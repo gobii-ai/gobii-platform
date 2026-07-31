@@ -5,25 +5,25 @@
     "description": "Rendered prompt messages plus JSON tool definitions for representative send and first-run paths.",
     "limits": {
       "first_run": {
-        "fitted_tokens": 9317,
-        "system_bytes": 32433,
+        "fitted_tokens": 9268,
+        "system_bytes": 32430,
         "tools_bytes": 23714,
-        "total_bytes": 67856,
-        "user_bytes": 11709
+        "total_bytes": 67829,
+        "user_bytes": 11685
       },
       "normal_explicit_send": {
-        "fitted_tokens": 8698,
-        "system_bytes": 29314,
+        "fitted_tokens": 8644,
+        "system_bytes": 29311,
         "tools_bytes": 23714,
-        "total_bytes": 64770,
-        "user_bytes": 11742
+        "total_bytes": 64743,
+        "user_bytes": 11718
       },
       "web_chat_implied_send": {
-        "fitted_tokens": 8900,
-        "system_bytes": 29951,
+        "fitted_tokens": 8849,
+        "system_bytes": 29948,
         "tools_bytes": 23714,
-        "total_bytes": 65410,
-        "user_bytes": 11745
+        "total_bytes": 65383,
+        "user_bytes": 11721
       }
     },
     "scenarios": {

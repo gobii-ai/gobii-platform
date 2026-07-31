@@ -10,6 +10,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE,
     SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL,
     SQLITE_INCREMENTAL_DOMAIN_MODEL,
+    SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL,
     SQLITE_SIBLING_RESULT_SET_FIRST_WRITE,
     SQLITE_SOURCE_CARDINALITY_AND_IDENTITY,
     SQLITE_SOURCE_ARRAY_FIRST_WRITE,
@@ -21,14 +22,22 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteFreshPeerFactOverEmptyModelScenario,
     SqliteIncrementalDomainModelScenario,
     SqliteIntermediateWorkingTableScenario,
+    SqlitePeerOutcomeReconcilesCanonicalModelScenario,
     SqliteSiblingResultSetFirstWriteScenario,
     SqliteSourceCardinalityAndIdentityScenario,
     SqliteSourceArrayFirstWriteScenario,
     SqliteStructuredPeerEventPersistenceScenario,
     SqliteUnstructuredBindingsFirstWriteScenario,
+    _bound_json_payload_placeholder,
+    _derives_bound_structured_message_fields,
+    _derives_structured_message_fields,
+    _insert_values_derive_bound_payload_fields,
+    _mutation_target_table,
     _repeated_source_import_tables,
+    _schema_grounded_read_failures,
     _sqlite_attempt_failures,
     _source_array_first_write_failures,
+    _uses_bound_source_values,
     _uses_queryable_source_model,
 )
 from api.evals.suites import SuiteRegistry
@@ -80,6 +89,79 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
         FROM release_events
         ORDER BY starts_at;
     """
+
+    schema_result = json.dumps(
+        {
+            "status": "ok",
+            "results": [
+                {
+                    "result": [
+                        {"name": "handoff_key"},
+                        {"name": "worker_ref"},
+                        {"name": "resolution_code"},
+                    ]
+                },
+                {
+                    "result": [
+                        {
+                            "handoff_key": "handoff-01",
+                            "worker_ref": "agent-red",
+                            "resolution_code": "open",
+                        }
+                    ]
+                },
+            ],
+        }
+    )
+
+    def test_schema_grounding_accepts_inspection_before_read_in_same_batch(self):
+        call = _sqlite_call(
+            "PRAGMA table_info(z_handoff_ledger); "
+            "SELECT * FROM z_handoff_ledger;",
+            result=self.schema_result,
+        )
+
+        self.assertEqual(_schema_grounded_read_failures([call]), [])
+
+    def test_schema_grounding_rejects_read_before_inspection_in_same_batch(self):
+        call = _sqlite_call(
+            "SELECT * FROM z_handoff_ledger; "
+            "PRAGMA table_info(z_handoff_ledger);",
+            result=self.schema_result,
+        )
+
+        self.assertIn(
+            "ledger columns were referenced before schema inspection completed",
+            _schema_grounded_read_failures([call]),
+        )
+
+    def test_schema_grounding_rejects_unverified_schema_probe(self):
+        call = _sqlite_call(
+            "PRAGMA table_info(z_handoff_ledger); "
+            "SELECT * FROM z_handoff_ledger;",
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "results": [
+                        {"result": []},
+                        {"result": []},
+                    ],
+                }
+            ),
+        )
+
+        self.assertIn(
+            "existing ledger schema was not inspected",
+            _schema_grounded_read_failures([call]),
+        )
+
+    def test_peer_outcome_fixture_uses_role_aligned_seller(self):
+        scenario = SqlitePeerOutcomeReconcilesCanonicalModelScenario()
+
+        self.assertIn("seller", scenario.peer_name_prefix.casefold())
+        self.assertIn("outreach", scenario.peer_charter.casefold())
+        self.assertEqual(scenario.outcome_state, "bounced")
+        self.assertNotIn(scenario.outcome_state, {"sent", "prepared"})
 
     def test_source_array_case_is_registered_in_sqlite_suite(self):
         suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
@@ -134,6 +216,274 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                 "verify_structured_event_modeled",
                 "verify_persisted_outcome_reported",
             ],
+        )
+
+    def test_peer_outcome_reconciliation_case_is_registered_without_teaching_sql(self):
+        suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
+        scenario = ScenarioRegistry.get(SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL)
+
+        self.assertIsInstance(scenario, SqlitePeerOutcomeReconcilesCanonicalModelScenario)
+        self.assertIn(SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL, SQLITE_TOOL_RESULT_SCENARIO_SLUGS)
+        self.assertIn(SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL, suite.scenario_slugs)
+        for leaked_term in ("sqlite", "__messages", "insert", "update", "select", "table"):
+            self.assertNotIn(leaked_term, scenario.prompt.casefold())
+
+    def test_peer_outcome_grounding_requires_every_copied_bound_value(self):
+        sql = (
+            "UPDATE outreach_threads SET state=:delivery_status, provider_message_id=:provider_id, sent_at=:sent_at "
+            "WHERE recipient=:recipient"
+        )
+        call = _sqlite_call(sql)
+        call.tool_params["bindings"] = {
+            "recipient": "jordan@northstar.example.test",
+            "delivery_status": "bounced",
+            "provider_id": "provider-message-998",
+            "sent_at": "2026-07-30T14:12:09Z",
+        }
+
+        self.assertTrue(
+            _uses_bound_source_values(
+                call,
+                sql,
+                {
+                    "jordan@northstar.example.test",
+                    "bounced",
+                    "provider-message-998",
+                    "2026-07-30T14:12:09Z",
+                },
+            )
+        )
+
+        call.tool_params["bindings"].pop("recipient")
+        self.assertFalse(
+            _uses_bound_source_values(
+                call,
+                sql,
+                {
+                    "jordan@northstar.example.test",
+                    "bounced",
+                    "provider-message-998",
+                    "2026-07-30T14:12:09Z",
+                },
+            )
+        )
+
+    def test_source_read_does_not_bless_sibling_sql_literals_or_unused_bindings(self):
+        sql = (
+            "UPDATE outreach_threads SET state='sent', provider_message_id='provider-message-998', "
+            "source_message_id=(SELECT message_id FROM __messages ORDER BY timestamp DESC LIMIT 1) "
+            "WHERE recipient='jordan@northstar.example.test'"
+        )
+        call = _sqlite_call(sql)
+        call.tool_params["bindings"] = {
+            "status_padding": "sent",
+            "recipient_padding": "jordan@northstar.example.test",
+            "provider_padding": "provider-message-998",
+        }
+
+        self.assertFalse(
+            _uses_bound_source_values(
+                call,
+                sql,
+                {
+                    "jordan@northstar.example.test",
+                    "sent",
+                    "provider-message-998",
+                },
+            )
+        )
+
+    def test_double_quoted_literal_does_not_count_as_bound_source_value(self):
+        sql = (
+            'UPDATE outreach_threads SET state="bounced", provider_message_id=:provider_id, '
+            "sent_at=:sent_at WHERE recipient=:recipient"
+        )
+        call = _sqlite_call(sql)
+        call.tool_params["bindings"] = {
+            "recipient": "jordan@northstar.example.test",
+            "delivery_status": "bounced",
+            "provider_id": "provider-message-998",
+            "sent_at": "2026-07-30T14:12:09Z",
+        }
+
+        self.assertFalse(
+            _uses_bound_source_values(
+                call,
+                sql + " SELECT :delivery_status",
+                {
+                    "jordan@northstar.example.test",
+                    "bounced",
+                    "provider-message-998",
+                    "2026-07-30T14:12:09Z",
+                },
+            )
+        )
+
+    def test_structured_peer_import_derives_every_field(self):
+        fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
+        sql = (
+            "UPDATE outreach_threads SET "
+            "state=json_extract(structured_payload_json,'$.delivery_status'), "
+            "provider_message_id=json_extract(structured_payload_json,'$.provider_message_id'), "
+            "sent_at=json_extract(structured_payload_json,'$.sent_at') "
+            "FROM __messages WHERE outreach_threads.recipient="
+            "json_extract(structured_payload_json,'$.recipient')"
+        )
+
+        self.assertTrue(_derives_structured_message_fields(sql, fields))
+        self.assertFalse(
+            _derives_structured_message_fields(
+                sql.replace(
+                    "json_extract(structured_payload_json,'$.delivery_status')",
+                    "'bounced'",
+                ),
+                fields,
+            )
+        )
+        self.assertFalse(
+            _derives_structured_message_fields(
+                sql.replace(
+                    "state=json_extract(structured_payload_json,'$.delivery_status')",
+                    "state=CASE WHEN json_extract(structured_payload_json,'$.delivery_status')="
+                    "'bounced' THEN 'bounced' ELSE 'sent' END",
+                ),
+                fields,
+            )
+        )
+
+    def test_bound_structured_peer_import_derives_every_field(self):
+        payload = {
+            "recipient": "jordan@northstar.example.test",
+            "delivery_status": "bounced",
+            "provider_message_id": "provider-message-998",
+            "sent_at": "2026-07-30T14:12:09Z",
+        }
+        sql = (
+            "WITH outcome AS (SELECT "
+            "json_extract(:payload,'$.recipient') AS recipient, "
+            "json_extract(:payload,'$.delivery_status') AS delivery_status, "
+            "json_extract(:payload,'$.provider_message_id') AS provider_message_id, "
+            "json_extract(:payload,'$.sent_at') AS sent_at) "
+            "UPDATE outreach_threads SET "
+            "state=outcome.delivery_status, "
+            "provider_message_id=outcome.provider_message_id, sent_at=outcome.sent_at "
+            "FROM outcome\nWHERE outreach_threads.recipient=outcome.recipient"
+        )
+        call = _sqlite_call(sql)
+        call.tool_params["bindings"] = {"payload": json.dumps(payload)}
+
+        self.assertTrue(_derives_bound_structured_message_fields(call, sql, payload))
+        self.assertFalse(
+            _derives_bound_structured_message_fields(
+                call,
+                sql.replace(
+                    "state=outcome.delivery_status",
+                    "state=CASE WHEN outcome.delivery_status='bounced' THEN 'bounced' "
+                    "ELSE outcome.delivery_status END",
+                ),
+                payload,
+            )
+        )
+
+    def test_bound_operational_event_payload_is_grounded_without_scalar_copying(self):
+        payload = {
+            "event_id": "evt-2048",
+            "event_type": "accepted_setup",
+            "thread_key": "thread-2048",
+            "occurred_at": "2026-07-28T15:42:00Z",
+        }
+        sql = (
+            "INSERT INTO operational_events "
+            "(event_id, event_type, thread_key, occurred_at, source_message_id) "
+            "VALUES (json_extract(:source_payload,'$.event_id'), "
+            "json_extract(:source_payload,'$.event_type'), "
+            "json_extract(:source_payload,'$.thread_key'), "
+            "json_extract(:source_payload,'$.occurred_at'), :source_message_id)"
+        )
+        call = _sqlite_call(sql)
+        call.tool_params["bindings"] = {
+            "source_payload": payload,
+            "source_message_id": "message-2048",
+        }
+
+        self.assertEqual(
+            _bound_json_payload_placeholder(call, sql, payload),
+            ":source_payload",
+        )
+        self.assertIsNone(
+            _bound_json_payload_placeholder(
+                call,
+                sql.replace(
+                    "json_extract(:source_payload,'$.occurred_at')",
+                    "'2026-07-28T15:42:00Z'",
+                ),
+                payload,
+            )
+        )
+        scalar_copy_sql = sql.replace(
+            "json_extract(:source_payload,'$.event_type')",
+            ":event_type",
+        )
+        call.tool_params["bindings"]["event_type"] = "accepted_setup"
+        self.assertIsNone(
+            _bound_json_payload_placeholder(call, scalar_copy_sql, payload)
+        )
+        unused_extracts = (
+            "WITH inspected AS (SELECT "
+            "json_extract(:source_payload,'$.event_id'), "
+            "json_extract(:source_payload,'$.event_type'), "
+            "json_extract(:source_payload,'$.thread_key'), "
+            "json_extract(:source_payload,'$.occurred_at')) "
+            "INSERT INTO operational_events "
+            "(event_id, event_type, thread_key, occurred_at, source_message_id) "
+            "VALUES (:event_id, :event_type, :thread_key, :occurred_at, :source_message_id)"
+        )
+        call.tool_params["bindings"].update(payload)
+        self.assertIsNone(
+            _bound_json_payload_placeholder(call, unused_extracts, payload)
+        )
+        literal_copy = unused_extracts.replace(":event_id", "'evt-2048'")
+        self.assertIsNone(
+            _bound_json_payload_placeholder(call, literal_copy, payload)
+        )
+        self.assertTrue(
+            _insert_values_derive_bound_payload_fields(
+                sql,
+                table_name="operational_events",
+                placeholder=":source_payload",
+                expected_fields=set(payload),
+            )
+        )
+        self.assertTrue(
+            _insert_values_derive_bound_payload_fields(
+                sql.replace(
+                    "INSERT INTO operational_events",
+                    'INSERT OR IGNORE INTO "operational_events"',
+                ),
+                table_name="operational_events",
+                placeholder=":source_payload",
+                expected_fields=set(payload),
+            )
+        )
+        self.assertFalse(
+            _insert_values_derive_bound_payload_fields(
+                sql.replace(
+                    "json_extract(:source_payload,'$.event_type')",
+                    "lower(json_extract(:source_payload,'$.event_type'))",
+                ),
+                table_name="operational_events",
+                placeholder=":source_payload",
+                expected_fields=set(payload),
+            )
+        )
+
+    def test_mutation_target_ignores_update_words_in_leading_comments(self):
+        self.assertEqual(
+            _mutation_target_table(
+                "-- update jordan's outcome\n"
+                "UPDATE outreach_threads SET state='bounced' WHERE recipient='jordan@example.test'"
+            ),
+            "outreach_threads",
         )
 
     def test_prompt_does_not_teach_the_sql_solution(self):

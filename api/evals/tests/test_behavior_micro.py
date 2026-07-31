@@ -15,6 +15,7 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     CHARTER_PATCHES_EXPLICIT_AMENDMENT_UNDER_PRESSURE,
     CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
+    CHARTER_CORRECTION_GOVERNS_NEXT_PEER_ASSIGNMENT,
     CHARTER_REFINES_EXISTING_GUIDANCE_FROM_NATURAL_FEEDBACK,
     COMMON_USE_CASE_EVAL_CASES,
     GUIDED_PLANNING_BOUNDED_WHEN_REQUESTED,
@@ -51,9 +52,21 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
             CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
         )
         self.assertIn(
+            CHARTER_CORRECTION_GOVERNS_NEXT_PEER_ASSIGNMENT,
+            CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
+        )
+        self.assertIn(
             CHARTER_PATCHES_EXPLICIT_AMENDMENT_UNDER_PRESSURE,
             CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
         )
+
+    def test_correction_assignment_fixture_uses_a_role_aligned_peer(self):
+        scenario = ScenarioRegistry.get(CHARTER_CORRECTION_GOVERNS_NEXT_PEER_ASSIGNMENT)
+
+        self.assertIn("outreach", scenario.assignment_peer_name_prefix.casefold())
+        self.assertIn("outreach", scenario.assignment_peer_charter.casefold())
+        self.assertIn("prospect", scenario.assignment_peer_charter.casefold())
+        self.assertNotIn("technical support", scenario.assignment_peer_charter.casefold())
 
     def test_focused_charter_patch_allows_same_batch_verification_read(self):
         call = SimpleNamespace(

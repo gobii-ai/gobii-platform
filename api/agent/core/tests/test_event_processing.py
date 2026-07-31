@@ -1345,6 +1345,8 @@ class ContinuationModePromptContextTests(TestCase):
         system_prompt = self._render_system_prompt(is_first_run=False)
 
         self.assertIn("## Continuation Mode", system_prompt)
+        self.assertIn("Reconcile fresh completion/outcome events", system_prompt)
+        self.assertIn("into canonical state before counts/queues", system_prompt)
 
     def test_prompt_omits_continuation_mode_on_first_run(self):
         system_prompt = self._render_system_prompt(is_first_run=True)

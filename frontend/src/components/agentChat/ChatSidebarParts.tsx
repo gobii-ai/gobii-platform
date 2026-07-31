@@ -112,6 +112,25 @@ type AgentEmptyStateProps = {
   searchQuery: string
 }
 
+// Ghost rows shaped like the agent list that is about to appear. Shared by the roster rail
+// and the search panel so every roster-loading surface reads "on its way", not plain text
+// (or worse, "no results" — #509). Wordless visually, announced via role=status.
+export function AgentListSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="agent-roster-skeleton" role="status" aria-label="Loading agents">
+      {Array.from({ length: rows }, (_, row) => (
+        <div className="agent-roster-skeleton__row" key={row} aria-hidden="true">
+          <span className="agent-roster-skeleton__avatar" />
+          <span className="agent-roster-skeleton__lines">
+            <span className="agent-roster-skeleton__bar" data-width="name" />
+            <span className="agent-roster-skeleton__bar" data-width="description" />
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function AgentEmptyState({
   variant,
   hasAgents,
@@ -123,7 +142,7 @@ export function AgentEmptyState({
   let message: string | null = null
 
   if (!hasAgents && loading) {
-    message = 'Loading agents...'
+    return <AgentListSkeleton />
   } else if (!hasAgents && !loading && errorMessage) {
     message = errorMessage
   } else if (!hasAgents && !loading && !errorMessage) {

@@ -129,11 +129,12 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
     def test_sqlite_guidance_tracks_bounded_set_coverage(self):
         guidance = prompt_context._get_sqlite_guidance()
 
-        self.assertIn("Named tables are the durable world model", guidance)
-        self.assertIn("exact logic", guidance)
-        self.assertIn("query truth instead of memory", guidance)
-        self.assertIn("entities, relations, evidence, coverage, and provenance", guidance)
-        self.assertIn("Tool results do not update the model", guidance)
+        self.assertIn("Named tables hold truth/logic", guidance)
+        self.assertIn("entities, relations, coverage, provenance current", guidance)
+        self.assertIn("Results do not update them", guidance)
+        self.assertIn("Ready route", guidance)
+        self.assertIn("opaque auth refs unchanged only to requested operation", guidance)
+        self.assertIn("no preflight", guidance)
         self.assertIn("CURRENT SOURCE SET", guidance)
         self.assertIn("one set-wise upsert", guidance)
         self.assertIn("decision/evidence SELECT", guidance)
@@ -155,11 +156,10 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("put sourced facts, URLs, or link handles in SQL literals", guidance)
         self.assertIn("Bound fields only transcribe evidence", guidance)
         self.assertIn("qualitative claims do not support numbers", guidance)
-        self.assertIn("Messages/peer events", guidance)
-        self.assertIn("prefer one-batch INSERT ... SELECT from __messages", guidance)
-        self.assertIn("bind the observed body/structured_payload_json values", guidance)
-        self.assertIn("never put them in SQL", guidance)
-        self.assertIn("sqlite_batch call ID as an __tool_results result_id", guidance)
+        self.assertIn("Structured messages: derive/bind every field", guidance)
+        self.assertIn("state/status uses :source_status or json_extract", guidance)
+        self.assertIn("never a literal", guidance)
+        self.assertIn("No peer-local keys/call IDs", guidance)
         self.assertIn("one result_id at a time", guidance)
         self.assertIn("Upsert stable keys and refresh mutable fields", guidance)
         self.assertIn("same-batch final SELECT must return its keyed rows", guidance)
@@ -170,7 +170,8 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("Deliver those rows without rereading", guidance)
         self.assertIn("values as :name in `bindings`", guidance)
         self.assertIn("exact tool_name metadata may be a SQL literal", guidance)
-        self.assertIn("put `WHERE 1=1` before `ON CONFLICT`", guidance)
+        self.assertIn("Upserts: VALUES match columns/no WHERE", guidance)
+        self.assertIn("INSERT SELECT needs WHERE 1=1 before ON CONFLICT", guidance)
         self.assertIn("call 1 only targeted sqlite_master", guidance)
         self.assertIn("meaningful domain noun from the request", guidance)
         self.assertIn("call 2 is PRAGMA table_info alone", guidance)
@@ -603,7 +604,15 @@ class PromptContextContactsGuidanceTests(TestCase):
             context, _, _ = prompt_context.build_prompt_context(self.agent, is_first_run=False)
 
         content = "\n".join(message["content"] for message in context)
-        self.assertIn("temporary task scope never changes it", content)
+        self.assertIn("never temporary task scope", content.lower())
+        self.assertIn(
+            "__agent_schedules only columns: schedule_key,name,kind,schedule,timezone,run_at,instruction,enabled",
+            content,
+        )
+        self.assertIn("weekly=cron; @every only s/m/h", content)
+        self.assertIn("exceeds 12 active jobs", content)
+        self.assertIn("one bounded alternative; no SQLite", content)
+        self.assertIn("never repurpose primary", content)
         self.assertNotIn("Task scope changed? Adjust timing", content)
 
     def test_large_allowed_contacts_are_compacted_in_prompt(self):

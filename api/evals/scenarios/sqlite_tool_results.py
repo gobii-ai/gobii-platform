@@ -63,6 +63,7 @@ SQLITE_ENRICHMENT_REFRESH_UNDER_PRESSURE = "sqlite_enrichment_refresh_under_pres
 SQLITE_SOURCE_CARDINALITY_AND_IDENTITY = "sqlite_source_cardinality_and_identity"
 SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL = "sqlite_fresh_peer_fact_over_empty_model"
 SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE = "sqlite_structured_peer_event_persistence"
+SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL = "sqlite_peer_outcome_reconciles_canonical_model"
 SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_MULTI_RESULT_WEB_SYNTHESIS,
     SQLITE_INTERMEDIATE_WORKING_TABLE,
@@ -83,6 +84,7 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_SOURCE_CARDINALITY_AND_IDENTITY,
     SQLITE_FRESH_PEER_FACT_OVER_EMPTY_MODEL,
     SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE,
+    SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL,
 ]
 
 
@@ -272,6 +274,12 @@ _MUTATION_TARGET_RE = re.compile(
 )
 
 
+def _mutation_target_table(statement: str) -> str | None:
+    statement_without_comments = sqlparse.format(statement, strip_comments=True)
+    match = _MUTATION_TARGET_RE.search(statement_without_comments)
+    return match.group("table").casefold() if match else None
+
+
 def _result_payload(call) -> dict | None:
     result = getattr(call, "result", None)
     try:
@@ -341,6 +349,224 @@ def _sqlite_attempt_failures(calls) -> list[str]:
         if (isinstance(payload, dict) and payload.get("advisories")) or "SQLITE QUERY ADVICE" in str(raw_result or ""):
             failures.append(f"SQLite attempt {index} returned a query advisory")
     return failures
+
+
+def _uses_bound_source_values(call, statement: str, expected_values: set[str]) -> bool:
+    bindings = (getattr(call, "tool_params", None) or {}).get("bindings") or {}
+    used_bound_values = {
+        str(value)
+        for key, value in bindings.items()
+        if (
+            isinstance(value, (str, int, float))
+            and re.search(rf":{re.escape(str(key))}\b", statement)
+        )
+    }
+    statement_without_comments = sqlparse.format(statement, strip_comments=True)
+    sql_literals = {
+        match.group(1).replace("''", "'")
+        for match in re.finditer(r"'((?:''|[^'])*)'", statement_without_comments)
+    }
+    sql_literals.update(
+        match.group(1).replace('""', '"')
+        for match in re.finditer(r'"((?:""|[^"])*)"', statement_without_comments)
+    )
+    return expected_values.issubset(used_bound_values) and expected_values.isdisjoint(sql_literals)
+
+
+def _derives_structured_message_fields(
+    statement: str,
+    expected_fields: set[str],
+) -> bool:
+    statement_without_comments = sqlparse.format(statement, strip_comments=True)
+    lowered = statement_without_comments.casefold()
+    return (
+        _reads_table(statement, "__messages")
+        and "structured_payload_json" in lowered
+        and all(f"$.{field.casefold()}" in lowered for field in expected_fields)
+        and _structured_outcome_assignments_use_extracted_fields(lowered)
+    )
+
+
+def _bound_json_payload_placeholder(
+    call,
+    statement: str,
+    expected_payload: dict[str, str],
+) -> str | None:
+    bindings = (getattr(call, "tool_params", None) or {}).get("bindings") or {}
+    statement_without_comments = sqlparse.format(statement, strip_comments=True)
+    lowered = statement_without_comments.casefold()
+    expected_values = set(expected_payload.values())
+    sql_literals = {
+        match.group(1).replace("''", "'")
+        for match in re.finditer(r"'((?:''|[^'])*)'", statement_without_comments)
+    }
+    sql_literals.update(
+        match.group(1).replace('""', '"')
+        for match in re.finditer(r'"((?:""|[^"])*)"', statement_without_comments)
+    )
+    if expected_values.intersection(sql_literals):
+        return None
+    for key, raw_payload in bindings.items():
+        placeholder = f":{str(key).casefold()}"
+        if placeholder not in lowered:
+            continue
+        if isinstance(raw_payload, str):
+            try:
+                payload = json.loads(raw_payload)
+            except json.JSONDecodeError:
+                continue
+        else:
+            payload = raw_payload
+        if not isinstance(payload, dict):
+            continue
+        if any(str(payload.get(field)) != value for field, value in expected_payload.items()):
+            continue
+        if any(
+            other_key != key
+            and isinstance(other_value, (str, int, float))
+            and str(other_value) in expected_values
+            for other_key, other_value in bindings.items()
+        ):
+            continue
+        if not all(
+            re.search(
+                rf"json_extract\s*\(\s*{re.escape(placeholder)}\s*,\s*['\"]\$\."
+                rf"{re.escape(field.casefold())}['\"]\s*\)",
+                lowered,
+            )
+            for field in expected_payload
+        ):
+            continue
+        return placeholder
+    return None
+
+
+def _insert_values_derive_bound_payload_fields(
+    statement: str,
+    *,
+    table_name: str,
+    placeholder: str,
+    expected_fields: set[str],
+) -> bool:
+    parsed = sqlparse.parse(statement)
+    if len(parsed) != 1:
+        return False
+    tokens = [token for token in parsed[0].tokens if not token.is_whitespace]
+    into_index = next(
+        (
+            index
+            for index, token in enumerate(tokens)
+            if str(getattr(token, "normalized", "")).casefold() == "into"
+        ),
+        -1,
+    )
+    target = tokens[into_index + 1] if 0 <= into_index < len(tokens) - 1 else None
+    target_name = str(getattr(target, "get_name", lambda: "")() or "").casefold()
+    if target_name != table_name.casefold():
+        return False
+    values = next(
+        (
+            token
+            for token in tokens
+            if isinstance(token, sqlparse.sql.Values)
+        ),
+        None,
+    )
+    if values is None:
+        return False
+
+    if isinstance(target, sqlparse.sql.Function):
+        target_parenthesis = next(
+            (
+                token
+                for token in target.tokens
+                if isinstance(token, sqlparse.sql.Parenthesis)
+            ),
+            None,
+        )
+    else:
+        target_parenthesis = (
+            tokens[into_index + 2]
+            if into_index < len(tokens) - 2
+            and isinstance(tokens[into_index + 2], sqlparse.sql.Parenthesis)
+            else None
+        )
+    values_parenthesis = next(
+        (token for token in values.tokens if isinstance(token, sqlparse.sql.Parenthesis)),
+        None,
+    )
+    if target_parenthesis is None or values_parenthesis is None:
+        return False
+
+    def _items(parenthesis):
+        identifier_list = next(
+            (
+                token
+                for token in parenthesis.tokens
+                if isinstance(token, sqlparse.sql.IdentifierList)
+            ),
+            None,
+        )
+        return (
+            [str(item).strip() for item in identifier_list.get_identifiers()]
+            if identifier_list is not None
+            else []
+        )
+
+    columns = [item.strip('"`[] ').casefold() for item in _items(target_parenthesis)]
+    expressions = _items(values_parenthesis)
+    if len(columns) != len(expressions):
+        return False
+    assignments = dict(zip(columns, expressions))
+    return all(
+        field.casefold() in assignments
+        and re.fullmatch(
+            rf"json_extract\s*\(\s*{re.escape(placeholder)}\s*,\s*['\"]\$\."
+            rf"{re.escape(field.casefold())}['\"]\s*\)",
+            assignments[field.casefold()].casefold(),
+        )
+        for field in expected_fields
+    )
+
+
+def _derives_bound_structured_message_fields(
+    call,
+    statement: str,
+    expected_payload: dict[str, str],
+) -> bool:
+    return bool(
+        _bound_json_payload_placeholder(call, statement, expected_payload)
+        and _structured_outcome_assignments_use_extracted_fields(
+            sqlparse.format(statement, strip_comments=True).casefold()
+        )
+    )
+
+
+def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str) -> bool:
+    assignment_sources = {
+        "state": "delivery_status",
+        "provider_message_id": "provider_message_id",
+        "sent_at": "sent_at",
+    }
+    for column, source_field in assignment_sources.items():
+        match = re.search(
+            rf"\b{column}\s*=\s*(.+?)(?=,\s*(?:state|provider_message_id|sent_at|"
+            rf"source_message_id)\s*=|\bfrom\b|\bwhere\b)",
+            lowered_statement,
+            flags=re.DOTALL,
+        )
+        if match is None or not _direct_source_assignment(match.group(1), source_field):
+            return False
+    where_match = re.search(r"\bwhere\b(.+)", lowered_statement, flags=re.DOTALL)
+    return where_match is not None and "recipient" in where_match.group(1)
+
+
+def _direct_source_assignment(expression: str, source_field: str) -> bool:
+    expression, field = expression.strip(), re.escape(source_field)
+    if re.fullmatch(rf"(?:[a-z_][a-z0-9_]*\.)?{field}", expression):
+        return True
+    json_extract_pattern = rf"json_extract\s*\(\s*[:a-z_][a-z0-9_.:]*\s*,\s*['\"]\$.{field}['\"]\s*\)"
+    return bool(re.fullmatch(json_extract_pattern, expression))
 
 
 def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL) -> list[str]:
@@ -1372,33 +1598,79 @@ def _seed_empty_operational_events(agent_id: str) -> None:
             conn.close()
 
 
+def _seed_outreach_reconciliation_model(agent_id: str) -> None:
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            conn.execute(
+                "CREATE TABLE outreach_threads ("
+                "thread_id TEXT PRIMARY KEY, recipient TEXT NOT NULL UNIQUE, owner_name TEXT NOT NULL, "
+                "state TEXT NOT NULL, provider_message_id TEXT, sent_at TEXT, source_message_id TEXT);"
+            )
+            conn.executemany(
+                "INSERT INTO outreach_threads "
+                "(thread_id, recipient, owner_name, state) VALUES (?, ?, ?, ?);",
+                (
+                    (
+                        "manager:wave:prospect-77",
+                        "jordan@northstar.example.test",
+                        "Seller One",
+                        "prepared",
+                    ),
+                    (
+                        "manager:wave:prospect-78",
+                        "avery@harbor.example.test",
+                        "Seller Two",
+                        "prepared",
+                    ),
+                ),
+            )
+            conn.commit()
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+
+
 def _schema_grounded_read_failures(calls) -> list[str]:
     calls = list(calls)
     failures = _sqlite_attempt_failures(calls)
-    schema_call_indexes = []
+    schema_positions = []
     data_reads = []
     for call_index, call in enumerate(calls):
         sql = str((call.tool_params or {}).get("sql") or "")
         schema_evidence = json.dumps(_result_payload(call) or {})
-        if (
+        has_schema_evidence = (
             HANDOFF_LEDGER_TABLE.casefold() in sql.casefold()
             and all(field in schema_evidence.casefold() for field in (
                 "handoff_key",
                 "worker_ref",
                 "resolution_code",
             ))
-        ):
-            schema_call_indexes.append(call_index)
-        for statement in sqlparse.split(sql):
+        )
+        for statement_index, statement in enumerate(sqlparse.split(sql)):
             structural = _structural_sql(statement)
+            if has_schema_evidence and (
+                re.search(
+                    r"\bpragma\s+(?:(?:main|temp)\.)?table_(?:info|xinfo)\s*\(",
+                    structural,
+                    re.I,
+                )
+                or re.search(r"\bpragma_table_(?:info|xinfo)\s*\(", structural, re.I)
+                or re.search(
+                    r"\bfrom\s+(?:(?:main|temp)\.)?sqlite_(?:master|schema)\b",
+                    structural,
+                    re.I,
+                )
+            ):
+                schema_positions.append((call_index, statement_index))
             if _reads_table(structural, HANDOFF_LEDGER_TABLE):
-                data_reads.append((call_index, structural))
+                data_reads.append((call_index, statement_index))
 
-    if not schema_call_indexes:
+    if not schema_positions:
         failures.append("existing ledger schema was not inspected")
     if not data_reads:
         failures.append("existing ledger was not queried")
-    if schema_call_indexes and data_reads and min(schema_call_indexes) >= min(item[0] for item in data_reads):
+    if schema_positions and data_reads and min(schema_positions) >= min(data_reads):
         failures.append("ledger columns were referenced before schema inspection completed")
     return failures
 
@@ -3838,34 +4110,42 @@ class SqliteStructuredPeerEventPersistenceScenario(SqliteDomainModelScenario):
             and _reads_table(statement, "operational_events")
             for call_index, statement_index, _call, statement in statement_entries
         )
+        expected_payload = {
+            "event_id": "evt-2048",
+            "event_type": "accepted_setup",
+            "thread_key": "thread-2048",
+            "occurred_at": "2026-07-28T15:42:00Z",
+        }
+        statement_without_comments = sqlparse.format(write_statement, strip_comments=True)
         direct_message_import = (
             write_entry is not None
             and _reads_table(write_statement, "__messages")
             and "structured_payload_json" in write_statement.casefold()
+            and not any(
+                value in statement_without_comments
+                for value in (*expected_payload.values(), str(peer_event.id))
+            )
         )
-        inspected_message_payload = any(
-            call_index < write_call_index
-            and _reads_table(statement, "__messages")
-            and "structured_payload_json" in statement.casefold()
-            for call_index, _statement_index, _call, statement in statement_entries
-        )
-        expected_bound_values = {
-            "evt-2048",
-            "accepted_setup",
-            "thread-2048",
-            "2026-07-28T15:42:00Z",
-            str(peer_event.id),
-        }
-        bindings = (write_call.tool_params or {}).get("bindings") if write_call else {}
-        bound_values = {
-            str(value)
-            for value in (bindings or {}).values()
-            if isinstance(value, (str, int, float))
-        }
         bound_message_import = (
-            inspected_message_payload
-            and expected_bound_values.issubset(bound_values)
-            and not any(value in write_statement for value in expected_bound_values)
+            write_call is not None
+            and _uses_bound_source_values(
+                write_call,
+                write_statement,
+                {str(peer_event.id)},
+            )
+            and (
+                bound_payload_placeholder := _bound_json_payload_placeholder(
+                    write_call,
+                    write_statement,
+                    expected_payload,
+                )
+            )
+            and _insert_values_derive_bound_payload_fields(
+                write_statement,
+                table_name="operational_events",
+                placeholder=bound_payload_placeholder,
+                expected_fields=set(expected_payload),
+            )
         )
         message_grounded_import = direct_message_import or bound_message_import
 
@@ -3929,6 +4209,203 @@ class SqliteStructuredPeerEventPersistenceScenario(SqliteDomainModelScenario):
                 "Reported the one durably modeled accepted setup."
                 if reported_persisted_truth
                 else f"Expected one accepted setup for thread-2048 after persistence; body={body!r}."
+            ),
+            artifacts={"message": outbound[-1]} if outbound else {},
+        )
+
+
+@register_scenario
+class SqlitePeerOutcomeReconcilesCanonicalModelScenario(SqliteDomainModelScenario):
+    slug = SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL
+    version = "1.1"
+    description = (
+        "A manager should reconcile a fresh seller outcome into canonical state before counting or selecting next work."
+    )
+    expected_runtime = "short"
+    tags = (*SqliteToolResultScenario.tags, "trajectory_regression", "peer_handoff", "event_truth")
+    tasks = [
+        ScenarioTask(name="inject_board_request", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_canonical_outcome", assertion_type="persisted_state"),
+        ScenarioTask(name="verify_current_board_answer", assertion_type="manual"),
+    ]
+
+    prompt = "Give me the current delivery-state counts, then tell me which recipient is next in the queue."
+    peer_name_prefix = "Outreach Seller"
+    peer_charter = "Own assigned prospect outreach and report exact delivery outcomes to the outbound manager."
+    outcome_state = "bounced"
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        from api.evals.scenarios.responsibility_boundaries import ResponsibilityBoundaryScenario
+
+        self._ready_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter=(
+                "Manage the outbound team from the canonical outreach ledger. Seller outcome updates are operating "
+                "inputs. Keep recipient ownership unique, report the current board, and choose follow-on work only "
+                "from recipients that remain prepared."
+            ),
+        )
+        _seed_outreach_reconciliation_model(agent_id)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        peer_event = ResponsibilityBoundaryScenario._peer_inbound(
+            agent,
+            run_id,
+            "A finalized outreach outcome is attached structurally. Reconcile it before reporting the board.",
+            peer_name_prefix=self.peer_name_prefix,
+            peer_charter=self.peer_charter,
+        )
+        peer_event.raw_payload = {
+            **(peer_event.raw_payload or {}),
+            "structured_payload": {
+                "kind": "outreach_outcome",
+                "recipient": "jordan@northstar.example.test",
+                "delivery_status": self.outcome_state,
+                "provider_message_id": "provider-message-998",
+                "sent_at": "2026-07-30T14:12:09Z",
+            },
+        }
+        peer_event.save(update_fields=["raw_payload"])
+        inbound = self._inject_and_wait(
+            run_id,
+            agent_id,
+            self.prompt,
+            {},
+            allowed_tool_names={"sqlite_batch", "send_chat_message"},
+            max_relevant_tool_calls=7,
+            task_name="inject_board_request",
+        )
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        statements = [
+            (call_index, statement_index, call, statement)
+            for call_index, call in enumerate(sqlite_calls)
+            for statement_index, statement in enumerate(
+                sqlparse.split(str((call.tool_params or {}).get("sql") or ""))
+            )
+            if statement.strip()
+        ]
+        writes = [
+            item
+            for item in statements
+            if _mutation_target_table(item[3]) == "outreach_threads"
+        ]
+        write = writes[0] if writes else None
+        write_call_index, write_statement_index, write_call, write_sql = (
+            write or (-1, -1, None, "")
+        )
+        read_after_write = write is not None and any(
+            call_index == write_call_index
+            and statement_index > write_statement_index
+            and _reads_table(statement, "outreach_threads")
+            for call_index, statement_index, _call, statement in statements
+        )
+        read_after_write = read_after_write or (
+            write is not None
+            and "returning" in write_sql.casefold()
+            and "recipient" in write_sql.casefold()
+            and "state" in write_sql.casefold()
+        )
+        expected_bound_values = {
+            "jordan@northstar.example.test",
+            self.outcome_state,
+            "provider-message-998",
+            "2026-07-30T14:12:09Z",
+        }
+        bound_write = (
+            write_call is not None
+            and _uses_bound_source_values(write_call, write_sql, expected_bound_values)
+        )
+        structured_write = (
+            write_call is not None
+            and _derives_structured_message_fields(
+                write_sql,
+                {"recipient", "delivery_status", "provider_message_id", "sent_at"},
+            )
+        )
+        bound_payload_write = (
+            write_call is not None
+            and _derives_bound_structured_message_fields(
+                write_call,
+                write_sql,
+                {
+                    "recipient": "jordan@northstar.example.test",
+                    "delivery_status": self.outcome_state,
+                    "provider_message_id": "provider-message-998",
+                    "sent_at": "2026-07-30T14:12:09Z",
+                },
+            )
+        )
+        grounded_write = bound_write or structured_write or bound_payload_write
+
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            conn = open_guarded_sqlite_connection(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT thread_id, recipient, state, provider_message_id, sent_at "
+                    "FROM outreach_threads ORDER BY thread_id;"
+                ).fetchall()
+            finally:
+                clear_guarded_connection(conn)
+                conn.close()
+
+        expected_rows = [
+            (
+                "manager:wave:prospect-77",
+                "jordan@northstar.example.test",
+                self.outcome_state,
+                "provider-message-998",
+                "2026-07-30T14:12:09Z",
+            ),
+            (
+                "manager:wave:prospect-78",
+                "avery@harbor.example.test",
+                "prepared",
+                None,
+                None,
+            ),
+        ]
+        failures = _sqlite_attempt_failures(sqlite_calls)
+        failures.extend(
+            message
+            for failed, message in (
+                (not sqlite_calls, "no SQLite board reconciliation observed"),
+                (len(writes) != 1, f"expected one canonical thread write, saw {len(writes)}"),
+                (not grounded_write, "seller outcome was not grounded in the peer message"),
+                (not read_after_write, "canonical state was not read back in the write batch"),
+                (rows != expected_rows, f"canonical outreach rows were {rows!r}"),
+            )
+            if failed
+        )
+        self._record_check(
+            run_id,
+            "verify_canonical_outcome",
+            failures,
+            "Reconciled the seller outcome into the existing recipient row and read back current state.",
+        )
+
+        outbound = _outbound_messages_after(agent_id, inbound.timestamp)
+        body = outbound[-1].body if outbound else ""
+        answer_choice, answer_reasoning = self.llm_judge(
+            question=(
+                "Does the response report exactly one bounced recipient and one prepared recipient, and identify "
+                "Avery at Harbor as the next queued recipient? It may also identify Jordan as the bounced recipient."
+            ),
+            context=f"Response:\n{body or '(none)'}",
+            options=["Correct current board", "Incorrect or ambiguous board"],
+        )
+        current_answer = len(outbound) == 1 and answer_choice == "Correct current board"
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if current_answer else EvalRunTask.Status.FAILED,
+            task_name="verify_current_board_answer",
+            observed_summary=(
+                "Reported the reconciled board and selected only the remaining prepared recipient."
+                if current_answer
+                else (
+                    f"Expected one bounced, one prepared, and Avery next; "
+                    f"judge={answer_choice}: {answer_reasoning}; body={body!r}."
+                )
             ),
             artifacts={"message": outbound[-1]} if outbound else {},
         )

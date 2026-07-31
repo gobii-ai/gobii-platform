@@ -2385,18 +2385,15 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Durable world model/exact logic. Each shape: keyed DDL, set-wise upsert, decision SELECT. "
-                "Structured: derive result_json/item.value over current batch + tool_name; no "
-                "ID/URL filter; keep t.result_id/t.source_url. Prose: inspect bounded set once; join "
-                "top-level rows by result_id. Message/peer events: prefer one-batch INSERT ... SELECT from __messages. "
-                "After payload inspection, bind observed values; never put them in SQL or use a SQLite call ID in "
-                "__tool_results. Structured JSON uses rows=[]. Never put "
-                "sourced facts/URLs in SQL, import siblings singly, mix historical generic results, or rebuild tables. "
-                "Upsert stable keys; put WHERE 1=1 "
-                "before ON CONFLICT. group_concat(DISTINCT x) has no separator. Evolve normalized entities/relations; "
-                "query counts/joins/coverage/gaps/ranks. Same batch: read back keyed writes and all evidence/URLs "
-                "before delivery. Bind messy text via :name; no backslash escapes. Semicolon-separate statements. "
-                "ON CONFLICT(cols) needs exact PRIMARY KEY/UNIQUE columns. bindings object; rows array. No ATTACH"
+                "MESSAGE RULE: copy every payload field through a binding/json_extract. `state='...'` is invalid even when "
+                "the matching source payload is bound; use state=:source_status or "
+                "state=json_extract(:source_payload,'$.delivery_status'). Durable world model/exact logic: keyed DDL, set-wise upsert, decision SELECT. "
+                "Structured: derive result_json/item.value over current batch + exact tool_name; no ID/URL filters; keep t.result_id/t.source_url. Prose: inspect once, join top-level rows by result_id. "
+                "Peer/message: use __messages/bound evidence, never rows/__tool_results or SQLite call IDs. Use rows=[] for other structured JSON. Never use sourced SQL literals, import siblings singly, mix historical generic results, or rebuild "
+                "tables. Evolve normalized entities/relations; query counts/joins/coverage/gaps/ranks. Read back keyed writes "
+                "and evidence/URLs in the same batch. Bind messy text via :name; no backslash escapes. Semicolon-separate "
+                "statements. VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before "
+                "ON CONFLICT on exact unique-key columns. group_concat(DISTINCT x) has no separator. No ATTACH."
             ),
             "parameters": {
                 "type": "object",
@@ -2426,40 +2423,39 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                             "additionalProperties": True,
                         },
                         "description": (
-                            "Use [] for structured JSON, inspection, and model-only work; never invent structured "
-                            "result IDs. REQUIRED and non-empty for every prose-derived "
-                            "model write: include every source as exact result_id plus non-empty fields; SQL receives :rows."
+                            "Use [] for structured/inspection/model-only work. Prose writes are REQUIRED and non-empty: "
+                            "include each exact result_id with fields; never invent IDs. SQL receives :rows."
                         ),
                     },
                     "sql": {
                         "type": "string",
                         "description": (
                             "SQL. Prose: join `json_each(:rows) r` to __tool_results t on "
-                            "t.result_id=json_extract(r.value,'$.result_id'); facts at $.fields.<name>, "
-                            "with t.result_id/t.source_url provenance. Message events: prefer INSERT ... SELECT from "
-                            "__messages; after inspecting body/structured_payload_json, use bindings, not SQL literals. "
-                            "No sourced literals "
-                            "or rows=[] prose writes. Config: UPDATE with patch_text(charter,:old,:new); old/new belong "
-                            "in bindings. End writes with keyed readback plus decision/detail SELECTs."
+                            "t.result_id=json_extract(r.value,'$.result_id'); use $.fields.<name>; keep "
+                            "t.result_id/t.source_url. Message writes follow MESSAGE RULE using __messages or bound evidence, "
+                            "never rows/__tool_results, sourced literals, or rows=[] prose writes. Prefer a bound "
+                            ":source_payload and json_extract every message field. Config UPDATE: "
+                            "patch_text(charter,:old,:new), old/new in bindings. End writes with keyed readback + "
+                            "decision/detail SELECTs."
                         ),
                     },
                     "bindings": {
                         "type": "object",
                         "description": (
-                            "Config requires old/new. Otherwise optional authored or inspected-message :name values; "
-                            "keys omit colon."
+                            "Config requires old/new. Otherwise bind authored/messy values, inspected source fields, or one "
+                            "complete message payload as source_payload. Keys omit colon."
                         ),
                         "additionalProperties": {},
                     },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. True for any read that may trigger another tool; queue reads are true. "
-                            "false when its SELECTs are enough to answer. Never true only to query SQLite again."
+                            "REQUIRED. True for any read that may trigger another tool (queues included); false when SELECTs answer. "
+                            "Never true only to query SQLite again."
                         ),
                     },
                 },
-                "required": ["rows", "sql", "will_continue_work"],
+                "required": ["rows", "sql", "bindings", "will_continue_work"],
             },
         },
     }

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { AgentListItem } from './ChatSidebarParts'
+import { AgentEmptyState, AgentListItem } from './ChatSidebarParts'
 import type { AgentRosterEntry } from '../../types/agentRoster'
 
 describe('AgentListItem paused state', () => {
@@ -41,5 +41,21 @@ describe('AgentListItem paused state', () => {
     expect(screen.queryByText('Research assistant')).not.toBeInTheDocument()
     expect(screen.queryByText(/request/)).not.toBeInTheDocument()
     expect(screen.queryByText('Working')).not.toBeInTheDocument()
+  })
+})
+
+describe('AgentEmptyState while the roster loads (bug #509 polish)', () => {
+  it('renders skeleton rows instead of plain "Loading agents..." text', () => {
+    render(
+      <AgentEmptyState
+        variant="sidebar"
+        hasAgents={false}
+        loading
+        filteredCount={0}
+        searchQuery=""
+      />,
+    )
+    expect(screen.getByRole('status', { name: /loading agents/i })).toBeInTheDocument()
+    expect(screen.queryByText(/loading agents/i)).not.toBeInTheDocument()
   })
 })
