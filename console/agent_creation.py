@@ -56,6 +56,7 @@ AGENT_TEMPLATE_ORGANIZATION_SESSION_KEY = "agent_template_organization_id"
 AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER = "pretrained_worker"
 AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE = "public_template"
 AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE = "organization_template"
+AGENT_TEMPLATE_SOURCE_TRIAL_PROMO = "trial_promo"
 PREFERRED_LLM_TIER_SESSION_KEY = "agent_preferred_llm_tier"
 
 
@@ -229,6 +230,7 @@ def create_persistent_agent_from_charter(
         selected_template = PretrainedWorkerTemplateService.get_template_by_code(
             template_code,
             organization=organization,
+            include_unlisted=template_source == AGENT_TEMPLATE_SOURCE_TRIAL_PROMO,
         )
         if selected_template is None:
             raise ValidationError("This template is no longer available.")
@@ -310,6 +312,9 @@ def create_persistent_agent_from_charter(
                 user=request.user,
                 organization=organization,
                 template_code=template_code,
+                allow_unlisted_template=(
+                    template_source == AGENT_TEMPLATE_SOURCE_TRIAL_PROMO
+                ),
                 charter=charter_text,
                 preferred_llm_tier=preferred_llm_tier,
                 signup_preview_state=get_signup_preview_creation_state(preview_creation_allowed),

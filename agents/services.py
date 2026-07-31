@@ -266,6 +266,7 @@ class PretrainedWorkerTemplateService:
         qs = Template.objects.select_related("preferred_llm_tier").filter(
             public_profile__isnull=True,
             organization__isnull=True,
+            is_listed=True,
         )
         if not include_inactive:
             qs = qs.filter(is_active=True)
@@ -278,14 +279,33 @@ class PretrainedWorkerTemplateService:
         if db_templates:
             return db_templates
 
+        Template = apps.get_model("api", "PersistentAgentTemplate")
+        unlisted_db_codes = set(
+            Template.objects.filter(
+                public_profile__isnull=True,
+                organization__isnull=True,
+                is_listed=False,
+            ).values_list("code", flat=True)
+        )
         templates = [
-            template for template in cls._all_templates() if getattr(template, "is_active", True)
+            template
+            for template in cls._all_templates()
+            if (
+                getattr(template, "is_active", True)
+                and template.code not in unlisted_db_codes
+            )
         ]
         templates.sort(key=lambda template: (template.priority, template.display_name.lower()))
         return templates
 
     @classmethod
-    def get_template_by_code(cls, code: str, *, organization: Any = None):
+    def get_template_by_code(
+        cls,
+        code: str,
+        *,
+        organization: Any = None,
+        include_unlisted: bool = False,
+    ):
         if not code:
             return None
         normalized = code.strip().lower()
@@ -293,9 +313,12 @@ class PretrainedWorkerTemplateService:
         Template = apps.get_model("api", "PersistentAgentTemplate")
         db_template = Template.objects.select_related("preferred_llm_tier").filter(
             code=normalized,
-            is_active=True,
         ).first()
         if db_template:
+            if not db_template.is_active:
+                return None
+            if not include_unlisted and not db_template.is_listed:
+                return None
             organization_id = getattr(organization, "id", organization)
             if db_template.organization_id is None:
                 return cls._template_from_model(db_template)

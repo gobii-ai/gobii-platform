@@ -193,7 +193,10 @@ def _sync_active_subscriptions_from_stripe_customer(customer: Customer | None) -
             continue
 
         try:
-            Subscription.sync_from_stripe_data(stripe_sub)
+            Subscription.sync_from_stripe_data(
+                stripe_sub,
+                api_key=stripe.api_key,
+            )
             synced_any = True
         except Exception:
             logger.warning(
@@ -212,7 +215,10 @@ def sync_subscription_after_direct_update(subscription_payload: Any) -> None:
         return
 
     try:
-        Subscription.sync_from_stripe_data(subscription_payload)
+        Subscription.sync_from_stripe_data(
+            subscription_payload,
+            api_key=stripe.api_key,
+        )
     except Exception:
         # Intentionally broad: sync failures must not turn successful Stripe updates into API errors.
         logger.warning(
@@ -282,11 +288,20 @@ def get_existing_individual_subscriptions(customer_id: str) -> list[dict[str, An
     return subscriptions
 
 
-def customer_has_any_individual_subscription(customer_id: str) -> bool:
+def customer_has_any_individual_subscription(
+    customer_id: str,
+    *,
+    excluded_subscription_ids: set[str] | None = None,
+) -> bool:
     """Return True when a customer has ever held an individual (non-org) plan subscription."""
     if not customer_id:
         raise ValueError("customer_id is required")
 
+    excluded_ids = {
+        str(subscription_id)
+        for subscription_id in (excluded_subscription_ids or set())
+        if subscription_id
+    }
     _ensure_stripe_ready()
 
     plan_products = _individual_plan_product_ids()
@@ -310,6 +325,8 @@ def customer_has_any_individual_subscription(customer_id: str) -> bool:
 
     for sub in iterator:
         sub_data = _normalize_stripe_object(sub) or {}
+        if str(sub_data.get("id") or "") in excluded_ids:
+            continue
         items = (sub_data.get("items") or {}).get("data", []) or []
         for item in items:
             price = _normalize_stripe_object(item.get("price") or {}) or {}
@@ -1018,7 +1035,10 @@ def get_or_create_stripe_customer(owner) -> Customer:
                 api_key=stripe.api_key,
             )
 
-        customer = Customer.sync_from_stripe_data(stripe_customer)
+        customer = Customer.sync_from_stripe_data(
+            stripe_customer,
+            api_key=stripe.api_key,
+        )
 
         if owner_type == "user":
             customer.subscriber = owner

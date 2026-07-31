@@ -71,6 +71,16 @@ export type BillingTrial = {
   trialEndsAtIso: string | null
 }
 
+export type BillingLateConversionOffer = {
+  url: string
+  planName: string
+  discountLabel: string
+  discountMonths: number
+  standardMonthlyPrice: number
+  currency: string
+  expiresAtIso: string
+}
+
 export type BillingExtraTasksSettings = {
   enabled: boolean
   infinite: boolean
@@ -96,6 +106,7 @@ export type BillingPersonalData = {
   cancelAt?: string | null
   cancelAtPeriodEnd: boolean
   churnKey?: BillingChurnKeyConfig | null
+  lateConversionOffer?: BillingLateConversionOffer | null
   addons: BillingAddonContext
   addonsDisabled: boolean
   dedicatedIps: DedicatedIpContext

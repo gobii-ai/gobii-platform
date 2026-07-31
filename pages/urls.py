@@ -31,6 +31,7 @@ from .views import (
     SolutionsSitemap,
     RecruitingContactView,
     MarketingContactRequestView,
+    SpecialAccessConversionView,
     SpecialAccessStartView,
     SpecialAccessView,
     WebManifestView,
@@ -122,6 +123,11 @@ urlpatterns = [
     ),
     path("special-access/", SpecialAccessView.as_view(), name="special_access"),
     path("special-access/start/", SpecialAccessStartView.as_view(), name="special_access_start"),
+    path(
+        "special-access/convert/<uuid:redemption_id>/",
+        SpecialAccessConversionView.as_view(),
+        name="special_access_convert",
+    ),
     path("contact/request/", MarketingContactRequestView.as_view(), name="marketing_contact_request"),
     path("health/", health_check, name="health_check"),
     # Kubernetes health check endpoint - matches /healthz/ in BackendConfig

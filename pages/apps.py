@@ -14,6 +14,8 @@ class PagesConfig(AppConfig):
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to import signals: {e}")
 
+        from . import template_cache_signals  # noqa: F401
+
         try:
             from billing.lifecycle_handlers import register_billing_lifecycle_handlers
 

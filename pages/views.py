@@ -4,6 +4,7 @@ import json
 import mimetypes
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Mapping
 from urllib.parse import parse_qsl, urlencode, urlsplit
 import uuid
 
@@ -31,7 +32,19 @@ from django.templatetags.static import static
 from django.db import DatabaseError
 from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.db.models.functions import Lower
-from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, PersistentAgentTemplateUrlAlias, TrialPromo, UserBilling
+from api.models import (
+    MCPServerConfig,
+    PaidPlanIntent,
+    PersistentAgent,
+    PersistentAgentTemplate,
+    PersistentAgentTemplateUrlAlias,
+    TrialPromo,
+    TrialPromoActivationModeChoices,
+    TrialPromoPlanChoices,
+    TrialPromoRedemption,
+    TrialPromoRedemptionStatusChoices,
+    UserBilling,
+)
 from api.agent.short_description import build_listing_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
@@ -39,18 +52,40 @@ from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial
 from api.services.trial_promos import (
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
     TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
+    TRIAL_PROMO_META_PAYMENT_REQUIRED,
+    TRIAL_PROMO_META_PLAN,
+    TRIAL_PROMO_META_TRIAL_DAYS,
+    TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY,
+    TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY,
     TrialPromoError,
+    build_trial_promo_conversion_metadata,
     build_trial_promo_checkout_metadata,
     build_trial_promo_metadata,
     can_user_start_trial_promo,
+    clear_expired_trial_promo_conversion_checkout,
+    clear_trial_promo_session,
+    clear_trial_promo_start_pending,
     find_active_trial_promo_by_code,
+    get_direct_trial_promo_redemption,
+    get_eligible_late_conversion_redemption,
+    get_trial_promo_conversion_offer,
     get_session_trial_promo,
+    is_trial_promo_start_pending,
     is_user_email_allowed_for_trial_promo,
     is_user_email_verified_for_trial_promo,
     mark_trial_promo_redemption_checkout_started,
     mark_trial_promo_redemption_failed,
+    mark_trial_promo_start_pending,
+    mark_trial_promo_conversion_checkout_started,
+    reserve_trial_promo_conversion_checkout,
     reserve_trial_promo_redemption,
     store_trial_promo_in_session,
+)
+from api.services.direct_trial_promos import (
+    activate_direct_trial_promo,
+    retire_pending_direct_trial_promo_for_paid_user,
+    validate_direct_trial_configuration,
+    validate_direct_trial_conversion_configuration,
 )
 from config.socialaccount_adapter import OAUTH_ATTRIBUTION_COOKIE, OAUTH_ATTRIBUTION_SESSION_KEYS, OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS, serialize_oauth_charter_cookie_payload
 from billing.checkout_metadata import (
@@ -65,6 +100,7 @@ from billing.checkout_metadata import (
 )
 from billing.checkout_context import record_checkout_context
 from billing.checkout_sessions import create_stripe_checkout_session
+from billing.price_snapshot import get_stripe_price_snapshot
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from config.plans import STARTUP_MONTHLY_PRICE_USD, get_plan_config
 from config.stripe_config import get_stripe_settings
@@ -138,7 +174,7 @@ from .public_template_urls import (
 )
 from .comparisons import COMPARISON_CATALOG, COMPARISON_STATUS_PUBLISHED, get_comparison, get_published_comparisons
 from .forms import MarketingContactForm
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY, stage_agent_template_session
+from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY, AGENT_TEMPLATE_SOURCE_TRIAL_PROMO, stage_agent_template_session
 from console.views import build_llm_intelligence_props
 from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
@@ -1513,6 +1549,14 @@ class HomepageIntegrationsSearchView(View):
 
 
 def _legacy_pretrained_worker_destination_or_404(slug: str | None):
+    normalized_slug = str(slug or "").strip().lower()
+    if normalized_slug and PersistentAgentTemplate.objects.filter(
+        code__iexact=normalized_slug,
+    ).filter(
+        Q(is_active=False) | Q(is_listed=False),
+    ).exists():
+        raise Http404("This legacy AI employee URL is not available.")
+
     destination = get_legacy_pretrained_worker_redirect(slug)
     if not destination:
         raise Http404("This legacy AI employee URL is not available.")
@@ -1576,6 +1620,7 @@ def _active_public_template_queryset():
         public_profile__isnull=False,
         organization__isnull=True,
         is_active=True,
+        is_listed=True,
     )
 
 
@@ -1628,7 +1673,11 @@ def _is_public_related_template_candidate(
 ) -> bool:
     if not template or template.id == source_template_id:
         return False
-    if template.organization_id is not None or not template.is_active:
+    if (
+        template.organization_id is not None
+        or not template.is_active
+        or not template.is_listed
+    ):
         return False
     return bool(public_template_route_slug(template))
 
@@ -1736,6 +1785,7 @@ def _get_active_public_template_by_slug(template_slug: str | None):
             Q(slug=normalized_slug) | Q(code=normalized_slug),
             organization__isnull=True,
             is_active=True,
+            is_listed=True,
         )
         .order_by(
             Case(
@@ -1759,7 +1809,7 @@ def _get_active_public_template_by_category_route(category_slug: str | None, tem
 
     candidates = (
         PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(organization__isnull=True, is_active=True)
+        .filter(organization__isnull=True, is_active=True, is_listed=True)
         .filter(Q(slug=normalized_template_slug) | Q(code=normalized_template_slug))
         .order_by("priority", Lower("display_name"), "id")
     )
@@ -1791,6 +1841,7 @@ def _get_active_public_template_by_legacy_path(handle: str | None, template_slug
             Q(handle=normalized_handle) | Q(handle="", public_profile__handle=normalized_handle),
             slug=normalized_template_slug,
             template__is_active=True,
+            template__is_listed=True,
             template__organization__isnull=True,
         )
         .first()
@@ -1940,6 +1991,7 @@ def public_template_social_image(request, image_path: str):
     template = PersistentAgentTemplate.objects.filter(
         organization__isnull=True,
         is_active=True,
+        is_listed=True,
         social_image=image_name,
     ).first()
     if not template:
@@ -2650,6 +2702,17 @@ class EditorialPolicyView(TemplateView):
     template_name = "editorial-policy.html"
 
 
+def _format_monthly_price_label(amount, currency: str) -> str:
+    if amount is None or amount <= 0:
+        return ""
+    normalized_currency = str(currency or "").upper()
+    if normalized_currency == "USD":
+        return f"${amount:,.2f}/month"
+    if normalized_currency:
+        return f"{normalized_currency} {amount:,.2f}/month"
+    return ""
+
+
 class SpecialAccessView(TemplateView):
     template_name = "special_access.html"
 
@@ -2681,9 +2744,90 @@ class SpecialAccessView(TemplateView):
         context = super().get_context_data(**kwargs)
         promo = get_session_trial_promo(self.request)
         plan_label = ""
+        standard_monthly_price_label = ""
         redemptions_remaining = None
+        offer_activation_mode = ""
+        offer_trial_days = None
+        offer_payment_method_required = False
+        offer_discount_months = None
         if promo is not None:
             plan_label = promo.get_plan_display()
+            offer_activation_mode = promo.activation_mode
+            offer_trial_days = promo.trial_days
+            offer_payment_method_required = promo.payment_method_required
+            offer_discount_months = promo.discount_months
+            direct_redemption = (
+                get_direct_trial_promo_redemption(
+                    promo=promo,
+                    user=self.request.user,
+                )
+                if self.request.user.is_authenticated
+                else None
+            )
+            if direct_redemption is not None:
+                offer_activation_mode = (
+                    TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
+                )
+                offer_discount_months = None
+                redemption_metadata = direct_redemption.metadata or {}
+                snapshot_plan = str(
+                    redemption_metadata.get(TRIAL_PROMO_META_PLAN) or "",
+                ).strip().lower()
+                if snapshot_plan in TrialPromoPlanChoices.values:
+                    plan_label = TrialPromoPlanChoices(snapshot_plan).label
+                try:
+                    snapshot_trial_days = int(
+                        redemption_metadata.get(TRIAL_PROMO_META_TRIAL_DAYS),
+                    )
+                except (TypeError, ValueError):
+                    snapshot_trial_days = 0
+                if snapshot_trial_days > 0:
+                    offer_trial_days = snapshot_trial_days
+                offer_payment_method_required = (
+                    str(
+                        redemption_metadata.get(
+                            TRIAL_PROMO_META_PAYMENT_REQUIRED,
+                        )
+                        or "",
+                    ).lower()
+                    == "true"
+                )
+                try:
+                    snapshot_discount_months = int(
+                        redemption_metadata.get(
+                            TRIAL_PROMO_REDEMPTION_DISCOUNT_MONTHS_KEY,
+                        ),
+                    )
+                except (TypeError, ValueError):
+                    snapshot_discount_months = 0
+                if snapshot_discount_months > 0:
+                    offer_discount_months = snapshot_discount_months
+                snapshot_price_id = str(
+                    redemption_metadata.get(
+                        TRIAL_PROMO_REDEMPTION_PRICE_ID_KEY,
+                    )
+                    or "",
+                ).strip()
+                if snapshot_price_id:
+                    price_snapshot = get_stripe_price_snapshot(
+                        snapshot_price_id,
+                    )
+                    if price_snapshot is not None:
+                        standard_monthly_price_label = (
+                            _format_monthly_price_label(
+                                price_snapshot.amount,
+                                price_snapshot.currency,
+                            )
+                        )
+            elif (
+                offer_activation_mode
+                == TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
+            ):
+                promo_plan = get_plan_config(promo.plan) or {}
+                standard_monthly_price_label = _format_monthly_price_label(
+                    float(promo_plan.get("price") or 0),
+                    str(promo_plan.get("currency") or "USD"),
+                )
             if promo.max_redemptions is not None:
                 used_count = promo.redemptions.filter(
                     status__in=promo.redemptions.model.COUNTED_STATUSES,
@@ -2702,15 +2846,27 @@ class SpecialAccessView(TemplateView):
             email_verification_address = TrialPromo.normalize_allowed_email(
                 self.request.user.email,
             )
+        auto_resume_start = bool(
+            promo is not None
+            and self.request.user.is_authenticated
+            and not email_verification_required
+            and is_trial_promo_start_pending(self.request, promo)
+        )
         context.update(
             {
                 "promo": promo,
                 "invalid_code_error": getattr(self, "invalid_code_error", ""),
                 "plan_label": plan_label,
+                "standard_monthly_price_label": standard_monthly_price_label,
+                "offer_activation_mode": offer_activation_mode,
+                "offer_trial_days": offer_trial_days,
+                "offer_payment_method_required": offer_payment_method_required,
+                "offer_discount_months": offer_discount_months,
                 "redemptions_remaining": redemptions_remaining,
                 "start_url": reverse("pages:special_access_start"),
                 "email_verification_required": email_verification_required,
                 "email_verification_address": email_verification_address,
+                "auto_resume_start": auto_resume_start,
             }
         )
         return context
@@ -2728,7 +2884,14 @@ class SpecialAccessStartView(View):
         return super().dispatch(request, *args, **kwargs)
 
     def get(self, request, *args, **kwargs):
-        return self._handle(request)
+        code = (request.GET.get("code") or "").strip()
+        if code:
+            promo = find_active_trial_promo_by_code(code)
+            if promo is None:
+                messages.error(request, "That special access code is not active.")
+            else:
+                store_trial_promo_in_session(request, promo)
+        return redirect("pages:special_access")
 
     def post(self, request, *args, **kwargs):
         return self._handle(request)
@@ -2748,17 +2911,54 @@ class SpecialAccessStartView(View):
             return redirect("pages:special_access")
 
         if not request.user.is_authenticated:
-            return redirect_to_login(
-                next=request.get_full_path(),
+            mark_trial_promo_start_pending(request, promo)
+            response = redirect_to_login(
+                next=reverse("pages:special_access"),
                 login_url=_cta_auth_url_with_utms(request),
             )
+            _set_oauth_stash_cookies(
+                response,
+                request,
+                charter_data=_build_oauth_charter_cookie_payload(
+                    request,
+                    charter="",
+                    charter_source="",
+                ),
+                attribution_data=_build_oauth_attribution_cookie_payload(
+                    request,
+                ),
+            )
+            return response
 
         if request.POST.get("action") == TRIAL_PROMO_RESEND_VERIFICATION_ACTION:
             return _resend_special_access_email_verification(request, promo)
 
+        clear_trial_promo_start_pending(request)
+        direct_activation_redemption = (
+            get_direct_trial_promo_redemption(
+                promo=promo,
+                user=request.user,
+            )
+            if request.user.is_authenticated
+            else None
+        )
+        is_direct_activation = (
+            promo.activation_mode == TrialPromoActivationModeChoices.DIRECT_STRIPE_TRIAL
+            or direct_activation_redemption is not None
+        )
         try:
+            if is_direct_activation:
+                return _start_direct_trial_promo(request, promo)
             return _start_trial_promo_checkout(request, promo)
         except TrialPromoError as exc:
+            if is_direct_activation:
+                logger.warning(
+                    "Transparent campaign request failed for promo %s and user %s (%s): %s",
+                    promo.pk,
+                    request.user.pk,
+                    exc.code,
+                    exc.message,
+                )
             messages.error(request, exc.message)
             return redirect("pages:special_access")
 
@@ -2825,6 +3025,375 @@ def _resend_special_access_email_verification(request, promo: TrialPromo):
 
     messages.success(request, f"Verification email sent to {email_address.email}.")
     return redirect("pages:special_access")
+
+
+def _trial_promo_personal_agent_redirect(request, *, spawn: bool):
+    personal_context_name = (
+        request.user.get_full_name()
+        or request.user.username
+        or request.user.email
+        or "Personal"
+    )
+    request.session["context_type"] = "personal"
+    request.session["context_id"] = str(request.user.pk)
+    request.session["context_name"] = personal_context_name
+    redirect_params = {
+        "context_type": "personal",
+        "context_id": str(request.user.pk),
+    }
+    if spawn:
+        redirect_params["spawn"] = "1"
+    return redirect(
+        append_query_params(
+            f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+            redirect_params,
+        ),
+    )
+
+
+def _trial_promo_template_redirect(request, promo: TrialPromo):
+    template = promo.linked_template
+    if template is None:
+        clear_trial_promo_session(request)
+        return _trial_promo_personal_agent_redirect(request, spawn=False)
+    if (
+        not template.is_active
+        or template.is_listed
+        or template.organization_id
+        or template.public_profile_id
+    ):
+        raise TrialPromoError(
+            "campaign_template_unavailable",
+            "This campaign's private template is not available. Please contact support.",
+        )
+
+    stage_agent_template_session(
+        request,
+        template,
+        template_source=AGENT_TEMPLATE_SOURCE_TRIAL_PROMO,
+        include_charter=True,
+    )
+    logger.info(
+        "Staged private campaign template %s for promo %s and user %s",
+        template.pk,
+        promo.pk,
+        request.user.pk,
+    )
+    clear_trial_promo_session(request)
+    return _trial_promo_personal_agent_redirect(request, spawn=True)
+
+
+def _prepare_campaign_stripe() -> None:
+    try:
+        _prepare_stripe_or_404()
+    except Http404 as exc:
+        raise TrialPromoError(
+            "stripe_unavailable",
+            "This special campaign is temporarily unavailable. Please try again.",
+        ) from exc
+
+
+def _start_direct_trial_promo(request, promo: TrialPromo):
+    user = request.user
+    existing_redemption = get_direct_trial_promo_redemption(promo=promo, user=user)
+    activation_pending = (
+        existing_redemption is not None
+        and existing_redemption.status
+        == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_PENDING
+    )
+    if existing_redemption is None:
+        if not is_user_email_allowed_for_trial_promo(user=user, promo=promo):
+            raise TrialPromoError(
+                TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
+                "This invitation is tied to a different email address.",
+            )
+        if not is_user_email_verified_for_trial_promo(user=user, promo=promo):
+            raise TrialPromoError(
+                TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED,
+                "Please verify your email address to use this campaign invitation.",
+            )
+    try:
+        plan = reconcile_user_plan_from_stripe(user) or {}
+    except stripe.error.StripeError as exc:
+        raise TrialPromoError(
+            "plan_sync_unavailable",
+            "We couldn't confirm your current plan. Please try again.",
+        ) from exc
+    plan_id = str(plan.get("id") or "").lower()
+
+    if plan_id and plan_id != PlanNames.FREE:
+        if (
+            not activation_pending
+            or retire_pending_direct_trial_promo_for_paid_user(
+                existing_redemption,
+            )
+        ):
+            return _trial_promo_template_redirect(request, promo)
+
+    if (
+        existing_redemption is not None
+        and existing_redemption.status
+        == TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED
+    ):
+        late_redemption = get_eligible_late_conversion_redemption(
+            promo=promo,
+            user=user,
+        )
+        if late_redemption is None:
+            raise TrialPromoError(
+                "late_conversion_expired",
+                "This campaign's discounted conversion window has ended.",
+            )
+        return _start_trial_promo_conversion_checkout(request, promo, late_redemption)
+
+    if existing_redemption is None:
+        if not settings.TRIAL_PROMO_DIRECT_ACTIVATION_ENABLED:
+            raise TrialPromoError(
+                "direct_activation_disabled",
+                "Transparent trial activation is temporarily unavailable.",
+            )
+        failed_activation_subscription_ids = {
+            str(subscription_id)
+            for subscription_id in TrialPromoRedemption.objects.filter(
+                promo=promo,
+                user=user,
+                status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_FAILED,
+            ).values_list("stripe_subscription_id", flat=True)
+            if subscription_id
+        }
+        decision = can_user_start_trial_promo(
+            user=user,
+            promo=promo,
+            request=request,
+            excluded_subscription_ids=failed_activation_subscription_ids,
+        )
+        if not decision.allowed:
+            message = "This account is not eligible for this special trial."
+            if decision.reason == TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED:
+                message = "This invitation is tied to a different email address."
+            elif decision.reason == TRIAL_PROMO_REASON_EMAIL_NOT_VERIFIED:
+                message = (
+                    "Please verify your email address to start this special trial. "
+                    "You can resend the verification email from this page."
+                )
+            raise TrialPromoError(decision.reason or "trial_unavailable", message)
+
+    _prepare_campaign_stripe()
+    if activation_pending:
+        activate_direct_trial_promo(
+            promo=promo,
+            user=user,
+        )
+        return _trial_promo_template_redirect(request, promo)
+
+    stripe_settings = get_stripe_settings()
+    plan_config = _personal_plan_checkout_config(stripe_settings, promo.plan)
+    price_id = plan_config["price_id"]
+    if not price_id:
+        raise TrialPromoError(
+            "price_missing",
+            "This special access plan is not configured yet.",
+        )
+    try:
+        price_object = Price.objects.get(id=price_id)
+    except Price.DoesNotExist as exc:
+        raise TrialPromoError(
+            "price_not_synced",
+            "This special access plan pricing is not ready.",
+        ) from exc
+
+    additional_price_id = ""
+    if _is_additional_tasks_auto_purchase_enabled(user):
+        additional_price_id = plan_config["additional_tasks_price_id"]
+
+    activate_direct_trial_promo(
+        promo=promo,
+        user=user,
+        price_object=price_object,
+        price_id=price_id,
+        additional_price_id=additional_price_id,
+    )
+    return _trial_promo_template_redirect(request, promo)
+
+
+def _start_trial_promo_conversion_checkout(request, promo: TrialPromo, redemption):
+    _prepare_campaign_stripe()
+    stripe_settings = get_stripe_settings()
+    offer = get_trial_promo_conversion_offer(redemption)
+    plan_config = _personal_plan_checkout_config(stripe_settings, offer.plan)
+    try:
+        price_object = Price.objects.get(id=offer.price_id)
+    except Price.DoesNotExist as exc:
+        raise TrialPromoError(
+            "price_not_synced",
+            "This special access plan pricing is not ready.",
+        ) from exc
+
+    coupon = validate_direct_trial_conversion_configuration(
+        price_object=price_object,
+        coupon_id=offer.coupon_id,
+        discount_months=offer.discount_months,
+    )
+    try:
+        customer = get_or_create_stripe_customer(request.user)
+    except stripe.error.StripeError as exc:
+        raise TrialPromoError(
+            "stripe_customer_unavailable",
+            "We couldn't prepare the discounted checkout. Please try again.",
+        ) from exc
+
+    if redemption.conversion_checkout_session_id:
+        try:
+            existing_session = stripe.checkout.Session.retrieve(
+                redemption.conversion_checkout_session_id,
+                api_key=stripe.api_key,
+            )
+        except stripe.error.StripeError as exc:
+            raise TrialPromoError(
+                "conversion_checkout_recovery_failed",
+                "We couldn't resume the discounted checkout. Please try again.",
+            ) from exc
+
+        existing_status = str(
+            existing_session.get("status", "")
+            if isinstance(existing_session, Mapping)
+            else getattr(existing_session, "status", "")
+        )
+        existing_url = (
+            existing_session.get("url")
+            if isinstance(existing_session, Mapping)
+            else getattr(existing_session, "url", None)
+        )
+        if existing_status == "open" and existing_url:
+            logger.info(
+                "Resumed campaign conversion checkout %s for redemption %s",
+                redemption.conversion_checkout_session_id,
+                redemption.pk,
+            )
+            return redirect(existing_url)
+        if existing_status == "complete":
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
+        if existing_status != "expired":
+            raise TrialPromoError(
+                "conversion_checkout_recovery_failed",
+                "We couldn't resume the discounted checkout. Please try again.",
+            )
+        clear_expired_trial_promo_conversion_checkout(
+            redemption,
+            checkout_session_id=redemption.conversion_checkout_session_id,
+        )
+
+    redemption, checkout_attempt = reserve_trial_promo_conversion_checkout(redemption)
+    event_id = f"trial-promo-conversion-{redemption.pk}-{checkout_attempt}"
+    metadata = build_trial_promo_conversion_metadata(
+        redemption,
+        event_id=event_id,
+    )
+    success_url, _post_checkout_redirect_used = _build_checkout_success_url(
+        request,
+        event_id=event_id,
+        price=(price_object.unit_amount or 0) / 100,
+        plan=plan_config["plan"],
+    )
+    checkout_kwargs = {
+        "customer": customer.id,
+        "api_key": stripe.api_key,
+        "success_url": success_url,
+        "cancel_url": request.build_absolute_uri(reverse("pages:special_access")),
+        "mode": "subscription",
+        "payment_method_types": PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
+        "allow_promotion_codes": False,
+        # Late conversion starts paid service immediately, so the validated
+        # repeating coupon itself owns the exact N discounted billing periods.
+        "discounts": [{"coupon": coupon.coupon_id}],
+        "metadata": metadata,
+        "subscription_data": {"metadata": metadata},
+        "line_items": [{"price": offer.price_id, "quantity": 1}],
+        "idempotency_key": event_id,
+    }
+    try:
+        session = _create_checkout_session_with_customer_context(
+            customer_id=customer.id,
+            flow_type=STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
+            event_id=event_id,
+            plan=plan_config["plan"],
+            plan_label=plan_config["plan_label"],
+            value=(price_object.unit_amount or 0) / 100,
+            currency=getattr(price_object, "currency", None),
+            checkout_source_url=request.build_absolute_uri(reverse("pages:special_access")),
+            extra_customer_metadata=metadata,
+            checkout_kwargs=checkout_kwargs,
+        )
+    except stripe.error.StripeError as exc:
+        raise TrialPromoError(
+            "conversion_checkout_failed",
+            "We couldn't open the discounted checkout. Please try again.",
+        ) from exc
+
+    mark_trial_promo_conversion_checkout_started(
+        redemption,
+        checkout_session_id=session.id,
+    )
+    logger.info(
+        "Started campaign conversion checkout %s for redemption %s",
+        session.id,
+        redemption.pk,
+    )
+    return redirect(session.url)
+
+
+class SpecialAccessConversionView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            raise Http404()
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        redemption = (
+            TrialPromoRedemption.objects.select_related("promo")
+            .filter(
+                pk=kwargs.get("redemption_id"),
+                user=request.user,
+                status=TrialPromoRedemptionStatusChoices.DIRECT_ACTIVATION_COMPLETED,
+            )
+            .first()
+        )
+        if redemption is None:
+            raise Http404()
+
+        eligible = get_eligible_late_conversion_redemption(
+            promo=redemption.promo,
+            user=request.user,
+        )
+        if eligible is None or eligible.pk != redemption.pk:
+            messages.error(request, "This campaign's discounted conversion window has ended.")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
+
+        try:
+            plan = reconcile_user_plan_from_stripe(request.user) or {}
+            if str(plan.get("id") or "").lower() != PlanNames.FREE:
+                return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
+            return _start_trial_promo_conversion_checkout(
+                request,
+                redemption.promo,
+                redemption,
+            )
+        except stripe.error.StripeError:
+            logger.warning(
+                "Failed to reconcile plan for campaign conversion redemption %s",
+                redemption.pk,
+                exc_info=True,
+            )
+            messages.error(
+                request,
+                "We couldn't confirm your current plan. Please try again.",
+            )
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
+        except TrialPromoError as exc:
+            messages.error(request, exc.message)
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
 
 def _start_trial_promo_checkout(request, promo: TrialPromo):
@@ -3796,7 +4365,7 @@ class PublicTemplateSitemap(sitemaps.Sitemap):
             return []
         return (
             PersistentAgentTemplate.objects.select_related("public_profile")
-            .filter(organization__isnull=True, is_active=True)
+            .filter(organization__isnull=True, is_active=True, is_listed=True)
             .exclude(code="")
             .order_by("priority", Lower("display_name"), "id")
         )
@@ -3819,6 +4388,7 @@ class PublicTemplateCategorySitemap(sitemaps.Sitemap):
             PersistentAgentTemplate.objects.filter(
                 organization__isnull=True,
                 is_active=True,
+                is_listed=True,
             )
             .filter(Q(slug__gt="") | Q(code__gt=""))
             .values_list("category", flat=True)

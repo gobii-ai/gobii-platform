@@ -1,10 +1,12 @@
 import logging
 import re
 import uuid
+from urllib.parse import urlencode
 
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Prefetch
 from django.db.models.expressions import OuterRef, Exists
@@ -314,6 +316,7 @@ class TrialPromoAdmin(admin.ModelAdmin):
         "name",
         "code_label",
         "plan",
+        "activation_mode",
         "trial_days",
         "payment_method_required",
         "repeat_trials_allowed",
@@ -327,6 +330,7 @@ class TrialPromoAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "plan",
+        "activation_mode",
         "payment_method_required",
         "repeat_trials_allowed",
         "email_allowlist_enabled",
@@ -334,13 +338,21 @@ class TrialPromoAdmin(admin.ModelAdmin):
         "is_active",
     )
     search_fields = ("name", "code_label", "headline", "description", "allowed_emails__normalized_email")
-    readonly_fields = ("code_digest", "allowed_email_count", "created_at", "updated_at")
+    readonly_fields = (
+        "code_digest",
+        "campaign_url",
+        "allowed_email_count",
+        "created_at",
+        "updated_at",
+    )
     fields = (
         "name",
         "code",
         "code_label",
         "code_digest",
+        "campaign_url",
         "plan",
+        "activation_mode",
         "trial_days",
         "payment_method_required",
         "no_payment_method_end_behavior",
@@ -351,6 +363,10 @@ class TrialPromoAdmin(admin.ModelAdmin):
         "trial_abuse_filtering_enabled",
         "trial_credit_amount",
         "max_redemptions",
+        "linked_template",
+        "conversion_coupon_id",
+        "discount_months",
+        "late_conversion_grace_days",
         "active_from",
         "active_until",
         "is_active",
@@ -366,6 +382,14 @@ class TrialPromoAdmin(admin.ModelAdmin):
             return 0
         return obj.allowed_emails.count()
 
+    @admin.display(description="Private campaign link")
+    def campaign_url(self, obj):
+        if obj is None or not getattr(obj, "code_label", ""):
+            return "Save the promo to generate its link."
+        path = f"{reverse('pages:special_access')}?{urlencode({'code': obj.code_label})}"
+        url = f"{settings.PUBLIC_SITE_URL.rstrip('/')}{path}"
+        return format_html('<a href="{}" target="_blank" rel="noopener">{}</a>', url, url)
+
 
 @admin.register(TrialPromoRedemption)
 class TrialPromoRedemptionAdmin(admin.ModelAdmin):
@@ -376,11 +400,17 @@ class TrialPromoRedemptionAdmin(admin.ModelAdmin):
         "stripe_customer_id",
         "stripe_checkout_session_id",
         "stripe_subscription_id",
+        "stripe_subscription_schedule_id",
+        "conversion_checkout_session_id",
+        "discount_state",
         "checkout_started_at",
         "checkout_completed_at",
         "checkout_expired_at",
+        "activated_at",
+        "late_conversion_expires_at",
+        "discount_applied_at",
     )
-    list_filter = ("status", "promo", "checkout_started_at")
+    list_filter = ("status", "discount_state", "promo", "checkout_started_at")
     search_fields = (
         "promo__name",
         "promo__code_label",
@@ -399,11 +429,17 @@ class TrialPromoRedemptionAdmin(admin.ModelAdmin):
         "stripe_customer_id",
         "stripe_checkout_session_id",
         "stripe_subscription_id",
+        "stripe_subscription_schedule_id",
+        "conversion_checkout_session_id",
         "metadata",
         "checkout_started_at",
         "checkout_completed_at",
         "checkout_expired_at",
         "checkout_failed_at",
+        "activated_at",
+        "late_conversion_expires_at",
+        "discount_state",
+        "discount_applied_at",
         "created_at",
         "updated_at",
     )
@@ -5911,11 +5947,11 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     list_display = (
         'display_name', 'category', 'organization', 'is_official', 'preferred_llm_tier',
         'recommended_contact_channel', 'base_schedule',
-        'schedule_jitter_minutes', 'priority', 'is_active', 'updated_at'
+        'schedule_jitter_minutes', 'priority', 'is_active', 'is_listed', 'updated_at'
     )
     list_filter = (
         'category', 'organization', 'is_official', 'preferred_llm_tier',
-        'recommended_contact_channel', 'is_active',
+        'recommended_contact_channel', 'is_active', 'is_listed',
     )
     list_editable = ('is_official',)
     search_fields = (
@@ -5931,7 +5967,7 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     inlines = (PersistentAgentTemplateRelatedTemplateInline,)
     fieldsets = (
         ('Identity', {
-            'fields': ('code', 'display_name', 'tagline', 'category', 'priority', 'is_active')
+            'fields': ('code', 'display_name', 'tagline', 'category', 'priority', 'is_active', 'is_listed')
         }),
         ('Public Template', {
             'fields': ('public_profile', 'slug', 'is_official', 'source_agent', 'created_by')

@@ -861,7 +861,7 @@ def _resolve_quick_create_template(
         template = (
             PersistentAgentTemplate.objects
             .select_related("preferred_llm_tier", "organization")
-            .filter(organization__isnull=True, is_active=True)
+            .filter(organization__isnull=True, is_active=True, is_listed=True)
             .filter(public_filter)
             .filter(Q(code__gt="") | Q(slug__gt=""))
             .order_by("priority", "display_name", "id")

@@ -3406,6 +3406,10 @@ def handle_subscription_event(event, **kwargs):
         mark_trial_promo_redemption_subscription(
             event_id=subscription_metadata.get("gobii_event_id"),
             stripe_subscription_id=subscription_id,
+            discount_active=(
+                str(subscription_metadata.get("trial_promo_discount_active") or "").lower()
+                == "true"
+            ),
         )
 
         # Handle explicit deletions (downgrade to free immediately)
