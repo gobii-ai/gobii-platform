@@ -19,6 +19,7 @@ from django.utils import timezone
 from api.agent.core.event_processing import (
     _deep_work_update_gate_reason,
     _finalize_tool_batch,
+    _filter_tools_after_non_retryable_result,
     _contact_permission_params_from_misrouted_human_input,
     _ensure_credit_for_tool,
     _process_agent_events_locked,
@@ -72,6 +73,53 @@ class _DummySpan:
 
     def set_attribute(self, *_args, **_kwargs):
         return None
+
+
+def _tool_names(tools):
+    return {tool.get("function", {}).get("name") for tool in tools}
+
+
+@tag("batch_event_processing")
+class NonRetryableToolAvailabilityTests(SimpleTestCase):
+    tools = [
+        {"type": "function", "function": {"name": "mcp_vendor_search"}},
+        {"type": "function", "function": {"name": "http_request"}},
+        {"type": "function", "function": {"name": "send_chat_message"}},
+        {"type": "function", "function": {"name": "sleep_until_next_trigger"}},
+    ]
+
+    def test_non_retryable_result_removes_failed_tool_for_active_request(self):
+        filtered = _filter_tools_after_non_retryable_result(
+            self.tools,
+            "mcp_vendor_search",
+            {"status": "error", "retryable": False},
+        )
+
+        self.assertEqual(
+            _tool_names(filtered),
+            {"http_request", "send_chat_message", "sleep_until_next_trigger"},
+        )
+
+    def test_terminal_result_leaves_only_delivery_and_stop_tools(self):
+        filtered = _filter_tools_after_non_retryable_result(
+            self.tools,
+            "mcp_vendor_search",
+            {"status": "error", "retryable": False, "terminal_error": True},
+        )
+
+        self.assertEqual(
+            _tool_names(filtered),
+            {"send_chat_message", "sleep_until_next_trigger"},
+        )
+
+    def test_success_result_with_irrelevant_retryable_field_keeps_tools(self):
+        filtered = _filter_tools_after_non_retryable_result(
+            self.tools,
+            "mcp_vendor_search",
+            {"status": "ok", "retryable": False},
+        )
+
+        self.assertEqual(filtered, self.tools)
 
 
 @tag('batch_event_processing')

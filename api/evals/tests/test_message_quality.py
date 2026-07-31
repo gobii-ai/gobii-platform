@@ -7,6 +7,7 @@ import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.message_quality import (
     EMAIL_APPROVED_ACTION_TUPLE_SLUG,
+    EMAIL_PHONE_HANDOFF_IDENTITY_NEUTRAL_SLUG,
     EMAIL_SENT_STATE_SEQUENCING_SLUG,
     EMAIL_REVIEW_OUTBOX_COMMUNICATION_SLUG,
     EmailReviewOutboxCommunicationScenario,
@@ -28,16 +29,35 @@ from api.evals.scenarios.message_quality import (
     _claims_no_human_contact,
 )
 from api.evals.suites import SuiteRegistry
+from api.agent.core.prompt_context import _message_cc_addresses
 
 
 @tag("eval_sim")
 class MessageQualityScenarioTests(SimpleTestCase):
+    def test_email_cc_context_combines_persisted_and_transport_addresses(self):
+        message = SimpleNamespace(
+            cc_endpoints=SimpleNamespace(
+                all=lambda: [
+                    SimpleNamespace(address="jordan@example.test"),
+                    SimpleNamespace(address="  "),
+                ]
+            )
+        )
+
+        self.assertEqual(
+            _message_cc_addresses(
+                message,
+                {"cc_addresses": ["jordan@example.test", "sam@example.test"]},
+            ),
+            ("jordan@example.test", "sam@example.test"),
+        )
+
     def test_message_quality_suite_contains_all_generated_scenarios(self):
         suite = SuiteRegistry.get(MESSAGE_QUALITY_SUITE_SLUG)
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 24)
+        self.assertEqual(len(suite.scenario_slugs), 25)
         self.assertIn(REPLY_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(UNAVAILABLE_WEB_CHANNEL_CONTINUITY_SLUG, suite.scenario_slugs)
         self.assertIn(FAILED_EMAIL_DELIVERY_RECOVERY_SLUG, suite.scenario_slugs)
@@ -46,6 +66,7 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertIn(REMOTE_MCP_NO_CONTACT_SLUG, suite.scenario_slugs)
         self.assertIn(EMAIL_SENT_STATE_SEQUENCING_SLUG, suite.scenario_slugs)
         self.assertIn(EMAIL_APPROVED_ACTION_TUPLE_SLUG, suite.scenario_slugs)
+        self.assertIn(EMAIL_PHONE_HANDOFF_IDENTITY_NEUTRAL_SLUG, suite.scenario_slugs)
 
     def test_generated_cases_cover_email_and_chat_for_each_real_world_domain(self):
         channels_by_brief = {}

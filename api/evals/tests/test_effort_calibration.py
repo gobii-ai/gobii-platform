@@ -1723,6 +1723,31 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("each call replaces the full active plan", instructions)
         self.assertIn("Send the final user-facing report before any final completion update", instructions)
 
+    def test_system_instruction_prioritizes_practical_handoffs_and_terminal_results(self):
+        class NoContacts:
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def exists(self):
+                return False
+
+        agent = SimpleNamespace(
+            id="intent-integrity-agent",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+            organization_id=None,
+        )
+
+        with patch(
+            "api.agent.core.prompt_context.CommsAllowlistEntry.objects.filter",
+            return_value=NoContacts(),
+        ):
+            instructions = _get_system_instruction(agent, has_peer_links=False)
+
+        self.assertIn("A phone/call request is not an identity question", instructions)
+        self.assertIn("without volunteering your identity", instructions)
+        self.assertIn("`retryable=false` follows the adjacent terminal-result", instructions)
+        self.assertIn("never `retryable=false`", instructions)
+
     def test_contact_permission_description_defers_setup_only_future_sends(self):
         description = get_request_contact_permission_tool()["function"]["description"]
 

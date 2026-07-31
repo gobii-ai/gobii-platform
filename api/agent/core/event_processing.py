@@ -1670,6 +1670,41 @@ def _tool_definition_names_for_completion(tools: list[dict] | None) -> list[str]
     ]
 
 
+def _filter_tools_after_non_retryable_result(
+    tools: list[dict],
+    tool_name: str,
+    result: object,
+) -> list[dict]:
+    payload = result
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            return tools
+    if not isinstance(payload, dict) or payload.get("retryable") is not False:
+        return tools
+
+    if payload.get(TERMINAL_ERROR_FLAG) is True:
+        allowed = MESSAGE_TOOL_NAMES | {"request_human_input", "sleep_until_next_trigger"}
+        return [
+            tool
+            for tool in tools
+            if tool.get("function", {}).get("name") in allowed
+        ]
+    if str(payload.get("status") or "").casefold() not in {
+        "error",
+        "failed",
+        "failure",
+        "blocked",
+    }:
+        return tools
+    return [
+        tool
+        for tool in tools
+        if tool.get("function", {}).get("name") != tool_name
+    ]
+
+
 def _filter_incompatible_reply_tools(
     tools: list[dict],
     inbound: PersistentAgentMessage | None,
@@ -4023,8 +4058,19 @@ def _execute_prepared_tool_batch_inner(
                     execution_outcomes.append(outcome)
                 submit_available_calls()
 
+        ordered_outcomes = sorted(execution_outcomes, key=lambda item: item.prepared.idx)
+        for outcome in ordered_outcomes:
+            if outcome.updated_tools is not None:
+                available_tools = outcome.updated_tools
+        for outcome in ordered_outcomes:
+            available_tools = _filter_tools_after_non_retryable_result(
+                available_tools,
+                outcome.prepared.tool_name,
+                outcome.result,
+            )
+
         merged_variables = dict(base_variables)
-        for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
+        for outcome in ordered_outcomes:
             merged_variables.update(outcome.variable_map)
         replace_all_variables(merged_variables)
     else:
@@ -4098,6 +4144,11 @@ def _execute_prepared_tool_batch_inner(
                         before_count,
                         after_count,
                     )
+                available_tools = _filter_tools_after_non_retryable_result(
+                    available_tools,
+                    prepared.tool_name,
+                    outcome.result,
+                )
 
     return _ExecutedToolBatch(
         execution_outcomes=execution_outcomes,

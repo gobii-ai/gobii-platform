@@ -4141,7 +4141,8 @@ def _get_system_instruction(
 
         "## Phone Calls\n\n"
         "You cannot place, receive, join, or conduct live calls. "
-        "For call tasks, coordinate details, prepare notes/questions, and say a human will call.\n\n"
+        "A phone/call request is not an identity question: route it to an available human without volunteering your "
+        "identity. Answer direct identity questions accurately and prepare any needed context.\n\n"
 
         f"{charter_and_schedule_intro}"
 
@@ -4224,7 +4225,8 @@ def _get_system_instruction(
         "```\n"
 
         "For MCP tools, call the matching tool; do not list/open first unless required. "
-        "Obey returned side_effects, status, retryable, and next_action. For retryable=false, never repeat unchanged: repair from context, fetch one missing input, then change path or stop. Held/skipped/rejected means not run: apply the correction next; never bypass it or claim success. If auth/setup is blocked, give the requester the returned setup action, park that workstream, and continue only independent work. Correct a retryable request-shape error once. "
+        "Obey side_effects, status, retryable, and next_action; `retryable=false` follows the adjacent terminal-result "
+        "directive. Held/skipped/rejected means not run: correct it next; never bypass or claim success. If auth/setup is blocked, give the requester the setup action, park it, and continue only independent work. Correct a retryable request-shape error once. "
         "Email/SMS imperatives map directly to send_email/send_sms. For a specific new number when send_sms is absent, call request_contact_permission directly; never search for messaging tools. "
         "Do not downgrade requested email/SMS delivery to chat unless the send tool result proves delivery is blocked and no setup path exists. "
         "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "
@@ -4248,7 +4250,12 @@ def _get_system_instruction(
         "'I'll save/update it' with will_continue_work=false; do it first.\n\n"
         f"{LINK_REFERENCE_PROMPT_NOTE}\n\n"
         "## Bounded Current Research (CRITICAL)\n\n"
-        "For one-off latest/current company/batch/funding/pricing/product/news/status asks except finite sets: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs compactly. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress except the required Discord kickoff, create files/charts, build an ad hoc SQLite model, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
+        "For one-off current company/batch/funding/pricing/product/news/status asks except finite sets: search or use a "
+        "structured lookup once; scrape 1-3 top sources only if snippets are insufficient; then answer with takeaways "
+        "and two source links. A corrected query is allowed only after a successful empty/contradictory result, never "
+        "`retryable=false`. No query variants, plan, progress except required Discord kickoff, file/chart, ad hoc "
+        "model, or further search once sources answer. Escalate only for explicit deep/exhaustive work, market maps, "
+        "exports, list-all, outreach, monitoring, or genuinely broader scope.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
         "For explicit deep/exhaustive research and finite-set coverage, do not finalize from search results: after discovery, scrape/open at least 4 promising URLs (or every useful URL if fewer), then synthesize. A structured source already containing every requested field needs no item refetch. Snippets are leads, not sources. Start with one broad search, two if it misses an angle. For named sets, batch gaps, follow up misses, and reconcile coverage; never repeat a successful URL/query. Send a kickoff only for genuinely substantial/long-running work, not a small finite set. If sources support the memo, final next with linked evidence; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
@@ -4383,6 +4390,43 @@ def _get_message_attachment_paths(message: PersistentAgentMessage) -> List[str]:
                 paths.append(path)
                 seen.add(path)
     return paths
+
+
+def _message_cc_addresses(
+    message: PersistentAgentMessage,
+    raw_payload: Mapping[str, Any],
+) -> tuple[str, ...]:
+    addresses = {
+        str(endpoint.address).strip()
+        for endpoint in message.cc_endpoints.all()
+        if str(endpoint.address or "").strip()
+    }
+    raw_addresses = raw_payload.get("cc_addresses") or raw_payload.get("cc") or ()
+    if isinstance(raw_addresses, str):
+        raw_addresses = (raw_addresses,)
+    if isinstance(raw_addresses, (list, tuple, set)):
+        addresses.update(
+            str(address).strip()
+            for address in raw_addresses
+            if str(address or "").strip()
+        )
+    return tuple(sorted(addresses))
+
+
+def _discord_author_type(raw_payload: Mapping[str, Any]) -> str:
+    if str(raw_payload.get("discord_webhook_id") or "").strip():
+        return "bot or webhook"
+    pipedream_payload = raw_payload.get("pipedream_payload")
+    if isinstance(pipedream_payload, Mapping):
+        metadata = pipedream_payload.get("author_metadata")
+        if isinstance(metadata, Mapping) and metadata.get("bot") is True:
+            return "bot or webhook"
+        if any(
+            str(pipedream_payload.get(key) or "").strip()
+            for key in ("webhookId", "webhookID", "webhook_id")
+        ):
+            return "bot or webhook"
+    return "human participant"
 
 
 def _format_discord_reply_context(raw_payload: Mapping[str, Any]) -> str:
@@ -4794,7 +4838,7 @@ def _get_unified_history_prompt(
             owner_agent=agent, timestamp__gt=comms_cutoff
         )
         .select_related("from_endpoint", "to_endpoint", "conversation", "peer_agent")
-        .prefetch_related("attachments__filespace_node")
+        .prefetch_related("attachments__filespace_node", "cc_endpoints")
         .order_by("-timestamp")[:unified_fetch_span]
     )
     structured_events: List[Tuple[datetime, str, dict]] = []  # (timestamp, event_type, components)
@@ -5257,6 +5301,9 @@ def _get_unified_history_prompt(
                 components["reply_to_message_id"] = str(m.id)
                 if subject:
                     components["subject"] = subject
+                cc_addresses = _message_cc_addresses(m, raw_payload)
+                if cc_addresses:
+                    components["cc_addresses"] = json.dumps(cc_addresses)
 
                 if m.is_outbound:
                     if body:
@@ -5282,11 +5329,14 @@ def _get_unified_history_prompt(
                 components["content"] = content
 
             if channel == CommsChannel.DISCORD:
+                if not m.is_outbound:
+                    components["discord_author_type"] = _discord_author_type(raw_payload)
                 if not m.is_outbound and m.id == latest_inbound_discord_id:
                     components["discord_shared_channel_context"] = (
                         "This is a multi-user channel. The message may or may not be for you. "
                         "Use its addressee, reply target, mentions, current ownership, and whether your contribution "
-                        "is necessary before responding."
+                        "is necessary before responding. Explicit author type is authoritative; display names and "
+                        "handles are not identity evidence."
                     )
                 discord_channel_id = str(raw_payload.get("discord_channel_id") or "").strip()
                 if discord_channel_id:
