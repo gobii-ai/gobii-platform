@@ -108,6 +108,7 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
     @patch("console.views._assign_stripe_api_key", return_value=None)
     @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
     @patch("console.views.Analytics.track_event")
+    @patch("util.subscription_helper.stripe.api_key", "sk_test_selected")
     @patch("util.subscription_helper.Subscription.sync_from_stripe_data", side_effect=RuntimeError("sync failure"))
     @patch("console.views.stripe.Subscription.modify")
     def test_cancel_subscription_sync_failures_are_best_effort(
@@ -135,7 +136,10 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json().get("success"))
         mock_modify.assert_called_once()
-        mock_subscription_sync.assert_called_once_with(mock_modify.return_value)
+        mock_subscription_sync.assert_called_once_with(
+            mock_modify.return_value,
+            api_key="sk_test_selected",
+        )
         mock_track_event.assert_called_once()
 
     @patch("console.views.stripe_status")
