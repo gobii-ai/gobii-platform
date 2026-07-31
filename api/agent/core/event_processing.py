@@ -3218,6 +3218,26 @@ def _find_successful_duplicate_http_request(
     return None
 
 
+def _record_duplicate_http_request_skip(
+    agent: PersistentAgent,
+    prior_call: PersistentAgentToolCall,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Skipped duplicate http_request: this exact request already succeeded in this task. "
+            f"Use the prior tool result from step {prior_call.step_id}. "
+            "If it answers the request, send the final message next; do not refetch or inspect __tool_results just to reread it."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
+
+
 _ToolExecutor = Callable[[PersistentAgent, Dict[str, Any]], Any]
 _ToolExecutorResolver = Callable[[], _ToolExecutor]
 
@@ -4758,7 +4778,7 @@ def _completion_with_failover(
         stream_broadcaster: Optional broadcaster for streaming deltas to web UI
         allow_streamed_content: Whether assistant message text is allowed to stream to the UI
         defer_stream_finish: Leave the stream open until the caller accepts the response
-        
+
     Returns:
         Tuple of (LiteLLM completion response or streaming aggregate, token usage dict)
         Token usage dict contains: prompt_tokens, completion_tokens, total_tokens, 
