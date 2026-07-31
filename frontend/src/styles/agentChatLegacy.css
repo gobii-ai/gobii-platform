@@ -5830,6 +5830,61 @@
     font-size: 0.8rem;
     text-align: center;
 }
+/* Skeleton rows while the roster loads: ghosts of the agent results about to appear, so
+   every roster-loading surface (sidebar rail, search panel) reads "on its way" rather than
+   plain text or a false "no results" (#509). Slate-based shimmer stays visible on both the
+   dark search panel and the light rail. */
+.agent-roster-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.25rem 0.125rem;
+}
+.agent-roster-skeleton__row {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.5rem 0.625rem;
+}
+.agent-roster-skeleton__avatar {
+    width: 2.125rem;
+    height: 2.125rem;
+    border-radius: 9999px;
+    flex-shrink: 0;
+}
+.agent-roster-skeleton__lines {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+.agent-roster-skeleton__bar {
+    height: 0.5625rem;
+    border-radius: 9999px;
+}
+.agent-roster-skeleton__bar[data-width="name"] { width: 42%; }
+.agent-roster-skeleton__bar[data-width="description"] { width: 68%; }
+.agent-roster-skeleton__avatar,
+.agent-roster-skeleton__bar {
+    background: linear-gradient(100deg, rgba(148, 163, 184, 0.16) 40%, rgba(148, 163, 184, 0.34) 50%, rgba(148, 163, 184, 0.16) 60%);
+    background-size: 200% 100%;
+    animation: agent-roster-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+.agent-roster-skeleton__row:nth-child(2) .agent-roster-skeleton__avatar,
+.agent-roster-skeleton__row:nth-child(2) .agent-roster-skeleton__bar { animation-delay: 0.15s; }
+.agent-roster-skeleton__row:nth-child(3) .agent-roster-skeleton__avatar,
+.agent-roster-skeleton__row:nth-child(3) .agent-roster-skeleton__bar { animation-delay: 0.3s; }
+@keyframes agent-roster-skeleton-shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .agent-roster-skeleton__avatar,
+    .agent-roster-skeleton__bar {
+        animation: none;
+        background-position: 50% 0;
+    }
+}
 .message-search-result {
     gap: 0.65rem;
     padding: 0.75rem;

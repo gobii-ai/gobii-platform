@@ -13,7 +13,7 @@ import type { AgentRosterEntry } from '../../types/agentRoster'
 import { handleAppAnchorClick } from '../../util/appNavigation'
 import { buildAgentSearchBlob } from '../../util/agentCards'
 import { revealTimelineMessage } from '../../util/timelineNavigation'
-import { AgentSearchInput } from './ChatSidebarParts'
+import { AgentListSkeleton, AgentSearchInput } from './ChatSidebarParts'
 import { AgentChatAvatar } from './uiPrimitives'
 
 export type MessageSearchState = {
@@ -472,6 +472,16 @@ export function MessageSearchPanel({
                 </button>
               )
             })}
+          </div>
+        ) : null}
+
+        {/* While the roster is in flight a typed query would otherwise render silence, which
+            reads as "no results" until agents pop in (bug #509). Skeleton rows chosen over a
+            spinner+text row in design review. */}
+        {!showShortcutSuggestions && !matchingAgents.length && agentsLoading && parsedSearch.q.trim() ? (
+          <div className="message-search-agent-results flex flex-col">
+            <div className="message-search-panel__section-title"><span>Agents</span></div>
+            <AgentListSkeleton />
           </div>
         ) : null}
 

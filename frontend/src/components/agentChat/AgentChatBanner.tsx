@@ -339,10 +339,12 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 </span>
               ) : null}
             </div>
-            {hasPlan && currentTask ? (
+            {/* The plan's "doing" item stands in for the description only while the agent is
+                actually working, framed as activity; an idle agent shows its description (#519). */}
+            {hasPlan && currentTask && processingActive ? (
               <div className={`banner-task ${animate ? 'banner-task--animate' : ''}`}>
-                <span className={`banner-task-dot ${processingActive ? 'banner-task-dot--active' : ''}`} />
-                <span className="banner-task-title">{currentTask}</span>
+                <span className="banner-task-dot banner-task-dot--active" />
+                <span className="banner-task-title">working on {currentTask}</span>
               </div>
             ) : trimmedMiniDescription ? (
               <span className="banner-mini-description" title={trimmedMiniDescription}>
