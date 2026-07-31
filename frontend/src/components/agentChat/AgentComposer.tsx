@@ -554,6 +554,7 @@ type AgentComposerProps = {
   isProcessing?: boolean
   insightsLoading?: boolean
   onOpenUsage?: () => void
+  onOpenIntegrations?: () => void
   onOpenQuickSettings?: () => void
   usageUrl?: string | null
   intelligenceConfig?: LlmIntelligenceConfig | null
@@ -600,6 +601,7 @@ export const AgentComposer = memo(function AgentComposer({
   isProcessing = false,
   insightsLoading = false,
   onOpenUsage,
+  onOpenIntegrations,
   onOpenQuickSettings,
   usageUrl = '/app/usage',
   intelligenceConfig = null,
@@ -2334,7 +2336,7 @@ export const AgentComposer = memo(function AgentComposer({
                   >
                     {ActiveNativePanel ? (
                       activeWorkingTab?.kind === 'computer' ? (
-                        <ComputerInsightPanel agentId={agentId} />
+                        <ComputerInsightPanel agentId={agentId} onManage={onOpenIntegrations} />
                       ) : (
                         <ActiveNativePanel
                           agentId={agentId}
