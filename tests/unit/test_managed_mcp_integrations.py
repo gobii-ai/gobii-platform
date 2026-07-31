@@ -1,5 +1,6 @@
 import json
 import os
+from dataclasses import replace
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import MagicMock, patch
@@ -14,6 +15,7 @@ from waffle.testutils import override_flag
 
 from api.agent.system_skills.defaults import _hubspot_native_prompt_instructions
 from api.agent.tools.mcp_error_normalizers import MCPErrorNormalizerRegistry
+from api.agent.tools.mcp_manager import MCPToolInfo, MCPToolManager
 from api.models import (
     BrowserUseAgent,
     GlobalSecret,
@@ -28,10 +30,13 @@ from api.models import (
 )
 from api.services.managed_mcp_integrations import (
     HUBSPOT_MCP_PROVIDER,
+    MANAGED_OAUTH_MCP_PROVIDERS,
+    complete_managed_mcp_oauth,
     managed_mcp_provider_enabled,
+    start_managed_mcp_oauth,
     trigger_agents_for_managed_mcp_change,
 )
-from api.services.mcp_oauth import MCPOAuthStatus, ensure_mcp_oauth_credential
+from api.services.mcp_oauth import MCPOAuthResult, MCPOAuthStatus, ensure_mcp_oauth_credential
 from api.services.mcp_servers import agent_accessible_server_configs, agent_server_overview
 from api.services.native_integrations import (
     HUBSPOT_PROVIDER,
@@ -57,7 +62,7 @@ User = get_user_model()
 class ManagedHubSpotMCPTests(TestCase):
     def setUp(self):
         os.environ.setdefault("GOBII_ENCRYPTION_KEY", "test-key-for-managed-mcp")
-        Flag.objects.update_or_create(
+        hubspot_flag, _created = Flag.objects.update_or_create(
             name="hubspot_mcp",
             defaults={
                 "everyone": None,
@@ -67,6 +72,7 @@ class ManagedHubSpotMCPTests(TestCase):
                 "authenticated": False,
             },
         )
+        hubspot_flag.flush()
         Flag.objects.update_or_create(name="organizations", defaults={"everyone": True})
         self.user = User.objects.create_user(
             username="managed-hubspot-staff",
@@ -137,6 +143,41 @@ class ManagedHubSpotMCPTests(TestCase):
         self.assertEqual(generic_list.json()["servers"], [])
         detail = self.client.get(reverse("console-mcp-server-detail", args=[config.id]))
         self.assertEqual(detail.status_code, 403)
+
+    def test_generic_provider_scopes_are_requested_and_preserved_when_token_omits_scope(self):
+        scoped_provider = replace(
+            HUBSPOT_MCP_PROVIDER,
+            scopes=("crm.objects.contacts.read", "oauth"),
+        )
+        token_response = self._token_response()
+
+        with (
+            patch.dict(MANAGED_OAUTH_MCP_PROVIDERS, {"hubspot": scoped_provider}),
+            patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"),
+            patch("api.services.managed_mcp_integrations.httpx.post", return_value=token_response),
+            patch("api.agent.tools.mcp_manager.get_mcp_manager"),
+        ):
+            started = start_managed_mcp_oauth(
+                "hubspot",
+                initiated_by=self.user,
+                owner_user=self.user,
+                owner_org=None,
+                redirect_uri="https://example.test/oauth/callback",
+            )
+            query = parse_qs(urlparse(started["authorization_url"]).query)
+            self.assertEqual(query["scope"], ["crm.objects.contacts.read oauth"])
+            self.assertEqual(started["session"].scope, "crm.objects.contacts.read oauth")
+
+            completed = complete_managed_mcp_oauth(
+                "hubspot",
+                state=started["state"],
+                authorization_code="authorization-code",
+                initiated_by=self.user,
+                owner_user=self.user,
+                owner_org=None,
+            )
+
+        self.assertEqual(completed["credential"].scope, "crm.objects.contacts.read oauth")
 
     @patch("api.agent.tools.mcp_manager.get_mcp_manager")
     @patch("api.services.managed_mcp_integrations.httpx.post")
@@ -334,6 +375,43 @@ class ManagedHubSpotMCPTests(TestCase):
         self.assertTrue(GlobalSecret.objects.filter(id=legacy_secret.id).exists())
         mock_manager.return_value.remove_server.assert_called_once_with(str(config.id))
 
+    @patch("api.agent.tools.mcp_manager.get_mcp_manager")
+    @patch("api.services.managed_mcp_integrations.httpx.post")
+    def test_disconnect_after_rollout_is_disabled_clears_managed_and_legacy_credentials(
+        self,
+        mock_post,
+        mock_manager,
+    ):
+        mock_post.return_value = self._token_response()
+        state = self._start().json()["state"]
+        self.client.post(
+            reverse("console-native-integration-callback", args=["hubspot"]),
+            data=json.dumps({"authorization_code": "code", "state": state}),
+            content_type="application/json",
+        )
+        config = MCPServerConfig.objects.get(managed_integration_key="hubspot")
+        legacy_secret = GlobalSecret(
+            user=self.user,
+            name="Legacy HubSpot",
+            secret_type=GlobalSecret.SecretType.INTEGRATION,
+            domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
+            key=HUBSPOT_PROVIDER.secret_key,
+        )
+        legacy_secret.set_value(json.dumps({"access_token": "legacy-token"}))
+        legacy_secret.save()
+        mock_manager.reset_mock()
+
+        with override_flag("hubspot_mcp", active=False):
+            response = self.client.post(reverse("console-native-integration-revoke", args=["hubspot"]))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["revoked"])
+        config.refresh_from_db()
+        self.assertFalse(config.is_active)
+        self.assertFalse(MCPServerOAuthCredential.objects.filter(server_config=config).exists())
+        self.assertFalse(GlobalSecret.objects.filter(id=legacy_secret.id).exists())
+        mock_manager.return_value.remove_server.assert_called_once_with(str(config.id))
+
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
     @patch("api.services.mcp_oauth.requests.post")
     @patch("api.services.mcp_oauth.Redlock")
@@ -480,6 +558,89 @@ class ManagedHubSpotMCPTests(TestCase):
         self.assertEqual(provider["connection_kind"], "native_api")
         self.assertEqual(provider["scopes"], list(HUBSPOT_PROVIDER.scopes))
         self.assertFalse(MCPServerConfig.objects.filter(user=non_staff, managed_integration_key="hubspot").exists())
+
+    def test_percentage_rollout_is_stable_for_the_workspace_owner(self):
+        non_staff = User.objects.create_user(
+            username="managed-hubspot-percentage",
+            email="managed-hubspot-percentage@example.com",
+        )
+        flag = Flag.objects.get(name="hubspot_mcp")
+        self.addCleanup(flag.flush)
+        flag.everyone = None
+        flag.percent = 50
+        flag.superusers = False
+        flag.staff = False
+        flag.authenticated = False
+        flag.save()
+        flag.flush()
+
+        with patch("waffle.models.random.uniform") as mock_random:
+            decisions = [
+                managed_mcp_provider_enabled("hubspot", non_staff, None)
+                for _index in range(5)
+            ]
+
+        self.assertEqual(len(set(decisions)), 1)
+        mock_random.assert_not_called()
+
+    @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
+    def test_disabling_rollout_blocks_fresh_cached_managed_tools(self, _mock_discovery):
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="hubspot",
+            display_name="HubSpot",
+            url=HUBSPOT_MCP_PROVIDER.server_url,
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            managed_integration_key="hubspot",
+            metadata={"managed_oauth": True, "provider_key": "hubspot"},
+        )
+        credential = MCPServerOAuthCredential.objects.create(
+            server_config=config,
+            user=self.user,
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        credential.access_token = "fresh-managed-token"
+        credential.refresh_token = "managed-refresh-token"
+        credential.save()
+
+        tool_name = "mcp_hubspot_get_user_details"
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name=tool_name,
+            tool_server="hubspot",
+            tool_name="get_user_details",
+            server_config=config,
+        )
+        manager = MCPToolManager()
+        runtime = manager._build_runtime_from_config(config)
+        cached_tool = MCPToolInfo(
+            config_id=str(config.id),
+            full_name=tool_name,
+            server_name="hubspot",
+            tool_name="get_user_details",
+            description="Return HubSpot account details.",
+            parameters={"type": "object", "properties": {}},
+        )
+        manager._server_cache[str(config.id)] = runtime
+        manager._tools_cache["managed-rollout-test"] = [cached_tool]
+
+        with override_flag("hubspot_mcp", active=False):
+            _prepared, auth_error = manager._ensure_runtime_oauth(runtime)
+            resolved_tool = manager.prepare_tool_for_agent(self.agent, tool_name)
+
+        self.assertEqual(auth_error["status"], "error")
+        self.assertFalse(auth_error["retryable"])
+        self.assertIsNone(resolved_tool)
+
+        unavailable = MCPOAuthResult(MCPOAuthStatus.TEMPORARILY_UNAVAILABLE, None)
+        with patch(
+            "api.agent.tools.mcp_manager.ensure_mcp_oauth_credential",
+            return_value=unavailable,
+        ):
+            _prepared, validation_error = manager._ensure_runtime_oauth(runtime)
+        self.assertEqual(validation_error["status"], "error")
+        self.assertTrue(validation_error["retryable"])
 
     def test_disabling_rollout_restores_existing_legacy_rest_auth(self):
         legacy_secret = GlobalSecret(
