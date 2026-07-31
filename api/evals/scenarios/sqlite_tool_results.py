@@ -387,11 +387,11 @@ def _derives_structured_message_fields(
     )
 
 
-def _derives_bound_structured_message_fields(
+def _bound_json_payload_placeholder(
     call,
     statement: str,
     expected_payload: dict[str, str],
-) -> bool:
+) -> str | None:
     bindings = (getattr(call, "tool_params", None) or {}).get("bindings") or {}
     lowered = sqlparse.format(statement, strip_comments=True).casefold()
     for key, raw_payload in bindings.items():
@@ -418,9 +418,21 @@ def _derives_bound_structured_message_fields(
             for field in expected_payload
         ):
             continue
-        if _structured_outcome_assignments_use_extracted_fields(lowered):
-            return True
-    return False
+        return placeholder
+    return None
+
+
+def _derives_bound_structured_message_fields(
+    call,
+    statement: str,
+    expected_payload: dict[str, str],
+) -> bool:
+    return bool(
+        _bound_json_payload_placeholder(call, statement, expected_payload)
+        and _structured_outcome_assignments_use_extracted_fields(
+            sqlparse.format(statement, strip_comments=True).casefold()
+        )
+    )
 
 
 def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str) -> bool:
@@ -3978,23 +3990,34 @@ class SqliteStructuredPeerEventPersistenceScenario(SqliteDomainModelScenario):
             and _reads_table(statement, "operational_events")
             for call_index, statement_index, _call, statement in statement_entries
         )
-        expected_bound_values = {
-            "evt-2048",
-            "accepted_setup",
-            "thread-2048",
-            "2026-07-28T15:42:00Z",
-            str(peer_event.id),
+        expected_payload = {
+            "event_id": "evt-2048",
+            "event_type": "accepted_setup",
+            "thread_key": "thread-2048",
+            "occurred_at": "2026-07-28T15:42:00Z",
         }
         statement_without_comments = sqlparse.format(write_statement, strip_comments=True)
         direct_message_import = (
             write_entry is not None
             and _reads_table(write_statement, "__messages")
             and "structured_payload_json" in write_statement.casefold()
-            and not any(value in statement_without_comments for value in expected_bound_values)
+            and not any(
+                value in statement_without_comments
+                for value in (*expected_payload.values(), str(peer_event.id))
+            )
         )
         bound_message_import = (
             write_call is not None
-            and _uses_bound_source_values(write_call, write_statement, expected_bound_values)
+            and _uses_bound_source_values(
+                write_call,
+                write_statement,
+                {str(peer_event.id)},
+            )
+            and _bound_json_payload_placeholder(
+                write_call,
+                write_statement,
+                expected_payload,
+            )
         )
         message_grounded_import = direct_message_import or bound_message_import
 

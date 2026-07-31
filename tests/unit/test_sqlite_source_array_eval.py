@@ -28,6 +28,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteSourceArrayFirstWriteScenario,
     SqliteStructuredPeerEventPersistenceScenario,
     SqliteUnstructuredBindingsFirstWriteScenario,
+    _bound_json_payload_placeholder,
     _derives_bound_structured_message_fields,
     _derives_structured_message_fields,
     _mutation_target_table,
@@ -312,6 +313,42 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                     "state=outcome.delivery_status",
                     "state=CASE WHEN outcome.delivery_status='bounced' THEN 'bounced' "
                     "ELSE outcome.delivery_status END",
+                ),
+                payload,
+            )
+        )
+
+    def test_bound_operational_event_payload_is_grounded_without_scalar_copying(self):
+        payload = {
+            "event_id": "evt-2048",
+            "event_type": "accepted_setup",
+            "thread_key": "thread-2048",
+            "occurred_at": "2026-07-28T15:42:00Z",
+        }
+        sql = (
+            "INSERT INTO operational_events "
+            "(event_id, event_type, thread_key, occurred_at, source_message_id) "
+            "VALUES (json_extract(:source_payload,'$.event_id'), "
+            "json_extract(:source_payload,'$.event_type'), "
+            "json_extract(:source_payload,'$.thread_key'), "
+            "json_extract(:source_payload,'$.occurred_at'), :source_message_id)"
+        )
+        call = _sqlite_call(sql)
+        call.tool_params["bindings"] = {
+            "source_payload": payload,
+            "source_message_id": "message-2048",
+        }
+
+        self.assertEqual(
+            _bound_json_payload_placeholder(call, sql, payload),
+            ":source_payload",
+        )
+        self.assertIsNone(
+            _bound_json_payload_placeholder(
+                call,
+                sql.replace(
+                    "json_extract(:source_payload,'$.occurred_at')",
+                    "'2026-07-28T15:42:00Z'",
                 ),
                 payload,
             )
