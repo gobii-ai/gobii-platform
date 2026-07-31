@@ -4405,15 +4405,16 @@ def _message_cc_addresses(
     def append_cc_value(value: Any) -> None:
         if isinstance(value, str) and value.strip():
             raw_address_values.append(value.strip())
+        elif isinstance(value, Mapping):
+            for key, address in value.items():
+                if str(key).casefold() in {"address", "email"}:
+                    append_cc_value(address)
         elif isinstance(value, (list, tuple, set)):
-            raw_address_values.extend(
-                str(address).strip()
-                for address in value
-                if str(address or "").strip()
-            )
+            for address in value:
+                append_cc_value(address)
 
     for key, value in raw_payload.items():
-        if str(key).casefold() in {"cc", "cc_addresses"}:
+        if str(key).casefold() in {"cc", "cc_addresses", "ccfull", "cc_full"}:
             append_cc_value(value)
 
     headers = raw_payload.get("headers")

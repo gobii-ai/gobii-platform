@@ -61,9 +61,15 @@ class MessageQualityScenarioTests(SimpleTestCase):
                 {
                     "Cc": "Jordan Example <jordan@example.test>",
                     "headers": {"CC": "Sam Example <sam@example.test>, pat@example.test"},
+                    "CcFull": [{"Email": "casey@example.test", "Name": "Casey Example"}],
                 },
             ),
-            ("jordan@example.test", "pat@example.test", "sam@example.test"),
+            (
+                "casey@example.test",
+                "jordan@example.test",
+                "pat@example.test",
+                "sam@example.test",
+            ),
         )
 
     def test_message_quality_suite_contains_all_generated_scenarios(self):
