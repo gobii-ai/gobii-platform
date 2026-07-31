@@ -104,6 +104,8 @@ function wrapTablesForHorizontalScroll(value: string): string {
   return document.body.innerHTML
 }
 
+const LONG_EMAIL_CHAR_THRESHOLD = 6000
+
 export function MessageContent({
   bodyHtml,
   bodyText,
@@ -111,6 +113,7 @@ export function MessageContent({
   animateIn = false,
   onLinkClick,
 }: MessageContentProps) {
+  const [emailExpanded, setEmailExpanded] = useState(false)
   // Only use HTML rendering if backend explicitly provided bodyHtml (e.g., for email channel).
   // For other channels, bodyText may contain inline HTML like <br> which the markdown renderer handles.
   const htmlSource = useMemo(() => {
@@ -155,12 +158,27 @@ export function MessageContent({
   }, [onLinkClick])
 
   if (htmlSource) {
+    // Newsletter-scale emails render thousands of pixels tall and swallow the conversation
+    // (#504). Character count decides deterministically; the reader opts into the full body.
+    const isLongEmail = htmlSource.length > LONG_EMAIL_CHAR_THRESHOLD
     return (
-      <div
-        className="not-prose chat-html-content"
-        onClick={handleContentClick}
-        dangerouslySetInnerHTML={{ __html: htmlSource }}
-      />
+      <div className="chat-email-container" data-collapsed={isLongEmail && !emailExpanded ? 'true' : undefined}>
+        <div
+          className="not-prose chat-html-content"
+          onClick={handleContentClick}
+          dangerouslySetInnerHTML={{ __html: htmlSource }}
+        />
+        {isLongEmail ? (
+          <button
+            type="button"
+            className="chat-email-collapse-toggle"
+            aria-expanded={emailExpanded}
+            onClick={() => setEmailExpanded((current) => !current)}
+          >
+            {emailExpanded ? 'Show less' : 'Show full email'}
+          </button>
+        ) : null}
+      </div>
     )
   }
 
