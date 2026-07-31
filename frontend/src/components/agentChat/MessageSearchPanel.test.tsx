@@ -46,14 +46,14 @@ const agent = (id: string, name: string): AgentRosterEntry => ({
 })
 
 describe('MessageSearchPanel agent results during roster load (bug #509)', () => {
-  it('shows a loading indicator, not silence, when a query is typed before agents load', () => {
+  it('shows a loading skeleton, not silence, when a query is typed before agents load', () => {
     renderPanel({ agents: [], agentsLoading: true, query: 'zeta' })
-    expect(screen.getByText(/loading agents/i)).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: /loading agents/i })).toBeInTheDocument()
   })
 
-  it('does not show the loading indicator once agents are loaded', () => {
+  it('does not show the loading skeleton once agents are loaded', () => {
     renderPanel({ agents: [agent('a1', 'Ada')], agentsLoading: false, query: 'zeta' })
-    expect(screen.queryByText(/loading agents/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: /loading agents/i })).not.toBeInTheDocument()
   })
 
   it('still lists matches from the partial roster while loading', () => {

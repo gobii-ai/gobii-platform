@@ -476,11 +476,22 @@ export function MessageSearchPanel({
         ) : null}
 
         {/* While the roster is in flight a typed query would otherwise render silence, which
-            reads as "no results" until agents pop in (bug #509). */}
+            reads as "no results" until agents pop in (bug #509). Skeleton rows chosen over a
+            spinner+text row in design review. */}
         {!showShortcutSuggestions && !matchingAgents.length && agentsLoading && parsedSearch.q.trim() ? (
           <div className="message-search-agent-results flex flex-col">
             <div className="message-search-panel__section-title"><span>Agents</span></div>
-            <div className="message-search-panel__empty"><Loader2 className="h-5 w-5 animate-spin" /> Loading agents…</div>
+            <div className="message-search-skeleton" role="status" aria-label="Loading agents">
+              {[0, 1, 2].map((row) => (
+                <div className="message-search-skeleton__row" key={row} aria-hidden="true">
+                  <span className="message-search-skeleton__avatar" />
+                  <span className="message-search-skeleton__lines">
+                    <span className="message-search-skeleton__bar" data-width="name" />
+                    <span className="message-search-skeleton__bar" data-width="description" />
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
 
