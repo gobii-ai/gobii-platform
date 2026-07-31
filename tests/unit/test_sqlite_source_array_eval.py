@@ -225,6 +225,32 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             )
         )
 
+    def test_double_quoted_literal_does_not_count_as_bound_source_value(self):
+        sql = (
+            'UPDATE outreach_threads SET state="bounced", provider_message_id=:provider_id, '
+            "sent_at=:sent_at WHERE recipient=:recipient"
+        )
+        call = _sqlite_call(sql)
+        call.tool_params["bindings"] = {
+            "recipient": "jordan@northstar.example.test",
+            "delivery_status": "bounced",
+            "provider_id": "provider-message-998",
+            "sent_at": "2026-07-30T14:12:09Z",
+        }
+
+        self.assertFalse(
+            _uses_bound_source_values(
+                call,
+                sql + " SELECT :delivery_status",
+                {
+                    "jordan@northstar.example.test",
+                    "bounced",
+                    "provider-message-998",
+                    "2026-07-30T14:12:09Z",
+                },
+            )
+        )
+
     def test_structured_peer_import_derives_every_field(self):
         fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
         sql = (
@@ -246,6 +272,16 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                 fields,
             )
         )
+        self.assertFalse(
+            _derives_structured_message_fields(
+                sql.replace(
+                    "state=json_extract(structured_payload_json,'$.delivery_status')",
+                    "state=CASE WHEN json_extract(structured_payload_json,'$.delivery_status')="
+                    "'bounced' THEN 'bounced' ELSE 'sent' END",
+                ),
+                fields,
+            )
+        )
 
     def test_bound_structured_peer_import_derives_every_field(self):
         payload = {
@@ -261,8 +297,7 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             "json_extract(:payload,'$.provider_message_id') AS provider_message_id, "
             "json_extract(:payload,'$.sent_at') AS sent_at) "
             "UPDATE outreach_threads SET "
-            "state=CASE WHEN outcome.delivery_status='bounced' THEN 'bounced' "
-            "ELSE outcome.delivery_status END, "
+            "state=outcome.delivery_status, "
             "provider_message_id=outcome.provider_message_id, sent_at=outcome.sent_at "
             "FROM outcome\nWHERE outreach_threads.recipient=outcome.recipient"
         )
@@ -274,9 +309,9 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             _derives_bound_structured_message_fields(
                 call,
                 sql.replace(
+                    "state=outcome.delivery_status",
                     "state=CASE WHEN outcome.delivery_status='bounced' THEN 'bounced' "
                     "ELSE outcome.delivery_status END",
-                    "state='sent'",
                 ),
                 payload,
             )

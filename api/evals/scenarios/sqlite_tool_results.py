@@ -366,6 +366,10 @@ def _uses_bound_source_values(call, statement: str, expected_values: set[str]) -
         match.group(1).replace("''", "'")
         for match in re.finditer(r"'((?:''|[^'])*)'", statement_without_comments)
     }
+    sql_literals.update(
+        match.group(1).replace('""', '"')
+        for match in re.finditer(r'"((?:""|[^"])*)"', statement_without_comments)
+    )
     return expected_values.issubset(used_bound_values) and expected_values.isdisjoint(sql_literals)
 
 
@@ -432,10 +436,18 @@ def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str)
             lowered_statement,
             flags=re.DOTALL,
         )
-        if match is None or source_field not in match.group(1):
+        if match is None or not _direct_source_assignment(match.group(1), source_field):
             return False
     where_match = re.search(r"\bwhere\b(.+)", lowered_statement, flags=re.DOTALL)
     return where_match is not None and "recipient" in where_match.group(1)
+
+
+def _direct_source_assignment(expression: str, source_field: str) -> bool:
+    expression, field = expression.strip(), re.escape(source_field)
+    if re.fullmatch(rf"(?:[a-z_][a-z0-9_]*\.)?{field}", expression):
+        return True
+    json_extract_pattern = rf"json_extract\s*\(\s*[:a-z_][a-z0-9_.:]*\s*,\s*['\"]\$.{field}['\"]\s*\)"
+    return bool(re.fullmatch(json_extract_pattern, expression))
 
 
 def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL) -> list[str]:

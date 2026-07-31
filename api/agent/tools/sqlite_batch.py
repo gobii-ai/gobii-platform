@@ -2385,11 +2385,11 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "MESSAGE RULE: state/status must use state=:source_status or json_extract, never a literal; bind/derive every "
-                "payload field from evidence. Durable world model/exact logic: keyed DDL, set-wise upsert, decision SELECT. "
-                "Structured: derive result_json/item.value over current batch + exact tool_name; no ID/URL filters; keep t.result_id/t.source_url. Prose: inspect once, join top-level rows by result_id. Peer/message "
-                "fields never use rows/__tool_results: derive every mutable/provenance field and durable key from __messages "
-                "or bound evidence; no sourced SQL literal or SQLite call ID. Use rows=[] for other structured JSON. Never use sourced SQL literals, import siblings singly, mix historical generic results, or rebuild "
+                "MESSAGE RULE: copy every payload field through a binding/json_extract. `state='...'` is invalid even when "
+                "the matching source payload is bound; use state=:source_status or "
+                "state=json_extract(:source_payload,'$.delivery_status'). Durable world model/exact logic: keyed DDL, set-wise upsert, decision SELECT. "
+                "Structured: derive result_json/item.value over current batch + exact tool_name; no ID/URL filters; keep t.result_id/t.source_url. Prose: inspect once, join top-level rows by result_id. "
+                "Peer/message: use __messages/bound evidence, never rows/__tool_results or SQLite call IDs. Use rows=[] for other structured JSON. Never use sourced SQL literals, import siblings singly, mix historical generic results, or rebuild "
                 "tables. Evolve normalized entities/relations; query counts/joins/coverage/gaps/ranks. Read back keyed writes "
                 "and evidence/URLs in the same batch. Bind messy text via :name; no backslash escapes. Semicolon-separate "
                 "statements. VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before "
