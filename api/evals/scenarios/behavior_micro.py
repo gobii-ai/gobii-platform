@@ -3968,7 +3968,15 @@ class CharterPatchesAndCompletesImmediateTaskScenario(CharterMemoryScenario):
             and old != new
             and (not old or old in self.existing_charter)
             and bool(new.strip())
-            and all("__agent_config" not in statement.casefold() for statement in statements[1:])
+            and all(
+                not re.search(
+                    r"\b(?:insert(?:\s+or\s+\w+)?\s+into|replace\s+into|update|delete\s+from)\s+"
+                    r"[\"'`]?(?:__agent_config)[\"'`]?\b",
+                    statement,
+                    re.IGNORECASE,
+                )
+                for statement in statements[1:]
+            )
         )
         rows = self._signal_rows(agent.id)
         normalized = " ".join(rows).casefold()

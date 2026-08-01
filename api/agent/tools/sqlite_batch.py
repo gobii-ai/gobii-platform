@@ -2296,6 +2296,8 @@ def _execute_sqlite_batch_inner(
             "message": msg,
         }
 
+        if had_error:
+            response["retryable"] = True
         if not had_error and not had_warning and will_continue_work is False:
             response["auto_sleep_ok"] = True
         if advisories:
@@ -2385,15 +2387,19 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "MESSAGE RULE: copy every payload field through a binding/json_extract. `state='...'` is invalid even when "
-                "the matching source payload is bound; use state=:source_status or "
-                "state=json_extract(:source_payload,'$.delivery_status'). Durable world model/exact logic: keyed DDL, set-wise upsert, decision SELECT. "
-                "Structured: derive result_json/item.value over current batch + exact tool_name; no ID/URL filters; keep t.result_id/t.source_url. Prose: inspect once, join top-level rows by result_id. "
-                "Peer/message: use __messages/bound evidence, never rows/__tool_results or SQLite call IDs. Use rows=[] for other structured JSON. Never use sourced SQL literals, import siblings singly, mix historical generic results, or rebuild "
-                "tables. Evolve normalized entities/relations; query counts/joins/coverage/gaps/ranks. Read back keyed writes "
-                "and evidence/URLs in the same batch. Bind messy text via :name; no backslash escapes. Semicolon-separate "
-                "statements. VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before "
-                "ON CONFLICT on exact unique-key columns. group_concat(DISTINCT x) has no separator. No ATTACH."
+                "MESSAGE RULE: copy every payload field through a binding/json_extract; source message ID too. "
+                "`state='...'` is invalid even when the matching source payload is bound: state=:source_status or "
+                "state=json_extract(:source_payload,'$.delivery_status'). Durable world model/exact logic: keyed DDL per "
+                "entity/relation array; set-wise upsert; decision SELECT; deliver next, no reread. Structured: "
+                "result_json/item.value over current batch + exact tool_name; no ID/URL filters; keep "
+                "t.result_id/t.source_url. json_extract scalars; json_each arrays/objects; aliases belong in FROM/JOIN. "
+                "Prose: inspect once; join top-level rows by result_id. Peer/message: use __messages/bound evidence, never "
+                "rows/__tool_results or SQLite call IDs. Use rows=[] for other structured JSON. Never use sourced SQL "
+                "literals, import siblings singly, mix historical generic results, or rebuild. Evolve normalized "
+                "entities/relations; query counts/joins/coverage/gaps/ranks. Read back keyed writes/evidence/URLs same-batch. "
+                "Bind text via :name; no backslash escapes/`->`. Semicolon-separate "
+                "statements. VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before ON CONFLICT on exact "
+                "unique-key columns. group_concat(DISTINCT x) has no separator. No ATTACH."
             ),
             "parameters": {
                 "type": "object",

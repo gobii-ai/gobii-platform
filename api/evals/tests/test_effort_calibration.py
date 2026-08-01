@@ -86,6 +86,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
+    PersistentAgentSchedule,
     PersistentAgentStep,
     PersistentAgentToolCall,
 )
@@ -2011,6 +2012,50 @@ class EffortCalibrationHarnessTests(TestCase):
             EvalRunTask.Status.PASSED,
         )
 
+    def test_future_work_preserved_accepts_named_resume_schedule(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="future_work_named_schedule_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Future Work Named Schedule Browser")
+        agent = PersistentAgent.objects.create(
+            name="Future Work Named Schedule Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+            schedule="",
+        )
+        PersistentAgentSchedule.objects.create(
+            agent=agent,
+            schedule_key="continue_batches",
+            name="Continue batches",
+            instruction="Resume from the persisted cursor.",
+            kind=PersistentAgentSchedule.Kind.RECURRING,
+            expression="*/30 * * * *",
+            timezone="UTC",
+            enabled=True,
+        )
+        run = EvalRun.objects.create(
+            scenario_slug="future_work_named_schedule_test",
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        EvalRunTask.objects.create(run=run, name="verify_future_work_preserved", sequence=1)
+
+        passed = EffortCalibrationScenario()._record_future_work_preserved(
+            str(run.id),
+            agent_id=str(agent.id),
+            after=agent.created_at,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_send_outreach_batch"},
+        )
+
+        self.assertTrue(passed)
+        self.assertEqual(
+            run.tasks.get(name="verify_future_work_preserved").status,
+            EvalRunTask.Status.PASSED,
+        )
+
     def test_future_work_preserved_accepts_persisted_sqlite_resume_state(self):
         User = get_user_model()
         user = User.objects.create_user(username="future_work_sqlite_resume_user")
@@ -2472,12 +2517,34 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn("A skipped web send never permits switching", system_prompt)
-        self.assertIn("Ask once; options for decisions, free text for details", system_prompt)
-        self.assertIn("Replace conflicts/softened absolutes", system_prompt)
+        self.assertIn(
+            "FIRST ACTION: when the owner corrects your role or ownership, patch the charter before replying; treat adjacent messages as one turn",
+            system_prompt,
+        )
+        self.assertIn(
+            "Missing email/SMS recipient/detail -> one recipient-focused request_human_input(will_continue_work=false); never chat/SQLite",
+            system_prompt,
+        )
+        self.assertIn("bounded current report -> no SQLite", system_prompt)
+        self.assertIn("Replace one span covering every affected related clause", system_prompt)
         self.assertIn("append only if no related clause", system_prompt)
-        self.assertIn("Correction plus immediate task or recurrence means fulfill both", system_prompt)
-        self.assertIn("upsert each named schedule", system_prompt)
-        self.assertIn("finite task/batch/day/run/project/renewal/deal/case feedback is temporary", system_prompt)
+        self.assertIn("Correction plus task/recurrence: patch and complete both", system_prompt)
+        self.assertIn("batching config/task/schedules", system_prompt)
+        self.assertIn("Non-config work needs a result", system_prompt)
+        self.assertIn(
+            "Task/batch/day/run/project/case scope is finite",
+            system_prompt,
+        )
+        self.assertIn(
+            "Other critique, preference, or recurring factual refinement",
+            system_prompt,
+        )
+        self.assertIn(
+            "Recurring output flaws/rule refinements default durable",
+            system_prompt,
+        )
+        self.assertIn("requires sqlite_batch charter patch before reply", system_prompt)
+        self.assertIn("no-op only if identical", system_prompt)
         self.assertIn("Set false after delivery/config; future schedules, queued conversations", system_prompt)
         self.assertIn(
             "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
@@ -2493,13 +2560,24 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
         self.assertIn("Named tables hold truth/logic", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
+        self.assertIn(
+            "current price/quote -> search_tools('HTTP API request') if http_request absent",
+            system_prompt,
+        )
         self.assertIn("reconcile+SELECT there before use", system_prompt)
         self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
+        self.assertIn(
+            "collect missing API key/password/secret -> secure_credentials_request directly",
+            system_prompt,
+        )
+        self.assertIn("never read secret files to verify", system_prompt)
         self.assertIn("exact docs/blog/changelog/release-notes URL", system_prompt)
         self.assertIn("opaque identifiers", system_prompt)
         self.assertIn("supplied endpoints/paths/IDs/placeholders character-for-character", system_prompt)
         self.assertIn("same URLs/items returned twice -> no new evidence", system_prompt)
         self.assertIn("Held/skipped/rejected means not run", system_prompt)
+        self.assertIn("internal SQLite/plans prove no external action", system_prompt)
+        self.assertIn("Claim external action only after its tool succeeds", system_prompt)
         self.assertIn("Charts: create only when requested/materially useful", system_prompt)
         self.assertIn(
             "Finished answers/briefings/charts/lookups/one-off research are not config changes",
@@ -2520,7 +2598,7 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn(
-            "send one brief same-channel acknowledgment as the entire first response",
+            "Before update_plan, research, or SQLite, its first tool call must be one brief same-channel acknowledgment",
             system_prompt,
         )
         self.assertIn("upsert both in a normal domain-progress table", system_prompt)

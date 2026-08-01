@@ -225,6 +225,12 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         self.assertIn("Semicolon-separate statements", tool["description"])
         self.assertIn("exact unique-key columns", tool["description"])
+        self.assertIn("json_extract scalars", tool["description"])
+        self.assertIn("json_each arrays/objects", tool["description"])
+        self.assertIn("aliases belong in FROM/JOIN", tool["description"])
+        self.assertIn("no ID/URL filters", tool["description"])
+        self.assertIn("source message ID", tool["description"])
+        self.assertIn("deliver next, no reread", tool["description"])
         self.assertEqual(tool["parameters"]["properties"]["rows"]["type"], "array")
         self.assertEqual(tool["parameters"]["properties"]["bindings"]["type"], "object")
 
@@ -480,6 +486,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
                 )
 
             self.assertEqual(out.get("status"), "error")
+            self.assertIs(out.get("retryable"), True)
             self.assertIn("no such column: missing_column", out.get("message", ""))
             self.assertNotIn(
                 "SQLite does not support PostgreSQL",

@@ -161,6 +161,7 @@ def _record_plan_tool() -> dict[str, Any]:
                         "items": {"type": "string", "enum": allowed_tool_names},
                         "description": (
                             "Complete post-approval lifecycle, using each direct tool name once in first-use order. "
+                            "Use an enum name exactly; peer messaging is send_agent_message, never a meta_gobii-prefixed name. "
                             "Include create/link/message tools when the user asked to create, deploy, link, or brief. "
                             "Any newly created Gobii that will do work needs an approved link from the manager "
                             "Gobii followed by send_agent_message for its initial briefing."

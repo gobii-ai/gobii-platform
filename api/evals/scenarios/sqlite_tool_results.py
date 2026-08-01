@@ -464,17 +464,6 @@ def _insert_values_derive_bound_payload_fields(
     target_name = str(getattr(target, "get_name", lambda: "")() or "").casefold()
     if target_name != table_name.casefold():
         return False
-    values = next(
-        (
-            token
-            for token in tokens
-            if isinstance(token, sqlparse.sql.Values)
-        ),
-        None,
-    )
-    if values is None:
-        return False
-
     if isinstance(target, sqlparse.sql.Function):
         target_parenthesis = next(
             (
@@ -491,11 +480,7 @@ def _insert_values_derive_bound_payload_fields(
             and isinstance(tokens[into_index + 2], sqlparse.sql.Parenthesis)
             else None
         )
-    values_parenthesis = next(
-        (token for token in values.tokens if isinstance(token, sqlparse.sql.Parenthesis)),
-        None,
-    )
-    if target_parenthesis is None or values_parenthesis is None:
+    if target_parenthesis is None:
         return False
 
     def _items(parenthesis):
@@ -514,7 +499,31 @@ def _insert_values_derive_bound_payload_fields(
         )
 
     columns = [item.strip('"`[] ').casefold() for item in _items(target_parenthesis)]
-    expressions = _items(values_parenthesis)
+    values = next(
+        (token for token in tokens if isinstance(token, sqlparse.sql.Values)),
+        None,
+    )
+    if values is not None:
+        values_parenthesis = next(
+            (token for token in values.tokens if isinstance(token, sqlparse.sql.Parenthesis)),
+            None,
+        )
+        expressions = _items(values_parenthesis) if values_parenthesis is not None else []
+    else:
+        select_index = next(
+            (
+                index
+                for index, token in enumerate(tokens)
+                if str(getattr(token, "normalized", "")).casefold() == "select"
+            ),
+            -1,
+        )
+        select_values = tokens[select_index + 1] if 0 <= select_index < len(tokens) - 1 else None
+        expressions = (
+            [str(item).strip() for item in select_values.get_identifiers()]
+            if isinstance(select_values, sqlparse.sql.IdentifierList)
+            else []
+        )
     if len(columns) != len(expressions):
         return False
     assignments = dict(zip(columns, expressions))

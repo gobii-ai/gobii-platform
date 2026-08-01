@@ -23,6 +23,7 @@ from api.evals.scenarios.meta_gobii import (
     MetaGobiiImplicitResearchTeamRealHarnessScenario,
     MetaGobiiSpecialistAgentLaunchRealHarnessScenario,
     MetaGobiiSystemSkillScenario,
+    _record_plan_tool,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -106,6 +107,14 @@ def _implicit_research_team_response_args():
 
 @tag("eval_sim")
 class MetaGobiiEvalJudgeTests(SimpleTestCase):
+    def test_plan_schema_names_peer_message_tool_exactly(self):
+        tool = _record_plan_tool()
+        ordered_tools = tool["function"]["parameters"]["properties"]["ordered_tools"]
+
+        self.assertIn("send_agent_message", ordered_tools["items"]["enum"])
+        self.assertNotIn("meta_gobii_send_agent_message", ordered_tools["items"]["enum"])
+        self.assertIn("never a meta_gobii-prefixed name", ordered_tools["description"])
+
     def test_extra_scope_filter_allows_explicit_resource_limit_request(self):
         prompt = (
             "Archive every inactive Gobii you can find and raise the daily credit limit on all remaining Gobiis "

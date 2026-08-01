@@ -584,13 +584,21 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
     ) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         agent = PersistentAgent.objects.get(id=agent_id)
-        if (agent.schedule or "").strip():
+        active_schedule = (agent.schedule or "").strip()
+        if not active_schedule:
+            named_schedule = agent.additional_schedules.filter(enabled=True).order_by("schedule_key").first()
+            if named_schedule:
+                active_schedule = (
+                    named_schedule.expression
+                    or (named_schedule.run_at.isoformat() if named_schedule.run_at else named_schedule.schedule_key)
+                )
+        if active_schedule:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name=task_name,
-                observed_summary=f"Unfinished durable work has resume schedule: {agent.schedule}.",
+                observed_summary=f"Unfinished durable work has resume schedule: {active_schedule}.",
                 artifacts={"agent": agent},
             )
             return True
@@ -658,7 +666,10 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
     ) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         agent = PersistentAgent.objects.get(id=agent_id)
-        if (agent.schedule or "").strip():
+        has_active_schedule = bool((agent.schedule or "").strip()) or agent.additional_schedules.filter(
+            enabled=True
+        ).exists()
+        if has_active_schedule:
             self.record_task_result(
                 run_id,
                 None,
@@ -1631,7 +1642,11 @@ class EffortDefaultableResearchNoQuestionBatteryScenario(EffortCalibrationScenar
             after=inbound.timestamp,
             ignored_tool_names=MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES,
         )
-        allowed = {"search_tools", "mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"}
+        allowed = {
+            "search_tools",
+            "mcp_brightdata_search_engine",
+            "mcp_brightdata_scrape_as_markdown",
+        }
         unexpected = [call.tool_name for call in relevant if call.tool_name not in allowed]
         if len(relevant) <= 3 and not unexpected:
             self.record_task_result(

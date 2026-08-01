@@ -56,6 +56,7 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("the raw URL is evidence", system_message["content"])
         self.assertIn("adjacent token is a stable link handle", system_message["content"])
         self.assertIn("Items without a token stay plain", system_message["content"])
+        self.assertIn("combine, guess, or invent it", system_message["content"])
         self.assertIn("source/feed tokens link only themselves", system_message["content"])
         self.assertIn("A report is unfinished while a token-backed entity name is plain", system_message["content"])
         self.assertIn("resolve/source each requested field", system_message["content"])

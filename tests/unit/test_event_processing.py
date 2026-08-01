@@ -181,6 +181,7 @@ class ToolDisplayMetadataTests(TestCase):
         )
 
         self.assertIn("brief natural acknowledgment", updated_charter.result["reply_guidance"])
+        self.assertIn("Non-config reads or writes", updated_charter.result["reply_guidance"])
         self.assertIn("do not read or verify config again", updated_charter.result["reply_guidance"])
         self.assertNotIn("reply_guidance", updated_charter.result["agent_config_update"])
 

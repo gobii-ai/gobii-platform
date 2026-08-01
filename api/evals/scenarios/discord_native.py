@@ -84,6 +84,19 @@ def contains_markdown_pipe_table(text: str) -> bool:
     return False
 
 
+def _agent_addressed_reply_context(agent, *, channel_id: str, guild_id: str) -> dict:
+    return {
+        "message_id": "eval-discord-message-499",
+        "channel_id": channel_id,
+        "guild_id": guild_id,
+        "author_id": f"eval-agent-{agent.id}",
+        "author_name": agent.name,
+        "content": "Can you review this update and respond when it is ready?",
+        "attachment_filenames": [],
+        "unavailable": False,
+    }
+
+
 @dataclass(frozen=True)
 class DiscordReactionCase:
     slug: str
@@ -223,16 +236,11 @@ class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
                 "discord_channel_id": channel_id,
                 "discord_channel_name": "team-updates",
                 "discord_author_name": "Maya",
-                "discord_reply_to": {
-                    "message_id": "eval-discord-message-499",
-                    "channel_id": channel_id,
-                    "guild_id": guild_id,
-                    "author_id": "maya-1",
-                    "author_name": "Maya",
-                    "content": "Please acknowledge this update once reviewed.",
-                    "attachment_filenames": [],
-                    "unavailable": False,
-                },
+                "discord_reply_to": _agent_addressed_reply_context(
+                    agent,
+                    channel_id=channel_id,
+                    guild_id=guild_id,
+                ),
             },
         )
         self.record_task_result(

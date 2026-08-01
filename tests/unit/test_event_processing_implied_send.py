@@ -473,8 +473,12 @@ class ImpliedSendTests(TestCase):
         params = json.loads(compiled["function"]["arguments"])
 
         self.assertEqual(len(sqlparse.split(params["sql"])), 1)
-        self.assertIn("Owner''s rule", params["sql"])
-        self.assertIn("Owner''s clearer rule", params["sql"])
+        self.assertEqual(
+            params["sql"],
+            "UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1",
+        )
+        self.assertEqual(params["bindings"], {"old": old, "new": new})
+        self.assertEqual(params["rows"], [])
         self.assertIs(params["will_continue_work"], True)
 
         call["function"]["arguments"] = json.dumps({
@@ -483,9 +487,9 @@ class ImpliedSendTests(TestCase):
             "replacement_charter_text": "Research prospects. Include verified source links.",
         })
         compiled = ep._compile_charter_patch_tool_call(call, "Research prospects.")
-        self.assertIn(
-            "patch_text(charter, '', 'Include verified source links.')",
-            json.loads(compiled["function"]["arguments"])["sql"],
+        self.assertEqual(
+            json.loads(compiled["function"]["arguments"])["bindings"],
+            {"old": "", "new": "Include verified source links."},
         )
 
         call["function"]["arguments"] = json.dumps({
@@ -494,9 +498,9 @@ class ImpliedSendTests(TestCase):
             "replacement_charter_text": "Research prospects. Include verified source links.",
         })
         compiled = ep._compile_charter_patch_tool_call(call, "Research prospects.")
-        self.assertIn(
-            "patch_text(charter, '', 'Include verified source links.')",
-            json.loads(compiled["function"]["arguments"])["sql"],
+        self.assertEqual(
+            json.loads(compiled["function"]["arguments"])["bindings"],
+            {"old": "", "new": "Include verified source links."},
         )
 
     def test_structured_charter_patch_rejects_invalid_values(self):
@@ -3504,7 +3508,9 @@ class ImpliedSendTests(TestCase):
         self.assertIn('CURRENT CHARTER (<charter>), the only source for a nonempty target: "Test charter"', sqlite_tool["description"])
         self.assertIn("operative lasting behavior", sqlite_tool["description"])
         self.assertIn("Never store instructions about updating", sqlite_tool["description"])
-        self.assertIn("smallest exact contiguous span", sqlite_tool["description"])
+        self.assertIn("one exact contiguous span", sqlite_tool["description"])
+        self.assertIn("every related clause the feedback changes", sqlite_tool["description"])
+        self.assertIn("target must occur exactly once", sqlite_tool["description"])
         self.assertIn("not copied feedback or prior output", sqlite_tool["description"])
         self.assertEqual(
             set(sqlite_tool["parameters"]["properties"]),

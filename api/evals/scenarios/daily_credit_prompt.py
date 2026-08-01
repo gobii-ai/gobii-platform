@@ -383,7 +383,7 @@ class DailyCreditPromptHardLimitHitScenario(DailyCreditPromptScenario):
         )
         return (
             "DAILY HARD LIMIT MODE",
-            "Only message and sleep tools are available right now",
+            "currently limited to message tools until the user raises the limit or it resets",
             settings_url,
             f"double {double_limit_url_prefix}?token=",
             f"unlimited {unlimited_limit_url_prefix}?token=",

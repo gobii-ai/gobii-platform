@@ -33,6 +33,7 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
+    CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
     CHARTER_RECOVERS_FROM_NONRETRYABLE_PATCH_FAILURE,
     CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE,
@@ -86,6 +87,7 @@ from api.evals.scenarios.github_credential_retention import (
 )
 from api.evals.scenarios.monitor_pollution import (
     MonitorPollutionScenario,
+    _agent_has_reasonable_pollution_schedule,
     _charter_mentions_pollution_monitoring,
     _schedule_is_reasonable_pollution_monitoring,
 )
@@ -113,6 +115,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentSchedule,
     PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentSystemStep,
@@ -975,8 +978,15 @@ class BehaviorMicroHelperTests(TestCase):
         scenario = ScenarioRegistry.get(CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION)
         agent = SimpleNamespace(charter=GITHUB_DOCS_CORRECTED_CHARTER)
         patch_call = SimpleNamespace(tool_params={"operations": [{"op": "patch_text"}]})
+        conditional_agent = SimpleNamespace(
+            charter=(
+                f"{GITHUB_DOCS_CORRECTED_CHARTER} "
+                "Use the configured secrets; if they are missing, report the gap."
+            )
+        )
 
         passed, detail = scenario._charter_check(agent, [patch_call])
+        conditional_passed, conditional_detail = scenario._charter_check(conditional_agent, [patch_call])
         no_patch_passed, no_patch_detail = scenario._charter_check(agent, [])
         harmful_agent = SimpleNamespace(
             charter=(
@@ -987,6 +997,7 @@ class BehaviorMicroHelperTests(TestCase):
         harmful_passed, harmful_detail = scenario._charter_check(harmful_agent, [patch_call])
 
         self.assertTrue(passed, detail)
+        self.assertTrue(conditional_passed, conditional_detail)
         self.assertFalse(no_patch_passed, no_patch_detail)
         self.assertFalse(harmful_passed, harmful_detail)
 
@@ -1122,6 +1133,43 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(scenario._charter_check(agent, [full_append])[0])
         self.assertFalse(scenario._charter_check(agent, [good_call, good_call])[0])
         self.assertFalse(scenario._charter_check(opposite_agent, [opposite_call])[0])
+
+    def test_immediate_task_charter_check_allows_readback_but_rejects_second_config_write(self):
+        scenario = ScenarioRegistry.get(CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK)
+        old = "Analyze each observation and post a detailed framework with product implications."
+        new = "Record each observation as a signal in the ledger unless analysis is requested."
+        agent = SimpleNamespace(
+            id=self.agent.id,
+            charter=scenario.existing_charter.replace(old, new),
+        )
+
+        def call(trailing_sql):
+            return SimpleNamespace(
+                tool_params={
+                    "sql": (
+                        "UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1;"
+                        "INSERT INTO signal_log(signal) VALUES ('buyers say onboarding takes too long'),"
+                        "('teams want weekly summaries');"
+                        f"{trailing_sql}"
+                    ),
+                    "bindings": {"old": old, "new": new},
+                }
+            )
+
+        with patch.object(
+            scenario,
+            "_signal_rows",
+            return_value=["buyers say onboarding takes too long", "teams want weekly summaries"],
+        ):
+            self.assertTrue(
+                scenario._charter_check(agent, [call("SELECT charter FROM __agent_config;")])[0]
+            )
+            self.assertFalse(
+                scenario._charter_check(
+                    agent,
+                    [call("UPDATE __agent_config SET charter='unsafe';")],
+                )[0]
+            )
 
     def test_domain_refresh_checker_requires_relationship_decision_rows(self):
         imports = (
@@ -1343,6 +1391,26 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(
             scenario._has_completed_expected_work(str(self.agent.id), after=inbound.timestamp)
         )
+
+    def test_monitor_pollution_accepts_named_recurring_schedule(self):
+        self.agent.charter = "Monitor pollution index for Washington DC."
+        self.agent.schedule = None
+        self.agent.save(update_fields=["charter", "schedule"])
+        PersistentAgentSchedule.objects.create(
+            agent=self.agent,
+            schedule_key="dc_pollution_monitor",
+            name="Washington DC pollution monitor",
+            instruction="Check the Washington DC pollution index.",
+            kind=PersistentAgentSchedule.Kind.RECURRING,
+            expression="0 12 * * *",
+            timezone="America/New_York",
+            enabled=True,
+        )
+
+        accepted, reason = _agent_has_reasonable_pollution_schedule(self.agent)
+
+        self.assertTrue(accepted, reason)
+        self.assertIn("dc_pollution_monitor", reason)
 
     def test_custom_tool_common_use_case_exposes_enabled_sandbox_builtin(self):
         scenario = ScenarioRegistry.get("common_use_case_122_custom_tool_bulk_api_sqlite")

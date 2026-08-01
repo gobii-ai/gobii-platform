@@ -6,7 +6,12 @@ from api.agent.core.schedule_parser import ScheduleParser
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
-from api.models import EvalRunTask, PersistentAgentMessage, PersistentAgentToolCall
+from api.models import (
+    EvalRunTask,
+    PersistentAgentMessage,
+    PersistentAgentSchedule,
+    PersistentAgentToolCall,
+)
 from api.evals.sim_config import get_sim_weather_url
 from api.agent.events import AgentEventType
 from api.services.schedule_enforcement import cron_interval_seconds
@@ -75,6 +80,28 @@ def _schedule_is_reasonable_pollution_monitoring(schedule: str | None) -> tuple[
 
     return True, f"{parse_reason} Interval is {interval_seconds / 3600:.1f} hours."
 
+
+def _agent_has_reasonable_pollution_schedule(agent) -> tuple[bool, str]:
+    primary_accepted, primary_reason = _schedule_is_reasonable_pollution_monitoring(agent.schedule)
+    if primary_accepted:
+        return True, f"Primary schedule: {primary_reason}"
+
+    recurring = agent.additional_schedules.filter(
+        enabled=True,
+        kind=PersistentAgentSchedule.Kind.RECURRING,
+    ).order_by("schedule_key")
+    rejection_reasons = []
+    for schedule in recurring:
+        accepted, reason = _schedule_is_reasonable_pollution_monitoring(schedule.expression)
+        if accepted:
+            return True, f"Named schedule {schedule.schedule_key}: {reason}"
+        rejection_reasons.append(f"{schedule.schedule_key}: {reason}")
+
+    if rejection_reasons:
+        return False, "; ".join(rejection_reasons)
+    return False, primary_reason
+
+
 @register_scenario
 class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
     slug = "monitor_pollution"
@@ -98,7 +125,7 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         """Treat missed/late drain events as complete when persisted eval evidence is present."""
         agent = self.get_agent(agent_id)
         charter_accepted, _ = _charter_mentions_pollution_monitoring(agent.charter)
-        schedule_accepted, _ = _schedule_is_reasonable_pollution_monitoring(agent.schedule)
+        schedule_accepted, _ = _agent_has_reasonable_pollution_schedule(agent)
         if not (charter_accepted and schedule_accepted):
             return False
 
@@ -225,19 +252,19 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         # 3. Verify Schedule Setting
         self.record_task_result(run_id, 3, EvalRunTask.Status.RUNNING)
 
-        schedule_accepted, schedule_reason = _schedule_is_reasonable_pollution_monitoring(agent.schedule)
+        schedule_accepted, schedule_reason = _agent_has_reasonable_pollution_schedule(agent)
 
         if schedule_accepted:
             self.record_task_result(
                 run_id, 3, EvalRunTask.Status.PASSED,
                 observed_summary=f"Schedule accepted: {schedule_reason}",
-                artifacts={"schedule": agent.schedule}
+                artifacts={"agent": agent}
             )
         else:
             self.record_task_result(
                 run_id, 3, EvalRunTask.Status.FAILED,
                 observed_summary=f"Schedule rejected: {schedule_reason}",
-                artifacts={"schedule": agent.schedule}
+                artifacts={"agent": agent}
             )
 
         # 4. Verify Web Browsing

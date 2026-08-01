@@ -430,6 +430,25 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                 expected_fields=set(payload),
             )
         )
+        select_sql = sql.replace(
+            "VALUES (json_extract(:source_payload,'$.event_id'), "
+            "json_extract(:source_payload,'$.event_type'), "
+            "json_extract(:source_payload,'$.thread_key'), "
+            "json_extract(:source_payload,'$.occurred_at'), :source_message_id)",
+            "SELECT json_extract(:source_payload,'$.event_id'), "
+            "json_extract(:source_payload,'$.event_type'), "
+            "json_extract(:source_payload,'$.thread_key'), "
+            "json_extract(:source_payload,'$.occurred_at'), :source_message_id "
+            "WHERE 1=1",
+        )
+        self.assertTrue(
+            _insert_values_derive_bound_payload_fields(
+                select_sql,
+                table_name="operational_events",
+                placeholder=":source_payload",
+                expected_fields=set(payload),
+            )
+        )
         self.assertFalse(
             _insert_values_derive_bound_payload_fields(
                 sql.replace(
