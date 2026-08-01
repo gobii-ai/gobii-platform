@@ -610,6 +610,58 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIn("top-level `rows=[", combined_meta)
         self.assertIn("no sourced SQL literals", combined_meta)
 
+    def test_http_mutation_outcomes_do_not_expand_the_source_work_set(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id="campaign-get",
+                tool_name="http_request",
+                created_at=datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "ok",
+                    "content": {
+                        "campaign": {"id": "cmp-1", "status": "draft"},
+                        "recipients": [{"id": "lead-1", "qualified": False}],
+                    },
+                }),
+                source_batch_id="campaign-batch",
+                source_bearing=True,
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="campaign-patch-rejected",
+                tool_name="http_request",
+                created_at=datetime(2026, 7, 26, 12, 1, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "ok",
+                    "content": {"saved": False, "retryable": False, "error_code": "invalid_timezone"},
+                }),
+                source_batch_id="campaign-batch",
+                source_bearing=False,
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="campaign-patch-saved",
+                tool_name="http_request",
+                created_at=datetime(2026, 7, 26, 12, 2, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "ok",
+                    "content": {"saved": True, "changed_fields": ["sequence"]},
+                }),
+                source_batch_id="campaign-batch",
+                source_bearing=False,
+            ),
+        ]
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(records)},
+            fresh_tool_call_step_ids={record.step_id for record in records},
+        )
+
+        combined_meta = "\n".join(item.meta for item in info.values())
+        self.assertNotIn("PROSE SOURCE WORK SET", combined_meta)
+        self.assertNotIn("multi-source prose model write", combined_meta)
+        self.assertFalse(info["campaign-patch-rejected"].source_reconciliation_directive)
+        self.assertFalse(info["campaign-patch-saved"].source_reconciliation_directive)
+
     def test_scrape_as_markdown_meta_does_not_misclassify_comma_heavy_page_as_csv(self):
         markdown = "# Operations report\n\n" + "\n".join(
             f"Section {index}: implementation, onboarding, controls, and support context."

@@ -102,6 +102,27 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertEqual((first, second), ("request-one", "request-one"))
         self.assertEqual(non_source, "completion-one")
 
+    def test_http_mutations_are_not_source_bearing_results(self):
+        self.assertTrue(
+            prompt_context._tool_result_is_source_bearing(
+                "http_request",
+                {"method": "GET"},
+            )
+        )
+        self.assertTrue(
+            prompt_context._tool_result_is_source_bearing(
+                "http_request",
+                {"method": "POST"},
+            )
+        )
+        for method in ("PATCH", "PUT", "DELETE"):
+            self.assertFalse(
+                prompt_context._tool_result_is_source_bearing(
+                    "http_request",
+                    {"method": method},
+                )
+            )
+
     def test_source_url_metadata_uses_one_exact_source_request_url(self):
         self.assertEqual(
             prompt_context._source_url_from_tool_params(

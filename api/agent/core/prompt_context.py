@@ -713,15 +713,25 @@ def _source_batch_id_for_tool_result(
     completion_id: object,
     active_batch_id: Optional[str],
     active_started_at: Optional[datetime],
+    source_bearing: bool = True,
 ) -> Optional[str]:
     if (
         active_batch_id
         and active_started_at
         and created_at >= active_started_at
+        and source_bearing
         and is_source_bearing_tool(tool_name)
     ):
         return active_batch_id
     return str(completion_id) if completion_id else None
+
+
+def _tool_result_is_source_bearing(tool_name: str, tool_params: object) -> bool:
+    if not is_source_bearing_tool(tool_name):
+        return False
+    if tool_name != "http_request" or not isinstance(tool_params, dict):
+        return True
+    return str(tool_params.get("method") or "GET").upper() not in {"PATCH", "PUT", "DELETE"}
 
 
 def _build_browser_task_tool_result_record(
@@ -5001,30 +5011,35 @@ def _get_unified_history_prompt(
                 sql_values = _sql_values_from_params(row.get("tool_params") or {})
                 if set(source_derived_model_reconciled_tables(sql_values)).intersection(named_model_tables or ()):
                     source_reconciliations.append((step.created_at, "\n".join(sql_values)))
+            tool_name = row.get("tool_name") or ""
+            tool_params = row.get("tool_params")
+            source_bearing = _tool_result_is_source_bearing(tool_name, tool_params)
             tool_call_records.append(
                 ToolCallResultRecord(
                     step_id=step_id,
-                    tool_name=row.get("tool_name") or "",
+                    tool_name=tool_name,
                     created_at=step.created_at,
                     result_text=result_text,
                     source_batch_id=_source_batch_id_for_tool_result(
-                        tool_name=row.get("tool_name") or "",
+                        tool_name=tool_name,
                         created_at=step.created_at,
                         completion_id=completion_id,
                         active_batch_id=active_source_batch_id,
                         active_started_at=active_source_started_at,
+                        source_bearing=source_bearing,
                     ),
                     source_url=_source_url_from_tool_params(
                         agent,
-                        row.get("tool_name") or "",
-                        row.get("tool_params"),
+                        tool_name,
+                        tool_params,
                     ),
                     will_continue_work=(
-                        row["tool_params"].get("will_continue_work")
-                        if isinstance(row.get("tool_params"), dict)
-                        and isinstance(row["tool_params"].get("will_continue_work"), bool)
+                        tool_params.get("will_continue_work")
+                        if isinstance(tool_params, dict)
+                        and isinstance(tool_params.get("will_continue_work"), bool)
                         else None
                     ),
+                    source_bearing=source_bearing,
                 )
             )
         missing_parent_ids = set(tool_call_parent_ids.values()) - {record.step_id for record in tool_call_records}
@@ -5048,30 +5063,35 @@ def _get_unified_history_prompt(
                 step_id = str(row["step_id"])
                 completion_id = row.get("step__completion_id")
                 tool_call_completion_ids[step_id] = str(completion_id) if completion_id else None
+                tool_name = row.get("tool_name") or ""
+                tool_params = row.get("tool_params")
+                source_bearing = _tool_result_is_source_bearing(tool_name, tool_params)
                 tool_call_records.append(
                     ToolCallResultRecord(
                         step_id=step_id,
-                        tool_name=row.get("tool_name") or "",
+                        tool_name=tool_name,
                         created_at=row["step__created_at"],
                         result_text=result_text,
                         source_batch_id=_source_batch_id_for_tool_result(
-                            tool_name=row.get("tool_name") or "",
+                            tool_name=tool_name,
                             created_at=row["step__created_at"],
                             completion_id=completion_id,
                             active_batch_id=active_source_batch_id,
                             active_started_at=active_source_started_at,
+                            source_bearing=source_bearing,
                         ),
                         source_url=_source_url_from_tool_params(
                             agent,
-                            row.get("tool_name") or "",
-                            row.get("tool_params"),
+                            tool_name,
+                            tool_params,
                         ),
                         will_continue_work=(
-                            row["tool_params"].get("will_continue_work")
-                            if isinstance(row.get("tool_params"), dict)
-                            and isinstance(row["tool_params"].get("will_continue_work"), bool)
+                            tool_params.get("will_continue_work")
+                            if isinstance(tool_params, dict)
+                            and isinstance(tool_params.get("will_continue_work"), bool)
                             else None
                         ),
+                        source_bearing=source_bearing,
                     )
                 )
         if tool_call_records:

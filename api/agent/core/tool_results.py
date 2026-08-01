@@ -116,6 +116,7 @@ class ToolCallResultRecord:
     source_batch_id: Optional[str] = None
     source_url: Optional[str] = None
     will_continue_work: Optional[bool] = None
+    source_bearing: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,10 @@ class ToolResultPromptInfo:
     is_inline: bool
     source_reconciliation_directive: Optional[str]
     suppress_from_prompt: bool = False
+
+
+def _record_is_source_bearing(record: ToolCallResultRecord) -> bool:
+    return is_source_bearing_tool(record.tool_name) and record.source_bearing is not False
 
 
 def entity_name_stem(value: str) -> str:
@@ -389,7 +394,7 @@ def prepare_tool_results_for_prompt(
     source_records = [
         record
         for record in records
-        if is_source_bearing_tool(record.tool_name)
+        if _record_is_source_bearing(record)
     ]
     current_source_record = (
         max(source_records, key=lambda record: record.created_at)
@@ -408,7 +413,7 @@ def prepare_tool_results_for_prompt(
     for record in sorted(records, key=lambda item: item.created_at):
         if (
             not record.result_text
-            or not is_source_bearing_tool(record.tool_name)
+            or not _record_is_source_bearing(record)
             or (
                 record.source_batch_id is not None
                 and record.tool_name == current_source_tool_name
@@ -479,7 +484,7 @@ def prepare_tool_results_for_prompt(
         if (
             stored_in_db
             and is_current_source_batch
-            and is_source_bearing_tool(record.tool_name)
+            and _record_is_source_bearing(record)
             and not _entity_arrays(analysis)
             and 1 < len(work_set) <= MAX_ACTIVE_PROSE_PREVIEWS
             and (
@@ -499,14 +504,14 @@ def prepare_tool_results_for_prompt(
             current_source_batch_id is not None
             and not is_current_source_batch
             and record.tool_name == current_source_tool_name
-            and is_source_bearing_tool(record.tool_name)
+            and _record_is_source_bearing(record)
         )
         if is_historical_same_tool_source:
             context_hint = None
             preview_text = None
             is_inline = False
         keep_source_import_hint = (
-            is_source_bearing_tool(record.tool_name)
+            _record_is_source_bearing(record)
             and is_fresh_tool_call
             and is_current_source_batch
         )
@@ -635,6 +640,7 @@ def prepare_tool_results_for_prompt(
         is_prose_work_set = (
             stored_in_db
             and is_current_source_batch
+            and _record_is_source_bearing(record)
             and not _entity_arrays(analysis)
             and (is_scrape_markdown or len(work_set) > 1)
         )
