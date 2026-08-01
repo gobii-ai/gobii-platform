@@ -3420,20 +3420,6 @@ def _tool_result_is_success(result: Any) -> bool:
     return True
 
 
-def _search_result_activated_capability(result: Any) -> bool:
-    if not isinstance(result, dict) or not _tool_result_is_success(result):
-        return False
-    system_skills = result.get("system_skills")
-    tools = result.get("tools")
-    return bool(
-        (
-            isinstance(system_skills, dict)
-            and (system_skills.get("enabled") or system_skills.get("already_enabled"))
-        )
-        or (isinstance(tools, dict) and tools.get("enabled"))
-    )
-
-
 def _capture_tool_display_metadata(
     prepared: _PreparedToolExecution,
     result: Any,
@@ -7012,7 +6998,6 @@ def _run_agent_loop(
             snapshot_reuse_enabled=settings.AGENT_PROMPT_RUN_CACHE_ENABLED,
         )
         prompt_run_cache_token = bind_prompt_run_cache(prompt_run_cache)
-        successful_tool_discovery = False
         for i in range(max_remaining):
             try:
                 agent.refresh_from_db(fields=["updated_at"])
@@ -7115,12 +7100,6 @@ def _run_agent_loop(
                     credit_snapshot["available"] = task_credit_available
 
                 iteration_tools = tools
-                if successful_tool_discovery:
-                    iteration_tools = [
-                        tool
-                        for tool in iteration_tools
-                        if tool.get("function", {}).get("name") != "search_tools"
-                    ]
                 if is_credit_message_only_mode(daily_state, task_credit_available):
                     iteration_tools = filter_tools_for_credit_message_only_mode(iteration_tools)
                 iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
@@ -8030,11 +8009,6 @@ def _run_agent_loop(
                     stale_prompt_checker=_is_orchestrator_prompt_stale,
                 )
                 tools = executed_batch.tools
-                successful_tool_discovery = successful_tool_discovery or any(
-                    outcome.prepared.tool_name == "search_tools"
-                    and _search_result_activated_capability(outcome.result)
-                    for outcome in executed_batch.execution_outcomes
-                )
                 if not executed_batch.abort_after_execution or _get_processing_abort_reason(agent.id) is None:
                     runtime_errors, config_apply = _apply_runtime_updates()
                     _annotate_agent_config_update_result(

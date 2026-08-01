@@ -2446,19 +2446,6 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(has_recipient_request([focused, unrelated]))
         self.assertFalse(has_recipient_request([unrelated]))
 
-    def test_search_discovery_guard_requires_an_activated_capability(self):
-        unrelated_existing_tools = {
-            "status": "success",
-            "tools": {"enabled": [], "already_enabled": ["mcp_brightdata_search_engine"]},
-        }
-        enabled_skill = {
-            "status": "success",
-            "system_skills": {"enabled": ["webhooks"], "already_enabled": []},
-        }
-
-        self.assertFalse(ep._search_result_activated_capability(unrelated_existing_tools))
-        self.assertTrue(ep._search_result_activated_capability(enabled_skill))
-
     def test_planning_request_check_allows_one_free_text_identity_question(self):
         options = SimpleNamespace(
             options_json=[{"title": "Weekly", "description": "Send one weekly digest."}]
