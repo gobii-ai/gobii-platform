@@ -9,6 +9,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentEmailFooter,
 )
+from config.redis_client import _FakeRedis
 from constants.plans import PlanNamesChoices
 
 User = get_user_model()
@@ -113,28 +114,8 @@ class PersistentAgentEmailFooterTests(TestCase):
     @tag("batch_email_footer")
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True)
-    @patch("api.agent.comms.email_footer_service.get_redis_client")
+    @patch("api.services.cron_throttle.get_redis_client")
     def test_throttle_footer_replaces_default_footer_once(self, mock_get_redis, _mock_switch):
-        class _FakeRedis:
-            def __init__(self):
-                self._store = {}
-
-            def get(self, key):
-                return self._store.get(key)
-
-            def set(self, key, value, ex=None, nx=None):
-                if nx and key in self._store:
-                    return False
-                self._store[key] = value
-                return True
-
-            def delete(self, key):
-                self._store.pop(key, None)
-                return 1
-
-            def exists(self, key):
-                return 1 if key in self._store else 0
-
         fake_redis = _FakeRedis()
         mock_get_redis.return_value = fake_redis
 

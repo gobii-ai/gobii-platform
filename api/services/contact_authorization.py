@@ -27,6 +27,7 @@ def _authorize_email_contacts(
     addresses,
     *,
     automatic: bool,
+    locked_agent: PersistentAgent | None = None,
 ) -> None:
     normalized_addresses = normalize_email_addresses(addresses)
     if not normalized_addresses:
@@ -39,7 +40,7 @@ def _authorize_email_contacts(
 
     with transaction.atomic():
         # PostgreSQL cannot lock the nullable side of the organization outer join.
-        locked_agent = PersistentAgent.objects.select_for_update().get(pk=agent.pk)
+        locked_agent = locked_agent or PersistentAgent.objects.select_for_update().get(pk=agent.pk)
         if automatic:
             automatically_authorized = (
                 get_effective_email_sending_mode(locked_agent)
@@ -129,10 +130,16 @@ def authorize_email_contacts(agent: PersistentAgent, addresses) -> None:
     )
 
 
-def authorize_reviewed_email_contacts(agent: PersistentAgent, addresses) -> None:
+def authorize_reviewed_email_contacts(
+    agent: PersistentAgent,
+    addresses,
+    *,
+    locked_agent: PersistentAgent | None = None,
+) -> None:
     """Add human-approved email recipients as outbound-only contacts."""
     _authorize_email_contacts(
         agent,
         addresses,
         automatic=False,
+        locked_agent=locked_agent,
     )

@@ -17,6 +17,7 @@ from api.agent.comms.outbound_delivery import (
     _prepare_email_attachments,
     deliver_agent_email,
 )
+from api.agent.comms.email_footer_service import append_footer_if_needed
 from api.agent.comms.email_threading import get_message_contact_address
 from api.agent.tools.email_sender import execute_send_email
 from api.models import (
@@ -54,6 +55,7 @@ from api.services.outbound_email_review import (
 from api.services.persistent_agents import PersistentAgentProvisioningService
 from api.tasks.outbox import reconcile_approved_outbox_emails
 from console.outbox_api_views import serialize_outbox_review
+from config.redis_client import _FakeRedis
 from constants.feature_flags import EMAIL_REVIEW_OUTBOX
 
 
@@ -532,21 +534,6 @@ class EmailReviewOutboxTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
     def test_review_render_defers_throttle_footer_consumption_until_approval(self, _delay_mock):
-        class _FakeRedis:
-            def __init__(self):
-                self.values = {}
-
-            def get(self, key):
-                return self.values.get(key)
-
-            def set(self, key, value, ex=None):
-                self.values[key] = value
-                return True
-
-            def delete(self, key):
-                self.values.pop(key, None)
-                return 1
-
         from api.services.cron_throttle import (
             cron_throttle_footer_cooldown_key,
             cron_throttle_pending_footer_key,
@@ -559,7 +546,7 @@ class EmailReviewOutboxTests(TestCase):
 
         with (
             patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
-            patch("api.agent.comms.email_footer_service.get_redis_client", return_value=fake_redis),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
         ):
             review = queue_message_for_review(self._message())
             self.assertTrue(review.rendered_includes_throttle_footer)
@@ -583,21 +570,6 @@ class EmailReviewOutboxTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_throttle_footer_is_reserved_for_one_pending_review_and_released_after_review_ends(self):
-        class _FakeRedis:
-            def __init__(self):
-                self.values = {}
-
-            def get(self, key):
-                return self.values.get(key)
-
-            def set(self, key, value, ex=None):
-                self.values[key] = value
-                return True
-
-            def delete(self, key):
-                self.values.pop(key, None)
-                return 1
-
         from api.services.cron_throttle import cron_throttle_pending_footer_key
 
         fake_redis = _FakeRedis()
@@ -606,7 +578,7 @@ class EmailReviewOutboxTests(TestCase):
 
         with (
             patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
-            patch("api.agent.comms.email_footer_service.get_redis_client", return_value=fake_redis),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
         ):
             first = queue_message_for_review(self._message("first@example.com"))
             second = queue_message_for_review(self._message("second@example.com"))
@@ -614,6 +586,10 @@ class EmailReviewOutboxTests(TestCase):
             self.assertTrue(first.rendered_includes_throttle_footer)
             self.assertFalse(second.rendered_includes_throttle_footer)
             self.assertNotIn("temporarily adjusted", second.rendered_plaintext_body)
+            direct_html, direct_plaintext = append_footer_if_needed(self.agent, "Direct", "Direct")
+            self.assertNotIn("temporarily adjusted", direct_html)
+            self.assertNotIn("temporarily adjusted", direct_plaintext)
+            self.assertTrue(fake_redis.get(pending_key))
 
             discard_review(first, actor=self.owner, expected_version=1)
             third = queue_message_for_review(self._message("third@example.com"))

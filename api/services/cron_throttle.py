@@ -6,15 +6,16 @@ from typing import Optional
 
 from celery.schedules import crontab, schedule as celery_schedule
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from api.agent.core.schedule_parser import ScheduleParser
+from config.redis_client import get_redis_client
 from api.services.schedule_enforcement import cron_interval_seconds
 from constants.plans import PlanNames
 from util.subscription_helper import get_owner_plan
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass(frozen=True)
 class CronThrottleDecision:
@@ -38,6 +39,54 @@ def cron_throttle_pending_footer_key(agent_id: str) -> str:
 def cron_throttle_footer_cooldown_key(agent_id: str) -> str:
     """Dedupe key to avoid repeating throttle footers too frequently."""
     return f"cron-throttle:footer-cooldown:{agent_id}"
+
+
+def has_pending_cron_throttle_footer(agent_id: str) -> bool:
+    redis_client = get_redis_client()
+    return bool(redis_client.get(cron_throttle_pending_footer_key(agent_id)))
+
+
+def consume_pending_cron_throttle_footer(agent_id: str, *, ttl_seconds: int) -> bool:
+    redis_client = get_redis_client()
+    pending_key = cron_throttle_pending_footer_key(agent_id)
+    if not redis_client.get(pending_key):
+        return False
+    redis_client.delete(pending_key)
+    redis_client.set(
+        cron_throttle_footer_cooldown_key(agent_id),
+        "1",
+        ex=ttl_seconds,
+    )
+    return True
+
+
+def claim_pending_cron_throttle_footer(agent_id: str, *, ttl_seconds: int) -> bool:
+    from api.models import OutboundEmailReview, PersistentAgent
+
+    with transaction.atomic():
+        PersistentAgent.objects.select_for_update().only("id").get(pk=agent_id)
+        if OutboundEmailReview.objects.filter(
+            agent_id=agent_id,
+            status=OutboundEmailReview.Status.PENDING,
+            rendered_includes_throttle_footer=True,
+        ).exists():
+            return False
+        return consume_pending_cron_throttle_footer(agent_id, ttl_seconds=ttl_seconds)
+
+
+def clear_pending_cron_throttle_footer(agent_id: str) -> bool:
+    from api.models import OutboundEmailReview, PersistentAgent
+
+    with transaction.atomic():
+        PersistentAgent.objects.select_for_update().only("id").get(pk=agent_id)
+        if OutboundEmailReview.objects.filter(
+            agent_id=agent_id,
+            status=OutboundEmailReview.Status.PENDING,
+            rendered_includes_throttle_footer=True,
+        ).exists():
+            return False
+        redis_client = get_redis_client()
+        return bool(redis_client.delete(cron_throttle_pending_footer_key(agent_id)))
 
 
 def is_free_or_seatless_agent(agent) -> bool:

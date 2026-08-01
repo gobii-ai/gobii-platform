@@ -4,10 +4,16 @@ from waffle import switch_is_active
 
 from constants.plans import PlanNames
 from constants.feature_flags import AGENT_CRON_THROTTLE
-from config.redis_client import get_redis_client
-
 from api.models import PersistentAgent, PersistentAgentEmailFooter
-from api.services.cron_throttle import cron_throttle_footer_cooldown_key, cron_throttle_pending_footer_key, evaluate_free_plan_cron_throttle, build_upgrade_link, select_cron_throttle_footer
+from api.services.cron_throttle import (
+    build_upgrade_link,
+    claim_pending_cron_throttle_footer,
+    clear_pending_cron_throttle_footer,
+    consume_pending_cron_throttle_footer,
+    evaluate_free_plan_cron_throttle,
+    has_pending_cron_throttle_footer,
+    select_cron_throttle_footer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +37,7 @@ def append_footer_for_review(
     html_body: str,
     plaintext_body: str,
     *,
-    allow_throttle_footer: bool = True,
+    include_throttle_footer: bool,
 ) -> tuple[str, str, bool]:
     """Render a reviewable footer without consuming one-time delivery state."""
     return _append_footer(
@@ -39,13 +45,30 @@ def append_footer_for_review(
         html_body,
         plaintext_body,
         consume_throttle_footer=False,
-        allow_throttle_footer=allow_throttle_footer,
+        include_reviewed_throttle_footer=include_throttle_footer,
     )
 
 
+def reviewed_throttle_footer_is_pending(agent: PersistentAgent | None) -> bool:
+    if agent is None or not switch_is_active(AGENT_CRON_THROTTLE) or not _should_apply_footer(agent):
+        return False
+    try:
+        return has_pending_cron_throttle_footer(str(agent.id))
+    except Exception:
+        logger.debug("Failed checking pending throttle footer for agent %s", agent.id, exc_info=True)
+        return False
+
+
 def consume_reviewed_throttle_footer(agent: PersistentAgent | None) -> None:
-    if agent is not None:
-        _consume_throttle_footer_if_pending(agent)
+    if agent is None:
+        return
+    try:
+        consume_pending_cron_throttle_footer(
+            str(agent.id),
+            ttl_seconds=_notice_ttl_seconds(),
+        )
+    except Exception:
+        logger.debug("Failed consuming reviewed throttle footer for agent %s", agent.id, exc_info=True)
 
 
 def _append_footer(
@@ -54,7 +77,7 @@ def _append_footer(
     plaintext_body: str,
     *,
     consume_throttle_footer: bool,
-    allow_throttle_footer: bool = True,
+    include_reviewed_throttle_footer: bool = False,
 ) -> tuple[str, str, bool]:
     """
     Append a configured footer to the provided HTML/plaintext bodies when the
@@ -66,8 +89,7 @@ def _append_footer(
     if not _should_apply_footer(agent):
         if consume_throttle_footer and switch_is_active(AGENT_CRON_THROTTLE):
             try:
-                redis_client = get_redis_client()
-                redis_client.delete(cron_throttle_pending_footer_key(str(agent.id)))
+                clear_pending_cron_throttle_footer(str(agent.id))
             except Exception:
                 logger.debug(
                     "Failed clearing pending throttle footer for agent %s after footer no longer applies.",
@@ -76,14 +98,12 @@ def _append_footer(
                 )
         return html_body, plaintext_body, False
 
-    throttle_footer = (
-        _throttle_footer_if_pending(
-            agent,
-            consume=consume_throttle_footer,
-        )
-        if allow_throttle_footer
-        else None
-    )
+    if include_reviewed_throttle_footer:
+        throttle_footer = _build_throttle_footer(agent)
+    elif consume_throttle_footer:
+        throttle_footer = _consume_throttle_footer_if_pending(agent)
+    else:
+        throttle_footer = None
     if throttle_footer is not None:
         updated_html = _append_section(html_body, throttle_footer.html_content)
         updated_plain = _append_section(plaintext_body, throttle_footer.text_content, separator="\n\n")
@@ -100,29 +120,21 @@ def _append_footer(
 
 
 def _consume_throttle_footer_if_pending(agent: PersistentAgent):
-    return _throttle_footer_if_pending(agent, consume=True)
-
-
-def _throttle_footer_if_pending(agent: PersistentAgent, *, consume: bool):
     if not switch_is_active(AGENT_CRON_THROTTLE):
         return None
 
     try:
-        redis_client = get_redis_client()
+        claimed = claim_pending_cron_throttle_footer(
+            str(agent.id),
+            ttl_seconds=_notice_ttl_seconds(),
+        )
     except Exception:
-        logger.debug("Failed to fetch redis client for throttle footer check", exc_info=True)
+        logger.debug("Failed consuming throttle footer pending flag for agent %s", agent.id, exc_info=True)
         return None
+    return _build_throttle_footer(agent) if claimed else None
 
-    pending_key = cron_throttle_pending_footer_key(str(agent.id))
-    try:
-        pending = bool(redis_client.get(pending_key))
-    except Exception:
-        logger.debug("Throttle footer pending check failed for agent %s", agent.id, exc_info=True)
-        return None
 
-    if not pending:
-        return None
-
+def _build_throttle_footer(agent: PersistentAgent):
     effective_interval_seconds = None
     schedule_str = (getattr(agent, "schedule", None) or "").strip()
     try:
@@ -137,26 +149,15 @@ def _throttle_footer_if_pending(agent: PersistentAgent, *, consume: bool):
     except Exception:
         upgrade_link = "/subscribe/pro/"
 
-    footer = select_cron_throttle_footer(
+    return select_cron_throttle_footer(
         agent_name=agent.name,
         effective_interval_seconds=effective_interval_seconds,
         upgrade_link=upgrade_link,
     )
 
-    if consume:
-        try:
-            redis_client.delete(pending_key)
-            ttl_days = int(getattr(settings, "AGENT_CRON_THROTTLE_NOTICE_TTL_DAYS", 7))
-            ttl_seconds = max(1, ttl_days * 86400)
-            redis_client.set(
-                cron_throttle_footer_cooldown_key(str(agent.id)),
-                "1",
-                ex=ttl_seconds,
-            )
-        except Exception:
-            logger.debug("Failed to consume throttle footer pending flag for agent %s", agent.id, exc_info=True)
 
-    return footer
+def _notice_ttl_seconds() -> int:
+    return max(1, int(settings.AGENT_CRON_THROTTLE_NOTICE_TTL_DAYS) * 86400)
 
 
 def _should_apply_footer(agent: PersistentAgent) -> bool:

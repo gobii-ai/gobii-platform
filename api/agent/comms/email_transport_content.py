@@ -8,7 +8,7 @@ def render_email_transport_content(
     message,
     *,
     emit_logs=True,
-    allow_throttle_footer=True,
+    include_throttle_footer=False,
 ):
     """Build the exact HTML and plain-text alternatives shown and sent."""
     html_snippet, plaintext_body = convert_body_to_html_and_plaintext(
@@ -19,7 +19,7 @@ def render_email_transport_content(
         message.owner_agent,
         html_snippet,
         plaintext_body,
-        allow_throttle_footer=allow_throttle_footer,
+        include_throttle_footer=include_throttle_footer,
     )
     html_body = render_to_string(
         "emails/persistent_agent_email.html",

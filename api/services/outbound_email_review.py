@@ -9,7 +9,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
-from api.agent.comms.email_footer_service import consume_reviewed_throttle_footer
+from api.agent.comms.email_footer_service import (
+    consume_reviewed_throttle_footer,
+    reviewed_throttle_footer_is_pending,
+)
 from api.agent.comms.email_transport_content import render_email_transport_content
 from api.agent.comms.email_threading import get_message_contact_address
 from api.models import (
@@ -187,11 +190,11 @@ def compute_message_content_hash(message: PersistentAgentMessage) -> str:
 def _render_review_revision(
     message: PersistentAgentMessage,
     *,
-    allow_throttle_footer: bool,
+    include_throttle_footer: bool,
 ) -> tuple[str, str, bool]:
     html_body, plaintext_body, html_snippet, includes_throttle_footer = render_email_transport_content(
         message,
-        allow_throttle_footer=allow_throttle_footer,
+        include_throttle_footer=include_throttle_footer,
     )
     message.raw_payload = merge_chat_body_html_cache(
         message.raw_payload,
@@ -212,10 +215,10 @@ def queue_message_for_review(message: PersistentAgentMessage) -> OutboundEmailRe
         agent=agent,
         status=OutboundEmailReview.Status.PENDING,
         rendered_includes_throttle_footer=True,
-    ).exists()
+    ).exists() and reviewed_throttle_footer_is_pending(agent)
     rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(
         message,
-        allow_throttle_footer=throttle_footer_available,
+        include_throttle_footer=throttle_footer_available,
     )
     message.latest_status = DeliveryStatus.PENDING_APPROVAL
     message.latest_error_code = ""
@@ -276,7 +279,11 @@ def expire_review_if_needed(review: OutboundEmailReview, *, now=None) -> bool:
     return True
 
 
-def authorize_reviewed_external_contacts(message: PersistentAgentMessage) -> None:
+def authorize_reviewed_external_contacts(
+    message: PersistentAgentMessage,
+    *,
+    locked_agent: PersistentAgent | None = None,
+) -> None:
     agent = message.owner_agent
     decision = classify_email_recipients(agent, get_message_email_recipients(message))
     if decision.blocked_recipients:
@@ -287,7 +294,11 @@ def authorize_reviewed_external_contacts(message: PersistentAgentMessage) -> Non
     if not decision.unknown_external_recipients:
         return
     try:
-        authorize_reviewed_email_contacts(agent, decision.unknown_external_recipients)
+        authorize_reviewed_email_contacts(
+            agent,
+            decision.unknown_external_recipients,
+            locked_agent=locked_agent,
+        )
     except ContactAuthorizationError as exc:
         raise OutboundEmailReviewError(str(exc)) from exc
 
@@ -370,7 +381,7 @@ def update_pending_review_message(
         replace_message_attachments(message, changes["attachmentNodeIds"])
     rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(
         message,
-        allow_throttle_footer=locked.rendered_includes_throttle_footer,
+        include_throttle_footer=locked.rendered_includes_throttle_footer,
     )
     message.save()
 
@@ -487,9 +498,8 @@ def approve_review(
         raise OutboundEmailReviewError("The email changed outside the Outbox editor and must be reviewed again.")
     if review_thread_changed(locked) and not acknowledge_thread_changed:
         raise OutboundEmailReviewError("thread_changed")
-    authorize_reviewed_external_contacts(message)
-    if locked.rendered_includes_throttle_footer:
-        consume_reviewed_throttle_footer(message.owner_agent)
+    locked_agent = PersistentAgent.objects.select_for_update().get(pk=message.owner_agent_id)
+    authorize_reviewed_external_contacts(message, locked_agent=locked_agent)
 
     now = timezone.now()
     locked.status = OutboundEmailReview.Status.APPROVED
@@ -516,6 +526,8 @@ def approve_review(
         actor=actor,
         action_type=PersistentAgentUserActionEvent.ActionType.OUTBOX_APPROVED,
     )
+    if locked.rendered_includes_throttle_footer:
+        consume_reviewed_throttle_footer(message.owner_agent)
 
     from api.tasks.outbox import dispatch_approved_outbox_email
 
