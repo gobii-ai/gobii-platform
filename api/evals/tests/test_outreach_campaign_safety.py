@@ -5,6 +5,7 @@ from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.event_processing import _resolve_eval_mock_result
+from api.agent.tools.http_request import get_http_request_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.outreach_campaign_safety import (
     ACTIVATION_READBACK_PROMPT,
@@ -91,6 +92,15 @@ class OutreachCampaignSafetyScenarioTests(SimpleTestCase):
         self.assertEqual(counts["confirmed_owner_or_decision_maker"], 1)
         self.assertEqual(counts["generic_inbox"], 1)
         self.assertEqual(counts["company_identity_mismatch"], 1)
+
+    def test_http_tool_requires_complete_campaign_qa_before_mutation(self):
+        description = get_http_request_tool()["function"]["description"]
+
+        self.assertIn("Before any outreach PATCH", description)
+        self.assertIn("each placeholder vs lead fields", description)
+        self.assertIn("every recipient's identity/qualification", description)
+        self.assertIn("Final must report every gap", description)
+        self.assertIn("stop on retryable=false", description)
 
     def test_http_mocks_route_by_method_and_never_fall_through_to_network(self):
         preflight = preflight_mock_config()

@@ -2623,28 +2623,28 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn(
-            "Owner's lasting behavior correction: patch every affected charter rule",
+            "Owner dislikes behavior/output",
             system_prompt,
         )
         self.assertIn(
-            "Email/SMS lacks a literal address/number or unique named recipient",
+            "Email/SMS missing a literal address/number or unique named recipient",
             system_prompt,
         )
         self.assertIn(
-            "generic roles are missing",
+            "Generic roles are missing",
             system_prompt,
         )
-        self.assertIn("Substantial multi-round work", system_prompt)
+        self.assertIn("New substantial multi-round work", system_prompt)
         self.assertIn("Never use SQLite for a bounded small report", system_prompt)
         self.assertIn("For prose, inspect once", system_prompt)
         self.assertIn("aggregate-only and SELECT-all are incomplete", system_prompt)
-        self.assertIn("Replace one span covering every affected related clause", system_prompt)
+        self.assertIn("Delete/update all contradicted behavior in one span", system_prompt)
         self.assertIn("append only if no related clause", system_prompt)
         self.assertIn("Correction plus task/recurrence: patch and complete both", system_prompt)
         self.assertIn("batching config/task/schedules", system_prompt)
         self.assertIn("Non-config work needs a result", system_prompt)
         self.assertIn(
-            "Task/batch/day/run/project/case scope is finite",
+            "A named task/batch/day/run/project/case scope is finite",
             system_prompt,
         )
         self.assertIn(
@@ -2652,11 +2652,11 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn(
-            "Recurring output flaws/rule refinements default durable",
+            "Output critique/rules default durable",
             system_prompt,
         )
         self.assertIn("requires sqlite_batch charter patch before reply", system_prompt)
-        self.assertIn("no-op only if identical", system_prompt)
+        self.assertIn("Only agent_config_update proving updated/unchanged counts", system_prompt)
         self.assertIn("Set false after delivery/config; future schedules, queued conversations", system_prompt)
         self.assertIn(
             "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
@@ -2664,20 +2664,20 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
-        self.assertIn("enabled tool fits -> use directly", system_prompt)
+        self.assertIn("Short action or current-batch continuation: call its tool directly", system_prompt)
         self.assertIn("Ready routes", system_prompt)
         self.assertIn("opaque auth refs only for the requested operation", system_prompt)
         self.assertIn("no preflight", system_prompt)
         self.assertIn("credential-returning API -> search_tools('secure credential delegation') first", system_prompt)
-        self.assertIn("named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
+        self.assertIn("fresh source for an existing SQLite table -> fetch once", system_prompt)
         self.assertIn("Named tables hold truth/logic", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
         self.assertIn(
             "current price/quote -> search_tools('HTTP API request') if http_request absent",
             system_prompt,
         )
-        self.assertIn("reconcile+SELECT there before use", system_prompt)
-        self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
+        self.assertIn("then one reconcile+SELECT sqlite_batch", system_prompt)
+        self.assertIn("browser only after access/render/login blockage", system_prompt)
         self.assertIn(
             "collect missing API key/password/secret -> secure_credentials_request directly",
             system_prompt,

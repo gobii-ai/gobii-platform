@@ -357,9 +357,10 @@ def get_http_request_tool() -> Dict[str, Any]:
         "function": {
             "name": "http_request",
             "description": (
-                "Fetch non-secret raw structured data (JSON, XML, CSV) or interact with APIs. "
-                "Before PATCHing outreach, jointly inspect placeholders vs lead fields, recipient identity/qualification, "
-                "and timezone; a named timezone is not a fixed offset. Patch only independent safe fields and report gaps. "
+                "Fetch non-secret structured data or call APIs. "
+                "Before any outreach PATCH, inspect each placeholder vs lead fields, every recipient's identity/qualification, "
+                "and named-zone timezone. Final must report every gap. Patch only independent safe fields; never use a fixed "
+                "offset; stop on retryable=false. "
                 "Never use this when a response may contain credentials, passwords, tokens, or OTPs; first search for `secure credential delegation` and use its secure request tool. "
                 "This is the PREFERRED tool for non-secret programmatic data retrieval from known endpoints. "
                 "With an exact endpoint, attempt once before API/auth/docs discovery. "
