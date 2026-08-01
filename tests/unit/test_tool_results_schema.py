@@ -1138,10 +1138,12 @@ class PreviewByteLimitTests(SimpleTestCase):
         for expected in (
             "[SOURCE SET:",
             "$.content.prospects(name,title,profile_url)",
-            "No model: CREATE",
+            "No model: CREATE a user table",
             "`json_extract(j.value,'$.profile_url')`",
             "FIRST/NOW: one sqlite_batch rows=[]",
-            "never SELECT/preview/bind/copy source rows",
+            "__tool_results is read-only, never a write target",
+            "No pre-read/bind/copy",
+            "INSERT INTO model SELECT",
             "json_extract(j.value,'$.name') AS name",
             "json_extract(j.value,'$.profile_url') AS profile_url",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
@@ -1157,7 +1159,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertNotIn("json_extract(j.value,'$.id')", info.meta)
         self.assertIsNone(info.source_reconciliation_directive)
 
-    def test_continuing_source_array_hides_literal_preview_before_model_import(self):
+    def test_single_item_api_array_stays_inline_without_forcing_a_new_model(self):
         payload = {
             "status": "ok",
             "content": {
@@ -1175,13 +1177,11 @@ class PreviewByteLimitTests(SimpleTestCase):
             will_continue_work=True,
         )
 
-        self.assertIn("[SOURCE SET:", info.meta)
-        self.assertIn("$.content.events(release_id,service,source_url)", info.meta)
-        self.assertIn("SOURCE SET STORED IN __tool_results", info.preview_text)
-        self.assertIn("do not inspect or copy the source first", info.preview_text)
-        self.assertNotIn("rel-1", info.preview_text)
-        self.assertNotIn("Search index", info.preview_text)
-        self.assertFalse(info.is_inline)
+        self.assertNotIn("[SOURCE SET:", info.meta)
+        self.assertNotIn("SOURCE SET STORED IN __tool_results", info.preview_text)
+        self.assertIn("rel-1", info.preview_text)
+        self.assertIn("Search index", info.preview_text)
+        self.assertTrue(info.is_inline)
 
     def test_generic_enrichment_array_gets_existing_model_refresh_shape(self):
         payload = {
@@ -1259,18 +1259,21 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_columns={"accounts": {"account_id", "company_name"}},
         )
 
-        self.assertIn("No model: CREATE", info.meta)
+        self.assertNotIn("[SOURCE SET:", info.meta)
         self.assertNotIn("Existing tables: accounts", info.meta)
 
     def test_source_write_hint_uses_the_actual_array_identity(self):
         payload = {
             "status": "ok",
             "content": {
-                "events": [{
-                    "release_id": "rel-1",
-                    "service": "Search index",
-                    "source_url": "https://example.test/releases",
-                }]
+                "events": [
+                    {
+                        "release_id": f"rel-{index}",
+                        "service": "Search index",
+                        "source_url": "https://example.test/releases",
+                    }
+                    for index in range(2)
+                ]
             },
         }
         info, _record = self._prepare_http_result(
@@ -1289,10 +1292,13 @@ class PreviewByteLimitTests(SimpleTestCase):
             "content": {
                 "vendor": "AxonFlow",
                 "source_url": "https://example.test/axonflow",
-                "plans": [{
-                    "plan_id": "enterprise",
-                    "price": 1500,
-                }],
+                "plans": [
+                    {
+                        "plan_id": plan_id,
+                        "price": price,
+                    }
+                    for plan_id, price in (("enterprise", 1500), ("business", 900))
+                ],
             },
         }
         info, _record = self._prepare_http_result(
@@ -1361,7 +1367,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertEqual(source_set_meta.count("[SOURCE SET"), 1)
         self.assertNotIn("source_batch_id=batch-current", source_set_meta)
         self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
-        self.assertIn("never SELECT/preview/bind/copy source rows", source_set_meta)
+        self.assertIn("No pre-read/bind/copy", source_set_meta)
         self.assertIn("is_current_batch=1", source_set_meta)
         self.assertIn("Upsert mutable fields/provenance", source_set_meta)
 
@@ -1410,13 +1416,14 @@ class PreviewByteLimitTests(SimpleTestCase):
             "content": {
                 f"entities_{index}": [
                     {
-                        "entity_name": f"Entity {index}",
-                        "profile_url": f"https://example.test/{index}",
+                        "entity_name": f"Entity {index}-{item_index}",
+                        "profile_url": f"https://example.test/{index}/{item_index}",
                         "role": "Owner",
                         "qualification_signal_with_a_deliberately_long_name": "verified",
                         "relationship_context_with_a_deliberately_long_name": "direct",
                         "evidence_observation_with_a_deliberately_long_name": "current",
                     }
+                    for item_index in range(2)
                 ]
                 for index in range(12)
             },
@@ -1436,15 +1443,18 @@ class PreviewByteLimitTests(SimpleTestCase):
         payload = {
             "status": "ok",
             "content": {
-                "events": [{
-                    "release_id": "rel-1",
-                    "service": "Checkout API",
-                    "starts_at": "2026-07-23T15:30:17Z",
-                    "owner": "Priya Shah",
-                    "status": "approved",
-                    "source_url": "https://example.test/releases.json",
-                    "observed_at": "2026-07-22T14:15:00Z",
-                }],
+                "events": [
+                    {
+                        "release_id": f"rel-{index}",
+                        "service": "Checkout API",
+                        "starts_at": "2026-07-23T15:30:17Z",
+                        "owner": "Priya Shah",
+                        "status": "approved",
+                        "source_url": "https://example.test/releases.json",
+                        "observed_at": "2026-07-22T14:15:00Z",
+                    }
+                    for index in range(2)
+                ],
             },
         }
         info, _record = self._prepare_http_result(
@@ -1459,10 +1469,11 @@ class PreviewByteLimitTests(SimpleTestCase):
             "$.content.events(release_id,service,starts_at,owner,status,source_url,observed_at)",
             hint,
         )
-        self.assertIn("No model: CREATE", hint)
-        self.assertIn("`json_extract(j.value,'$.release_id')` as PRIMARY KEY/UNIQUE", hint)
+        self.assertIn("No model: CREATE a user table", hint)
+        self.assertIn("key `json_extract(j.value,'$.release_id')` PRIMARY KEY/UNIQUE", hint)
         self.assertIn("FIRST/NOW: one sqlite_batch rows=[]", hint)
-        self.assertIn("never SELECT/preview/bind/copy source rows", hint)
+        self.assertIn("__tool_results is read-only, never a write target", hint)
+        self.assertIn("No pre-read/bind/copy", hint)
         self.assertIn("json_extract(j.value,'$.owner') AS owner", hint)
         self.assertIn("decision SELECT in the same batch", hint)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)

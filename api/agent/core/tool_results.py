@@ -221,10 +221,27 @@ def _build_optional_source_write_hint(
     analysis: ResultAnalysis | None,
     model_tables: Sequence[str] = (),
     payload: object | None = None,
+    reusable_source_set: bool = False,
 ) -> str:
     """Give source-shape mechanics that fit both new and existing domain models."""
     schemas = _optional_source_array_schemas(analysis)
     if not schemas or len(tool_name) > 100:
+        return ""
+
+    json_analysis = analysis.json_analysis if analysis else None
+    source_arrays = (
+        (json_analysis.primary_array, *json_analysis.secondary_arrays)
+        if json_analysis
+        else ()
+    )
+    has_reusable_set = any(
+        item
+        and item.item_fields
+        and item.path == schemas[0][0]
+        and item.length >= 2
+        for item in source_arrays
+    )
+    if not model_tables and not has_reusable_set and not reusable_source_set:
         return ""
 
     first_path, _first_schema, first_key, first_fields = schemas[0]
@@ -270,7 +287,7 @@ def _build_optional_source_write_hint(
                 f"Join its scalar key to {key_expr}. "
             )
         else:
-            model_guidance = f"No model: CREATE with {key_expr} as PRIMARY KEY/UNIQUE. "
+            model_guidance = f"No model: CREATE a user table; key {key_expr} PRIMARY KEY/UNIQUE. "
         parent_guidance = (
             f" Parent {parent_path}({','.join(parent_fields)}): "
             f"json_extract(t.result_json,'{parent_path}.<field>')."
@@ -285,8 +302,9 @@ def _build_optional_source_write_hint(
         return (
             f"[SOURCE SET: {schema_text}. "
             f"{model_guidance}"
-            "FIRST/NOW: one sqlite_batch rows=[]; never SELECT/preview/bind/copy source rows. "
-            f"{select_guidance}FROM __tool_results AS t, "
+            "FIRST/NOW: one sqlite_batch rows=[]; __tool_results is read-only, never a write target. "
+            "No pre-read/bind/copy. "
+            f"INSERT INTO model {select_guidance.removeprefix('INSERT ... ')}FROM __tool_results AS t, "
             f"json_each(t.result_json,'{first_path}') AS j "
             f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
             "Upsert mutable fields/provenance; then decision SELECT in the same batch."
@@ -549,6 +567,7 @@ def prepare_tool_results_for_prompt(
                 analysis,
                 tuple(refresh_model_tables),
                 _load_json_payload(stored_json, analysis),
+                reusable_source_set=len(source_work_set_ids.get(record.tool_name, ())) >= 2,
             )
         preserve_raw_model_source_values = bool(
             source_write_hint_prefix and refresh_model_tables
@@ -563,8 +582,9 @@ def prepare_tool_results_for_prompt(
                 # instead of the set-wise import needed for the durable model.
                 context_hint = None
                 preview_text = (
-                    "[SOURCE SET STORED IN __tool_results. Use the exact result_meta INSERT ... SELECT shape now; "
-                    "do not inspect or copy the source first.]"
+                    "[SOURCE SET STORED IN __tool_results. Create/evolve the durable model and use the exact "
+                    "result_meta INSERT ... SELECT shape now; __tool_results is read-only source. Do not inspect "
+                    "or copy the source first.]"
                 )
                 is_inline = False
         if requires_source_import:
