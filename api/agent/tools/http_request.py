@@ -379,7 +379,7 @@ def get_http_request_tool() -> Dict[str, Any]:
                     "url": {
                         "type": "string",
                         "description": (
-                            "Raw http(s) URL, never `$[link:id]`."
+                            "Raw http(s) URL, never `$[link:...]`."
                         ),
                     },
                     "headers": {"type": "object", "description": "Optional HTTP headers to include in the request."},
