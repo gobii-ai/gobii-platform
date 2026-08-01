@@ -562,7 +562,10 @@ def prepare_tool_results_for_prompt(
                 # continuing work, a second value-level copy invites transcription
                 # instead of the set-wise import needed for the durable model.
                 context_hint = None
-                preview_text = None
+                preview_text = (
+                    "[SOURCE SET STORED IN __tool_results. Use the exact result_meta INSERT ... SELECT shape now; "
+                    "do not inspect or copy the source first.]"
+                )
                 is_inline = False
         if requires_source_import:
             # A second visible copy invites literal transcription and wastes prompt space.

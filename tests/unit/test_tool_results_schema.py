@@ -1177,7 +1177,10 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         self.assertIn("[SOURCE SET:", info.meta)
         self.assertIn("$.content.events(release_id,service,source_url)", info.meta)
-        self.assertIsNone(info.preview_text)
+        self.assertIn("SOURCE SET STORED IN __tool_results", info.preview_text)
+        self.assertIn("do not inspect or copy the source first", info.preview_text)
+        self.assertNotIn("rel-1", info.preview_text)
+        self.assertNotIn("Search index", info.preview_text)
         self.assertFalse(info.is_inline)
 
     def test_generic_enrichment_array_gets_existing_model_refresh_shape(self):
