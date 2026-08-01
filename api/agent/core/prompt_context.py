@@ -841,8 +841,8 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Named tables hold truth/logic: keyed entities/relations/provenance; SQL handles counts, joins, gaps, ranks. "
-        "Results do not update them. Use SQLite for row reconciliation.\n"
+        "Named tables hold truth/logic: keyed entities/relations/provenance; SQL: counts, joins, gaps, ranks. "
+        "Results do not update them. Use SQLite for material row reconciliation.\n"
         "For a current source set: keyed DDL, one set-wise upsert, one request-specific decision SELECT with "
         "answer/supporting rows/URLs; aggregate-only and SELECT-all are incomplete; deliver without reread. "
         "Structured JSON uses all `is_current_batch=1 AND tool_name='exact visible name'` rows, with no result_id/URL "
