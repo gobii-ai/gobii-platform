@@ -171,7 +171,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Short action or current-batch continuation", prompt)
         self.assertIn("Meaningful shared win/repeated failure", prompt)
         self.assertIn("Campaign/bulk review", prompt)
-        self.assertIn("jointly verify copy", prompt)
+        self.assertIn("before any patch: verify copy", prompt)
+        self.assertIn("every placeholder against available fields", prompt)
         self.assertIn("email=send_email in-thread", prompt)
         self.assertIn("repair rejected/wrong channel first", prompt)
         self.assertIn(
