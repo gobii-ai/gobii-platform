@@ -103,6 +103,7 @@ For Docker-based products, the standard pattern is to validate Docker and Compos
 - [Identity, Channels, and Agent-to-Agent](#identity-channels-and-agent-to-agent)
 - [Security Posture](#security-posture)
 - [API Quick Start](#api-quick-start)
+- [Gobii Remote MCP](#gobii-remote-mcp)
 - [Deployment Paths](#deployment-paths)
 - [Operational Profiles](#operational-profiles)
 - [Production Use Cases](#production-use-cases)
@@ -279,6 +280,118 @@ curl --no-buffer \
         }
       }'
 ```
+
+## Gobii Remote MCP
+
+Gobii Cloud is also a hosted [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server. Connect an MCP client to Gobii to create, manage, message, coordinate, and inspect persistent agents without running a local bridge process.
+
+- **Streamable HTTP endpoint:** `https://gobii.ai/api/v1/mcp/`
+- **Authentication:** `Authorization: Bearer <key>` or `X-Api-Key: <key>` on every request
+- **Current surface:** 16 tools plus authenticated file resources
+- **Full reference:** [Remote MCP documentation](https://docs.gobii.ai/developers/mcp-server)
+- **Registry metadata:** [`server.json`](server.json)
+
+Remote MCP means an external client calls Gobii. It is the reverse of [connecting an MCP server to a Gobii](https://docs.gobii.ai/advanced-usage/mcp-servers), where a Gobii calls tools exposed by another service.
+
+### Create an API key
+
+Create a personal or organization API key in [Gobii API Keys](https://gobii.ai/app/api-keys), then make it available to your client through an environment variable or secret manager:
+
+```bash
+export GOBII_API_KEY="your-gobii-api-key"
+```
+
+Do not commit the key or paste it into chat. Personal keys expose agents accessible to that user; organization keys expose organization-owned agents.
+
+### Connect from Codex
+
+```bash
+codex mcp add gobii \
+  --url https://gobii.ai/api/v1/mcp/ \
+  --bearer-token-env-var GOBII_API_KEY
+```
+
+### Connect from Claude Code
+
+Add this project-scoped `.mcp.json`; Claude Code expands `${GOBII_API_KEY}` from its environment:
+
+```json
+{
+  "mcpServers": {
+    "gobii": {
+      "type": "http",
+      "url": "https://gobii.ai/api/v1/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GOBII_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+### Connect from Cursor
+
+Add this to `.cursor/mcp.json` for the project or `~/.cursor/mcp.json` globally. Start Cursor from an environment that contains `GOBII_API_KEY` so `${env:GOBII_API_KEY}` can be resolved.
+
+```json
+{
+  "mcpServers": {
+    "gobii": {
+      "type": "http",
+      "url": "https://gobii.ai/api/v1/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${env:GOBII_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+### Connect from VS Code
+
+Add this to `.vscode/mcp.json`. VS Code prompts once and stores the key securely instead of writing it into the file.
+
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "gobii-api-key",
+      "description": "Gobii API key",
+      "password": true
+    }
+  ],
+  "servers": {
+    "gobii": {
+      "type": "http",
+      "url": "https://gobii.ai/api/v1/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${input:gobii-api-key}"
+      }
+    }
+  }
+}
+```
+
+Other clients need the same three values: the `streamable-http` transport, the endpoint above, and either supported authentication header. Environment-variable interpolation syntax is client-specific.
+
+### What clients can do
+
+| Access level | Examples |
+| --- | --- |
+| Read | List and inspect agents, timelines, links, debug traces, files, and MCP resources; wait for timeline events. |
+| Write | Create or update agents, send messages, link agents, and upload files. |
+| Destructive | Archive an agent. Archival is a soft delete, but clients should still request confirmation. |
+
+Keep MCP tool approvals enabled until you have reviewed the requested tool and arguments. A useful first session is:
+
+- “List the Gobii agents I can access and summarize what each one does.”
+- “Show me the latest timeline activity for the research agent.”
+- “Send this research brief to the research agent, then wait for its next response.”
+- “Create an unscheduled agent for weekly competitor research; show me the proposed configuration before creating it.”
+- “Upload this report to the agent, list its files, and read the returned resource.”
+
+For a self-hosted deployment, replace the production endpoint with `http://localhost:8000/api/v1/mcp/` and use an API key created in that deployment.
 
 ## Deployment Paths
 

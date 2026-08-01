@@ -6,6 +6,7 @@ from decimal import Decimal
 from datetime import timedelta
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, tag
@@ -233,6 +234,36 @@ class RemoteMCPViewTests(TestCase):
             payload["result"]["capabilities"]["resources"],
             {"subscribe": False, "listChanged": False},
         )
+        server_info = payload["result"]["serverInfo"]
+        self.assertEqual(
+            server_info,
+            {
+                "name": "gobii",
+                "title": "Gobii",
+                "version": "2.19.0",
+                "description": (
+                    "Create, manage, message, coordinate, and inspect persistent AI agents from MCP clients."
+                ),
+                "websiteUrl": "https://docs.gobii.ai/developers/mcp-server",
+                "icons": [
+                    {
+                        "src": "https://gobii.ai/static/images/gobii_fish_icon_512.png",
+                        "mimeType": "image/png",
+                        "sizes": ["512x512"],
+                    },
+                    {
+                        "src": "https://gobii.ai/static/images/gobii-fish.svg",
+                        "mimeType": "image/svg+xml",
+                        "sizes": ["any"],
+                    },
+                ],
+            },
+        )
+
+        registry_manifest = json.loads((settings.BASE_DIR / "server.json").read_text())
+        self.assertEqual(registry_manifest["version"], server_info["version"])
+        self.assertEqual(registry_manifest["description"], server_info["description"])
+        self.assertEqual(registry_manifest["websiteUrl"], server_info["websiteUrl"])
 
         bearer_response = self._post_mcp("initialize", auth="bearer")
         self.assertEqual(bearer_response.status_code, 200)
@@ -243,7 +274,10 @@ class RemoteMCPViewTests(TestCase):
 
         tools_response = self._post_mcp("tools/list")
         self.assertEqual(tools_response.status_code, 200)
-        tool_names = {tool["name"] for tool in tools_response.json()["result"]["tools"]}
+        tools = tools_response.json()["result"]["tools"]
+        self.assertEqual(len(tools), 16)
+        tool_names = {tool["name"] for tool in tools}
+        self.assertEqual(len(tool_names), len(tools))
         self.assertIn("gobii_list_agents", tool_names)
         self.assertIn("gobii_get_agent_config_options", tool_names)
         self.assertIn("gobii_send_agent_message", tool_names)

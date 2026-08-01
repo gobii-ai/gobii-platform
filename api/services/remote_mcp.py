@@ -66,10 +66,29 @@ from util.trial_enforcement import can_user_use_personal_agents_and_api
 
 
 MCP_PROTOCOL_VERSION = "2025-11-25"
+REMOTE_MCP_SERVER_VERSION = "2.19.0"
+REMOTE_MCP_DESCRIPTION = (
+    "Create, manage, message, coordinate, and inspect persistent AI agents from MCP clients."
+)
+REMOTE_MCP_WEBSITE_URL = "https://docs.gobii.ai/developers/mcp-server"
 SERVER_INFO = {
     "name": "gobii",
     "title": "Gobii",
-    "version": "2.19.0",
+    "version": REMOTE_MCP_SERVER_VERSION,
+    "description": REMOTE_MCP_DESCRIPTION,
+    "websiteUrl": REMOTE_MCP_WEBSITE_URL,
+    "icons": [
+        {
+            "src": "https://gobii.ai/static/images/gobii_fish_icon_512.png",
+            "mimeType": "image/png",
+            "sizes": ["512x512"],
+        },
+        {
+            "src": "https://gobii.ai/static/images/gobii-fish.svg",
+            "mimeType": "image/svg+xml",
+            "sizes": ["any"],
+        },
+    ],
 }
 WAIT_DEFAULT_TIMEOUT_SECONDS = 10
 WAIT_MAX_TIMEOUT_SECONDS = 30

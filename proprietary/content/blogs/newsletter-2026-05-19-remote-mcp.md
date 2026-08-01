@@ -1,8 +1,8 @@
 ---
 title: "Remote MCP Server for Persistent AI Agents"
 date: 2026-05-19
-updated: 2026-07-18
-description: "Gobii Remote MCP exposes 15 tools for creating, messaging, coordinating, debugging, and attaching files to persistent AI agents from compatible clients."
+updated: 2026-08-01
+description: "Gobii Remote MCP exposes 16 tools for creating, messaging, coordinating, debugging, and working with files and resources from compatible clients."
 author: "Matt Greathouse"
 author_type: "Person"
 author_url: "/team/"
@@ -12,7 +12,7 @@ author_same_as:
   - "https://www.linkedin.com/in/matt-greathouse/"
   - "https://github.com/matt-greathouse"
 seo_title: "Remote MCP Server for Persistent AI Agents | Gobii"
-seo_description: "Gobii Remote MCP exposes 15 tools for creating, messaging, coordinating, debugging, and attaching files to persistent AI agents from compatible clients."
+seo_description: "Gobii Remote MCP exposes 16 tools for creating, messaging, coordinating, debugging, and working with files and resources from compatible clients."
 canonical: "https://gobii.ai/blog/newsletter-2026-05-19-remote-mcp/"
 slug: "newsletter-2026-05-19-remote-mcp"
 image: "/static/images/blog/newsletters/newsletter-2026-05-19-remote-mcp-hero.webp"
@@ -45,15 +45,15 @@ This is a different flow from adding an MCP server to a Gobii. Connected MCP ser
 
 > **Key takeaways**
 >
-> - Remote MCP currently exposes 15 tools.
+> - Remote MCP launched with 15 tools and now exposes 16.
 > - Traffic runs from an outside AI client into Gobii, the reverse of a Gobii consuming a connected MCP server.
 > - Protect the scoped API key for lifecycle, coordination, messaging, timelines, debugging, and files in an environment variable or managed secret store.
 
 ## What Is a Remote MCP Server?
 
-**Remote MCP servers** are network endpoints that expose tools to compatible clients. As of July 2026, Gobii's endpoint provides 15 tools for operating persistent AI agents through one authenticated connection ([Gobii, Remote MCP](https://docs.gobii.ai/developers/mcp-server), retrieved July 18, 2026).
+**Remote MCP servers** are network endpoints that expose tools to compatible clients. As of August 2026, Gobii's endpoint provides 16 tools for operating persistent AI agents through one authenticated connection ([Gobii, Remote MCP](https://docs.gobii.ai/developers/mcp-server), retrieved August 1, 2026).
 
-The [Model Context Protocol](https://modelcontextprotocol.io/specification/2025-11-25) standardizes client-server exchanges. It covers tools, resources, prompts, and related capabilities. This implementation focuses on tools: callers list the operations their credentials permit, then invoke them through JSON-RPC messages. Persistence is the anchor. An agent's charter, schedule, apps, files, peer links, and history all remain in Gobii. Rather than copying a worker into the caller, the endpoint provides a controlled route to it.
+The [Model Context Protocol](https://modelcontextprotocol.io/specification/2025-11-25) standardizes client-server exchanges. It covers tools, resources, prompts, and related capabilities. This implementation focuses on tools and authenticated file resources: callers discover the operations their credentials permit, then invoke them through JSON-RPC messages or read returned resource links. Persistence is the anchor. An agent's charter, schedule, apps, files, peer links, and history all remain in Gobii. Rather than copying a worker into the caller, the endpoint provides a controlled route to it.
 
 ## How Does Gobii Remote MCP Work?
 
@@ -70,7 +70,7 @@ This isn't a second task system. Timeline reads use durable cursors, and the wai
 
 ## What Can an MCP Client Do With Gobii Agents?
 
-Today, the Remote MCP server exposes 15 tools in four practical groups: six for agent lifecycle and configuration, three for peer links, four for messaging and visibility, and two for files ([Gobii, Remote MCP tools](https://docs.gobii.ai/developers/mcp-server), retrieved July 18, 2026).
+Today, the Remote MCP server exposes 16 tools in four practical groups: six for agent lifecycle and configuration, three for peer links, four for messaging and visibility, and three for files and resources ([Gobii, Remote MCP tools](https://docs.gobii.ai/developers/mcp-server), retrieved August 1, 2026).
 
 <table>
   <thead>
@@ -80,9 +80,11 @@ Today, the Remote MCP server exposes 15 tools in four practical groups: six for 
     <tr><td>Agent lifecycle</td><td><code>gobii_list_agents</code>, <code>gobii_get_agent</code>, <code>gobii_create_agent</code>, <code>gobii_update_agent</code>, <code>gobii_archive_agent</code>, <code>gobii_get_agent_config_options</code></td><td>Create an operations agent, inspect supported configuration, then set its schedule and credit policy.</td></tr>
     <tr><td>Peer coordination</td><td><code>gobii_list_agent_links</code>, <code>gobii_link_agents</code>, <code>gobii_unlink_agents</code></td><td>Link a research agent to a reporting agent while preserving each worker's timeline.</td></tr>
     <tr><td>Messaging and visibility</td><td><code>gobii_send_agent_message</code>, <code>gobii_get_agent_timeline</code>, <code>gobii_get_agent_debug_trace</code>, <code>gobii_wait_for_agent_event</code></td><td>Send a brief, wait for a matching event, then inspect the result or sanitized debug context.</td></tr>
-    <tr><td>Files</td><td><code>gobii_list_agent_files</code>, <code>gobii_upload_agent_file</code></td><td>Upload a brief, attach it to a message, and list the agent's filespace afterward.</td></tr>
+    <tr><td>Files and resources</td><td><code>gobii_read_agent_resource</code>, <code>gobii_list_agent_files</code>, <code>gobii_upload_agent_file</code></td><td>Upload a brief, attach it to a message, list the agent's filespace, and read a returned resource.</td></tr>
   </tbody>
 </table>
+
+The initial release shipped with 15 tools. `gobii_read_agent_resource` was added afterward so tool-centric clients can retrieve authenticated `gobii://` files and images as native MCP content; clients with resource support can also use `resources/read`.
 
 <!-- [PERSONAL EXPERIENCE] -->
 
@@ -172,11 +174,11 @@ Store the key in an environment variable or managed secret. Never paste it into 
 
 Remote MCP v1 has three deliberate boundaries: it issues no `Mcp-Session-Id`, exposes no standalone GET SSE stream, and does not create an MCP task or run abstraction. It maps MCP calls onto Gobii's existing agent timeline instead ([Gobii, Remote MCP limitations](https://docs.gobii.ai/developers/mcp-server), retrieved July 18, 2026).
 
-On the wire, this is Streamable HTTP. Send each JSON-RPC message as a new `POST` whose `Accept` header permits both `application/json` and `text/event-stream`, matching the negotiated content types expected by compatible clients. Requests return JSON; notifications or responses receive `202 Accepted`. Version 1 advertises tools only. File operations use agent filespaces; before referencing especially large assets from a message, place them there through a suitable transfer path outside MCP. Arbitrary URL fetching is excluded. These boundaries narrow troubleshooting considerably. `GET /api/v1/mcp/` returns the expected `405 Method Not Allowed`. Use MCP initialization or the documented `POST` smoke flow for a meaningful check; clients that probe standalone SSE should be reconfigured for Streamable HTTP before diagnosis continues.
+On the wire, this is Streamable HTTP. Send each JSON-RPC message as a new `POST` whose `Accept` header permits both `application/json` and `text/event-stream`, matching the negotiated content types expected by compatible clients. Requests return JSON; notifications or responses receive `202 Accepted`. Version 1 advertises tools and authenticated resources, but not prompts. File operations use agent filespaces; before referencing especially large assets from a message, place them there through a suitable transfer path outside MCP. Arbitrary URL fetching is excluded. These boundaries narrow troubleshooting considerably. `GET /api/v1/mcp/` returns the expected `405 Method Not Allowed`. Use MCP initialization or the documented `POST` smoke flow for a meaningful check; clients that probe standalone SSE should be reconfigured for Streamable HTTP before diagnosis continues.
 
 ## Frequently Asked Questions
 
-These five answers cover the distinctions and v1 constraints that most often affect setup. They reflect the 15-tool Remote MCP surface and the separate connected-server flow documented by Gobii as of July 18, 2026 ([Gobii, Remote MCP](https://docs.gobii.ai/developers/mcp-server), retrieved July 18, 2026).
+These five answers cover the distinctions and v1 constraints that most often affect setup. They reflect the 16-tool Remote MCP surface and the separate connected-server flow documented by Gobii as of August 1, 2026 ([Gobii, Remote MCP](https://docs.gobii.ai/developers/mcp-server), retrieved August 1, 2026).
 
 ### Is Gobii Remote MCP the same as connecting an MCP server to a Gobii?
 
@@ -196,8 +198,8 @@ Yes. Personal keys expose agents available to that user. Organization keys scope
 
 ### Does Remote MCP v1 expose resources, prompts, or a standalone SSE stream?
 
-No. Version 1 exposes MCP tools rather than resources or prompts. It returns JSON for requests and accepts notifications with 202 responses, but it does not open a standalone GET SSE stream or issue MCP session IDs.
+It exposes tools and authenticated file resources, but not prompts. Standard resource-capable clients can call `resources/read`; tool-centric clients can use `gobii_read_agent_resource`. The endpoint returns JSON for requests and accepts notifications with 202 responses, but it does not open a standalone GET SSE stream or issue MCP session IDs.
 
 ## Start With a Narrow Remote MCP Connection
 
-Its documented 15-tool catalog supports a staged rollout: begin with agent discovery, retrieval, timeline reading, messaging, and event waiting ([Gobii, Remote MCP](https://docs.gobii.ai/developers/mcp-server?utm_source=blog&utm_medium=web&utm_campaign=20260519&utm_content=cta), retrieved July 18, 2026). Verify ownership and observe a complete exchange before widening the allowlist to mutation, coordination, debug, or file operations. That sequence creates an auditable, reversible baseline.
+Its documented 16-tool catalog supports a staged rollout: begin with agent discovery, retrieval, timeline reading, messaging, and event waiting ([Gobii, Remote MCP](https://docs.gobii.ai/developers/mcp-server?utm_source=blog&utm_medium=web&utm_campaign=20260519&utm_content=cta), retrieved August 1, 2026). Verify ownership and observe a complete exchange before widening the allowlist to mutation, coordination, debug, or file operations. That sequence creates an auditable, reversible baseline.
