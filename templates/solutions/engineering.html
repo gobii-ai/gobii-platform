@@ -7,120 +7,22 @@
 {{ block.super }}
 {% include "solutions/_seo_meta.html" %}
 <style>
-  .engineering-panel {
+  .engineering-hero-k {
     position: relative;
     overflow: hidden;
-    isolation: isolate;
+    background: #faf9fe;
   }
-
-  .engineering-panel::before {
+  .engineering-hero-k::before {
     content: "";
     position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(circle at 20% 25%, rgba(79, 70, 229, 0.16) 0%, rgba(79, 70, 229, 0) 55%),
-      radial-gradient(circle at 75% 35%, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0) 60%),
-      radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.1) 0%, rgba(129, 140, 248, 0) 70%);
-    opacity: 0.8;
-    filter: blur(40px);
+    top: -260px;
+    right: -140px;
+    width: 720px;
+    height: 520px;
+    border-radius: 50%;
     pointer-events: none;
-    z-index: 2;
-  }
-
-  .engineering-panel::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
-    pointer-events: none;
-    z-index: 3;
-    mix-blend-mode: lighten;
-  }
-
-  .engineering-gradient-bg {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.35) 0%, rgba(129, 140, 248, 0.4) 40%, rgba(59, 130, 246, 0.3) 100%);
-    -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
-    mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
-  }
-
-  .engineering-content {
-    position: relative;
-    z-index: 10;
-    min-height: inherit;
-  }
-
-  .engineering-content::after {
-    content: "";
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 20;
-    height: 10rem;
-    pointer-events: none;
-    background: linear-gradient(to top, #fff 0%, rgba(255, 255, 255, 0.8) 50%, rgba(255, 255, 255, 0) 100%);
-  }
-
-  /* Hero image as atmospheric background element */
-  .hero-image-bg {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
-    pointer-events: none;
-    overflow: hidden;
-  }
-
-  .hero-image-bg img {
-    position: absolute;
-    right: -5%;
-    top: 0;
-    width: 70%;
-    height: 100%;
-    object-fit: cover;
-    object-position: 50% 75%;
-    opacity: 1;
-    -webkit-mask-image:
-      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
-      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
-    -webkit-mask-composite: source-in;
-    mask-image:
-      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
-      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
-    mask-composite: intersect;
-  }
-
-  @media (max-width: 1023px) {
-    .hero-image-bg img {
-      right: -10%;
-      width: 100%;
-      object-position: 65% 72%;
-      opacity: 0.45;
-      -webkit-mask-image:
-        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
-        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
-      mask-image:
-        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
-        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
-    }
-
-    .engineering-panel::after {
-      background: linear-gradient(90deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.6) 40%, rgba(255, 255, 255, 0.3) 70%, transparent 100%),
-                  linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.6) 100%);
-    }
-  }
-
-  .feature-card {
-    transition: all 0.2s ease;
-  }
-
-  .feature-card:hover {
-    transform: translateY(-2px);
-    border-color: rgba(79, 70, 229, 0.26);
-    box-shadow: 0 24px 48px -28px rgba(79, 70, 229, 0.35);
+    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
+    filter: blur(60px);
   }
 
   .code-block {
@@ -152,49 +54,16 @@
 
 {% block content %}
 <!-- Hero Section -->
-<div class="relative engineering-panel -mt-16 min-h-[600px] lg:min-h-[700px]">
-  <div class="engineering-gradient-bg" aria-hidden="true"></div>
-
-  <!-- Hero image as atmospheric background -->
-  <div class="hero-image-bg" aria-hidden="true">
-    <picture>
-      <source
-        type="image/webp"
-        srcset="{% static 'images/solutions/engineering-hero-640.webp' %} 640w,
-                {% static 'images/solutions/engineering-hero-960.webp' %} 960w,
-                {% static 'images/solutions/engineering-hero-1280.webp' %} 1280w,
-                {% static 'images/solutions/engineering-hero-1920.webp' %} 1920w"
-        sizes="(max-width: 1023px) 100vw, 70vw"
-      >
-      <img
-        src="{% static 'images/solutions/engineering-hero-1280.jpg' %}"
-        srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
-                {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
-                {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
-                {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w"
-        sizes="(max-width: 1023px) 100vw, 70vw"
-        alt=""
-        width="1280"
-        height="543"
-        loading="eager"
-        fetchpriority="high"
-        decoding="async"
-      >
-    </picture>
-  </div>
-
-  <!-- Grid pattern overlay -->
-  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[4]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
-
-  <section class="relative engineering-content">
+<div class="relative engineering-hero-k -mt-16">
+  <section class="relative">
     <div class="relative max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
 
       <!-- Hero Content -->
       <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
-        <p class="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-violet-800">AI Agent API</p>
+        <p class="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">AI Agent API</p>
         <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
           Deploy and manage
-          <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">always-on AI employees</span>
+          <span class="font-normal bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">always-on AI employees</span>
         </h1>
 
         <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
@@ -207,14 +76,14 @@
             <input type="hidden" name="source_page" value="engineering_hero" />
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="api_keys" />
-            <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
+            <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 text-white font-semibold rounded-lg transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
               {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
               <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
             </button>
           </form>
-          <a href="https://docs.gobii.ai/developers/developer-agents" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
+          <a href="https://docs.gobii.ai/developers/developer-agents" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-violet-200 bg-white text-slate-900 font-medium rounded-lg hover:border-violet-400 hover:text-violet-700 shadow-sm transition-all duration-200">
             Read the Agent API docs
           </a>
         </div>
@@ -289,7 +158,7 @@ agent = response.<span class="function">json</span>()
 <!-- Platform Capabilities Section -->
 <section class="relative py-20 lg:py-28 overflow-hidden">
   <!-- Background -->
-  <div class="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-900 to-indigo-950"></div>
+  <div class="absolute inset-0" style="background:linear-gradient(125deg,#241a3f,#46208c 70%,#7c3aed 130%)"></div>
   <div class="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(120,119,198,0.3),transparent)]"></div>
 
   <!-- Grid pattern -->
@@ -300,7 +169,7 @@ agent = response.<span class="function">json</span>()
       <h2 class="text-3xl sm:text-4xl lg:text-5xl font-light text-white tracking-tight">
         One API for the full employee lifecycle
       </h2>
-      <p class="mt-4 text-lg text-slate-400 max-w-2xl mx-auto">
+      <p class="mt-4 text-lg text-violet-200 max-w-2xl mx-auto">
         Deploy the agent, give it recurring responsibilities, connect its tools, inspect its work, and pause or update it without rebuilding your infrastructure.
       </p>
     </div>
@@ -319,7 +188,7 @@ agent = response.<span class="function">json</span>()
             <span class="px-3 py-1 rounded-full bg-violet-500/10 text-violet-400 text-xs font-medium border border-violet-500/20">Long-lived by default</span>
           </div>
           <h3 class="text-xl font-semibold text-white mb-3">Agent lifecycle</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
+          <p class="text-violet-200 leading-relaxed mb-6">
             Create an AI employee with a charter, then retrieve, update, activate, deactivate, or delete it through stable REST resources. Configuration and state persist between interactions.
           </p>
           <div class="flex flex-wrap gap-2">
@@ -332,14 +201,14 @@ agent = response.<span class="function">json</span>()
       </div>
 
       <!-- Schedules and events -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-indigo-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-indigo-500/20 transition-all duration-500"></div>
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-violet-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
         <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg shadow-indigo-500/25 mb-6">
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/25 mb-6" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
             <i data-lucide="clock-3" class="w-6 h-6 text-white"></i>
           </div>
           <h3 class="text-xl font-semibold text-white mb-3">Schedules and events</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
+          <p class="text-violet-200 leading-relaxed mb-6">
             Wake employees on cron-like schedules, inbound messages, or webhooks. Long-running responsibilities continue without an open browser tab or synchronous request.
           </p>
           <div class="flex flex-wrap gap-2">
@@ -350,14 +219,14 @@ agent = response.<span class="function">json</span>()
       </div>
 
       <!-- Tools and connected apps -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-purple-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute top-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-purple-500/20 transition-all duration-500"></div>
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 left-0 w-48 h-48 bg-violet-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
         <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-500/25 mb-6">
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/25 mb-6" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
             <i data-lucide="plug" class="w-6 h-6 text-white"></i>
           </div>
           <h3 class="text-xl font-semibold text-white mb-3">Tools and connected apps</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
+          <p class="text-violet-200 leading-relaxed mb-6">
             Equip each employee with MCP servers and connected app tools. Keep access scoped at the platform, organization, user, or individual-agent level.
           </p>
           <div class="flex flex-wrap gap-2">
@@ -368,17 +237,17 @@ agent = response.<span class="function">json</span>()
       </div>
 
       <!-- Persistent workspace - Large -->
-      <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-fuchsia-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute bottom-0 right-0 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl translate-y-1/2 translate-x-1/2 group-hover:bg-fuchsia-500/20 transition-all duration-500"></div>
+      <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute bottom-0 right-0 w-64 h-64 bg-violet-500/10 rounded-full blur-3xl translate-y-1/2 translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
         <div class="relative">
           <div class="flex items-start justify-between mb-6">
-            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-fuchsia-500 to-pink-600 flex items-center justify-center shadow-lg shadow-fuchsia-500/25">
+            <div class="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/25" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
               <i data-lucide="database" class="w-6 h-6 text-white"></i>
             </div>
-            <span class="px-3 py-1 rounded-full bg-fuchsia-500/10 text-fuchsia-400 text-xs font-medium border border-fuchsia-500/20">Per-Agent</span>
+            <span class="px-3 py-1 rounded-full bg-violet-500/10 text-violet-400 text-xs font-medium border border-violet-500/20">Per-Agent</span>
           </div>
           <h3 class="text-xl font-semibold text-white mb-3">Persistent workspace</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
+          <p class="text-violet-200 leading-relaxed mb-6">
             Give every employee durable files, structured data, browser state, and working context. Their workspace survives across scheduled runs, messages, and tool calls.
           </p>
           <div class="flex flex-wrap gap-2">
@@ -391,14 +260,14 @@ agent = response.<span class="function">json</span>()
       </div>
 
       <!-- Messages and timelines -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-cyan-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute top-0 right-0 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-cyan-500/20 transition-all duration-500"></div>
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 right-0 w-48 h-48 bg-violet-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
         <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 mb-6">
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/25 mb-6" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
             <i data-lucide="messages-square" class="w-6 h-6 text-white"></i>
           </div>
           <h3 class="text-xl font-semibold text-white mb-3">Messages and timelines</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
+          <p class="text-violet-200 leading-relaxed mb-6">
             Send work into an employee, fetch its event timeline, check processing state, and inspect recent browser tasks from your own application.
           </p>
           <div class="flex flex-wrap gap-2">
@@ -409,14 +278,14 @@ agent = response.<span class="function">json</span>()
       </div>
 
       <!-- Browser automation -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-emerald-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute bottom-0 left-0 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-emerald-500/20 transition-all duration-500"></div>
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-violet-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
         <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 mb-6">
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/25 mb-6" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
             <i data-lucide="monitor" class="w-6 h-6 text-white"></i>
           </div>
           <h3 class="text-xl font-semibold text-white mb-3">Browser automation</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
+          <p class="text-violet-200 leading-relaxed mb-6">
             Employees can use real cloud browsers for multistep web work, preserve authenticated sessions, download files, and capture visual output.
           </p>
           <div class="flex flex-wrap gap-2">
@@ -427,14 +296,14 @@ agent = response.<span class="function">json</span>()
       </div>
 
       <!-- Team controls -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-amber-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute top-0 left-0 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-amber-500/20 transition-all duration-500"></div>
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 left-0 w-48 h-48 bg-violet-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
         <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/25 mb-6">
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/25 mb-6" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
             <i data-lucide="users" class="w-6 h-6 text-white"></i>
           </div>
           <h3 class="text-xl font-semibold text-white mb-3">Team controls</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
+          <p class="text-violet-200 leading-relaxed mb-6">
             Create organization-owned employees with shared API keys, choose intelligence tiers, set daily credit limits, and keep ownership separate from individual users.
           </p>
           <div class="flex flex-wrap gap-2">
@@ -458,7 +327,7 @@ agent = response.<span class="function">json</span>()
               <h3 class="text-xl font-semibold text-white">Gobii Cloud or self-hosted</h3>
               <span class="px-2.5 py-0.5 rounded-full bg-slate-700/50 text-slate-300 text-xs font-medium border border-slate-600/50">Open Source</span>
             </div>
-            <p class="text-slate-400 leading-relaxed">
+            <p class="text-violet-200 leading-relaxed">
               Use Gobii Cloud for the fastest path to production, or run the same open-source platform in your infrastructure. Gobii builds on browser-use and adds the durable runtime, communication, memory, tools, and controls needed for always-on employees.
             </p>
           </div>
@@ -488,8 +357,8 @@ agent = response.<span class="function">json</span>()
     <div class="grid md:grid-cols-2 gap-8">
       <!-- Use Case 1 -->
       <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
-        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center">
-          <i data-lucide="database" class="w-6 h-6 text-indigo-600"></i>
+        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-violet-100 flex items-center justify-center">
+          <i data-lucide="database" class="w-6 h-6 text-violet-600"></i>
         </div>
         <div>
           <h3 class="text-lg font-medium text-gray-900 mb-2">Research and monitoring employees</h3>
@@ -514,8 +383,8 @@ agent = response.<span class="function">json</span>()
 
       <!-- Use Case 3 -->
       <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
-        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
-          <i data-lucide="refresh-cw" class="w-6 h-6 text-purple-600"></i>
+        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-violet-100 flex items-center justify-center">
+          <i data-lucide="refresh-cw" class="w-6 h-6 text-violet-600"></i>
         </div>
         <div>
           <h3 class="text-lg font-medium text-gray-900 mb-2">Embedded agent experiences</h3>
@@ -527,8 +396,8 @@ agent = response.<span class="function">json</span>()
 
       <!-- Use Case 4 -->
       <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
-        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-fuchsia-100 flex items-center justify-center">
-          <i data-lucide="eye" class="w-6 h-6 text-fuchsia-600"></i>
+        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-violet-100 flex items-center justify-center">
+          <i data-lucide="eye" class="w-6 h-6 text-violet-600"></i>
         </div>
         <div>
           <h3 class="text-lg font-medium text-gray-900 mb-2">Cross-tool workflow employees</h3>
@@ -619,7 +488,7 @@ agent = response.<span class="function">json</span>()
   <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
     <div class="grid lg:grid-cols-[0.9fr_1.1fr] gap-10 lg:gap-16 items-start">
       <div class="lg:sticky lg:top-24">
-        <p class="mb-5 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">Built for ongoing work</p>
+        <p class="mb-5 text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Built for ongoing work</p>
         <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
           More than a one-off agent run
         </h2>
@@ -723,7 +592,7 @@ agent = response.<span class="function">json</span>()
           <div class="grid gap-4 md:grid-cols-4">
             <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="terminal" class="w-4 h-4 text-indigo-600"></i>
+                <i data-lucide="terminal" class="w-4 h-4 text-violet-600"></i>
                 API
               </div>
               <p class="mt-2 text-sm leading-6 text-slate-600">Create employees, change configuration, schedule work, pause, resume, or delete.</p>
@@ -737,14 +606,14 @@ agent = response.<span class="function">json</span>()
             </div>
             <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="webhook" class="w-4 h-4 text-cyan-600"></i>
+                <i data-lucide="webhook" class="w-4 h-4 text-violet-600"></i>
                 Observe
               </div>
               <p class="mt-2 text-sm leading-6 text-slate-600">Read timelines, processing state, browser tasks, messages, and deliverables.</p>
             </div>
             <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="shield-check" class="w-4 h-4 text-emerald-600"></i>
+                <i data-lucide="shield-check" class="w-4 h-4 text-violet-600"></i>
                 Review
               </div>
               <p class="mt-2 text-sm leading-6 text-slate-600">Scope credentials, approve sensitive actions, and keep important outputs auditable.</p>
@@ -761,12 +630,12 @@ agent = response.<span class="function">json</span>()
   <!-- Centered radial gradient that fades to transparent on all edges -->
   <div class="absolute inset-0 pointer-events-none">
     <div class="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_50%_50%,rgba(139,92,246,0.15),transparent_70%)]"></div>
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_50%_50%,rgba(99,102,241,0.08),transparent_60%)]"></div>
+    <div class="absolute inset-0" style="background:radial-gradient(ellipse 90% 60% at 50% 50%,rgba(139,92,246,0.08),transparent 60%)"></div>
   </div>
 
   <!-- Soft floating orbs with heavy blur -->
   <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[450px] h-[450px] bg-violet-300/20 rounded-full blur-[120px] pointer-events-none"></div>
-  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-indigo-300/15 rounded-full blur-[100px] pointer-events-none"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] rounded-full blur-[100px] pointer-events-none" style="background:rgba(196,181,253,0.15)"></div>
 
   <div class="relative max-w-4xl mx-auto px-6 text-center">
     <h2 class="text-4xl sm:text-5xl font-light text-gray-900 tracking-tight">
@@ -782,14 +651,14 @@ agent = response.<span class="function">json</span>()
         <input type="hidden" name="source_page" value="engineering_final_cta" />
         <input type="hidden" name="trial_onboarding" value="1" />
         <input type="hidden" name="trial_onboarding_target" value="api_keys" />
-        <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
+        <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 text-white font-semibold rounded-lg transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
           {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
           <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>
         </button>
       </form>
-      <a href="https://docs.gobii.ai/developers/developer-agents" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
+      <a href="https://docs.gobii.ai/developers/developer-agents" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 border border-violet-200 bg-white text-slate-900 font-medium rounded-lg hover:border-violet-400 hover:text-violet-700 shadow-sm transition-all duration-200">
         Read the Agent API docs
       </a>
     </div>

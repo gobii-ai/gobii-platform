@@ -24,53 +24,45 @@
 <meta name="twitter:image:alt" content="{{ comparisons_social_image_alt }}">
 <script type="application/ld+json">{{ comparisons_structured_data_json }}</script>
 <script type="application/ld+json">{{ comparisons_breadcrumb_json }}</script>
+<style>
+  .comparisons-hero {
+    position: relative;
+    overflow: hidden;
+    background: #faf9fe;
+  }
+  .comparisons-hero::before {
+    content: "";
+    position: absolute;
+    top: -260px;
+    right: -140px;
+    width: 720px;
+    height: 520px;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
+    filter: blur(60px);
+  }
+</style>
 {% endblock %}
 
 {% block content %}
 <main id="main-content" class="bg-white">
-  <section class="relative isolate overflow-hidden bg-slate-950 text-white">
-    <picture>
-      <source
-        type="image/webp"
-        srcset="{% static 'images/solutions/engineering-hero-640.webp' %} 640w,
-                {% static 'images/solutions/engineering-hero-960.webp' %} 960w,
-                {% static 'images/solutions/engineering-hero-1280.webp' %} 1280w,
-                {% static 'images/solutions/engineering-hero-1920.webp' %} 1920w"
-        sizes="100vw"
-      >
-      <img
-        src="{% static 'images/solutions/engineering-hero-1280.jpg' %}"
-        srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
-                {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
-                {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
-                {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w"
-        sizes="100vw"
-        alt="AI agent platform evaluation workspace"
-        class="absolute inset-0 h-full w-full object-cover"
-        width="1280"
-        height="720"
-        loading="eager"
-        decoding="async"
-        fetchpriority="high"
-        style="opacity: 0.72;"
-      >
-    </picture>
-    <div class="absolute inset-0" style="background: linear-gradient(90deg, rgba(2, 6, 23, 0.82) 0%, rgba(15, 23, 42, 0.68) 48%, rgba(15, 23, 42, 0.34) 100%);"></div>
+  <section class="comparisons-hero relative isolate">
     <div class="relative mx-auto max-w-6xl px-6 py-20 sm:px-8 sm:py-24 lg:px-12 lg:py-28">
-      <div class="max-w-3xl rounded-lg border border-white/15 p-6 sm:p-8 lg:p-10" style="background: rgba(2, 6, 23, 0.58); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
-        <p class="text-sm font-semibold uppercase text-cyan-200">Gobii comparisons</p>
-        <h1 class="mt-5 text-4xl font-light leading-[1.08] text-white sm:text-5xl lg:text-6xl">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold uppercase text-violet-600">Gobii comparisons</p>
+        <h1 class="mt-5 text-4xl font-light tracking-tight leading-[1.08] text-slate-950 sm:text-5xl lg:text-6xl">
           AI agent platform comparisons
         </h1>
-        <p class="mt-6 max-w-2xl text-lg leading-8 text-cyan-50">
+        <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
           Evaluate Gobii against other AI agent platforms with practical criteria for deployment, browser automation, operations, and production readiness.
         </p>
         <div class="mt-9 flex flex-col gap-3 sm:flex-row">
-          <a href="#comparison-guides" class="inline-flex items-center justify-center rounded-lg bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-50">
+          <a href="#comparison-guides" class="inline-flex items-center justify-center rounded-lg px-6 py-3 text-sm font-semibold text-white transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
             View available comparisons
             <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
           </a>
-          <a href="{% url 'pages:library' %}" class="inline-flex items-center justify-center rounded-lg border border-white/50 bg-slate-950/35 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/15">
+          <a href="{% url 'pages:library' %}" class="inline-flex items-center justify-center rounded-lg border border-violet-200 bg-white px-6 py-3 text-sm font-semibold text-slate-900 transition hover:border-violet-400 hover:text-violet-700">
             Browse agent templates
           </a>
         </div>
@@ -81,16 +73,16 @@
   <section class="bg-white py-16 sm:py-20">
     <div class="mx-auto max-w-6xl px-6 sm:px-8 lg:px-12">
       <div class="max-w-3xl">
-        <h2 class="text-3xl font-light text-slate-950 sm:text-4xl">Compare the platform, not just the prompt box</h2>
+        <h2 class="text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Compare the platform, not just the prompt box</h2>
         <p class="mt-4 text-base leading-7 text-slate-700">
           AI agent tools can look similar in a demo. The important differences show up in how they run, recover, integrate, and control data once real work starts.
         </p>
       </div>
 
       <div class="mt-10 grid gap-5 md:grid-cols-2">
-        <article class="rounded-lg border border-cyan-200 bg-cyan-50 p-6">
+        <article class="rounded-lg border border-violet-200 bg-violet-50 p-6">
           <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-cyan-700 text-white">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
               <i aria-hidden="true" data-lucide="server-cog" class="size-5"></i>
             </span>
             <h3 class="text-lg font-semibold text-slate-950">Deployment model</h3>
@@ -100,9 +92,9 @@
           </p>
         </article>
 
-        <article class="rounded-lg border border-emerald-200 bg-emerald-50 p-6">
+        <article class="rounded-lg border border-violet-200 bg-violet-50 p-6">
           <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-emerald-700 text-white">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
               <i aria-hidden="true" data-lucide="monitor-play" class="size-5"></i>
             </span>
             <h3 class="text-lg font-semibold text-slate-950">Browser automation</h3>
@@ -112,9 +104,9 @@
           </p>
         </article>
 
-        <article class="rounded-lg border border-amber-200 bg-amber-50 p-6">
+        <article class="rounded-lg border border-violet-200 bg-violet-50 p-6">
           <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-amber-700 text-white">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
               <i aria-hidden="true" data-lucide="activity" class="size-5"></i>
             </span>
             <h3 class="text-lg font-semibold text-slate-950">Agent operations</h3>
@@ -124,9 +116,9 @@
           </p>
         </article>
 
-        <article class="rounded-lg border border-rose-200 bg-rose-50 p-6">
+        <article class="rounded-lg border border-violet-200 bg-violet-50 p-6">
           <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg bg-rose-700 text-white">
+            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
               <i aria-hidden="true" data-lucide="shield-check" class="size-5"></i>
             </span>
             <h3 class="text-lg font-semibold text-slate-950">Security and data control</h3>
@@ -139,11 +131,11 @@
     </div>
   </section>
 
-  <section id="comparison-guides" class="bg-indigo-950 py-16 text-white sm:py-20">
+  <section id="comparison-guides" class="py-16 text-white sm:py-20" style="background:linear-gradient(125deg,#241a3f,#46208c 70%,#7c3aed 130%)">
     <div class="mx-auto max-w-6xl px-6 sm:px-8 lg:px-12">
       <div class="max-w-3xl">
-        <h2 class="text-3xl font-light sm:text-4xl">Available comparisons</h2>
-        <p class="mt-4 text-base leading-7 text-indigo-100">
+        <h2 class="text-3xl font-light tracking-tight sm:text-4xl">Available comparisons</h2>
+        <p class="mt-4 text-base leading-7 text-violet-200">
           Start with focused, source-aware comparison guides for teams evaluating where to run production AI agent workflows.
         </p>
       </div>
@@ -153,7 +145,7 @@
           <article id="{{ comparison.competitor_name|slugify }}" class="rounded-lg border border-white/20 bg-white p-6 text-slate-950">
             <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p class="text-sm font-semibold text-indigo-700">{{ comparison.competitor_name }}</p>
+                <p class="text-sm font-semibold text-violet-600">{{ comparison.competitor_name }}</p>
                 <h3 class="mt-2 text-2xl font-semibold text-slate-950">{{ comparison.title }}</h3>
               </div>
               {% if comparison.status == "published" %}
@@ -165,11 +157,11 @@
             <p class="mt-5 text-sm leading-6 text-slate-700">{{ comparison.summary }}</p>
             <div class="mt-6 flex flex-wrap gap-2">
               {% for keyword in comparison.target_keywords %}
-                <span class="rounded-md bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-800">{{ keyword }}</span>
+                <span class="rounded-md bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">{{ keyword }}</span>
               {% endfor %}
             </div>
             {% if comparison.status == "published" %}
-              <a href="{% url 'proprietary:comparison_detail' slug=comparison.slug %}" class="mt-7 inline-flex items-center text-sm font-semibold text-indigo-700 hover:text-indigo-900">
+              <a href="{% url 'proprietary:comparison_detail' slug=comparison.slug %}" class="mt-7 inline-flex items-center text-sm font-semibold text-violet-600 hover:text-violet-700">
                 Read the comparison
                 <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
               </a>

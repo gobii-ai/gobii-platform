@@ -8,110 +8,22 @@
 {{ block.super }}
 {% include "solutions/_seo_meta.html" %}
 <style>
-  .sales-panel {
+  .sales-k-hero {
     position: relative;
     overflow: hidden;
-    isolation: isolate;
+    background: #faf9fe;
   }
-
-  .sales-panel::before {
+  .sales-k-hero::before {
     content: "";
     position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(circle at 20% 25%, rgba(99, 102, 241, 0.14) 0%, rgba(99, 102, 241, 0) 55%),
-      radial-gradient(circle at 75% 35%, rgba(79, 70, 229, 0.10) 0%, rgba(79, 70, 229, 0) 60%),
-      radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.08) 0%, rgba(129, 140, 248, 0) 70%);
-    opacity: 0.8;
-    filter: blur(40px);
+    top: -260px;
+    right: -140px;
+    width: 720px;
+    height: 520px;
+    border-radius: 50%;
     pointer-events: none;
-    z-index: 2;
-  }
-
-  .sales-panel::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
-    pointer-events: none;
-    z-index: 3;
-    mix-blend-mode: lighten;
-  }
-
-  .sales-gradient-bg {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.28) 0%, rgba(129, 140, 248, 0.32) 40%, rgba(79, 70, 229, 0.22) 100%);
-    -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
-    mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
-  }
-
-  .sales-content {
-    position: relative;
-    z-index: 10;
-    min-height: inherit;
-  }
-
-  .sales-content::after {
-    content: "";
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 20;
-    height: 10rem;
-    pointer-events: none;
-    background: linear-gradient(to top, #fff 0%, rgba(255, 255, 255, 0.8) 50%, rgba(255, 255, 255, 0) 100%);
-  }
-
-  /* Hero image as atmospheric background element */
-  .hero-image-bg {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
-    pointer-events: none;
-    overflow: hidden;
-  }
-
-  .hero-image-bg img {
-    position: absolute;
-    right: -5%;
-    top: 0;
-    width: 80%;
-    height: 100%;
-    object-fit: cover;
-    object-position: 100% 50%;
-    opacity: 1;
-    -webkit-mask-image:
-      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
-      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
-    -webkit-mask-composite: source-in;
-    mask-image:
-      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
-      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
-    mask-composite: intersect;
-  }
-
-  @media (max-width: 1023px) {
-    .hero-image-bg img {
-      right: -10%;
-      width: 110%;
-      object-position: 100% 50%;
-      opacity: 0.45;
-      -webkit-mask-image:
-        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
-        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
-      mask-image:
-        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
-        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
-    }
-
-    .sales-panel::after {
-      background: linear-gradient(90deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.6) 40%, rgba(255, 255, 255, 0.3) 70%, transparent 100%),
-                  linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.6) 100%);
-    }
+    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
+    filter: blur(60px);
   }
 
   .agent-card {
@@ -120,47 +32,23 @@
 
   .agent-card:hover {
     transform: translateY(-2px);
-    border-color: rgba(99, 102, 241, 0.26);
-    box-shadow: 0 24px 48px -28px rgba(99, 102, 241, 0.35);
+    border-color: rgba(124, 58, 237, 0.26);
+    box-shadow: 0 24px 48px -28px rgba(124, 58, 237, 0.35);
   }
 </style>
 {% endblock %}
 
 {% block content %}
 <!-- Hero Section -->
-<div class="relative sales-panel -mt-16 min-h-[600px] lg:min-h-[700px]">
-  <div class="sales-gradient-bg" aria-hidden="true"></div>
-
-  <!-- Hero image as atmospheric background -->
-  <div class="hero-image-bg" aria-hidden="true">
-    <img
-      src="{% static 'images/solutions/sales-hero.jpg' %}"
-      srcset="{% static 'images/solutions/sales-hero-640.jpg' %} 640w,
-              {% static 'images/solutions/sales-hero-960.jpg' %} 960w,
-              {% static 'images/solutions/sales-hero-1280.jpg' %} 1280w,
-              {% static 'images/solutions/sales-hero-1920.jpg' %} 1920w,
-              {% static 'images/solutions/sales-hero.jpg' %} 2816w"
-      sizes="(max-width: 1023px) 110vw, 80vw"
-      alt=""
-      width="2816"
-      height="1536"
-      loading="eager"
-      fetchpriority="high"
-      decoding="async"
-    >
-  </div>
-
-  <!-- Grid pattern overlay -->
-  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[4]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
-
-  <section class="relative sales-content">
+<div class="relative sales-k-hero -mt-16">
+  <section class="relative">
     <div class="relative max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
 
       <!-- Hero Content -->
       <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
         <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
           AI sales agents for
-          <span class="font-normal bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">outbound lead generation</span>
+          <span class="font-normal bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">outbound lead generation</span>
         </h1>
 
         <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
@@ -173,7 +61,7 @@
             <input type="hidden" name="source_page" value="sales_hero" />
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-            <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
+            <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 text-white font-semibold rounded-lg transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
               {% if not user.is_authenticated or solution_spawn_requires_trial %}
                 {% cta_text "cta_sales_launch_btn_unauth" fallback="Start Free Trial" %}
               {% else %}
@@ -184,14 +72,14 @@
               </svg>
             </button>
           </form>
-          <a href="#how-it-works" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200" data-analytics-cta-id="sales_hero_how_it_works" data-analytics-placement="hero" data-analytics-intent="view_how_it_works">
+          <a href="#how-it-works" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-violet-200 bg-white text-slate-900 hover:border-violet-400 hover:text-violet-700 font-medium rounded-lg shadow-sm transition-all duration-200" data-analytics-cta-id="sales_hero_how_it_works" data-analytics-placement="hero" data-analytics-intent="view_how_it_works">
             See how it works
           </a>
         </div>
         {% include "solutions/_crawlable_related_link.html" %}
         <p class="mt-5 text-sm text-gray-700">
           Evaluating the category first?
-          <a href="{% url 'pages:solution_sales_ai_sales_agent' %}" class="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-4 transition-colors hover:text-indigo-800 hover:decoration-indigo-500">
+          <a href="{% url 'pages:solution_sales_ai_sales_agent' %}" class="font-medium text-violet-600 underline underline-offset-4 transition-colors hover:text-violet-700">
             Read the AI sales agent guide
           </a>
           for supervised prospecting, enrichment, and seller-reviewed handoffs.
@@ -231,14 +119,13 @@
 
     <!-- Featured employee: B2B Lead Research -->
     <div class="mb-10">
-      <div class="agent-card group relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-600 p-1">
-        <div class="absolute inset-0 bg-gradient-to-br from-blue-400/20 via-transparent to-indigo-400/20 pointer-events-none"></div>
+      <div class="agent-card group relative overflow-hidden rounded-3xl p-1" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
         <div class="relative bg-white rounded-[1.35rem] p-8 lg:p-10">
           <div class="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
             <!-- Left: Content -->
             <div>
-              <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 text-xs font-semibold tracking-wide uppercase mb-6">
-                <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+              <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 text-violet-600 text-xs font-semibold tracking-wide uppercase mb-6">
+                <span class="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse"></span>
                 Most Popular
               </div>
               <h3 class="text-2xl lg:text-3xl font-medium text-gray-900 mb-4">B2B Lead Research AI Employee</h3>
@@ -247,32 +134,32 @@
               </p>
               <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-3 text-sm text-gray-600 mb-8">
                 <li class="flex items-center gap-3">
-                  <div class="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-3 h-3 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
                     </svg>
                   </div>
                   ICP-based targeting
                 </li>
                 <li class="flex items-center gap-3">
-                  <div class="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-3 h-3 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
                     </svg>
                   </div>
                   Multi-source discovery
                 </li>
                 <li class="flex items-center gap-3">
-                  <div class="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-3 h-3 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
                     </svg>
                   </div>
                   CRM integration
                 </li>
                 <li class="flex items-center gap-3">
-                  <div class="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-3 h-3 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
                     </svg>
                   </div>
@@ -284,7 +171,7 @@
                 <input type="hidden" name="source_page" value="sales_lead_hunter" />
                 <input type="hidden" name="trial_onboarding" value="1" />
                 <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-                <button type="submit" class="group/btn inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
+                <button type="submit" class="group/btn inline-flex items-center justify-center gap-2 px-6 py-3.5 text-white font-semibold rounded-lg transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
                   {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
                   <svg class="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -296,23 +183,23 @@
             <div class="hidden lg:block">
               <div class="relative">
                 <!-- Decorative gradient orb -->
-                <div class="absolute -top-8 -right-8 w-64 h-64 bg-gradient-to-br from-blue-200/60 via-indigo-200/40 to-sky-200/60 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute -top-8 -right-8 w-64 h-64 rounded-full blur-3xl pointer-events-none" style="background:radial-gradient(closest-side, rgba(168,85,247,0.28), transparent)"></div>
                 <!-- Icon cluster -->
                 <div class="relative flex items-center justify-center py-8">
                   <div class="relative">
                     <!-- Main icon -->
-                    <div class="w-28 h-28 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-blue-300/50 rotate-3">
+                    <div class="w-28 h-28 rounded-3xl flex items-center justify-center shadow-2xl rotate-3" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
                       <i data-lucide="target" class="w-14 h-14 text-white"></i>
                     </div>
                     <!-- Floating badges -->
                     <div class="absolute -top-4 -right-6 w-12 h-12 bg-white rounded-xl shadow-lg flex items-center justify-center border border-slate-100">
-                      <i data-lucide="linkedin" class="w-6 h-6 text-[#0A66C2]"></i>
+                      <i data-lucide="linkedin" class="w-6 h-6 text-violet-600"></i>
                     </div>
                     <div class="absolute -bottom-3 -left-8 w-12 h-12 bg-white rounded-xl shadow-lg flex items-center justify-center border border-slate-100">
                       <i data-lucide="building-2" class="w-6 h-6 text-gray-700"></i>
                     </div>
                     <div class="absolute top-1/2 -right-10 -translate-y-1/2 w-10 h-10 bg-white rounded-lg shadow-lg flex items-center justify-center border border-slate-100">
-                      <i data-lucide="user-plus" class="w-5 h-5 text-blue-600"></i>
+                      <i data-lucide="user-plus" class="w-5 h-5 text-violet-600"></i>
                     </div>
                   </div>
                 </div>
@@ -328,7 +215,7 @@
       <!-- Agent 2: Account Researcher -->
       <div class="agent-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
         <div class="flex items-start gap-5">
-          <div class="w-14 h-14 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200/50 flex-shrink-0">
+          <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg flex-shrink-0" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
             <i data-lucide="sparkles" class="w-7 h-7 text-white"></i>
           </div>
           <div class="flex-1 min-w-0">
@@ -340,19 +227,19 @@
         </div>
         <ul class="space-y-2.5 text-sm text-gray-500 mb-6 mt-5 pl-[4.75rem]">
           <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-violet-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Company enrichment
           </li>
           <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-violet-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Tech stack detection
           </li>
           <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-violet-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Decision-maker mapping
@@ -364,7 +251,7 @@
             <input type="hidden" name="source_page" value="sales_account_researcher" />
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-            <button type="submit" class="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
+            <button type="submit" class="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-700">
               {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
               <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -377,7 +264,7 @@
       <!-- Agent 3: Outreach Agent -->
       <div class="agent-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
         <div class="flex items-start gap-5">
-          <div class="w-14 h-14 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200/50 flex-shrink-0">
+          <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg flex-shrink-0" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
             <i data-lucide="message-circle" class="w-7 h-7 text-white"></i>
           </div>
           <div class="flex-1 min-w-0">
@@ -389,19 +276,19 @@
         </div>
         <ul class="space-y-2.5 text-sm text-gray-500 mb-6 mt-5 pl-[4.75rem]">
           <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-violet-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Personalized messaging
           </li>
           <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-violet-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Multi-channel sequences
           </li>
           <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-violet-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Smart follow-ups
@@ -413,7 +300,7 @@
             <input type="hidden" name="source_page" value="sales_outreach_agent" />
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-            <button type="submit" class="inline-flex items-center text-sm font-medium text-emerald-600 hover:text-emerald-700">
+            <button type="submit" class="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-700">
               {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
               <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -446,7 +333,7 @@
       <div class="space-y-12">
         <div class="flex gap-6">
           <div class="flex-shrink-0">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-blue-200/50">1</div>
+            <div class="w-14 h-14 rounded-2xl text-white text-xl font-medium flex items-center justify-center shadow-lg" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">1</div>
           </div>
           <div>
             <h3 class="text-xl font-medium text-gray-900 mb-3">Define your ideal customer</h3>
@@ -458,7 +345,7 @@
 
         <div class="flex gap-6">
           <div class="flex-shrink-0">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-indigo-200/50">2</div>
+            <div class="w-14 h-14 rounded-2xl text-white text-xl font-medium flex items-center justify-center shadow-lg" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">2</div>
           </div>
           <div>
             <h3 class="text-xl font-medium text-gray-900 mb-3">Your agent delivers qualified leads</h3>
@@ -466,8 +353,8 @@
               Working continuously in the background, your agent searches sources and qualifies prospects against your criteria, then reaches out with matches as they're found.
             </p>
             <!-- 24/7 badge -->
-            <div class="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 text-sm font-medium">
-              <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+            <div class="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 text-violet-700 text-sm font-medium">
+              <span class="w-2 h-2 rounded-full bg-violet-500 animate-pulse"></span>
               Always on, always prospecting
             </div>
           </div>
@@ -475,7 +362,7 @@
 
         <div class="flex gap-6">
           <div class="flex-shrink-0">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-sky-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-blue-200/50">3</div>
+            <div class="w-14 h-14 rounded-2xl text-white text-xl font-medium flex items-center justify-center shadow-lg" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">3</div>
           </div>
           <div>
             <h3 class="text-xl font-medium text-gray-900 mb-3">Refine as you go</h3>
@@ -489,16 +376,16 @@
       <!-- Right: Visual -->
       <div class="relative">
         <!-- Decorative gradient orb -->
-        <div class="absolute -top-8 -right-8 w-72 h-72 bg-gradient-to-br from-blue-200/50 via-indigo-200/30 to-sky-200/50 rounded-full blur-3xl pointer-events-none"></div>
-        <div class="absolute -bottom-8 -left-8 w-48 h-48 bg-gradient-to-br from-indigo-200/40 to-blue-200/40 rounded-full blur-2xl pointer-events-none"></div>
+        <div class="absolute -top-8 -right-8 w-72 h-72 rounded-full blur-3xl pointer-events-none" style="background:radial-gradient(closest-side, rgba(168,85,247,0.24), transparent)"></div>
+        <div class="absolute -bottom-8 -left-8 w-48 h-48 rounded-full blur-2xl pointer-events-none" style="background:radial-gradient(closest-side, rgba(124,58,237,0.2), transparent)"></div>
 
         <!-- Visual representation -->
-        <div class="relative rounded-3xl overflow-hidden shadow-2xl shadow-blue-200/40 border border-white/60 bg-gradient-to-br from-blue-50 to-indigo-50 p-8 lg:p-12">
+        <div class="relative rounded-3xl overflow-hidden shadow-2xl border border-white/60 bg-violet-50 p-8 lg:p-12">
           <div class="space-y-6">
             <!-- Lead card mock -->
-            <div class="bg-white rounded-xl p-4 shadow-lg border border-blue-100">
+            <div class="bg-white rounded-xl p-4 shadow-lg border border-violet-100">
               <div class="flex items-center gap-3 mb-3">
-                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white font-semibold text-sm">JD</div>
+                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">JD</div>
                 <div>
                   <div class="font-medium text-gray-900">New Lead Found</div>
                   <div class="text-xs text-gray-500">Just now</div>
@@ -520,15 +407,15 @@
             <!-- Stats mini -->
             <div class="grid grid-cols-3 gap-3">
               <div class="bg-white/80 rounded-lg p-3 text-center">
-                <div class="text-2xl font-light text-blue-600">47</div>
+                <div class="text-2xl font-light text-violet-600">47</div>
                 <div class="text-xs text-gray-500">Leads today</div>
               </div>
               <div class="bg-white/80 rounded-lg p-3 text-center">
-                <div class="text-2xl font-light text-blue-600">89%</div>
+                <div class="text-2xl font-light text-violet-600">89%</div>
                 <div class="text-xs text-gray-500">ICP match</div>
               </div>
               <div class="bg-white/80 rounded-lg p-3 text-center">
-                <div class="text-2xl font-light text-emerald-600">12</div>
+                <div class="text-2xl font-light text-violet-600">12</div>
                 <div class="text-xs text-gray-500">Meetings</div>
               </div>
             </div>
@@ -560,7 +447,7 @@
 
         <div class="space-y-6">
           <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-white/80 transition-colors">
-            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-200/50">
+            <div class="flex-shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
               <i data-lucide="clock" class="w-6 h-6 text-white"></i>
             </div>
             <div>
@@ -570,7 +457,7 @@
           </div>
 
           <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-white/80 transition-colors">
-            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-200/50">
+            <div class="flex-shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
               <i data-lucide="trending-up" class="w-6 h-6 text-white"></i>
             </div>
             <div>
@@ -580,7 +467,7 @@
           </div>
 
           <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-white/80 transition-colors">
-            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-200/50">
+            <div class="flex-shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
               <i data-lucide="check-circle" class="w-6 h-6 text-white"></i>
             </div>
             <div>
@@ -594,18 +481,18 @@
       <!-- Right: Testimonial -->
       <div class="relative">
         <!-- Decorative gradient orb -->
-        <div class="absolute -top-8 -right-8 w-48 h-48 bg-gradient-to-br from-blue-200/60 to-indigo-200/60 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -top-8 -right-8 w-48 h-48 rounded-full blur-3xl pointer-events-none" style="background:radial-gradient(closest-side, rgba(168,85,247,0.26), transparent)"></div>
 
-        <div class="relative bg-gradient-to-br from-blue-50 via-indigo-50/80 to-sky-50/60 rounded-3xl p-8 sm:p-10 lg:p-12 shadow-xl shadow-blue-100/50 border border-white/60">
+        <div class="relative bg-violet-50 rounded-3xl p-8 sm:p-10 lg:p-12 shadow-xl border border-white/60">
           <blockquote>
-            <svg class="w-12 h-12 text-blue-300 mb-6" fill="currentColor" viewBox="0 0 24 24">
+            <svg class="w-12 h-12 text-violet-300 mb-6" fill="currentColor" viewBox="0 0 24 24">
               <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
             </svg>
             <p class="text-xl text-gray-700 leading-relaxed">
               Our SDRs used to spend 4 hours a day on prospecting. Now our Gobii agent delivers qualified leads to their inbox every morning. Pipeline is up 3x.
             </p>
             <footer class="mt-8 flex items-center gap-4">
-              <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-semibold shadow-lg shadow-blue-300/50">MR</div>
+              <div class="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold shadow-lg" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">MR</div>
               <div>
                 <div class="font-medium text-gray-900">Michael R.</div>
                 <div class="text-sm text-gray-500">VP Sales, SaaS Company</div>
@@ -625,7 +512,7 @@
   <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
     <div class="grid lg:grid-cols-[0.9fr_1.1fr] gap-10 lg:gap-16 items-start">
       <div class="lg:sticky lg:top-24">
-        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold tracking-wide uppercase mb-6">
+        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 text-violet-700 text-xs font-semibold tracking-wide uppercase mb-6">
           <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
           Human-reviewed workflows
         </div>
@@ -732,28 +619,28 @@
           <div class="grid md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-slate-200">
             <div class="p-5">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="sliders-horizontal" class="w-4 h-4 text-indigo-600"></i>
+                <i data-lucide="sliders-horizontal" class="w-4 h-4 text-violet-600"></i>
                 Criteria
               </div>
               <p class="mt-2 text-sm leading-6 text-slate-600">Industry, company size, titles, tech stack, geography, and buying signals.</p>
             </div>
             <div class="p-5">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="search" class="w-4 h-4 text-blue-600"></i>
+                <i data-lucide="search" class="w-4 h-4 text-violet-600"></i>
                 Research
               </div>
               <p class="mt-2 text-sm leading-6 text-slate-600">Approved sources, professional profiles, company pages, databases, and spreadsheets.</p>
             </div>
             <div class="p-5">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-600"></i>
+                <i data-lucide="file-spreadsheet" class="w-4 h-4 text-violet-600"></i>
                 Export
               </div>
               <p class="mt-2 text-sm leading-6 text-slate-600">Google Sheets, CSV, webhooks, CRM-ready fields, notes, and outreach drafts.</p>
             </div>
             <div class="p-5">
               <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="user-check" class="w-4 h-4 text-sky-600"></i>
+                <i data-lucide="user-check" class="w-4 h-4 text-violet-600"></i>
                 Review
               </div>
               <p class="mt-2 text-sm leading-6 text-slate-600">Sellers validate fit, approve messaging, and own outreach decisions.</p>
@@ -769,19 +656,19 @@
 <section class="relative pt-8 pb-24 lg:pt-10 lg:pb-28 overflow-hidden isolate">
   <!-- Centered radial gradient that fades to transparent on all edges -->
   <div class="absolute inset-0 pointer-events-none">
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_50%_50%,rgba(99,102,241,0.12),transparent_70%)]"></div>
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_50%_50%,rgba(79,70,229,0.06),transparent_60%)]"></div>
+    <div class="absolute inset-0" style="background:radial-gradient(ellipse 70% 50% at 50% 50%, rgba(124,58,237,0.12), transparent 70%)"></div>
+    <div class="absolute inset-0" style="background:radial-gradient(ellipse 90% 60% at 50% 50%, rgba(168,85,247,0.06), transparent 60%)"></div>
   </div>
 
   <!-- Soft floating orbs with heavy blur -->
-  <div class="absolute top-1/2 left-1/3 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-300/20 rounded-full blur-[100px] pointer-events-none"></div>
-  <div class="absolute top-1/2 right-1/3 -translate-y-1/2 w-[400px] h-[400px] bg-violet-300/15 rounded-full blur-[100px] pointer-events-none"></div>
+  <div class="absolute top-1/2 left-1/3 -translate-y-1/2 w-[500px] h-[500px] rounded-full blur-[100px] pointer-events-none" style="background:rgba(168,85,247,0.18)"></div>
+  <div class="absolute top-1/2 right-1/3 -translate-y-1/2 w-[400px] h-[400px] rounded-full blur-[100px] pointer-events-none" style="background:rgba(124,58,237,0.14)"></div>
 
   <div class="relative max-w-4xl mx-auto px-6 text-center">
     <!-- Decorative badge -->
-    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/70 backdrop-blur-sm border border-indigo-200/50 shadow-sm mb-8">
-      <span class="w-2 h-2 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 animate-pulse"></span>
-      <span class="text-sm font-medium text-indigo-700">Ready to deploy</span>
+    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/70 backdrop-blur-sm border border-violet-200 shadow-sm mb-8">
+      <span class="w-2 h-2 rounded-full animate-pulse" style="background:linear-gradient(90deg,#7c3aed,#a855f7)"></span>
+      <span class="text-sm font-medium text-violet-700">Ready to deploy</span>
     </div>
 
     <h2 class="text-4xl sm:text-5xl font-light text-gray-900 tracking-tight">
@@ -797,14 +684,14 @@
         <input type="hidden" name="source_page" value="sales_final_cta" />
         <input type="hidden" name="trial_onboarding" value="1" />
         <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-        <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-300/50 hover:shadow-xl hover:shadow-indigo-300/60 transition-all duration-200 hover:-translate-y-0.5">
+        <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 text-white font-semibold rounded-lg transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
           {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy AI Employee{% endif %}
           <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>
         </button>
       </form>
-      <a href="#how-it-works" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-indigo-200 shadow-sm hover:shadow transition-all duration-200" data-analytics-cta-id="sales_final_cta_how_it_works" data-analytics-placement="final_cta" data-analytics-intent="view_how_it_works">
+      <a href="#how-it-works" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 border border-violet-200 bg-white text-slate-900 hover:border-violet-400 hover:text-violet-700 font-medium rounded-lg shadow-sm hover:shadow transition-all duration-200" data-analytics-cta-id="sales_final_cta_how_it_works" data-analytics-placement="final_cta" data-analytics-intent="view_how_it_works">
         See how it works
       </a>
     </div>
@@ -812,13 +699,13 @@
     <!-- Trust indicators -->
     <div class="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-4 text-sm text-gray-500">
       <div class="flex items-center gap-2">
-        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
         </svg>
         Deploy in minutes
       </div>
       <div class="flex items-center gap-2">
-        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
         </svg>
         Cancel anytime

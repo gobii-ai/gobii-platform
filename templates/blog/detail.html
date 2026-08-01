@@ -40,14 +40,14 @@
 {% block content %}
 <article class="bg-white">
   <div class="mx-auto max-w-3xl px-6 py-16">
-    <a href="{% url 'proprietary:blog_index' %}" class="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-700">
+    <a href="{% url 'proprietary:blog_index' %}" class="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-700">
       <svg class="mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
       </svg>
       Back to blog
     </a>
 
-    <h1 class="mt-6 text-4xl text-slate-900">{{ post.meta.title }}</h1>
+    <h1 class="mt-6 text-4xl font-light tracking-tight text-slate-900">{{ post.meta.title }}</h1>
 
     <div class="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-500">
       {% if post.published_at %}
@@ -60,7 +60,7 @@
       {% if post.meta.author %}
         <span class="h-1 w-1 rounded-full bg-slate-300"></span>
         {% if post.meta.author_url %}
-        <a href="{{ post.meta.author_url }}" rel="author" class="font-medium text-slate-700 underline decoration-slate-300 underline-offset-4 hover:text-blue-700">{{ post.meta.author }}</a>
+        <a href="{{ post.meta.author_url }}" rel="author" class="font-medium text-slate-700 underline decoration-slate-300 underline-offset-4 hover:text-violet-700">{{ post.meta.author }}</a>
         {% else %}
         <span>{{ post.meta.author }}</span>
         {% endif %}
@@ -89,7 +89,7 @@
       {% for recent in recent_posts %}
         <article class="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-md">
           <h3 class="text-lg text-slate-900">
-            <a href="{{ recent.url }}" class="hover:text-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white">{{ recent.title }}</a>
+            <a href="{{ recent.url }}" class="hover:text-violet-700 focus:outline-none focus-visible:ring-2 focus:ring-violet-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white">{{ recent.title }}</a>
           </h3>
           {% if recent.summary %}
             <p class="mt-3 flex-1 text-sm text-slate-600">{{ recent.summary }}</p>
