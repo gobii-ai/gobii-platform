@@ -132,6 +132,19 @@ class ResumeStateHeuristicTests(SimpleTestCase):
 
         self.assertTrue(_sqlite_call_persists_resume_state(call))
 
+    def test_domain_progress_remaining_count_column_is_persisted_resume_state(self):
+        call = _eval_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "CREATE TABLE candidate_progress (next_cursor TEXT, remaining_count INTEGER); "
+                    "INSERT INTO candidate_progress VALUES ('candidate-offset-3', 12);"
+                )
+            },
+        )
+
+        self.assertTrue(_sqlite_call_persists_resume_state(call))
+
     def test_domain_resume_state_survives_a_schedule_write_in_the_same_batch(self):
         call = _eval_tool_call(
             "sqlite_batch",

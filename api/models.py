@@ -12249,6 +12249,9 @@ class OutboundEmailReview(models.Model):
     content_hash = models.CharField(max_length=64)
     approved_version = models.PositiveIntegerField(null=True, blank=True)
     approved_content_hash = models.CharField(max_length=64, blank=True)
+    rendered_html_body = models.TextField(blank=True)
+    rendered_plaintext_body = models.TextField(blank=True)
+    rendered_includes_throttle_footer = models.BooleanField(default=False)
     queued_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     last_edited_at = models.DateTimeField(null=True, blank=True)
@@ -12274,6 +12277,16 @@ class OutboundEmailReview(models.Model):
         indexes = [
             models.Index(fields=["agent", "status", "-queued_at"], name="outbox_agent_status_idx"),
             models.Index(fields=["status", "expires_at"], name="outbox_status_expiry_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent"],
+                condition=models.Q(
+                    status="pending",
+                    rendered_includes_throttle_footer=True,
+                ),
+                name="outbox_one_pending_throttle_footer",
+            ),
         ]
 
     def __str__(self) -> str:

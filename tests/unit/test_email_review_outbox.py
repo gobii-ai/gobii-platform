@@ -6,16 +6,18 @@ from unittest.mock import patch
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 from waffle.testutils import override_flag
 
 from api.agent.comms.outbound_delivery import (
+    _approved_email_transport_content,
     _claim_email_for_delivery,
     _prepare_email_attachments,
     deliver_agent_email,
 )
+from api.agent.comms.email_footer_service import append_footer_if_needed
 from api.agent.comms.email_threading import get_message_contact_address
 from api.agent.tools.email_sender import execute_send_email
 from api.models import (
@@ -42,8 +44,10 @@ from api.services.outbound_email_policy import (
 )
 from api.services.outbound_email_review import (
     OutboundEmailReviewError,
+    StaleOutboxVersionError,
     approve_review,
     compute_message_content_hash,
+    discard_review,
     expire_review_if_needed,
     queue_message_for_review,
     retry_review,
@@ -52,6 +56,7 @@ from api.services.outbound_email_review import (
 from api.services.persistent_agents import PersistentAgentProvisioningService
 from api.tasks.outbox import reconcile_approved_outbox_emails
 from console.outbox_api_views import serialize_outbox_review
+from config.redis_client import _FakeRedis
 from constants.feature_flags import EMAIL_REVIEW_OUTBOX
 
 
@@ -487,6 +492,165 @@ class EmailReviewOutboxTests(TestCase):
         self.assertIn("<p>First line<br />Second &amp; line</p>", payload["bodyHtml"])
         self.assertIn('class="email-body"', payload["bodyHtml"])
 
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_approval_reuses_the_exact_reviewed_transport_content(self, _delay_mock):
+        message = self._message()
+        message.body = "First line\nSecond & line"
+        message.save(update_fields=["body"])
+        review = queue_message_for_review(message)
+        reviewed_payload = serialize_outbox_review(review, detail=True)
+
+        approve_review(review, actor=self.owner, expected_version=1)
+
+        review.refresh_from_db()
+        message.refresh_from_db()
+        self.assertEqual(review.rendered_html_body, reviewed_payload["bodyHtml"])
+        self.assertEqual(
+            review.rendered_plaintext_body,
+            "First line\nSecond & line",
+        )
+        frozen_content = _approved_email_transport_content(message)
+        self.assertIsNotNone(frozen_content)
+        html_body, plaintext_body = frozen_content
+        self.assertEqual(html_body, review.rendered_html_body)
+        self.assertEqual(plaintext_body, review.rendered_plaintext_body)
+
+    def test_saved_body_edit_replaces_the_reviewed_transport_revision(self):
+        review = queue_message_for_review(self._message())
+        original_html = review.rendered_html_body
+
+        review = update_pending_review_message(
+            review,
+            actor=self.owner,
+            expected_version=1,
+            changes={"body": "Replacement & final"},
+        )
+
+        payload = serialize_outbox_review(review, detail=True)
+        self.assertNotEqual(review.rendered_html_body, original_html)
+        self.assertEqual(payload["bodyHtml"], review.rendered_html_body)
+        self.assertIn("Replacement &amp; final", payload["bodyHtml"])
+        self.assertEqual(review.rendered_plaintext_body, "Replacement & final")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_review_render_defers_throttle_footer_consumption_until_approval(self, _delay_mock):
+        from api.services.cron_throttle import (
+            cron_throttle_footer_cooldown_key,
+            cron_throttle_pending_footer_key,
+        )
+
+        fake_redis = _FakeRedis()
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        cooldown_key = cron_throttle_footer_cooldown_key(str(self.agent.id))
+        fake_redis.set(pending_key, "1")
+
+        with (
+            patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
+        ):
+            review = queue_message_for_review(self._message())
+            self.assertTrue(review.rendered_includes_throttle_footer)
+            self.assertTrue(fake_redis.get(pending_key))
+            self.assertFalse(fake_redis.get(cooldown_key))
+
+            review = update_pending_review_message(
+                review,
+                actor=self.owner,
+                expected_version=1,
+                changes={"body": "Final reviewed body"},
+            )
+            self.assertTrue(review.rendered_includes_throttle_footer)
+            self.assertTrue(fake_redis.get(pending_key))
+            self.assertFalse(fake_redis.get(cooldown_key))
+
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_review(review, actor=self.owner, expected_version=2)
+
+        self.assertFalse(fake_redis.get(pending_key))
+        self.assertTrue(fake_redis.get(cooldown_key))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_approval_removes_obsolete_free_plan_notice_and_requires_refresh(self, delay_mock):
+        from api.services.cron_throttle import cron_throttle_pending_footer_key
+
+        fake_redis = _FakeRedis()
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        fake_redis.set(pending_key, "1")
+
+        with (
+            patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
+            patch("api.agent.comms.email_footer_service._should_apply_footer", return_value=True),
+        ):
+            review = queue_message_for_review(self._message())
+        self.assertTrue(review.rendered_includes_throttle_footer)
+        self.assertIn("/subscribe/pro/", review.rendered_plaintext_body)
+
+        with (
+            patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
+            patch("api.agent.comms.email_footer_service._should_apply_footer", return_value=False),
+        ):
+            with self.assertRaisesRegex(StaleOutboxVersionError, "stale_version"):
+                approve_review(review, actor=self.owner, expected_version=1)
+
+            review.refresh_from_db()
+            self.assertEqual(review.content_version, 2)
+            self.assertFalse(review.rendered_includes_throttle_footer)
+            self.assertNotIn("/subscribe/pro/", review.rendered_plaintext_body)
+            self.assertFalse(fake_redis.get(pending_key))
+
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_review(review, actor=self.owner, expected_version=2)
+
+        review.refresh_from_db()
+        self.assertEqual(review.status, OutboundEmailReview.Status.APPROVED)
+        delay_mock.assert_called_once_with(str(review.id))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_throttle_footer_is_reserved_for_one_pending_review_and_released_after_review_ends(self):
+        from api.services.cron_throttle import cron_throttle_pending_footer_key
+
+        fake_redis = _FakeRedis()
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        fake_redis.set(pending_key, "1")
+
+        with (
+            patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
+        ):
+            first = queue_message_for_review(self._message("first@example.com"))
+            second = queue_message_for_review(self._message("second@example.com"))
+
+            self.assertTrue(first.rendered_includes_throttle_footer)
+            self.assertFalse(second.rendered_includes_throttle_footer)
+            self.assertNotIn("temporarily adjusted", second.rendered_plaintext_body)
+            direct_html, direct_plaintext = append_footer_if_needed(self.agent, "Direct", "Direct")
+            self.assertIn("/subscribe/pro/", direct_html)
+            self.assertIn("/subscribe/pro/", direct_plaintext)
+            self.assertFalse(fake_redis.get(pending_key))
+            first.refresh_from_db()
+            self.assertFalse(first.rendered_includes_throttle_footer)
+            self.assertNotIn("temporarily adjusted", first.rendered_plaintext_body)
+            self.assertEqual(first.content_version, 2)
+            with self.assertRaisesRegex(StaleOutboxVersionError, "stale_version"):
+                approve_review(first, actor=self.owner, expected_version=1)
+
+            discard_review(first, actor=self.owner, expected_version=2)
+            fake_redis.set(pending_key, "1")
+            third = queue_message_for_review(self._message("third@example.com"))
+            self.assertTrue(third.rendered_includes_throttle_footer)
+
+            third.expires_at = timezone.now() - timedelta(seconds=1)
+            third.save(update_fields=["expires_at"])
+            self.assertTrue(expire_review_if_needed(third))
+            fourth = queue_message_for_review(self._message("fourth@example.com"))
+
+        self.assertTrue(fourth.rendered_includes_throttle_footer)
+        self.assertTrue(fake_redis.get(pending_key))
+
     def test_expiry_records_manager_visible_action(self):
         review = queue_message_for_review(self._message())
         review.expires_at = timezone.now() - timedelta(seconds=1)
@@ -747,6 +911,28 @@ class EmailReviewOutboxTests(TestCase):
         self.assertFalse(message.cc_endpoints.exists())
         self.assertEqual(review.status, OutboundEmailReview.Status.PENDING)
         self.assertEqual(review.content_version, 1)
+        delay_mock.assert_not_called()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_outbox_api_requires_edits_to_be_saved_before_approval(self, delay_mock):
+        message = self._message("reviewed-copy@example.com")
+        review = queue_message_for_review(message)
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            reverse("console_outbox_approve", kwargs={"outbox_id": review.id}),
+            data={"expectedVersion": 1, "body": "<p>Unreviewed replacement</p>"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content.decode())
+        self.assertIn("Save edits as a new Outbox revision", response.json()["message"])
+        review.refresh_from_db()
+        message.refresh_from_db()
+        self.assertEqual(review.status, OutboundEmailReview.Status.PENDING)
+        self.assertEqual(review.content_version, 1)
+        self.assertEqual(message.body, "<p>Hello</p>")
         delay_mock.assert_not_called()
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)

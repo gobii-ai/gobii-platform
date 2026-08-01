@@ -336,7 +336,7 @@ def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
     sql = ";\n".join(domain_statements).lower()
     if not sql:
         return False
-    has_remaining_state = bool(re.search(r"\bremaining(?:_work)?\b", sql)) or bool(
+    has_remaining_state = bool(re.search(r"\bremaining(?:_(?:work|count))?\b", sql)) or bool(
         re.search(r"(?:\b\d+\s+(?:remaining|pending)\b|\b(?:remaining|pending)\D{0,20}\d+\b)", sql)
     )
     if not has_remaining_state or ("next_cursor" not in sql and "cursor" not in sql):

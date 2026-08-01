@@ -8,6 +8,12 @@ from django.core.validators import validate_email
 from django.db import transaction
 from django.utils import timezone
 
+from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
+from api.agent.comms.email_footer_service import (
+    consume_reviewed_throttle_footer,
+    reviewed_throttle_footer_is_pending,
+)
+from api.agent.comms.email_transport_content import render_email_transport_content
 from api.agent.comms.email_threading import get_message_contact_address
 from api.models import (
     AgentEmailAccount,
@@ -181,19 +187,77 @@ def compute_message_content_hash(message: PersistentAgentMessage) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _render_review_revision(
+    message: PersistentAgentMessage,
+    *,
+    include_throttle_footer: bool,
+) -> tuple[str, str, bool]:
+    html_body, plaintext_body, html_snippet, includes_throttle_footer = render_email_transport_content(
+        message,
+        include_throttle_footer=include_throttle_footer,
+    )
+    message.raw_payload = merge_chat_body_html_cache(
+        message.raw_payload,
+        message.body,
+        rendered_html=html_snippet,
+    )
+    return html_body, plaintext_body, includes_throttle_footer
+
+
+def remove_reviewed_throttle_footer(review: OutboundEmailReview) -> None:
+    if not review.rendered_includes_throttle_footer:
+        return
+    message = review.message
+    html_body, plaintext_body, _ = _render_review_revision(
+        message,
+        include_throttle_footer=False,
+    )
+    message.save(update_fields=["raw_payload"])
+
+    # Transport content changed, so an already-open browser must refresh before
+    # approving even though the authored message and its content hash did not.
+    review.content_version += 1
+    review.rendered_html_body = html_body
+    review.rendered_plaintext_body = plaintext_body
+    review.rendered_includes_throttle_footer = False
+    review.save(
+        update_fields=[
+            "content_version",
+            "rendered_html_body",
+            "rendered_plaintext_body",
+            "rendered_includes_throttle_footer",
+            "updated_at",
+        ]
+    )
+
+
+@transaction.atomic
 def queue_message_for_review(message: PersistentAgentMessage) -> OutboundEmailReview:
     if not message.is_outbound or message.from_endpoint.channel != CommsChannel.EMAIL:
         raise OutboundEmailReviewError("Only outbound email can be placed in the Outbox.")
+    agent = PersistentAgent.objects.select_for_update().get(pk=message.owner_agent_id)
     snapshot_message_attachments(message)
     content_hash = compute_message_content_hash(message)
+    throttle_footer_available = not OutboundEmailReview.objects.filter(
+        agent=agent,
+        status=OutboundEmailReview.Status.PENDING,
+        rendered_includes_throttle_footer=True,
+    ).exists() and reviewed_throttle_footer_is_pending(agent)
+    rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(
+        message,
+        include_throttle_footer=throttle_footer_available,
+    )
     message.latest_status = DeliveryStatus.PENDING_APPROVAL
     message.latest_error_code = ""
     message.latest_error_message = ""
-    message.save(update_fields=["latest_status", "latest_error_code", "latest_error_message"])
+    message.save(update_fields=["raw_payload", "latest_status", "latest_error_code", "latest_error_message"])
     review = OutboundEmailReview.objects.create(
         message=message,
-        agent=message.owner_agent,
+        agent=agent,
         content_hash=content_hash,
+        rendered_html_body=rendered_html_body,
+        rendered_plaintext_body=rendered_plaintext_body,
+        rendered_includes_throttle_footer=includes_throttle_footer,
         expires_at=timezone.now() + timedelta(days=OUTBOX_EXPIRY_DAYS),
     )
     track_review_event(
@@ -242,7 +306,11 @@ def expire_review_if_needed(review: OutboundEmailReview, *, now=None) -> bool:
     return True
 
 
-def authorize_reviewed_external_contacts(message: PersistentAgentMessage) -> None:
+def authorize_reviewed_external_contacts(
+    message: PersistentAgentMessage,
+    *,
+    locked_agent: PersistentAgent | None = None,
+) -> None:
     agent = message.owner_agent
     decision = classify_email_recipients(agent, get_message_email_recipients(message))
     if decision.blocked_recipients:
@@ -253,7 +321,11 @@ def authorize_reviewed_external_contacts(message: PersistentAgentMessage) -> Non
     if not decision.unknown_external_recipients:
         return
     try:
-        authorize_reviewed_email_contacts(agent, decision.unknown_external_recipients)
+        authorize_reviewed_email_contacts(
+            agent,
+            decision.unknown_external_recipients,
+            locked_agent=locked_agent,
+        )
     except ContactAuthorizationError as exc:
         raise OutboundEmailReviewError(str(exc)) from exc
 
@@ -334,13 +406,31 @@ def update_pending_review_message(
         message.body = str(changes["body"] or "")
     if "attachmentNodeIds" in changes:
         replace_message_attachments(message, changes["attachmentNodeIds"])
+    rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(
+        message,
+        include_throttle_footer=locked.rendered_includes_throttle_footer,
+    )
     message.save()
 
     locked.content_version += 1
     locked.content_hash = compute_message_content_hash(message)
+    locked.rendered_html_body = rendered_html_body
+    locked.rendered_plaintext_body = rendered_plaintext_body
+    locked.rendered_includes_throttle_footer = includes_throttle_footer
     locked.last_edited_at = timezone.now()
     locked.last_edited_by = actor
-    locked.save(update_fields=["content_version", "content_hash", "last_edited_at", "last_edited_by", "updated_at"])
+    locked.save(
+        update_fields=[
+            "content_version",
+            "content_hash",
+            "rendered_html_body",
+            "rendered_plaintext_body",
+            "rendered_includes_throttle_footer",
+            "last_edited_at",
+            "last_edited_by",
+            "updated_at",
+        ]
+    )
     _record_review_action(
         locked,
         actor=actor,
@@ -398,7 +488,6 @@ def _record_review_action(review: OutboundEmailReview, *, actor, action_type: st
         track_review_event(review, event, actor=actor, properties=properties)
 
 
-@transaction.atomic
 def approve_review(
     review: OutboundEmailReview,
     *,
@@ -407,6 +496,27 @@ def approve_review(
     changes: dict[str, object] | None = None,
     acknowledge_thread_changed: bool = False,
 ) -> OutboundEmailReview:
+    locked, refreshed = _approve_review(
+        review,
+        actor=actor,
+        expected_version=expected_version,
+        changes=changes,
+        acknowledge_thread_changed=acknowledge_thread_changed,
+    )
+    if refreshed:
+        raise StaleOutboxVersionError("stale_version")
+    return locked
+
+
+@transaction.atomic
+def _approve_review(
+    review: OutboundEmailReview,
+    *,
+    actor,
+    expected_version: int,
+    changes: dict[str, object] | None,
+    acknowledge_thread_changed: bool,
+) -> tuple[OutboundEmailReview, bool]:
     locked = _reviews_for_update().select_related(
         "message__from_endpoint",
         "message__owner_agent__user",
@@ -419,11 +529,10 @@ def approve_review(
     if locked.content_version != expected_version:
         raise StaleOutboxVersionError("stale_version")
     if changes:
-        locked = update_pending_review_message(
-            locked,
-            actor=actor,
-            expected_version=expected_version,
-            changes=changes,
+        if {"to", "cc", "bcc"} & changes.keys():
+            raise OutboundEmailReviewError("Outbox recipients cannot be changed after queueing.")
+        raise OutboundEmailReviewError(
+            "Save edits as a new Outbox revision before approving it."
         )
 
     message = locked.message
@@ -436,7 +545,14 @@ def approve_review(
         raise OutboundEmailReviewError("The email changed outside the Outbox editor and must be reviewed again.")
     if review_thread_changed(locked) and not acknowledge_thread_changed:
         raise OutboundEmailReviewError("thread_changed")
-    authorize_reviewed_external_contacts(message)
+    locked_agent = PersistentAgent.objects.select_for_update().get(pk=message.owner_agent_id)
+    if locked.rendered_includes_throttle_footer and not reviewed_throttle_footer_is_pending(locked_agent):
+        remove_reviewed_throttle_footer(locked)
+        from api.services.cron_throttle import clear_pending_cron_throttle_footer
+
+        clear_pending_cron_throttle_footer(str(locked_agent.id))
+        return locked, True
+    authorize_reviewed_external_contacts(message, locked_agent=locked_agent)
 
     now = timezone.now()
     locked.status = OutboundEmailReview.Status.APPROVED
@@ -463,11 +579,13 @@ def approve_review(
         actor=actor,
         action_type=PersistentAgentUserActionEvent.ActionType.OUTBOX_APPROVED,
     )
+    if locked.rendered_includes_throttle_footer:
+        consume_reviewed_throttle_footer(message.owner_agent)
 
     from api.tasks.outbox import dispatch_approved_outbox_email
 
     transaction.on_commit(lambda: dispatch_approved_outbox_email.delay(str(locked.id)))
-    return locked
+    return locked, False
 
 
 @transaction.atomic

@@ -121,8 +121,10 @@ def _warnings(review: OutboundEmailReview) -> list[dict[str, str]]:
     return warnings
 
 
-def _render_outbox_body_html(body: str) -> str:
-    html_snippet, _ = convert_body_to_html_and_plaintext(body, emit_logs=False)
+def _render_outbox_body_html(review: OutboundEmailReview) -> str:
+    if review.rendered_html_body:
+        return review.rendered_html_body
+    html_snippet, _ = convert_body_to_html_and_plaintext(review.message.body or "", emit_logs=False)
     return render_to_string("emails/persistent_agent_email.html", {"body": html_snippet})
 
 
@@ -176,7 +178,7 @@ def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False
         payload.update(
             {
                 "body": message.body or "",
-                "bodyHtml": _render_outbox_body_html(message.body or ""),
+                "bodyHtml": _render_outbox_body_html(review),
                 "attachments": [
                     {
                         "id": str(attachment.id),

@@ -268,6 +268,22 @@ def _prepare_email_content(message: PersistentAgentMessage, body_raw: str) -> tu
     return append_footer_if_needed(agent, html_snippet, plaintext_body)
 
 
+def _approved_email_transport_content(
+    message: PersistentAgentMessage,
+) -> tuple[str, str] | None:
+    try:
+        review = message.outbound_email_review
+    except OutboundEmailReview.DoesNotExist:
+        review = None
+    if (
+        review is not None
+        and review.status == OutboundEmailReview.Status.APPROVED
+        and review.rendered_html_body
+    ):
+        return review.rendered_html_body, review.rendered_plaintext_body
+    return None
+
+
 def _should_suppress_display_name(from_endpoint) -> bool:
     if from_endpoint is None:
         return False
@@ -911,15 +927,16 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 message,
                 suppress_configured_account_name=False,
             )
-            body_raw = message.body
-
-            # content conversion
-            html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
-            _cache_chat_body_html_for_message(message, html_snippet)
-            html_body = render_to_string(
-                "emails/persistent_agent_email.html",
-                {"body": html_snippet},
-            )
+            approved_content = _approved_email_transport_content(message)
+            if approved_content is not None:
+                html_body, plaintext_body = approved_content
+            else:
+                html_snippet, plaintext_body = _prepare_email_content(message, message.body)
+                _cache_chat_body_html_for_message(message, html_snippet)
+                html_body = render_to_string(
+                    "emails/persistent_agent_email.html",
+                    {"body": html_snippet},
+                )
             prepared_attachments, html_body = _prepare_email_attachments(message, html_body)
             if prepared_attachments:
                 logger.info(
@@ -1038,9 +1055,12 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 "present" if postmark_token else "missing",
                 message.id,
             )
-        body_raw = message.body
-        html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
-        _cache_chat_body_html_for_message(message, html_snippet)
+        approved_content = _approved_email_transport_content(message)
+        if approved_content is not None:
+            html_snippet, plaintext_body = approved_content
+        else:
+            html_snippet, plaintext_body = _prepare_email_content(message, message.body)
+            _cache_chat_body_html_for_message(message, html_snippet)
 
         # Log simulated content details for parity with non-prod simulation branch
         logger.info(
@@ -1103,8 +1123,12 @@ def deliver_agent_email(message: PersistentAgentMessage):
         
         # For simulation, also show content conversion results
         logger.info("SIMULATION - Processing content conversion for message %s", message.id)
-        html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
-        _cache_chat_body_html_for_message(message, html_snippet)
+        approved_content = _approved_email_transport_content(message)
+        if approved_content is not None:
+            html_snippet, plaintext_body = approved_content
+        else:
+            html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
+            _cache_chat_body_html_for_message(message, html_snippet)
         
         logger.info(
             "SIMULATION - Content conversion results for message %s: "
@@ -1196,27 +1220,25 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         # Detect content type and convert appropriately
         logger.info("Starting content type detection and conversion for message %s", message.id)
-        html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
-        _cache_chat_body_html_for_message(message, html_snippet)
+        approved_content = _approved_email_transport_content(message)
+        if approved_content is not None:
+            html_body, plaintext_body = approved_content
+        else:
+            html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
+            _cache_chat_body_html_for_message(message, html_snippet)
+            html_body = render_to_string(
+                "emails/persistent_agent_email.html",
+                {"body": html_snippet},
+            )
         
         # Log the conversion results
         logger.info(
             "Content conversion completed for message %s. HTML snippet length: %d, plaintext length: %d",
             message.id,
-            len(html_snippet),
+            len(html_body),
             len(plaintext_body)
         )
 
-        # Wrap with our mobile-first template
-        logger.info("Wrapping HTML snippet with email template for message %s", message.id)
-        html_body = render_to_string(
-            "emails/persistent_agent_email.html",
-            {
-                "body": html_snippet,
-            },
-        )
-        
-        # Log the final template-wrapped HTML
         logger.info(
             "Email template rendering complete for message %s. Final HTML body length: %d",
             message.id,
@@ -1429,38 +1451,31 @@ def deliver_agent_sms(message: PersistentAgentMessage):
 
     try:
         from constants.feature_flags import AGENT_CRON_THROTTLE
-        from config.redis_client import get_redis_client
         from api.services.cron_throttle import (
             build_upgrade_link,
-            cron_throttle_footer_cooldown_key,
-            cron_throttle_pending_footer_key,
+            claim_pending_cron_throttle_footer,
+            clear_pending_cron_throttle_footer,
             evaluate_free_plan_cron_throttle,
             select_cron_throttle_sms_suffix,
         )
 
         agent = getattr(message, "owner_agent", None)
         if agent is not None and switch_is_active(AGENT_CRON_THROTTLE):
-            redis_client = get_redis_client()
-            pending_key = cron_throttle_pending_footer_key(str(agent.id))
-            if redis_client.get(pending_key):
-                decision = evaluate_free_plan_cron_throttle(agent, (getattr(agent, "schedule", None) or ""))
-                if decision.throttling_applies:
-                    suffix = select_cron_throttle_sms_suffix(
-                        agent_name=agent.name,
-                        effective_interval_seconds=decision.effective_interval_seconds,
-                        upgrade_link=build_upgrade_link(),
-                    )
+            decision = evaluate_free_plan_cron_throttle(agent, (getattr(agent, "schedule", None) or ""))
+            if decision.throttling_applies:
+                suffix = select_cron_throttle_sms_suffix(
+                    agent_name=agent.name,
+                    effective_interval_seconds=decision.effective_interval_seconds,
+                    upgrade_link=build_upgrade_link(),
+                )
+                ttl_seconds = max(1, int(settings.AGENT_CRON_THROTTLE_NOTICE_TTL_DAYS) * 86400)
+                if claim_pending_cron_throttle_footer(
+                    str(agent.id),
+                    ttl_seconds=ttl_seconds,
+                ):
                     plaintext_body = f"{plaintext_body}\n\n{suffix}".strip()
-                    ttl_days = int(getattr(settings, "AGENT_CRON_THROTTLE_NOTICE_TTL_DAYS", 7))
-                    ttl_seconds = max(1, ttl_days * 86400)
-                    redis_client.delete(pending_key)
-                    redis_client.set(
-                        cron_throttle_footer_cooldown_key(str(agent.id)),
-                        "1",
-                        ex=ttl_seconds,
-                    )
-                else:
-                    redis_client.delete(pending_key)
+            else:
+                clear_pending_cron_throttle_footer(str(agent.id))
     except Exception:
         logger.debug("Failed applying cron throttle SMS notice for message %s", message.id, exc_info=True)
 

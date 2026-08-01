@@ -18,6 +18,7 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
+    OutboundEmailReview,
     OutboundMessageAttempt,
     CommsChannel,
     DeliveryStatus,
@@ -1209,26 +1210,10 @@ class SMSThrottleNoticeTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("api.agent.comms.outbound_delivery.switch_is_active", return_value=True)
-    @patch("config.redis_client.get_redis_client")
+    @patch("api.services.cron_throttle.get_redis_client")
     @patch("api.agent.comms.outbound_delivery.sms.send_sms", return_value="sms123")
     def test_deliver_agent_sms_appends_throttle_notice_when_pending(self, _mock_send, mock_get_redis, _mock_switch):
-        class _FakeRedis:
-            def __init__(self):
-                self._store = {}
-
-            def get(self, key):
-                return self._store.get(key)
-
-            def set(self, key, value, ex=None, nx=None):
-                if nx and key in self._store:
-                    return False
-                self._store[key] = value
-                return True
-
-            def delete(self, key):
-                self._store.pop(key, None)
-                return 1
-
+        from config.redis_client import _FakeRedis
         fake_redis = _FakeRedis()
         mock_get_redis.return_value = fake_redis
 
@@ -1260,6 +1245,59 @@ class SMSThrottleNoticeTests(TestCase):
 
         self.assertFalse(fake_redis.get(pending_key))
         self.assertTrue(fake_redis.get(cron_throttle_footer_cooldown_key(str(self.agent.id))))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("api.agent.comms.outbound_delivery.switch_is_active", return_value=True)
+    @patch("api.services.cron_throttle.get_redis_client")
+    @patch("api.agent.comms.outbound_delivery.sms.send_sms", return_value="sms123")
+    def test_deliver_agent_sms_moves_footer_from_pending_outbox_to_actual_send(
+        self,
+        mock_send,
+        mock_get_redis,
+        _mock_switch,
+    ):
+        from config.redis_client import _FakeRedis
+        from api.services.cron_throttle import cron_throttle_pending_footer_key
+
+        fake_redis = _FakeRedis()
+        mock_get_redis.return_value = fake_redis
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        fake_redis.set(pending_key, "1")
+        reserved_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="Pending review",
+            raw_payload={},
+        )
+        review = OutboundEmailReview.objects.create(
+            message=reserved_message,
+            agent=self.agent,
+            content_hash="a" * 64,
+            rendered_html_body="Pending review with throttle notice",
+            rendered_plaintext_body="Pending review with throttle notice 🥺",
+            rendered_includes_throttle_footer=True,
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="Hello there",
+            raw_payload={},
+        )
+
+        deliver_agent_sms(message)
+
+        sent_body = mock_send.call_args.kwargs.get("body", "")
+        self.assertIn("🥺", sent_body)
+        self.assertFalse(fake_redis.get(pending_key))
+        review.refresh_from_db()
+        self.assertFalse(review.rendered_includes_throttle_footer)
+        self.assertNotIn("🥺", review.rendered_plaintext_body)
+        self.assertEqual(review.content_version, 2)
 
 
 @tag("batch_outbound_delivery")

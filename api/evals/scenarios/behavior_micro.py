@@ -382,6 +382,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_137_slack_connect_tool_search", "category": "integration_discovery", "prompt": "Connect Slack so you can read and summarize customer feedback from our support channel.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_138_intercom_notes_capability_answer", "category": "tool_choice", "prompt": "Are you able to add internal notes to Intercom threads, different from replies?", "expected_tools": ["send_chat_message"], "forbidden_tools": ["request_human_input"], "accepted_tool_alternatives": {"send_chat_message": ["search_tools"]}, "plan_expected": False},
     {"slug": "common_use_case_139_simple_greeting", "category": "conversation", "prompt": "Hi", "expected_tools": ["send_chat_message"], "forbidden_tools": ["request_human_input", "sqlite_batch", "mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"], "plan_expected": False},
+    {"slug": "common_use_case_140_small_sourcing_delivers_before_automation", "category": "lead_sourcing", "prompt": "Find five current heads of operations at US warehouse-software companies. Give me each person's name, employer, and a verified public profile URL.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["create_custom_tool", "request_human_input", "spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -5131,7 +5132,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             agent_id,
             [tool_name for tool_name in tool_names if tool_name not in synthetic_tool_names],
         )
-        if "create_custom_tool" in self._accepted_expected_tool_names():
+        if "create_custom_tool" in tool_names:
             self.enable_sandbox_tool_visibility(agent_id)
         self._enable_eval_synthetic_tools(agent_id, list(dict.fromkeys(synthetic_tool_names)))
 
