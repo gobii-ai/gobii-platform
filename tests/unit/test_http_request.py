@@ -52,13 +52,13 @@ class HttpRequestJsonParsingTests(TestCase):
     def tearDown(self):
         self.agent.delete()
 
-    def test_tool_definition_requires_raw_urls(self):
+    def test_tool_definition_routes_known_endpoints_directly(self):
         tool = get_http_request_tool()["function"]
         url_description = tool["parameters"]["properties"]["url"]["description"]
 
         self.assertIn("Raw http(s) URL", url_description)
-        self.assertIn("never `$[link:...]`", url_description)
-        self.assertNotIn("URL or $[link:id] token", url_description)
+        self.assertIn("$[link:id]", url_description)
+        self.assertNotIn("never `$[link:...]`", url_description)
         self.assertIn("With an exact endpoint, attempt once", tool["description"])
         self.assertIn("Look up docs only when request shape is unknown", tool["description"])
         self.assertIn("every recipient's identity/qualification", tool["description"])
