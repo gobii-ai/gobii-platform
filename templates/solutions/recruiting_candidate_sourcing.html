@@ -7,215 +7,283 @@
 {{ block.super }}
 {% include "solutions/_seo_meta.html" %}
 <style>
-  .workflow-line {
-    background: linear-gradient(180deg, rgba(124, 58, 237, 0.28), rgba(168, 85, 247, 0.28));
-  }
-
-  .candidate-workflow-grid {
-    display: grid;
-    gap: 2.5rem;
-    align-items: start;
-  }
-
-  .candidate-workflow-steps {
-    display: flex;
-    flex-direction: column;
-    gap: 2.75rem;
-  }
-
-  .candidate-workflow-step {
-    display: flex;
-    align-items: flex-start;
-    gap: 1.5rem;
-  }
-
-  .candidate-workflow-dot {
-    flex: 0 0 2.5rem;
-  }
-
-  .candidate-workflow-step-body {
-    min-width: 0;
-    padding-top: 0.25rem;
-  }
-
-  .candidate-sourcing-templates {
-    background: #faf9fe;
-  }
-
-  .candidate-template-link {
-    background: rgba(255, 255, 255, 0.9);
-    border-color: rgba(221, 214, 254, 0.9);
-  }
-
-  .candidate-template-link:hover {
-    background: #fff;
-    border-color: rgba(124, 58, 237, 0.35);
-  }
-
-  .candidate-template-link:hover h3 {
-    color: #6d28d9;
-  }
-
-  .candidate-sourcing-primary-cta {
-    background: linear-gradient(90deg, #7c3aed, #a855f7);
-    box-shadow: 0 6px 24px rgba(124, 58, 237, 0.35);
-    transition: transform 0.15s ease;
-  }
-
-  .candidate-sourcing-primary-cta:hover {
-    transform: translateY(-1px);
-  }
-
-  @media (min-width: 1024px) {
-    .candidate-workflow-grid {
-      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-      gap: 3.5rem;
-    }
-  }
+  /* candidate sourcing — page-scoped layout on the Gobii Luxe theme */
+  .cs-hero { max-width: 1100px; margin: 0 auto; padding: 64px 24px 0; position: relative;
+    display: grid; grid-template-columns: 1.05fr .95fr; gap: 44px; align-items: center; }
+  @media (max-width: 900px) { .cs-hero { grid-template-columns: 1fr; } }
+  .cs-hero::before { content: ''; position: absolute; width: min(46vw, 640px); height: 360px;
+    border-radius: 50%; filter: blur(100px); opacity: .32; pointer-events: none; top: -40px; right: 4%;
+    background: radial-gradient(closest-side, rgba(168,85,247,.5), transparent); }
+  .cs-hero > * { position: relative; }
+  .cs-crumbs { font-size: 12.5px; color: #8b7fb8; margin-bottom: 14px; }
+  .cs-crumbs a { color: #c4b5fd; text-decoration: none; }
+  .cs-hero h1 { margin-top: 12px; }
+  .cs-hero .gk-sub { margin-top: 14px; max-width: 52ch; }
+  .cs-ctas { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+  .cs-crawl p { color: #b7aed4 !important; }
+  .cs-crawl a { color: #c4b5fd !important; text-decoration-color: rgba(196,181,253,.5) !important; }
+  .cs-crawl a:hover { color: #fff !important; }
+  .cs-stats { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 28px; padding: 18px 22px; max-width: 42rem; }
+  @media (min-width: 640px) { .cs-stats { grid-template-columns: repeat(3, 1fr); } }
+  .cs-stat { border-left: 2px solid rgba(196,181,253,.55); padding-left: 14px; }
+  .cs-stat dt { font-size: 22px; font-weight: 300; color: #fff; }
+  .cs-stat dd { margin: 4px 0 0; font-size: 12.5px; color: #8b7fb8; line-height: 1.5; }
+  /* white proof windows (the only light surfaces on the page) */
+  .cs-proof { position: relative; background: linear-gradient(180deg,#fff,#fbfaff); border-radius: 16px;
+    overflow: hidden; color: #111827; border: 1px solid rgba(233,228,246,.9);
+    box-shadow: 0 34px 90px rgba(5,2,18,.6), 0 0 70px rgba(168,85,247,.12); }
+  .cs-pbar { display: flex; align-items: center; gap: 6px; background: #f6f4fc; padding: 10px 14px;
+    border-bottom: 1px solid #ece7f8; }
+  .cs-pdot { width: 9px; height: 9px; border-radius: 50%; }
+  .cs-purl { flex: 1; text-align: center; color: #8b7fb8; font-size: 11.5px; font-weight: 500; }
+  .cs-pbody { padding: 14px 16px; }
+  .cs-prow { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #f0ecfa;
+    border-radius: 11px; padding: 9px 11px; margin-bottom: 8px; opacity: 0; transform: translateY(7px);
+    transition: opacity .45s, transform .45s cubic-bezier(.2,.8,.3,1); }
+  .cs-prow.on { opacity: 1; transform: none; }
+  .cs-pwho { font-size: 12.5px; font-weight: 500; }
+  .cs-pnote { font-size: 10.5px; color: #9ca3af; }
+  .cs-pfit { margin-left: auto; color: #6d28d9; background: #f3eefb; border-radius: 999px; padding: 2px 8px;
+    font-size: 10px; font-weight: 600; white-space: nowrap; }
+  .cs-pfoot { text-align: center; color: #8b7fb8; font-size: 11px; padding: 4px 0 12px; }
+  @media (prefers-reduced-motion: reduce) { .cs-prow { opacity: 1; transform: none; transition: none; } }
+  /* section helpers */
+  .cs-lede { color: #b7aed4; font-size: 15px; line-height: 1.65; margin-top: 12px; }
+  .cs-body { color: #a99cc9; font-size: 13.5px; line-height: 1.65; }
+  /* workflow timeline */
+  .cs-flow { display: grid; gap: 40px; align-items: start; margin-top: 32px; }
+  @media (min-width: 1024px) { .cs-flow { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 56px; } }
+  .cs-line { position: absolute; left: 19px; top: 32px; bottom: 32px; width: 1px;
+    background: linear-gradient(180deg, rgba(196,181,253,.4), rgba(240,171,252,.25)); }
+  .cs-steps { display: flex; flex-direction: column; gap: 38px; }
+  .cs-step { display: flex; align-items: flex-start; gap: 22px; position: relative; }
+  .cs-dot { flex: 0 0 40px; position: relative; z-index: 1; height: 40px; width: 40px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 600;
+    background: linear-gradient(120deg,#7c3aed,#a855f7); box-shadow: 0 8px 22px rgba(124,58,237,.4); }
+  .cs-step h3 { font-size: 16px; font-weight: 600; color: #fff; margin: 6px 0 0; }
+  .cs-step p { margin: 10px 0 0; }
+  /* white workflow quadrant card */
+  .cs-quad { display: grid; }
+  @media (min-width: 640px) { .cs-quad { grid-template-columns: 1fr 1fr; } }
+  .cs-quad-cell { padding: 22px 24px; border-bottom: 1px solid #ece7f8; }
+  @media (min-width: 640px) { .cs-quad-cell:nth-child(odd) { border-right: 1px solid #ece7f8; }
+    .cs-quad-cell:nth-child(3), .cs-quad-cell:nth-child(4) { border-bottom: 0; } }
+  .cs-quad-h { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #6d28d9; }
+  .cs-quad-cell p, .cs-quad-cell ul { margin: 12px 0 0; font-size: 13px; line-height: 1.6; color: #4b5563; }
+  .cs-quad-cell ul { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  /* card grids */
+  .cs-2col { display: grid; gap: 40px; align-items: center; margin-top: 26px; }
+  @media (min-width: 1024px) { .cs-2col { grid-template-columns: .9fr 1.1fr; gap: 56px; } }
+  .cs-grid2 { display: grid; gap: 12px; }
+  @media (min-width: 640px) { .cs-grid2 { grid-template-columns: 1fr 1fr; } }
+  .cs-cell { padding: 22px; }
+  .cs-cell i { color: #a78bfa; }
+  .cs-cell h3 { font-size: 15.5px; font-weight: 600; color: #fff; margin: 14px 0 0; }
+  .cs-cell p { margin: 10px 0 0; font-size: 13px; line-height: 1.6; color: #a99cc9; }
+  .cs-arrow-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 26px; font-size: 13.5px;
+    font-weight: 600; color: #c4b5fd; text-decoration: none; }
+  .cs-arrow-link:hover { color: #fff; }
+  /* deliverables */
+  .cs-feat { display: flex; gap: 16px; margin-top: 20px; }
+  .cs-feat-ic { flex-shrink: 0; margin-top: 2px; width: 34px; height: 34px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    background: linear-gradient(120deg,#7c3aed,#a855f7); box-shadow: 0 8px 20px rgba(124,58,237,.4); }
+  .cs-feat h3 { font-size: 14.5px; font-weight: 600; color: #fff; margin: 0; }
+  .cs-feat p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; color: #a99cc9; }
+  .cs-figure img { width: 100%; height: auto; border-radius: 16px; border: 1px solid rgba(255,255,255,.14);
+    box-shadow: 0 30px 80px rgba(5,2,18,.55), 0 0 60px rgba(168,85,247,.1); display: block; }
+  .cs-figure figcaption { margin-top: 14px; font-size: 13px; color: #8b7fb8; }
+  /* use cases */
+  .cs-cases { display: grid; gap: 12px; margin-top: 28px; }
+  @media (min-width: 768px) { .cs-cases { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 1024px) { .cs-cases { grid-template-columns: repeat(3, 1fr); } }
+  /* template links */
+  .cs-tpls { display: grid; gap: 14px; }
+  .cs-tpl { display: block; text-decoration: none; padding: 22px; }
+  .cs-tpl-kicker { font-size: 10.5px; font-weight: 600; letter-spacing: 1.3px; text-transform: uppercase; color: #c4b5fd; }
+  .cs-tpl h3 { font-size: 17px; font-weight: 600; color: #fff; margin: 8px 0 0; }
+  .cs-tpl p { margin: 12px 0 0; font-size: 13px; line-height: 1.6; color: #a99cc9; }
+  .cs-tpl-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .cs-tpl-row i { color: #a78bfa; flex-shrink: 0; }
+  /* FAQ */
+  .cs-faq-grid { display: grid; gap: 40px; align-items: start; margin-top: 26px; }
+  @media (min-width: 1024px) { .cs-faq-grid { grid-template-columns: .8fr 1.2fr; gap: 56px; } }
+  /* closer band */
+  .cs-band-wrap { max-width: 1100px; margin: 80px auto 0; padding: 0 24px 8px; }
+  .cs-band-ctas { display: flex; flex-direction: column; gap: 12px; justify-content: center; align-items: center; }
+  @media (min-width: 640px) { .cs-band-ctas { flex-direction: row; } }
 </style>
 {% endblock %}
 
 {% block content %}
-<section class="gk-page-dark">
-  <div class="gk-ph">
-    <nav class="gk-ph-crumbs flex flex-wrap items-center gap-2" aria-label="Breadcrumb">
-      <a href="{% url 'pages:solutions' %}">Solutions</a>
-      <span aria-hidden="true">/</span>
-      <a href="{% url 'pages:solution' 'recruiting' %}">Recruiting</a>
-      <span aria-hidden="true">/</span>
-      <span>Candidate sourcing</span>
-    </nav>
+<div class="gk-luxe">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
 
-    <p class="gk-ph-eyebrow">AI candidate sourcing</p>
-    <h1>
-      AI candidate sourcing for
-      <span class="gk-accent">recruiter-reviewed shortlists</span>
-    </h1>
+  <section class="cs-hero">
+    <div>
+      <nav class="cs-crumbs flex flex-wrap items-center gap-2" aria-label="Breadcrumb">
+        <a href="{% url 'pages:solutions' %}">Solutions</a>
+        <span aria-hidden="true">/</span>
+        <a href="{% url 'pages:solution' 'recruiting' %}">Recruiting</a>
+        <span aria-hidden="true">/</span>
+        <span>Candidate sourcing</span>
+      </nav>
 
-    <p class="gk-ph-sub">
-      Give Gobii a role brief and a sourcing direction. Your AI agent searches approved sources, qualifies profiles against your criteria, and returns organized candidate data for your team to review.
-    </p>
+      <p class="gk-eyebrow">AI candidate sourcing</p>
+      <h1 class="gk-display">
+        AI candidate sourcing for
+        <span class="gk-accent">recruiter-reviewed shortlists</span>
+      </h1>
 
-    <div class="gk-ph-ctas">
-      <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
-        {% csrf_token %}
-        <input type="hidden" name="source_page" value="candidate_sourcing_hero" />
-        <input type="hidden" name="trial_onboarding" value="1" />
-        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-        <button type="submit" class="gk-btn w-full sm:w-auto group">
-          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy Candidate Sourcing Employee{% endif %}
-          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-          </svg>
-        </button>
-      </form>
-      <a href="#candidate-sourcing-workflow" class="gk-btn-quiet w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_hero_workflow" data-analytics-placement="hero" data-analytics-intent="view_workflow">
-        See the workflow
-      </a>
+      <p class="gk-sub">
+        Give Gobii a role brief and a sourcing direction. Your AI agent searches approved sources, qualifies profiles against your criteria, and returns organized candidate data for your team to review.
+      </p>
+
+      <div class="cs-ctas">
+        <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="candidate_sourcing_hero" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="gk-btn w-full sm:w-auto group">
+            {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy Candidate Sourcing Employee{% endif %}
+            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </form>
+        <a href="#candidate-sourcing-workflow" class="gk-btn-quiet w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_hero_workflow" data-analytics-placement="hero" data-analytics-intent="view_workflow">
+          See the workflow
+        </a>
+      </div>
+      <div class="cs-crawl">
+        {% include "solutions/_crawlable_related_link.html" %}
+      </div>
+
+      <dl class="gk-glassrow cs-stats">
+        <div class="cs-stat">
+          <dt>24/7</dt>
+          <dd>Persistent sourcing runs</dd>
+        </div>
+        <div class="cs-stat">
+          <dt>CSV</dt>
+          <dd>Sheets and export-ready data</dd>
+        </div>
+        <div class="cs-stat">
+          <dt>Review</dt>
+          <dd>Recruiters approve fit and outreach</dd>
+        </div>
+      </dl>
     </div>
-    {% include "solutions/_crawlable_related_link.html" %}
 
-    <dl class="gk-glass mt-14 grid grid-cols-1 sm:grid-cols-3 gap-4 p-5 max-w-2xl">
-      <div class="border-l-2 border-violet-300 pl-4">
-        <dt class="text-2xl font-light">24/7</dt>
-        <dd class="gk-glass-label mt-1 text-sm">Persistent sourcing runs</dd>
+    <!-- Product proof: example shortlist window -->
+    <div class="cs-proof" aria-hidden="true">
+      <div class="cs-pbar">
+        <span class="cs-pdot" style="background:#fca5a5"></span>
+        <span class="cs-pdot" style="background:#fcd34d"></span>
+        <span class="cs-pdot" style="background:#86efac"></span>
+        <span class="cs-purl">Example shortlist &middot; recruiter review queue</span>
       </div>
-      <div class="border-l-2 border-violet-300 pl-4">
-        <dt class="text-2xl font-light">CSV</dt>
-        <dd class="gk-glass-label mt-1 text-sm">Sheets and export-ready data</dd>
+      <div class="cs-pbody">
+        <div class="cs-prow"><span class="gk-face"><img src="{% static 'images/people/face-mk.jpg' %}" alt=""></span><div><div class="cs-pwho">M. Kessler</div><div class="cs-pnote">Python, infra, 7 yrs &middot; source-linked</div></div><span class="cs-pfit">94% fit</span></div>
+        <div class="cs-prow"><span class="gk-face"><img src="{% static 'images/people/face-rs.jpg' %}" alt=""></span><div><div class="cs-pwho">R. Santos</div><div class="cs-pnote">data pipelines &middot; fit notes attached</div></div><span class="cs-pfit">91% fit</span></div>
+        <div class="cs-prow"><span class="gk-face"><img src="{% static 'images/people/face-al.jpg' %}" alt=""></span><div><div class="cs-pwho">A. Liu</div><div class="cs-pnote">platform lead &middot; portfolio verified</div></div><span class="cs-pfit">89% fit</span></div>
+        <div class="cs-prow"><span class="gk-face"><img src="{% static 'images/people/face-jn.jpg' %}" alt=""></span><div><div class="cs-pwho">J. Novak</div><div class="cs-pnote">SRE &middot; adjacent-title match</div></div><span class="cs-pfit">87% fit</span></div>
       </div>
-      <div class="border-l-2 border-violet-300 pl-4">
-        <dt class="text-2xl font-light">Review</dt>
-        <dd class="gk-glass-label mt-1 text-sm">Recruiters approve fit and outreach</dd>
-      </div>
-    </dl>
-  </div>
-</section>
+      <div class="cs-pfoot">&hellip;plus screening notes, gaps to verify, and source links</div>
+    </div>
+  </section>
 
-<section id="candidate-sourcing-workflow" class="relative bg-white py-20 lg:py-28">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="max-w-3xl">
-      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">Workflow</p>
-      <h2 class="mt-3 text-3xl sm:text-4xl font-light tracking-tight text-slate-950">From role brief to candidate shortlist</h2>
-      <p class="mt-5 text-lg leading-relaxed text-slate-700">
+  <section id="candidate-sourcing-workflow" class="gk-section">
+    <div style="max-width:48rem">
+      <p class="gk-eyebrow">Workflow</p>
+      <h2 class="gk-h2" style="margin-top:10px">From role brief to candidate shortlist</h2>
+      <p class="cs-lede">
         Candidate sourcing breaks when recruiters have to repeat the same search, screening, enrichment, and tracker work for every open role. Gobii turns that top-of-funnel work into an agent workflow your team can refine as the search evolves.
       </p>
     </div>
 
-    <div class="candidate-workflow-grid mt-14">
-      <div class="relative">
-        <div class="absolute left-5 top-8 bottom-8 w-px workflow-line" aria-hidden="true"></div>
-        <div class="candidate-workflow-steps">
-          <div class="candidate-workflow-step relative">
-            <div class="candidate-workflow-dot relative z-10 flex h-10 w-10 items-center justify-center rounded-full text-white text-sm font-semibold" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">1</div>
-            <div class="candidate-workflow-step-body">
-              <h3 class="text-lg font-medium text-slate-950">Define the target profile</h3>
-              <p class="mt-3 text-slate-700 leading-7">Role, seniority, location, must-have skills, target companies, disqualifiers, and the notes a sourcer would usually keep in their head.</p>
+    <div class="cs-flow">
+      <div style="position:relative">
+        <div class="cs-line" aria-hidden="true"></div>
+        <div class="cs-steps">
+          <div class="cs-step">
+            <div class="cs-dot">1</div>
+            <div>
+              <h3>Define the target profile</h3>
+              <p class="cs-body">Role, seniority, location, must-have skills, target companies, disqualifiers, and the notes a sourcer would usually keep in their head.</p>
             </div>
           </div>
-          <div class="candidate-workflow-step relative">
-            <div class="candidate-workflow-dot relative z-10 flex h-10 w-10 items-center justify-center rounded-full text-white text-sm font-semibold" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">2</div>
-            <div class="candidate-workflow-step-body">
-              <h3 class="text-lg font-medium text-slate-950">Search approved sources</h3>
-              <p class="mt-3 text-slate-700 leading-7">The agent searches the sources your team permits, such as professional profiles, GitHub, portfolios, job boards, company pages, or existing spreadsheets.</p>
+          <div class="cs-step">
+            <div class="cs-dot">2</div>
+            <div>
+              <h3>Search approved sources</h3>
+              <p class="cs-body">The agent searches the sources your team permits, such as professional profiles, GitHub, portfolios, job boards, company pages, or existing spreadsheets.</p>
             </div>
           </div>
-          <div class="candidate-workflow-step relative">
-            <div class="candidate-workflow-dot relative z-10 flex h-10 w-10 items-center justify-center rounded-full text-white text-sm font-semibold" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">3</div>
-            <div class="candidate-workflow-step-body">
-              <h3 class="text-lg font-medium text-slate-950">Qualify with evidence</h3>
-              <p class="mt-3 text-slate-700 leading-7">Each candidate is compared against the role criteria with source links, fit notes, gaps, and useful context for recruiter review.</p>
+          <div class="cs-step">
+            <div class="cs-dot">3</div>
+            <div>
+              <h3>Qualify with evidence</h3>
+              <p class="cs-body">Each candidate is compared against the role criteria with source links, fit notes, gaps, and useful context for recruiter review.</p>
             </div>
           </div>
-          <div class="candidate-workflow-step relative">
-            <div class="candidate-workflow-dot relative z-10 flex h-10 w-10 items-center justify-center rounded-full text-white text-sm font-semibold" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">4</div>
-            <div class="candidate-workflow-step-body">
-              <h3 class="text-lg font-medium text-slate-950">Export the shortlist</h3>
-              <p class="mt-3 text-slate-700 leading-7">Send results to Google Sheets, CSV, webhooks, email digests, or configured ATS workflows so recruiting operations stays clean.</p>
+          <div class="cs-step">
+            <div class="cs-dot">4</div>
+            <div>
+              <h3>Export the shortlist</h3>
+              <p class="cs-body">Send results to Google Sheets, CSV, webhooks, email digests, or configured ATS workflows so recruiting operations stays clean.</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="rounded-lg border border-violet-100 bg-white overflow-hidden shadow-xl">
-        <div class="grid sm:grid-cols-2">
-          <div class="p-6 sm:p-8 border-b sm:border-b-0 sm:border-r border-violet-100">
-            <div class="flex items-center gap-2 text-sm font-semibold text-violet-700">
+      <!-- Product proof: the working brief, in a white window -->
+      <div class="cs-proof">
+        <div class="cs-pbar">
+          <span class="cs-pdot" style="background:#fca5a5"></span>
+          <span class="cs-pdot" style="background:#fcd34d"></span>
+          <span class="cs-pdot" style="background:#86efac"></span>
+          <span class="cs-purl">Example sourcing run</span>
+        </div>
+        <div class="cs-quad">
+          <div class="cs-quad-cell">
+            <div class="cs-quad-h">
               <i data-lucide="clipboard-list" class="w-4 h-4"></i>
               Role brief
             </div>
-            <p class="mt-4 text-sm leading-6 text-slate-700">
+            <p>
               Senior backend engineer. Python, infra, data pipelines. Boston or remote East Coast. Prefer candidates from developer tooling or AI infrastructure teams.
             </p>
           </div>
-          <div class="p-6 sm:p-8 border-b border-violet-100">
-            <div class="flex items-center gap-2 text-sm font-semibold text-violet-700">
+          <div class="cs-quad-cell">
+            <div class="cs-quad-h">
               <i data-lucide="search" class="w-4 h-4"></i>
               Search plan
             </div>
-            <ul class="mt-4 space-y-2 text-sm leading-6 text-slate-700">
+            <ul>
               <li>Professional profiles and company pages</li>
               <li>GitHub and portfolio evidence</li>
               <li>Adjacent titles and target companies</li>
             </ul>
           </div>
-          <div class="p-6 sm:p-8 border-b sm:border-b-0 sm:border-r border-violet-100">
-            <div class="flex items-center gap-2 text-sm font-semibold text-violet-700">
+          <div class="cs-quad-cell">
+            <div class="cs-quad-h">
               <i data-lucide="user-check" class="w-4 h-4"></i>
               Candidate notes
             </div>
-            <ul class="mt-4 space-y-2 text-sm leading-6 text-slate-700">
+            <ul>
               <li>Evidence-backed fit summary</li>
               <li>Potential concerns to review</li>
               <li>Links to source material</li>
             </ul>
           </div>
-          <div class="p-6 sm:p-8">
-            <div class="flex items-center gap-2 text-sm font-semibold text-violet-700">
+          <div class="cs-quad-cell">
+            <div class="cs-quad-h">
               <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
               Export
             </div>
-            <ul class="mt-4 space-y-2 text-sm leading-6 text-slate-700">
+            <ul>
               <li>Google Sheets or CSV</li>
               <li>ATS handoff where configured</li>
               <li>Outreach drafts for approval</li>
@@ -224,19 +292,17 @@
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="py-20 lg:py-28 text-white" style="background:linear-gradient(125deg,#241a3f,#46208c 70%,#7c3aed 130%)">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="grid lg:grid-cols-[0.9fr_1.1fr] gap-12 items-center">
+  <section class="gk-section">
+    <div class="cs-2col">
       <div>
-        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-300">Why Gobii</p>
-        <h2 class="mt-3 text-3xl sm:text-4xl font-light tracking-tight">Sourcing work that happens before your ATS can help</h2>
-        <p class="mt-5 text-lg leading-relaxed text-violet-200">
+        <p class="gk-eyebrow">Why Gobii</p>
+        <h2 class="gk-h2" style="margin-top:10px">Sourcing work that happens before your ATS can help</h2>
+        <p class="cs-lede">
           Applicant tracking systems are great once a candidate is already in your process. Gobii helps with the messy work before that: finding people, researching them, comparing profiles, and preparing clean data for a recruiter to review.
         </p>
-        <a href="{% url 'pages:solution' 'recruiting' %}" class="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-violet-200 hover:text-white">
+        <a href="{% url 'pages:solution' 'recruiting' %}" class="cs-arrow-link">
           Explore the recruiting solution
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -244,73 +310,71 @@
         </a>
       </div>
 
-      <div class="grid sm:grid-cols-2 gap-px overflow-hidden rounded-lg border border-white/15 bg-white/15">
-        <div class="p-6" style="background:#2b1e52">
-          <i data-lucide="radar" class="w-6 h-6 text-violet-300"></i>
-          <h3 class="mt-5 text-lg font-medium">Find passive candidates</h3>
-          <p class="mt-3 text-sm leading-6 text-violet-200">Search beyond inbound applicants and build a pipeline from public, approved, and team-provided sources.</p>
+      <div class="cs-grid2">
+        <div class="gk-card-glass cs-cell">
+          <i data-lucide="radar" class="w-6 h-6"></i>
+          <h3>Find passive candidates</h3>
+          <p>Search beyond inbound applicants and build a pipeline from public, approved, and team-provided sources.</p>
         </div>
-        <div class="p-6" style="background:#2b1e52">
-          <i data-lucide="list-checks" class="w-6 h-6 text-violet-300"></i>
-          <h3 class="mt-5 text-lg font-medium">Match real criteria</h3>
-          <p class="mt-3 text-sm leading-6 text-violet-200">Evaluate skills, seniority, location, company background, and must-avoid criteria in one repeatable workflow.</p>
+        <div class="gk-card-glass cs-cell">
+          <i data-lucide="list-checks" class="w-6 h-6"></i>
+          <h3>Match real criteria</h3>
+          <p>Evaluate skills, seniority, location, company background, and must-avoid criteria in one repeatable workflow.</p>
         </div>
-        <div class="p-6" style="background:#2b1e52">
-          <i data-lucide="refresh-cw" class="w-6 h-6 text-violet-300"></i>
-          <h3 class="mt-5 text-lg font-medium">Refresh the search</h3>
-          <p class="mt-3 text-sm leading-6 text-violet-200">Run daily, weekly, or role-triggered searches so your pipeline keeps moving while recruiters focus on conversations.</p>
+        <div class="gk-card-glass cs-cell">
+          <i data-lucide="refresh-cw" class="w-6 h-6"></i>
+          <h3>Refresh the search</h3>
+          <p>Run daily, weekly, or role-triggered searches so your pipeline keeps moving while recruiters focus on conversations.</p>
         </div>
-        <div class="p-6" style="background:#2b1e52">
-          <i data-lucide="shield-check" class="w-6 h-6 text-violet-300"></i>
-          <h3 class="mt-5 text-lg font-medium">Keep humans in control</h3>
-          <p class="mt-3 text-sm leading-6 text-violet-200">Gobii prepares sourced candidate data. Recruiters verify, approve outreach, and make hiring decisions.</p>
+        <div class="gk-card-glass cs-cell">
+          <i data-lucide="shield-check" class="w-6 h-6"></i>
+          <h3>Keep humans in control</h3>
+          <p>Gobii prepares sourced candidate data. Recruiters verify, approve outreach, and make hiring decisions.</p>
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="bg-white py-20 lg:py-28">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+  <section class="gk-section">
+    <div class="cs-2col">
       <div>
-        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">Deliverables</p>
-        <h2 class="mt-3 text-3xl sm:text-4xl font-light tracking-tight text-slate-950">A shortlist your team can actually use</h2>
-        <p class="mt-5 text-lg leading-relaxed text-slate-700">
+        <p class="gk-eyebrow">Deliverables</p>
+        <h2 class="gk-h2" style="margin-top:10px">A shortlist your team can actually use</h2>
+        <p class="cs-lede">
           A useful sourcing agent should not just say "I found candidates." It should return structured evidence your team can scan, sort, and move into the next step.
         </p>
-        <div class="mt-8 grid gap-4">
-          <div class="flex gap-4">
-            <div class="mt-1 flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600 text-white">
+        <div style="margin-top:12px">
+          <div class="cs-feat">
+            <div class="cs-feat-ic">
               <i data-lucide="link" class="w-4 h-4"></i>
             </div>
             <div>
-              <h3 class="font-medium text-slate-950">Source-linked candidate profiles</h3>
-              <p class="mt-1 text-sm leading-6 text-slate-700">Names, profile URLs, portfolio links, location, current role, and the sources behind the recommendation.</p>
+              <h3>Source-linked candidate profiles</h3>
+              <p>Names, profile URLs, portfolio links, location, current role, and the sources behind the recommendation.</p>
             </div>
           </div>
-          <div class="flex gap-4">
-            <div class="mt-1 flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600 text-white">
+          <div class="cs-feat">
+            <div class="cs-feat-ic">
               <i data-lucide="sparkles" class="w-4 h-4"></i>
             </div>
             <div>
-              <h3 class="font-medium text-slate-950">Fit notes and recruiter prompts</h3>
-              <p class="mt-1 text-sm leading-6 text-slate-700">Why the candidate may fit, which requirements are supported, what is missing, and what to verify before outreach.</p>
+              <h3>Fit notes and recruiter prompts</h3>
+              <p>Why the candidate may fit, which requirements are supported, what is missing, and what to verify before outreach.</p>
             </div>
           </div>
-          <div class="flex gap-4">
-            <div class="mt-1 flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600 text-white">
+          <div class="cs-feat">
+            <div class="cs-feat-ic">
               <i data-lucide="send" class="w-4 h-4"></i>
             </div>
             <div>
-              <h3 class="font-medium text-slate-950">Export-ready recruiting data</h3>
-              <p class="mt-1 text-sm leading-6 text-slate-700">Google Sheets, CSV, email digests, webhooks, and ATS handoff where your organization has configured it.</p>
+              <h3>Export-ready recruiting data</h3>
+              <p>Google Sheets, CSV, email digests, webhooks, and ATS handoff where your organization has configured it.</p>
             </div>
           </div>
         </div>
       </div>
 
-      <figure class="relative">
+      <figure class="cs-figure">
         <img
           src="{% static 'images/solutions/candidate-found.jpg' %}"
           srcset="{% static 'images/solutions/candidate-found-320.jpg' %} 320w,
@@ -321,207 +385,207 @@
                   {% static 'images/solutions/candidate-found.jpg' %} 2048w"
           sizes="(max-width: 1023px) 100vw, 44vw"
           alt="Gobii AI agent sending a Candidate Found notification with sourced candidate details"
-          class="w-full rounded-lg border border-violet-100 shadow-xl"
           width="2048"
           height="1536"
           loading="lazy"
           decoding="async"
         >
-        <figcaption class="mt-4 text-sm text-slate-600">Gobii can notify recruiters when a qualified candidate is ready for review.</figcaption>
+        <figcaption>Gobii can notify recruiters when a qualified candidate is ready for review.</figcaption>
       </figure>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="bg-white py-20 lg:py-28">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="max-w-3xl">
-      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">Use cases</p>
-      <h2 class="mt-3 text-3xl sm:text-4xl font-light tracking-tight text-slate-950">When automated candidate sourcing pays off</h2>
-      <p class="mt-5 text-lg leading-relaxed text-slate-700">
+  <section class="gk-section">
+    <div style="max-width:48rem">
+      <p class="gk-eyebrow">Use cases</p>
+      <h2 class="gk-h2" style="margin-top:10px">When automated candidate sourcing pays off</h2>
+      <p class="cs-lede">
         The best Gobii sourcing workflows are specific. Give the agent a narrow role, clear constraints, and an output format, then refine the search as candidates come back.
       </p>
     </div>
 
-    <div class="mt-12 grid md:grid-cols-2 lg:grid-cols-3 gap-px overflow-hidden rounded-lg border border-violet-100 bg-violet-100">
-      <div class="bg-white p-6">
-        <h3 class="font-medium text-slate-950">Niche technical roles</h3>
-        <p class="mt-3 text-sm leading-6 text-slate-700">Find engineers, data specialists, security talent, or operators whose best evidence lives in projects, profiles, and public work.</p>
+    <div class="cs-cases">
+      <div class="gk-card-glass cs-cell">
+        <h3 style="margin-top:0">Niche technical roles</h3>
+        <p>Find engineers, data specialists, security talent, or operators whose best evidence lives in projects, profiles, and public work.</p>
       </div>
-      <div class="bg-white p-6">
-        <h3 class="font-medium text-slate-950">Location-constrained searches</h3>
-        <p class="mt-3 text-sm leading-6 text-slate-700">Build lists for specific cities, commuting zones, time zones, licenses, markets, or regional hiring constraints.</p>
+      <div class="gk-card-glass cs-cell">
+        <h3 style="margin-top:0">Location-constrained searches</h3>
+        <p>Build lists for specific cities, commuting zones, time zones, licenses, markets, or regional hiring constraints.</p>
       </div>
-      <div class="bg-white p-6">
-        <h3 class="font-medium text-slate-950">Competitor talent mapping</h3>
-        <p class="mt-3 text-sm leading-6 text-slate-700">Research adjacent companies, prior employers, job titles, and experience patterns that point to likely fit.</p>
+      <div class="gk-card-glass cs-cell">
+        <h3 style="margin-top:0">Competitor talent mapping</h3>
+        <p>Research adjacent companies, prior employers, job titles, and experience patterns that point to likely fit.</p>
       </div>
-      <div class="bg-white p-6">
-        <h3 class="font-medium text-slate-950">Executive and hard-to-fill roles</h3>
-        <p class="mt-3 text-sm leading-6 text-slate-700">Collect profile context, work history, public signals, and talking points before a recruiter spends time on outreach.</p>
+      <div class="gk-card-glass cs-cell">
+        <h3 style="margin-top:0">Executive and hard-to-fill roles</h3>
+        <p>Collect profile context, work history, public signals, and talking points before a recruiter spends time on outreach.</p>
       </div>
-      <div class="bg-white p-6">
-        <h3 class="font-medium text-slate-950">Agency sourcing lists</h3>
-        <p class="mt-3 text-sm leading-6 text-slate-700">Create repeatable shortlist and tracker workflows for multiple clients without rebuilding the same search process every week.</p>
+      <div class="gk-card-glass cs-cell">
+        <h3 style="margin-top:0">Agency sourcing lists</h3>
+        <p>Create repeatable shortlist and tracker workflows for multiple clients without rebuilding the same search process every week.</p>
       </div>
-      <div class="bg-white p-6">
-        <h3 class="font-medium text-slate-950">Pipeline refreshes</h3>
-        <p class="mt-3 text-sm leading-6 text-slate-700">Re-run searches on a cadence, add newly discovered candidates, and summarize what changed since the last batch.</p>
+      <div class="gk-card-glass cs-cell">
+        <h3 style="margin-top:0">Pipeline refreshes</h3>
+        <p>Re-run searches on a cadence, add newly discovered candidates, and summarize what changed since the last batch.</p>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="candidate-sourcing-templates py-20 lg:py-28">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="grid lg:grid-cols-[1fr_1.1fr] gap-12 items-start">
+  <section class="gk-section">
+    <div class="cs-2col" style="align-items:start">
       <div>
-        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">Templates</p>
-        <h2 class="mt-3 text-3xl sm:text-4xl font-light tracking-tight text-slate-950">Start with Candidate Sourcing, then add specialists</h2>
-        <p class="mt-5 text-lg leading-relaxed text-slate-700">
+        <p class="gk-eyebrow">Templates</p>
+        <h2 class="gk-h2" style="margin-top:10px">Start with Candidate Sourcing, then add specialists</h2>
+        <p class="cs-lede">
           The fastest path is to deploy the Candidate Sourcing AI employee and tune the role brief. For deeper research or outreach-heavy workflows, pair it with Candidate Researcher or the Outreach AI employee.
         </p>
       </div>
 
-      <div class="grid gap-4">
-        <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-sourcing-agent' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
-          <div class="flex items-center justify-between gap-4">
+      <div class="cs-tpls">
+        <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-sourcing-agent' %}" class="gk-card-edge cs-tpl">
+          <div class="cs-tpl-row">
             <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">Primary template</p>
-              <h3 class="mt-2 text-xl font-medium text-slate-950">Candidate Sourcing AI Employee</h3>
+              <p class="cs-tpl-kicker">Primary template</p>
+              <h3>Candidate Sourcing AI Employee</h3>
             </div>
-            <i data-lucide="arrow-right" class="w-5 h-5 text-violet-600 group-hover:translate-x-1 transition-transform"></i>
+            <i data-lucide="arrow-right" class="w-5 h-5"></i>
           </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">Finds and qualifies candidates across LinkedIn, GitHub, and job boards.</p>
+          <p>Finds and qualifies candidates across LinkedIn, GitHub, and job boards.</p>
         </a>
-        <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-researcher' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
-          <div class="flex items-center justify-between gap-4">
+        <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-researcher' %}" class="gk-card-edge cs-tpl">
+          <div class="cs-tpl-row">
             <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">Profile depth</p>
-              <h3 class="mt-2 text-xl font-medium text-slate-950">Candidate Researcher</h3>
+              <p class="cs-tpl-kicker">Profile depth</p>
+              <h3>Candidate Researcher</h3>
             </div>
-            <i data-lucide="arrow-right" class="w-5 h-5 text-violet-600 group-hover:translate-x-1 transition-transform"></i>
+            <i data-lucide="arrow-right" class="w-5 h-5"></i>
           </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">Enriches candidate profiles with background research, work history, and online presence.</p>
+          <p>Enriches candidate profiles with background research, work history, and online presence.</p>
         </a>
-        <a href="{% url 'pages:public_template_detail' 'sales' 'outreach-agent' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
-          <div class="flex items-center justify-between gap-4">
+        <a href="{% url 'pages:public_template_detail' 'sales' 'outreach-agent' %}" class="gk-card-edge cs-tpl">
+          <div class="cs-tpl-row">
             <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">Next step</p>
-              <h3 class="mt-2 text-xl font-medium text-slate-950">Outreach Agent</h3>
+              <p class="cs-tpl-kicker">Next step</p>
+              <h3>Outreach Agent</h3>
             </div>
-            <i data-lucide="arrow-right" class="w-5 h-5 text-violet-600 group-hover:translate-x-1 transition-transform"></i>
+            <i data-lucide="arrow-right" class="w-5 h-5"></i>
           </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">Drafts personalized candidate outreach and keeps follow-ups organized.</p>
+          <p>Drafts personalized candidate outreach and keeps follow-ups organized.</p>
         </a>
-        <a href="{% url 'pages:library_category' 'recruiting' %}" class="candidate-template-link group rounded-lg border p-6 transition-all duration-200">
-          <div class="flex items-center justify-between gap-4">
+        <a href="{% url 'pages:library_category' 'recruiting' %}" class="gk-card-edge cs-tpl">
+          <div class="cs-tpl-row">
             <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">More examples</p>
-              <h3 class="mt-2 text-xl font-medium text-slate-950">HR & Recruiting templates</h3>
+              <p class="cs-tpl-kicker">More examples</p>
+              <h3>HR &amp; Recruiting templates</h3>
             </div>
-            <i data-lucide="arrow-right" class="w-5 h-5 text-violet-600 group-hover:translate-x-1 transition-transform"></i>
+            <i data-lucide="arrow-right" class="w-5 h-5"></i>
           </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">Browse public recruiting templates for sourcing, research, enrichment, and outreach workflows.</p>
+          <p>Browse public recruiting templates for sourcing, research, enrichment, and outreach workflows.</p>
         </a>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="candidate-sourcing-faq" class="bg-white py-20 lg:py-28">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="grid lg:grid-cols-[0.8fr_1.2fr] gap-12">
+  <section id="candidate-sourcing-faq" class="gk-section">
+    <div class="cs-faq-grid">
       <div>
-        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">Questions</p>
-        <h2 class="mt-3 text-3xl sm:text-4xl font-light tracking-tight text-slate-950">AI candidate sourcing, with recruiter judgment intact</h2>
-        <p class="mt-5 text-lg leading-relaxed text-slate-700">
+        <p class="gk-eyebrow">Questions</p>
+        <h2 class="gk-h2" style="margin-top:10px">AI candidate sourcing, with recruiter judgment intact</h2>
+        <p class="cs-lede">
           Gobii is built for sourcing work that benefits from browsing, comparison, enrichment, and organization. Your team still owns candidate review and hiring decisions.
         </p>
       </div>
 
-      <div class="divide-y divide-slate-200 rounded-lg border border-violet-100 bg-white overflow-hidden">
-        <details class="group p-6 sm:p-7" open>
-          <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-            <span class="text-lg font-medium text-slate-950">What is AI candidate sourcing?</span>
-            <i data-lucide="plus" class="mt-1 w-5 h-5 text-violet-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-          </summary>
-          <p class="mt-4 text-slate-700 leading-relaxed">
+      <div class="gk-faq" style="display:flex;flex-direction:column;gap:10px">
+        <details open>
+          <summary>What is AI candidate sourcing?</summary>
+          <p>
             AI candidate sourcing uses an agent to turn a role brief into repeatable recruiting research. Instead of manually rebuilding searches, a recruiter gives the agent criteria, sources, and output requirements. The agent searches, compares, summarizes, and organizes candidate profiles for human review.
           </p>
         </details>
 
-        <details class="group p-6 sm:p-7">
-          <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-            <span class="text-lg font-medium text-slate-950">How does Gobii source candidates?</span>
-            <i data-lucide="plus" class="mt-1 w-5 h-5 text-violet-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-          </summary>
-          <p class="mt-4 text-slate-700 leading-relaxed">
+        <details>
+          <summary>How does Gobii source candidates?</summary>
+          <p>
             Gobii agents search the sources your team permits, such as professional profiles, GitHub, portfolios, job boards, company pages, spreadsheets, or approved databases. The agent compares profiles against your criteria and returns source-linked candidate notes instead of unsupported recommendations.
           </p>
         </details>
 
-        <details class="group p-6 sm:p-7">
-          <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-            <span class="text-lg font-medium text-slate-950">Can Gobii export sourced candidates to our recruiting workflow?</span>
-            <i data-lucide="plus" class="mt-1 w-5 h-5 text-violet-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-          </summary>
-          <p class="mt-4 text-slate-700 leading-relaxed">
+        <details>
+          <summary>Can Gobii export sourced candidates to our recruiting workflow?</summary>
+          <p>
             Yes. Gobii can produce structured candidate data for Google Sheets, CSV, email digests, webhooks, and configured ATS handoffs. Common fields include profile links, source URLs, fit notes, location, work history, skill matches, recruiter notes, and outreach drafts.
           </p>
         </details>
 
-        <details class="group p-6 sm:p-7">
-          <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-            <span class="text-lg font-medium text-slate-950">Does Gobii replace sourcers or recruiters?</span>
-            <i data-lucide="plus" class="mt-1 w-5 h-5 text-violet-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-          </summary>
-          <p class="mt-4 text-slate-700 leading-relaxed">
+        <details>
+          <summary>Does Gobii replace sourcers or recruiters?</summary>
+          <p>
             No. Gobii handles repetitive research and organization so recruiters can spend more time on judgment-heavy work: validating fit, approving outreach, talking with candidates, advising hiring managers, and making decisions under the organization's hiring policies.
           </p>
         </details>
 
-        <details class="group p-6 sm:p-7">
-          <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-            <span class="text-lg font-medium text-slate-950">What makes a good sourcing brief for an AI agent?</span>
-            <i data-lucide="plus" class="mt-1 w-5 h-5 text-violet-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-          </summary>
-          <p class="mt-4 text-slate-700 leading-relaxed">
+        <details>
+          <summary>What makes a good sourcing brief for an AI agent?</summary>
+          <p>
             A good brief includes the role, must-have skills, nice-to-have signals, seniority, location, target companies, excluded backgrounds, source preferences, export format, and review rules. The clearer the criteria, the easier it is to judge whether the shortlist is useful.
           </p>
         </details>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="relative bg-white pt-8 pb-24 lg:pt-10 lg:pb-28">
-  <div class="max-w-4xl mx-auto px-6 text-center">
-    <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">Ready to source</p>
-    <h2 class="mt-4 text-4xl sm:text-5xl font-light text-slate-950 tracking-tight">
-      Launch your first candidate sourcing agent
-    </h2>
-    <p class="mt-5 text-xl text-slate-700 max-w-2xl mx-auto leading-relaxed">
-      Start with Candidate Sourcing, describe the role, and let Gobii prepare the first recruiter-reviewed shortlist.
-    </p>
+  <div class="cs-band-wrap">
+    <div class="gk-band">
+      <p class="gk-eyebrow" style="color:#c4b5fd">Ready to source</p>
+      <h2 style="margin-top:12px">
+        Launch your first candidate sourcing agent
+      </h2>
+      <p style="max-width:40rem;margin-left:auto;margin-right:auto">
+        Start with Candidate Sourcing, describe the role, and let Gobii prepare the first recruiter-reviewed shortlist.
+      </p>
 
-    <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
-        {% csrf_token %}
-        <input type="hidden" name="source_page" value="candidate_sourcing_final_cta" />
-        <input type="hidden" name="trial_onboarding" value="1" />
-        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-        <button type="submit" class="candidate-sourcing-primary-cta w-full group inline-flex items-center justify-center gap-2 px-8 py-4 text-white font-semibold rounded-lg">
-          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy Candidate Sourcing Employee{% endif %}
-          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-          </svg>
-        </button>
-      </form>
-      <a href="{% url 'pages:solution' 'recruiting' %}" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-white text-slate-900 font-medium rounded-lg border border-violet-200 hover:border-violet-400 hover:text-violet-700 shadow-sm transition-all duration-200">
-        View recruiting agents
-      </a>
+      <div class="cs-band-ctas">
+        <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="candidate_sourcing_final_cta" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="gk-btn w-full group">
+            {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy Candidate Sourcing Employee{% endif %}
+            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </form>
+        <a href="{% url 'pages:solution' 'recruiting' %}" class="gk-btn-quiet w-full sm:w-auto">
+          View recruiting agents
+        </a>
+      </div>
     </div>
   </div>
-</section>
+</div>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.cs-prow'));
+  if (!rows.length) return;
+  if (reduce) {
+    rows.forEach(function (r) { r.classList.add('on'); });
+    return;
+  }
+  var gen = 0;
+  var loop = function () {
+    var g = ++gen;
+    rows.forEach(function (r) { r.classList.remove('on'); });
+    rows.forEach(function (r, i) {
+      setTimeout(function () { if (g === gen) r.classList.add('on'); }, 400 + i * 420);
+    });
+    setTimeout(function () { if (g === gen) loop(); }, 400 + rows.length * 420 + 2600);
+  };
+  loop();
+})();
+</script>
 {% endblock %}

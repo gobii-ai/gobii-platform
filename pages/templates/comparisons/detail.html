@@ -27,326 +27,367 @@
 {% endblock %}
 
 {% block content %}
-<main id="main-content" class="bg-white">
-  <section class="gk-page-dark">
-    <div class="gk-ph">
-      <p class="gk-ph-crumbs">
-        <a href="{% url 'proprietary:comparisons' %}" class="inline-flex items-center">
-          <i aria-hidden="true" data-lucide="arrow-left" class="mr-2 size-4"></i>
-          Comparisons
-        </a>
-      </p>
-      <p class="gk-ph-eyebrow">OpenClaw vs Gobii</p>
-      <h1>
-        OpenClaw vs Gobii: AI agents for real business workflows
-      </h1>
-      <p class="gk-ph-sub">
-        Comparing OpenClaw vs Gobii? OpenClaw is a capable local-first assistant for technical users and power users. Gobii is built for teams that need always-on AI agents with schedules, browser sessions, structured state, secure credentials, files, communication endpoints, and production deployment controls.
-      </p>
-      <div class="gk-ph-ctas">
-        <a href="{% url 'pages:home' %}" class="gk-btn">
-          Create Your First Gobii Agent
-          <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
-        </a>
-        <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="gk-btn-quiet">
-          Review the Open Source Repo
-        </a>
-      </div>
+<div class="gk-luxe">
+  <style>
+    /* comparison detail — page-scoped layout */
+    .cmpd-hero { max-width: 1100px; margin: 0 auto; padding: 64px 24px 0; position: relative; }
+    .cmpd-crumbs { font-size: 12.5px; margin: 0 0 14px; }
+    .cmpd-crumbs a { color: #c4b5fd; text-decoration: none; }
+    .cmpd-crumbs a:hover { color: #fff; }
+    .cmpd-hero h1 { margin-top: 12px; max-width: 30ch; }
+    .cmpd-hero .cmpd-sub { margin-top: 14px; max-width: 68ch; }
+    .cmpd-ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+    .cmpd-split { display: grid; gap: 28px; margin-top: 6px; }
+    @media (min-width: 1024px) {
+      .cmpd-split { grid-template-columns: 0.9fr 1.1fr; align-items: start; }
+      .cmpd-split-wide { grid-template-columns: 1fr 0.8fr; }
+    }
+    .cmpd-h2 { margin-top: 12px; }
+    .cmpd-prose p { color: #b7aed4; font-size: 14.5px; line-height: 1.7; margin: 0; }
+    .cmpd-prose p + p { margin-top: 14px; }
+    .cmpd-grid2 { display: grid; gap: 16px; margin-top: 26px; }
+    @media (min-width: 900px) { .cmpd-grid2 { grid-template-columns: 1fr 1fr; } }
+    .cmpd-card { padding: 24px; }
+    .cmpd-cardhead { display: flex; align-items: center; gap: 12px; }
+    .cmpd-ichip { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center;
+                  border-radius: 10px; color: #fff; flex-shrink: 0;
+                  background: linear-gradient(120deg, #7c3aed, #a855f7); }
+    .cmpd-card h2, .cmpd-card h3 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
+    .cmpd-card p { color: #b7aed4; font-size: 13.5px; line-height: 1.65; margin: 14px 0 0; }
+    .cmpd-tablewrap { margin-top: 26px; }
+    .cmpd-tablewrap thead th + th, .cmpd-tablewrap tbody td + td { text-align: left; color: #d5cdec; }
+    .cmpd-tablewrap tbody th { padding: 12px 18px; color: #fff; font-weight: 600; font-size: 13px;
+                               text-align: left; border-top: 1px solid rgba(255,255,255,.07);
+                               vertical-align: top; min-width: 150px; }
+    .cmpd-tablewrap tbody td { vertical-align: top; min-width: 200px; }
+    .cmpd-band { text-align: left; }
+    .cmpd-band h2 { text-align: left; margin-top: 12px; }
+    .cmpd-band .cmpd-prose p { color: #c4b5fd; margin: 0; }
+    .cmpd-band .cmpd-prose p + p { margin-top: 14px; }
+    .cmpd-checks { list-style: none; padding: 0; color: #d5cdec; font-size: 13.5px; line-height: 1.6; }
+    .cmpd-check-ic { color: #34d399; flex-shrink: 0; }
+    .cmpd-aside { padding: 26px; }
+    .cmpd-aside h2 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
+    .cmpd-aside p { color: #b7aed4; font-size: 13px; line-height: 1.65; margin: 14px 0 0; }
+    .cmpd-links { display: flex; flex-direction: column; gap: 12px; margin-top: 20px;
+                  font-size: 13px; font-weight: 600; }
+    .cmpd-links a { display: inline-flex; align-items: center; color: #c4b5fd; text-decoration: none; }
+    .cmpd-links a:hover { color: #fff; }
+  </style>
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+<main id="main-content">
+  <section class="cmpd-hero">
+    <p class="cmpd-crumbs">
+      <a href="{% url 'proprietary:comparisons' %}" class="inline-flex items-center">
+        <i aria-hidden="true" data-lucide="arrow-left" class="mr-2 size-4"></i>
+        Comparisons
+      </a>
+    </p>
+    <p class="gk-eyebrow">OpenClaw vs Gobii</p>
+    <h1 class="gk-display">
+      OpenClaw vs Gobii: AI agents for <span class="gk-accent">real business workflows</span>
+    </h1>
+    <p class="gk-sub cmpd-sub">
+      Comparing OpenClaw vs Gobii? OpenClaw is a capable local-first assistant for technical users and power users. Gobii is built for teams that need always-on AI agents with schedules, browser sessions, structured state, secure credentials, files, communication endpoints, and production deployment controls.
+    </p>
+    <div class="cmpd-ctas">
+      <a href="{% url 'pages:home' %}" class="gk-btn">
+        Create Your First Gobii Agent
+        <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
+      </a>
+      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="gk-btn-quiet">
+        Review the Open Source Repo
+      </a>
     </div>
   </section>
 
-  <section class="bg-white py-16 sm:py-20">
-    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
-      <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
-        <div>
-          <p class="text-sm font-semibold uppercase text-violet-600">Executive summary</p>
-          <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">
-            OpenClaw vs Gobii: the short version.
-          </h2>
-        </div>
-        <div class="space-y-5 text-base leading-7 text-slate-700">
-          <p>
-            Gobii and OpenClaw both support persistent agents, tool use, memory, browser automation, and scheduled work. The difference is the operating model.
-          </p>
-          <p>
-            OpenClaw is optimized for a trusted operator running a local gateway. It is a strong choice for personal automation, broad messaging-channel access, and local-first control.
-          </p>
-          <p>
-            Gobii is optimized for teams deploying agents into recurring business workflows. Gobii agents are designed to run continuously, preserve operational state, communicate through their own endpoints, use real browser sessions, handle files and structured data, and operate in cloud or self-hosted environments.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="bg-violet-50 py-16 sm:py-20">
-    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
-      <div class="max-w-3xl">
-        <p class="text-sm font-semibold uppercase text-violet-600">Which should you choose?</p>
-        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Pick based on who the agent serves.</h2>
-      </div>
-      <div class="mt-10 grid gap-5 lg:grid-cols-2">
-        <article class="rounded-lg border border-violet-200 bg-white p-6">
-          <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
-              <i aria-hidden="true" data-lucide="terminal" class="size-5"></i>
-            </span>
-            <h3 class="text-xl font-semibold text-slate-950">Choose OpenClaw if...</h3>
-          </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            You want a local-first personal assistant that you run yourself and connect to many messaging channels.
-          </p>
-        </article>
-
-        <article class="rounded-lg border border-violet-200 bg-white p-6">
-          <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
-              <i aria-hidden="true" data-lucide="briefcase" class="size-5"></i>
-            </span>
-            <h3 class="text-xl font-semibold text-slate-950">Choose Gobii if...</h3>
-          </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            You want always-on AI agents for team workflows: agents with schedules, persistent browser sessions, structured state, secure credentials, files, webhooks, communication endpoints, and production deployment options.
-          </p>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <section class="bg-white py-16 sm:py-20">
-    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
-      <div class="max-w-3xl">
-        <p class="text-sm font-semibold uppercase text-violet-600">At a glance</p>
-        <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">The practical comparison</h2>
-      </div>
-      <div class="mt-10 overflow-x-auto rounded-lg border border-violet-200">
-        <table class="min-w-[980px] divide-y divide-slate-200 text-left text-sm">
-          <thead class="text-white" style="background:linear-gradient(125deg,#241a3f,#46208c 70%,#7c3aed 130%)">
-            <tr>
-              <th scope="col" class="px-5 py-4 font-semibold">Dimension</th>
-              <th scope="col" class="px-5 py-4 font-semibold">Gobii</th>
-              <th scope="col" class="px-5 py-4 font-semibold">OpenClaw</th>
-              <th scope="col" class="px-5 py-4 font-semibold">Why it matters</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-200 bg-white">
-            <tr>
-              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Best fit</th>
-              <td class="px-5 py-5 text-slate-700">Production team automation</td>
-              <td class="px-5 py-5 text-slate-700">Local-first personal assistant workflows</td>
-              <td class="px-5 py-5 text-slate-700">The right platform depends on whether agents serve one operator or a business process.</td>
-            </tr>
-            <tr class="bg-violet-50">
-              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Deployment model</th>
-              <td class="px-5 py-5 text-slate-700">Gobii Cloud or self-hosted</td>
-              <td class="px-5 py-5 text-slate-700">Self-hosted gateway</td>
-              <td class="px-5 py-5 text-slate-700">Teams often need a managed path plus self-hosting for control.</td>
-            </tr>
-            <tr>
-              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Always-on model</th>
-              <td class="px-5 py-5 text-slate-700">Per-agent schedules plus durable event processing</td>
-              <td class="px-5 py-5 text-slate-700">Heartbeat, cron, and gateway-triggered sessions</td>
-              <td class="px-5 py-5 text-slate-700">Business workflows need reliable execution, not just periodic awareness.</td>
-            </tr>
-            <tr class="bg-violet-50">
-              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Agent identity</th>
-              <td class="px-5 py-5 text-slate-700">Agents can have their own email, SMS, and web endpoints</td>
-              <td class="px-5 py-5 text-slate-700">Workspace and session-oriented assistant model</td>
-              <td class="px-5 py-5 text-slate-700">Addressable agents are easier to delegate to, route, and coordinate with.</td>
-            </tr>
-            <tr>
-              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Browser automation</th>
-              <td class="px-5 py-5 text-slate-700">Cloud-ready browser runtime with persistent sessions and proxy-aware routing</td>
-              <td class="px-5 py-5 text-slate-700">Managed local browser profile and strong operator UX</td>
-              <td class="px-5 py-5 text-slate-700">Recurring web work needs state, recovery, and infrastructure around the browser.</td>
-            </tr>
-            <tr class="bg-violet-50">
-              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Memory and state</th>
-              <td class="px-5 py-5 text-slate-700">SQLite-native operational state for structured workflows</td>
-              <td class="px-5 py-5 text-slate-700">Markdown-first memory with search and memory tools</td>
-              <td class="px-5 py-5 text-slate-700">Structured state is valuable when agents collect, update, and query business data.</td>
-            </tr>
-            <tr>
-              <th scope="row" class="px-5 py-5 font-semibold text-slate-950">Security posture</th>
-              <td class="px-5 py-5 text-slate-700">Encrypted secrets, controlled egress, sandbox compute support, cloud and hybrid readiness</td>
-              <td class="px-5 py-5 text-slate-700">Personal-assistant trust model with optional sandboxing and hardening controls</td>
-              <td class="px-5 py-5 text-slate-700">Production agents need stronger default boundaries around credentials, data, and execution.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <section class="py-16 text-white sm:py-20" style="background:linear-gradient(125deg,#241a3f,#46208c 70%,#7c3aed 130%)">
-    <div class="mx-auto grid max-w-7xl gap-12 px-6 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:px-12">
+  <section class="gk-section">
+    <div class="cmpd-split">
       <div>
-        <p class="text-sm font-semibold uppercase text-violet-300">Why the operating model matters</p>
-        <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">The real test starts after the first prompt.</h2>
+        <p class="gk-eyebrow">Executive summary</p>
+        <h2 class="gk-h2 cmpd-h2">
+          OpenClaw vs Gobii: the short version.
+        </h2>
       </div>
-      <div class="space-y-5 text-base leading-7 text-violet-200">
+      <div class="cmpd-prose">
         <p>
-          AI agent platforms can look similar in a demo. The real differences appear after the first task: when agents need to wake on schedule, react to events, preserve browser state, store structured data, protect credentials, and deliver work without constant supervision.
+          Gobii and OpenClaw both support persistent agents, tool use, memory, browser automation, and scheduled work. The difference is the operating model.
         </p>
         <p>
-          OpenClaw gives a power user a strong local gateway for messaging channels, tools, browser control, memory, and assistant-style availability. Gobii gives teams a production agent runtime: persistent AI employees that can be contacted directly and trusted with repeatable business processes.
+          OpenClaw is optimized for a trusted operator running a local gateway. It is a strong choice for personal automation, broad messaging-channel access, and local-first control.
+        </p>
+        <p>
+          Gobii is optimized for teams deploying agents into recurring business workflows. Gobii agents are designed to run continuously, preserve operational state, communicate through their own endpoints, use real browser sessions, handle files and structured data, and operate in cloud or self-hosted environments.
         </p>
       </div>
     </div>
   </section>
 
-  <section class="bg-white py-16 sm:py-20">
-    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
-      <div class="grid gap-8 lg:grid-cols-2">
-        <article class="rounded-lg border border-violet-200 bg-violet-50 p-7">
-          <h2 class="text-2xl font-semibold text-slate-950">Always-on execution</h2>
-          <p class="mt-5 text-sm leading-6 text-slate-700">
-            OpenClaw's heartbeat model is useful for personal assistant awareness. It lets an agent periodically check whether anything needs attention and respond through the gateway.
-          </p>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            Gobii's always-on model is built around operational continuity. Schedules, email, SMS, webhooks, API events, and agent-to-agent messages feed into a durable per-agent lifecycle. That gives teams a cleaner model for workflows that must run every day, react to external events, retry work, and continue across turns.
-          </p>
-        </article>
+  <section class="gk-section">
+    <div>
+      <p class="gk-eyebrow">Which should you choose?</p>
+      <h2 class="gk-h2 cmpd-h2">Pick based on who the agent serves.</h2>
+    </div>
+    <div class="cmpd-grid2">
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip">
+            <i aria-hidden="true" data-lucide="terminal" class="size-5"></i>
+          </span>
+          <h3>Choose OpenClaw if...</h3>
+        </div>
+        <p>
+          You want a local-first personal assistant that you run yourself and connect to many messaging channels.
+        </p>
+      </article>
 
-        <article class="rounded-lg border border-violet-200 bg-violet-50 p-7">
-          <h2 class="text-2xl font-semibold text-slate-950">Browser automation</h2>
-          <p class="mt-5 text-sm leading-6 text-slate-700">
-            Both platforms support real browser work. The difference is what surrounds the browser.
-          </p>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            OpenClaw's browser model is well suited to a local operator who wants an isolated assistant-controlled browser. Gobii is designed for production browser automation: cloud execution, persistent sessions, file outputs, structured state, and proxy-aware routing.
-          </p>
-        </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip">
+            <i aria-hidden="true" data-lucide="briefcase" class="size-5"></i>
+          </span>
+          <h3>Choose Gobii if...</h3>
+        </div>
+        <p>
+          You want always-on AI agents for team workflows: agents with schedules, persistent browser sessions, structured state, secure credentials, files, webhooks, communication endpoints, and production deployment options.
+        </p>
+      </article>
+    </div>
+  </section>
 
-        <article class="rounded-lg border border-violet-200 bg-violet-50 p-7">
-          <h2 class="text-2xl font-semibold text-slate-950">Security and governance</h2>
-          <p class="mt-5 text-sm leading-6 text-slate-700">
-            OpenClaw's public security guidance describes a personal-assistant trust model: one trusted operator boundary per gateway, with sandboxing and hardening controls available.
-          </p>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            Gobii is designed for teams that need stronger production defaults. Agents can run with encrypted secrets, controlled egress, sandbox compute support, auditability, and cloud or self-hosted deployment paths.
-          </p>
-        </article>
+  <section class="gk-section">
+    <div>
+      <p class="gk-eyebrow">At a glance</p>
+      <h2 class="gk-h2 cmpd-h2">The practical comparison</h2>
+    </div>
+    <div class="gk-tablewrap cmpd-tablewrap">
+      <table style="min-width:980px">
+        <thead>
+          <tr>
+            <th scope="col">Dimension</th>
+            <th scope="col">Gobii</th>
+            <th scope="col">OpenClaw</th>
+            <th scope="col">Why it matters</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Best fit</th>
+            <td>Production team automation</td>
+            <td>Local-first personal assistant workflows</td>
+            <td>The right platform depends on whether agents serve one operator or a business process.</td>
+          </tr>
+          <tr>
+            <th scope="row">Deployment model</th>
+            <td>Gobii Cloud or self-hosted</td>
+            <td>Self-hosted gateway</td>
+            <td>Teams often need a managed path plus self-hosting for control.</td>
+          </tr>
+          <tr>
+            <th scope="row">Always-on model</th>
+            <td>Per-agent schedules plus durable event processing</td>
+            <td>Heartbeat, cron, and gateway-triggered sessions</td>
+            <td>Business workflows need reliable execution, not just periodic awareness.</td>
+          </tr>
+          <tr>
+            <th scope="row">Agent identity</th>
+            <td>Agents can have their own email, SMS, and web endpoints</td>
+            <td>Workspace and session-oriented assistant model</td>
+            <td>Addressable agents are easier to delegate to, route, and coordinate with.</td>
+          </tr>
+          <tr>
+            <th scope="row">Browser automation</th>
+            <td>Cloud-ready browser runtime with persistent sessions and proxy-aware routing</td>
+            <td>Managed local browser profile and strong operator UX</td>
+            <td>Recurring web work needs state, recovery, and infrastructure around the browser.</td>
+          </tr>
+          <tr>
+            <th scope="row">Memory and state</th>
+            <td>SQLite-native operational state for structured workflows</td>
+            <td>Markdown-first memory with search and memory tools</td>
+            <td>Structured state is valuable when agents collect, update, and query business data.</td>
+          </tr>
+          <tr>
+            <th scope="row">Security posture</th>
+            <td>Encrypted secrets, controlled egress, sandbox compute support, cloud and hybrid readiness</td>
+            <td>Personal-assistant trust model with optional sandboxing and hardening controls</td>
+            <td>Production agents need stronger default boundaries around credentials, data, and execution.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-        <article class="rounded-lg border border-violet-200 bg-violet-50 p-7">
-          <h2 class="text-2xl font-semibold text-slate-950">Agent identity</h2>
-          <p class="mt-5 text-sm leading-6 text-slate-700">
-            OpenClaw is primarily organized around a gateway, workspaces, sessions, and channels.
+  <section class="gk-section gk-section-plain" style="padding-top:56px">
+    <div class="gk-band cmpd-band">
+      <div class="cmpd-split">
+        <div>
+          <p class="gk-eyebrow">Why the operating model matters</p>
+          <h2>The real test starts after the first prompt.</h2>
+        </div>
+        <div class="cmpd-prose">
+          <p>
+            AI agent platforms can look similar in a demo. The real differences appear after the first task: when agents need to wake on schedule, react to events, preserve browser state, store structured data, protect credentials, and deliver work without constant supervision.
           </p>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            Gobii treats agents as operational entities. A Gobii agent can have its own name, email address, phone number, files, state, browser profile, tools, schedule, and collaborators. You do not just chat with an assistant. You delegate work to an AI employee your team can contact, route, and coordinate with.
+          <p>
+            OpenClaw gives a power user a strong local gateway for messaging channels, tools, browser control, memory, and assistant-style availability. Gobii gives teams a production agent runtime: persistent AI employees that can be contacted directly and trusted with repeatable business processes.
           </p>
-        </article>
+        </div>
       </div>
     </div>
   </section>
 
-  <section class="bg-violet-50 py-16 sm:py-20">
-    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
-      <div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr]">
-        <div>
-          <p class="text-sm font-semibold uppercase text-violet-600">Memory and structured state</p>
-          <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Gobii is built for durable work products, not only replies.</h2>
-        </div>
-        <div class="space-y-5 text-base leading-7 text-slate-700">
-          <p>
-            OpenClaw's Markdown-first memory model is easy to inspect and edit. That is useful for personal assistant workflows where the operator wants direct visibility into what the agent remembers.
-          </p>
-          <p>
-            Gobii gives each agent structured runtime state. Agents can store, query, update, and reuse data as they work. That makes Gobii a stronger fit for workflows where the output is not only a message, but a maintained dataset, report, CSV, PDF, or operational record.
-          </p>
-        </div>
+  <section class="gk-section gk-section-plain" style="padding-top:56px">
+    <div class="cmpd-grid2" style="margin-top:0">
+      <article class="gk-card-glass cmpd-card">
+        <h2>Always-on execution</h2>
+        <p>
+          OpenClaw's heartbeat model is useful for personal assistant awareness. It lets an agent periodically check whether anything needs attention and respond through the gateway.
+        </p>
+        <p>
+          Gobii's always-on model is built around operational continuity. Schedules, email, SMS, webhooks, API events, and agent-to-agent messages feed into a durable per-agent lifecycle. That gives teams a cleaner model for workflows that must run every day, react to external events, retry work, and continue across turns.
+        </p>
+      </article>
+
+      <article class="gk-card-glass cmpd-card">
+        <h2>Browser automation</h2>
+        <p>
+          Both platforms support real browser work. The difference is what surrounds the browser.
+        </p>
+        <p>
+          OpenClaw's browser model is well suited to a local operator who wants an isolated assistant-controlled browser. Gobii is designed for production browser automation: cloud execution, persistent sessions, file outputs, structured state, and proxy-aware routing.
+        </p>
+      </article>
+
+      <article class="gk-card-glass cmpd-card">
+        <h2>Security and governance</h2>
+        <p>
+          OpenClaw's public security guidance describes a personal-assistant trust model: one trusted operator boundary per gateway, with sandboxing and hardening controls available.
+        </p>
+        <p>
+          Gobii is designed for teams that need stronger production defaults. Agents can run with encrypted secrets, controlled egress, sandbox compute support, auditability, and cloud or self-hosted deployment paths.
+        </p>
+      </article>
+
+      <article class="gk-card-glass cmpd-card">
+        <h2>Agent identity</h2>
+        <p>
+          OpenClaw is primarily organized around a gateway, workspaces, sessions, and channels.
+        </p>
+        <p>
+          Gobii treats agents as operational entities. A Gobii agent can have its own name, email address, phone number, files, state, browser profile, tools, schedule, and collaborators. You do not just chat with an assistant. You delegate work to an AI employee your team can contact, route, and coordinate with.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-split">
+      <div>
+        <p class="gk-eyebrow">Memory and structured state</p>
+        <h2 class="gk-h2 cmpd-h2">Gobii is built for durable work products, not only replies.</h2>
+      </div>
+      <div class="cmpd-prose">
+        <p>
+          OpenClaw's Markdown-first memory model is easy to inspect and edit. That is useful for personal assistant workflows where the operator wants direct visibility into what the agent remembers.
+        </p>
+        <p>
+          Gobii gives each agent structured runtime state. Agents can store, query, update, and reuse data as they work. That makes Gobii a stronger fit for workflows where the output is not only a message, but a maintained dataset, report, CSV, PDF, or operational record.
+        </p>
       </div>
     </div>
   </section>
 
-  <section class="bg-white py-16 sm:py-20">
-    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
-      <div class="grid gap-10 lg:grid-cols-2">
-        <div>
-          <p class="text-sm font-semibold uppercase text-violet-600">Where OpenClaw fits</p>
-          <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">A strong local-first assistant platform.</h2>
-          <p class="mt-5 text-base leading-7 text-slate-700">
+  <section class="gk-section">
+    <div class="cmpd-grid2" style="margin-top:0;gap:40px">
+      <div>
+        <p class="gk-eyebrow">Where OpenClaw fits</p>
+        <h2 class="gk-h2 cmpd-h2">A strong local-first assistant platform.</h2>
+        <div class="cmpd-prose" style="margin-top:18px">
+          <p>
             OpenClaw is a strong option if your priority is local-first control, broad messaging-channel coverage, personal assistant workflows, and hands-on experimentation.
           </p>
-          <p class="mt-4 text-base leading-7 text-slate-700">
+          <p>
             It is especially compelling for technical users who want to run an assistant from their own machine or server and directly manage the gateway environment.
           </p>
         </div>
-        <div>
-          <p class="text-sm font-semibold uppercase text-violet-600">Where Gobii fits</p>
-          <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">A stronger fit for production team workflows.</h2>
-          <ul class="mt-6 grid gap-3 text-sm leading-6 text-slate-700 sm:grid-cols-2">
-            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Run on schedules and react to events</span></li>
-            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Browse websites with persistent sessions</span></li>
-            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Collect and maintain structured data</span></li>
-            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Send and receive email, SMS, files, and webhooks</span></li>
-            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Use encrypted credentials</span></li>
-            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Generate reports, CSVs, PDFs, and deliverables</span></li>
-            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Support cloud or self-hosted deployment</span></li>
-            <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 text-emerald-700"></i><span>Fit into team operations instead of a single local assistant setup</span></li>
-          </ul>
+      </div>
+      <div>
+        <p class="gk-eyebrow">Where Gobii fits</p>
+        <h2 class="gk-h2 cmpd-h2">A stronger fit for production team workflows.</h2>
+        <ul class="cmpd-checks mt-6 grid gap-3 sm:grid-cols-2">
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Run on schedules and react to events</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Browse websites with persistent sessions</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Collect and maintain structured data</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Send and receive email, SMS, files, and webhooks</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Use encrypted credentials</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Generate reports, CSVs, PDFs, and deliverables</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Support cloud or self-hosted deployment</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Fit into team operations instead of a single local assistant setup</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="gk-section gk-section-plain" style="padding-top:56px">
+    <div class="gk-band cmpd-band">
+      <div style="max-width:800px">
+        <p class="gk-eyebrow">Bottom line</p>
+        <h2>OpenClaw is a capable local-first assistant platform. Gobii is a production agent platform for teams.</h2>
+        <div class="cmpd-prose" style="margin-top:16px">
+          <p>
+            If you want a personal AI assistant connected to many channels, OpenClaw is worth evaluating. If you want AI agents that can take on recurring business workflows, preserve state, use real browser sessions, protect credentials, and deliver work to your team, Gobii is the stronger choice.
+          </p>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="py-16 text-white sm:py-20" style="background:linear-gradient(125deg,#241a3f,#46208c 70%,#7c3aed 130%)">
-    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
-      <div class="max-w-3xl">
-        <p class="text-sm font-semibold uppercase text-violet-300">Bottom line</p>
-        <h2 class="mt-4 text-3xl font-light tracking-tight sm:text-4xl">OpenClaw is a capable local-first assistant platform. Gobii is a production agent platform for teams.</h2>
-        <p class="mt-6 text-base leading-7 text-violet-200">
-          If you want a personal AI assistant connected to many channels, OpenClaw is worth evaluating. If you want AI agents that can take on recurring business workflows, preserve state, use real browser sessions, protect credentials, and deliver work to your team, Gobii is the stronger choice.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <section class="bg-white py-16 sm:py-20">
-    <div class="mx-auto max-w-7xl px-6 sm:px-8 lg:px-12">
-      <div class="grid gap-10 lg:grid-cols-[1fr_0.8fr] lg:items-start">
-        <div>
-          <p class="text-sm font-semibold uppercase text-violet-600">Deploy AI employees built for production work</p>
-          <h2 class="mt-4 text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Start with one workflow. Scale into an AI workforce your team can rely on.</h2>
-          <p class="mt-6 max-w-3xl text-base leading-7 text-slate-700">
+  <section class="gk-section gk-closer">
+    <div class="cmpd-split cmpd-split-wide">
+      <div>
+        <p class="gk-eyebrow">Deploy AI employees built for production work</p>
+        <h2 class="gk-h2 cmpd-h2">Start with one workflow. Scale into an AI workforce your team can rely on.</h2>
+        <div class="cmpd-prose" style="margin-top:18px;max-width:60ch">
+          <p>
             Gobii gives teams always-on agents with browser automation, persistent state, secure credentials, direct communication endpoints, and cloud or self-hosted deployment options.
           </p>
-          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
-            <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center rounded-lg px-6 py-3 text-sm font-semibold text-white transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
-              Create Your First Gobii Agent
-              <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
-            </a>
-            <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg border border-violet-200 bg-white px-6 py-3 text-sm font-semibold text-slate-900 transition hover:border-violet-400 hover:text-violet-700">
-              Review the Open Source Repo
-            </a>
-          </div>
         </div>
-        <aside class="rounded-lg border border-violet-200 bg-violet-50 p-6">
-          <h2 class="text-lg font-semibold text-slate-950">Source note</h2>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            This comparison is based on public documentation, public repository information, and Gobii platform architecture reviewed in {{ comparison.source_reviewed }}.
-          </p>
-          <p class="mt-3 text-sm leading-6 text-slate-700">
-            Last reviewed {{ comparison.last_reviewed_display }} by {{ comparison.reviewed_by }}.
-          </p>
-          <div class="mt-5 flex flex-col gap-3 text-sm font-semibold">
-            <a href="https://docs.openclaw.ai/" target="_blank" rel="noopener" class="inline-flex items-center text-violet-600 hover:text-violet-700">
-              OpenClaw documentation
-              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
-            </a>
-            <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener" class="inline-flex items-center text-violet-600 hover:text-violet-700">
-              OpenClaw GitHub
-              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
-            </a>
-            <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="inline-flex items-center text-violet-600 hover:text-violet-700">
-              Gobii open source repo
-              <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
-            </a>
-          </div>
-        </aside>
+        <div class="cmpd-ctas" style="margin-top:28px">
+          <a href="{% url 'pages:home' %}" class="gk-btn">
+            Create Your First Gobii Agent
+            <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
+          </a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="gk-btn-quiet">
+            Review the Open Source Repo
+          </a>
+        </div>
       </div>
+      <aside class="gk-card-glass cmpd-aside">
+        <h2>Source note</h2>
+        <p>
+          This comparison is based on public documentation, public repository information, and Gobii platform architecture reviewed in {{ comparison.source_reviewed }}.
+        </p>
+        <p>
+          Last reviewed {{ comparison.last_reviewed_display }} by {{ comparison.reviewed_by }}.
+        </p>
+        <div class="cmpd-links">
+          <a href="https://docs.openclaw.ai/" target="_blank" rel="noopener">
+            OpenClaw documentation
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">
+            OpenClaw GitHub
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener">
+            Gobii open source repo
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+        </div>
+      </aside>
     </div>
   </section>
 </main>
+</div>
 {% endblock %}

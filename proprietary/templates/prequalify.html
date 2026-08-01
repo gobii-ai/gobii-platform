@@ -10,165 +10,176 @@
 {% endblock %}
 
 {% block content %}
-<section class="gk-page-dark">
-  <div class="gk-ph gk-ph-center">
-    <p class="gk-ph-eyebrow">Enterprise pre-qualification</p>
-    <h1>Let's design your deployment.</h1>
-    <p class="gk-ph-sub">
+<div class="gk-luxe">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+  <style>
+    .prequal-hero { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; padding: 72px 24px 0; text-align: center; }
+    .prequal-hero .gk-sub { margin-top: 14px; }
+    .prequal-wrap { position: relative; z-index: 1; max-width: 1060px; margin: 0 auto; padding: 44px 24px 96px; }
+    .prequal-aside-title { font-size: 14px; font-weight: 600; color: #fff; }
+    .prequal-aside p { color: #b7aed4; font-size: 13.5px; line-height: 1.65; }
+    .prequal-aside a { color: #c4b5fd; font-weight: 500; }
+    .prequal-aside a:hover { color: #fff; }
+    .prequal-dot { background: #a855f7; }
+    .prequal-form select {
+      appearance: none; -webkit-appearance: none;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%23a99cc9'/></svg>");
+      background-repeat: no-repeat; background-position: right 14px center;
+    }
+    .prequal-ok { border-radius: 12px; border: 1px solid rgba(52,211,153,.6); background: rgba(52,211,153,.12);
+                  padding: 12px 16px; font-size: 13.5px; color: #6ee7b7; }
+    .prequal-err { border-radius: 12px; border: 1px solid rgba(244,114,182,.65); background: rgba(244,114,182,.1);
+                   padding: 12px 16px; font-size: 13.5px; color: #f9a8d4; }
+    .prequal-fineprint { font-size: 12px; color: #8b7fb8; }
+    [data-prequal-response] [role="status"], [data-prequal-response] [role="alert"] {
+      border-radius: 12px; padding: 12px 16px; font-size: 13.5px; margin-top: 8px; }
+    [data-prequal-response] [role="status"] { background: rgba(52,211,153,.12) !important;
+      border: 1px solid rgba(52,211,153,.6) !important; color: #6ee7b7 !important; }
+    [data-prequal-response] [role="alert"] { background: rgba(244,114,182,.1) !important;
+      border: 1px solid rgba(244,114,182,.65) !important; color: #f9a8d4 !important; }
+  </style>
+
+  <section class="prequal-hero">
+    <p class="gk-eyebrow">Enterprise pre-qualification</p>
+    <h1 class="gk-display mt-3">Let's design your deployment.</h1>
+    <p class="gk-sub">
       Share a few details about your team and goals. If it is a fit, we will send a scheduling link.
     </p>
-  </div>
-</section>
+  </section>
 
-<section class="py-12 sm:py-16">
-  <div class="relative max-w-5xl mx-auto px-6">
-    <div class="gobii-card-base p-8 sm:p-10">
-      <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
-        <div>
-          <p class="text-sm font-medium text-slate-900">What happens next</p>
-          <p class="mt-3 text-sm text-slate-600">
-            We use this to prioritize teams with clear production needs. Expect a response within 1-2 business days.
-          </p>
-          <div class="mt-6 space-y-4 text-sm text-slate-600">
-            <div class="flex items-start gap-3">
-              <span class="mt-2 size-2 rounded-full bg-violet-600"></span>
-              <p>We review every request and match you to the right plan.</p>
-            </div>
-            <div class="flex items-start gap-3">
-              <span class="mt-2 size-2 rounded-full bg-violet-600"></span>
-              <p>If it is a fit, you will receive a scheduling link by email.</p>
-            </div>
-            <div class="flex items-start gap-3">
-              <span class="mt-2 size-2 rounded-full bg-violet-600"></span>
-              <p>If not, we will suggest a faster async path or resources.</p>
-            </div>
+  <section class="prequal-wrap">
+    <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
+      <div class="prequal-aside">
+        <p class="prequal-aside-title">What happens next</p>
+        <p class="mt-3">
+          We use this to prioritize teams with clear production needs. Expect a response within 1-2 business days.
+        </p>
+        <div class="mt-6 space-y-4">
+          <div class="flex items-start gap-3">
+            <span class="mt-2 size-2 rounded-full prequal-dot"></span>
+            <p>We review every request and match you to the right plan.</p>
           </div>
-          <div class="mt-8 text-sm text-slate-600">
-            <p class="font-medium text-slate-900">Questions?</p>
-            {% if settings.PUBLIC_CONTACT_EMAIL %}
-              <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.PUBLIC_CONTACT_EMAIL }}" class="text-violet-600 hover:text-violet-700 font-medium">{{ settings.PUBLIC_CONTACT_EMAIL }}</a>.</p>
-            {% elif settings.PUBLIC_SUPPORT_EMAIL %}
-              <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}" class="text-violet-600 hover:text-violet-700 font-medium">{{ settings.PUBLIC_SUPPORT_EMAIL }}</a>.</p>
-            {% else %}
-              <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.SUPPORT_EMAIL }}" class="text-violet-600 hover:text-violet-700 font-medium">{{ settings.SUPPORT_EMAIL }}</a>.</p>
-            {% endif %}
+          <div class="flex items-start gap-3">
+            <span class="mt-2 size-2 rounded-full prequal-dot"></span>
+            <p>If it is a fit, you will receive a scheduling link by email.</p>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="mt-2 size-2 rounded-full prequal-dot"></span>
+            <p>If not, we will suggest a faster async path or resources.</p>
           </div>
         </div>
-
-        <div>
-          {% if success_message %}
-            <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 mb-6" role="status">
-              {{ success_message }}
-            </div>
+        <div class="mt-8">
+          <p class="prequal-aside-title">Questions?</p>
+          {% if settings.PUBLIC_CONTACT_EMAIL %}
+            <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.PUBLIC_CONTACT_EMAIL }}">{{ settings.PUBLIC_CONTACT_EMAIL }}</a>.</p>
+          {% elif settings.PUBLIC_SUPPORT_EMAIL %}
+            <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}">{{ settings.PUBLIC_SUPPORT_EMAIL }}</a>.</p>
+          {% else %}
+            <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.SUPPORT_EMAIL }}">{{ settings.SUPPORT_EMAIL }}</a>.</p>
           {% endif %}
-          {% if error_messages %}
-            <div class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 mb-6" role="alert">
-              <p class="font-medium">Please correct the following:</p>
-              <ul class="mt-2 list-disc list-inside">
-                {% for message in error_messages %}
-                  <li>{{ message }}</li>
-                {% endfor %}
-              </ul>
-            </div>
-          {% endif %}
-
-          <form class="space-y-4" data-prequal-form method="post" action="{% url 'proprietary:prequalify' %}">
-            {% csrf_token %}
-            <div class="grid gap-4 sm:grid-cols-2">
-              <div class="sm:col-span-1">
-                <label for="prequal-name" class="block text-sm font-medium text-slate-700">Full name</label>
-                <input type="text" id="prequal-name" name="name" autocomplete="name" required
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500">
-              </div>
-              <div class="sm:col-span-1">
-                <label for="prequal-email" class="block text-sm font-medium text-slate-700">Work email</label>
-                <input type="email" id="prequal-email" name="email" autocomplete="email" required
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500">
-              </div>
-              <div class="sm:col-span-1">
-                <label for="prequal-company" class="block text-sm font-medium text-slate-700">Company</label>
-                <input type="text" id="prequal-company" name="company" autocomplete="organization" required
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500">
-              </div>
-              <div class="sm:col-span-1">
-                <label for="prequal-role" class="block text-sm font-medium text-slate-700">Role or title</label>
-                <input type="text" id="prequal-role" name="role" autocomplete="organization-title" required
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500">
-              </div>
-              <div class="sm:col-span-1">
-                <label for="prequal-team-size" class="block text-sm font-medium text-slate-700">Team size</label>
-                <select id="prequal-team-size" name="team_size" required
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500">
-                  {% for value, label in form.TEAM_SIZE_CHOICES %}
-                    <option value="{{ value }}"{% if not value %} disabled selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="sm:col-span-1">
-                <label for="prequal-volume" class="block text-sm font-medium text-slate-700">Monthly automation volume</label>
-                <select id="prequal-volume" name="monthly_volume" required
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500">
-                  {% for value, label in form.VOLUME_CHOICES %}
-                    <option value="{{ value }}"{% if not value %} disabled selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="sm:col-span-1">
-                <label for="prequal-budget" class="block text-sm font-medium text-slate-700">Budget range</label>
-                <select id="prequal-budget" name="budget_range" required
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500">
-                  {% for value, label in form.BUDGET_CHOICES %}
-                    <option value="{{ value }}"{% if not value %} disabled selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="sm:col-span-1">
-                <label for="prequal-timeline" class="block text-sm font-medium text-slate-700">Timeline</label>
-                <select id="prequal-timeline" name="timeline" required
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500">
-                  {% for value, label in form.TIMELINE_CHOICES %}
-                    <option value="{{ value }}"{% if not value %} disabled selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="sm:col-span-2">
-                <label for="prequal-use-case" class="block text-sm font-medium text-slate-700">Primary use case</label>
-                <textarea id="prequal-use-case" name="use_case" rows="4" required
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500"></textarea>
-              </div>
-              <div class="sm:col-span-2">
-                <label for="prequal-website" class="block text-sm font-medium text-slate-700">Website or LinkedIn (optional)</label>
-                <input type="text" id="prequal-website" name="website" autocomplete="url" maxlength="254"
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500">
-              </div>
-              <div class="sm:col-span-2">
-                <label for="prequal-notes" class="block text-sm font-medium text-slate-700">Anything else we should know? (optional)</label>
-                <textarea id="prequal-notes" name="notes" rows="3"
-                  class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-violet-500"></textarea>
-              </div>
-            </div>
-
-            {% if settings.TURNSTILE_ENABLED and form.turnstile %}
-              <div class="flex justify-start">
-                {{ form.turnstile }}
-              </div>
-            {% endif %}
-
-            <div class="flex flex-col sm:flex-row sm:items-center gap-4">
-              <button type="submit" data-prequal-submit
-                class="inline-flex items-center justify-center rounded-lg px-6 py-3 text-sm font-semibold text-white transition-transform hover:-translate-y-px"
-                style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
-                {% cta_text "cta_enterprise_request_call" fallback="Request a call" %}
-              </button>
-              <p class="text-xs text-slate-500">We respond within 1-2 business days.</p>
-            </div>
-            <div data-prequal-response class="text-left" aria-live="polite"></div>
-          </form>
         </div>
       </div>
+
+      <div>
+        {% if success_message %}
+          <div class="prequal-ok mb-6" role="status">
+            {{ success_message }}
+          </div>
+        {% endif %}
+        {% if error_messages %}
+          <div class="prequal-err mb-6" role="alert">
+            <p class="font-medium">Please correct the following:</p>
+            <ul class="mt-2 list-disc list-inside">
+              {% for message in error_messages %}
+                <li>{{ message }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+
+        <form class="gk-form prequal-form space-y-4" data-prequal-form method="post" action="{% url 'proprietary:prequalify' %}">
+          {% csrf_token %}
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="sm:col-span-1">
+              <label for="prequal-name" class="gk-label">Full name</label>
+              <input type="text" id="prequal-name" name="name" autocomplete="name" required class="gk-input">
+            </div>
+            <div class="sm:col-span-1">
+              <label for="prequal-email" class="gk-label">Work email</label>
+              <input type="email" id="prequal-email" name="email" autocomplete="email" required class="gk-input">
+            </div>
+            <div class="sm:col-span-1">
+              <label for="prequal-company" class="gk-label">Company</label>
+              <input type="text" id="prequal-company" name="company" autocomplete="organization" required class="gk-input">
+            </div>
+            <div class="sm:col-span-1">
+              <label for="prequal-role" class="gk-label">Role or title</label>
+              <input type="text" id="prequal-role" name="role" autocomplete="organization-title" required class="gk-input">
+            </div>
+            <div class="sm:col-span-1">
+              <label for="prequal-team-size" class="gk-label">Team size</label>
+              <select id="prequal-team-size" name="team_size" required class="gk-input">
+                {% for value, label in form.TEAM_SIZE_CHOICES %}
+                  <option value="{{ value }}"{% if not value %} disabled selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="sm:col-span-1">
+              <label for="prequal-volume" class="gk-label">Monthly automation volume</label>
+              <select id="prequal-volume" name="monthly_volume" required class="gk-input">
+                {% for value, label in form.VOLUME_CHOICES %}
+                  <option value="{{ value }}"{% if not value %} disabled selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="sm:col-span-1">
+              <label for="prequal-budget" class="gk-label">Budget range</label>
+              <select id="prequal-budget" name="budget_range" required class="gk-input">
+                {% for value, label in form.BUDGET_CHOICES %}
+                  <option value="{{ value }}"{% if not value %} disabled selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="sm:col-span-1">
+              <label for="prequal-timeline" class="gk-label">Timeline</label>
+              <select id="prequal-timeline" name="timeline" required class="gk-input">
+                {% for value, label in form.TIMELINE_CHOICES %}
+                  <option value="{{ value }}"{% if not value %} disabled selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label for="prequal-use-case" class="gk-label">Primary use case</label>
+              <textarea id="prequal-use-case" name="use_case" rows="4" required class="gk-input"></textarea>
+            </div>
+            <div class="sm:col-span-2">
+              <label for="prequal-website" class="gk-label">Website or LinkedIn (optional)</label>
+              <input type="text" id="prequal-website" name="website" autocomplete="url" maxlength="254" class="gk-input">
+            </div>
+            <div class="sm:col-span-2">
+              <label for="prequal-notes" class="gk-label">Anything else we should know? (optional)</label>
+              <textarea id="prequal-notes" name="notes" rows="3" class="gk-input"></textarea>
+            </div>
+          </div>
+
+          {% if settings.TURNSTILE_ENABLED and form.turnstile %}
+            <div class="flex justify-start">
+              {{ form.turnstile }}
+            </div>
+          {% endif %}
+
+          <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+            <button type="submit" data-prequal-submit class="gk-btn">
+              {% cta_text "cta_enterprise_request_call" fallback="Request a call" %}
+            </button>
+            <p class="prequal-fineprint">We respond within 1-2 business days.</p>
+          </div>
+          <div data-prequal-response class="text-left" aria-live="polite"></div>
+        </form>
+      </div>
     </div>
-  </div>
-</section>
+  </section>
+</div>
 {% endblock %}
 
 {% block extra_js %}

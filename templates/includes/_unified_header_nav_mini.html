@@ -1,15 +1,14 @@
-<header class="sticky top-0 z-50 hs-header transition-all duration-300 !border-none"
-        style="background:#17102b"
-        x-data="{ scrolled: window.scrollY > 10 }"
-        x-init="scrolled = window.scrollY > 10"
-        @scroll.window.passive="scrolled = window.scrollY > 10"
-        :class="{ 'shadow-lg': scrolled }">
-
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex items-center h-16 !border-none">
-      <a href="{% url 'pages:home' %}" aria-label="Gobii home" class="text-lg font-bold text-white flex items-center h-10">
-        {% include "includes/_header_logo_image.html" %}
-      </a>
-    </div>
+<style>
+  .gk-nav-wrap-mini { position: sticky; top: 12px; z-index: 50; padding: 0 16px; }
+  .gk-nav-mini { display: flex; align-items: center; height: 54px; padding: 0 18px; border-radius: 15px;
+            max-width: 1240px; margin: 0 auto;
+            background: rgba(16,10,30,.85); backdrop-filter: blur(18px);
+            border: 1px solid rgba(255,255,255,.1); box-shadow: 0 8px 30px rgba(5,2,16,.45); }
+</style>
+<header class="gk-nav-wrap-mini hs-header !border-none">
+  <div class="gk-nav-mini">
+    <a href="{% url 'pages:home' %}" aria-label="Gobii home" class="flex items-center h-10" style="text-decoration:none">
+      {% include "includes/_header_logo_image.html" %}
+    </a>
   </div>
 </header>

@@ -2,9 +2,9 @@
 <div class="gk-hero">
   <div class="gk-cats" id="gk-cats">
     {% for group in home_hero_groups %}
-      <button type="button" class="gk-cat" data-k="{{ group.key }}" data-active="{% if forloop.first %}true{% else %}false{% endif %}">{{ group.label }}</button>
+      <button type="button" class="gk-pill gk-cat" data-k="{{ group.key }}" data-active="{% if forloop.first %}true{% else %}false{% endif %}">{{ group.label }}</button>
     {% endfor %}
-    <button type="button" class="gk-cat" data-k="all" data-active="{% if not home_hero_groups %}true{% else %}false{% endif %}">All agents</button>
+    <button type="button" class="gk-pill gk-cat" data-k="all" data-active="{% if not home_hero_groups %}true{% else %}false{% endif %}">All agents</button>
   </div>
 
   <div class="gk-hswap" id="gk-hswap">
@@ -68,12 +68,11 @@
       </div>
       <div class="gk-demo-out" id="gk-demo-out">
         <h4><img src="{% static 'images/integration-logos/greenhouse.svg' %}" alt="">IN YOUR ATS THIS MORNING</h4>
-        <div class="gk-cand gk-on"><span class="gk-avatar">MK</span><div><div class="gk-who">M. Kessler</div><div class="gk-note">Go, K8s, 7 yrs &middot; ex-Plaid</div></div><span class="gk-fit">94% fit</span></div>
-        <div class="gk-cand gk-on"><span class="gk-avatar">RS</span><div><div class="gk-who">R. Santos</div><div class="gk-note">distributed systems &middot; Stripe</div></div><span class="gk-fit">91% fit</span></div>
-        <div class="gk-cand gk-on"><span class="gk-avatar">AL</span><div><div class="gk-who">A. Liu</div><div class="gk-note">platform lead &middot; Brex</div></div><span class="gk-fit">89% fit</span></div>
+        <div class="gk-cand gk-on"><span class="gk-face"><img src="{% static 'images/people/face-mk.jpg' %}" alt=""></span><div><div class="gk-who">M. Kessler</div><div class="gk-note">Go, K8s, 7 yrs &middot; ex-Plaid</div></div><span class="gk-fit">94% fit</span></div>
+        <div class="gk-cand gk-on"><span class="gk-face"><img src="{% static 'images/people/face-rs.jpg' %}" alt=""></span><div><div class="gk-who">R. Santos</div><div class="gk-note">distributed systems &middot; Stripe</div></div><span class="gk-fit">91% fit</span></div>
+        <div class="gk-cand gk-on"><span class="gk-face"><img src="{% static 'images/people/face-al.jpg' %}" alt=""></span><div><div class="gk-who">A. Liu</div><div class="gk-note">platform lead &middot; Brex</div></div><span class="gk-fit">89% fit</span></div>
         <div class="gk-cand gk-on"><span class="gk-avatar">+17</span><div><div class="gk-who">17 more this week</div><div class="gk-note">full list waiting in Greenhouse</div></div></div>
       </div>
     </div>
   </div>
-  <div class="gk-demo-spacer"></div>
 </div>

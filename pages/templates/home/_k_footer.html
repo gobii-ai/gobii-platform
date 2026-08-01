@@ -2,7 +2,7 @@
 <style>
   /* dark footer */
   .gk-closer { padding-bottom: 84px; }
-  .gk-footer { background: #14101e; color: #b7aed4; }
+  .gk-footer { color: #b7aed4; }
   .gk-foot-grid { max-width: 1100px; margin: 0 auto; padding: 56px 48px 32px; display: grid;
                   grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr 1fr; gap: 24px; }
   .gk-foot-grid h4 { color: #fff; font-size: 13px; font-weight: 600; letter-spacing: .5px; margin: 0 0 14px; }
@@ -13,7 +13,7 @@
   .gk-foot-brand .gk-foot-logo { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
   .gk-foot-brand .gk-foot-logo img { height: 28px; width: auto; }
   .gk-foot-brand .gk-foot-logo span { font-size: 19px; font-weight: 300; letter-spacing: .2px; color: #fff;
-                                      line-height: 1; transform: translateY(-1px); }
+                                      line-height: 1; transform: translateY(-2px); }
   .gk-foot-brand p { font-size: 13px; line-height: 1.65; margin: 14px 0 0; max-width: 26ch; }
   .gk-foot-bottom { border-top: 1px solid rgba(255,255,255,.07); }
   .gk-foot-bottom-inner { max-width: 1100px; margin: 0 auto; padding: 20px 48px; display: flex; align-items: center;
@@ -29,7 +29,7 @@
     .gk-foot-social { margin-left: 0; }
   }
 </style>
-<footer class="gk-footer">
+<footer class="gk-footer gk-footer-solid">
   <div class="gk-foot-grid">
     <div class="gk-foot-brand">
       <a class="gk-foot-logo" href="{% url 'pages:home' %}" aria-label="Gobii home">

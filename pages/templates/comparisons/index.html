@@ -27,105 +27,129 @@
 {% endblock %}
 
 {% block content %}
-<main id="main-content" class="bg-white">
-  <section class="gk-page-dark">
-    <div class="gk-ph">
-      <p class="gk-ph-eyebrow">Gobii comparisons</p>
-      <h1>
-        AI agent platform comparisons
-      </h1>
-      <p class="gk-ph-sub">
-        Evaluate Gobii against other AI agent platforms with practical criteria for deployment, browser automation, operations, and production readiness.
+<div class="gk-luxe">
+  <style>
+    /* comparisons index — page-scoped layout */
+    .cmpx-hero { max-width: 1100px; margin: 0 auto; padding: 64px 24px 0; position: relative; }
+    .cmpx-hero h1 { margin-top: 12px; max-width: 24ch; }
+    .cmpx-hero .cmpx-sub { margin-top: 14px; max-width: 62ch; }
+    .cmpx-ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+    .cmpx-lead { margin-top: 14px; max-width: 58ch; }
+    .cmpx-grid2 { display: grid; gap: 16px; margin-top: 28px; }
+    @media (min-width: 860px) { .cmpx-grid2 { grid-template-columns: 1fr 1fr; } }
+    .cmpx-card { padding: 24px; }
+    .cmpx-cardhead { display: flex; align-items: center; gap: 12px; }
+    .cmpx-ichip { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center;
+                  border-radius: 10px; color: #fff; flex-shrink: 0;
+                  background: linear-gradient(120deg, #7c3aed, #a855f7); }
+    .cmpx-card h3 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
+    .cmpx-card > p { color: #b7aed4; font-size: 13.5px; line-height: 1.65; margin: 14px 0 0; }
+    .cmpx-band { text-align: left; margin-top: 28px; }
+    .cmpx-band > p { max-width: 58ch; }
+    .cmpx-guide { padding: 24px; display: flex; flex-direction: column; }
+    .cmpx-kicker { font-size: 10.5px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase;
+                   color: #c4b5fd; }
+    .cmpx-guide h3 { font-size: 18px; font-weight: 600; color: #fff; margin: 8px 0 0; }
+    .cmpx-guide .cmpx-summary { color: #b7aed4; font-size: 13.5px; line-height: 1.65; margin: 14px 0 0; flex: 1; }
+    .cmpx-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+    .cmpx-read { display: inline-flex; align-items: center; margin-top: 20px; font-size: 13px; font-weight: 600;
+                 color: #c4b5fd; text-decoration: none; }
+    .cmpx-read:hover { color: #fff; }
+  </style>
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+<main id="main-content">
+  <section class="cmpx-hero">
+    <p class="gk-eyebrow">Gobii comparisons</p>
+    <h1 class="gk-display">
+      AI agent platform <span class="gk-accent">comparisons</span>
+    </h1>
+    <p class="gk-sub cmpx-sub">
+      Evaluate Gobii against other AI agent platforms with practical criteria for deployment, browser automation, operations, and production readiness.
+    </p>
+    <div class="cmpx-ctas">
+      <a href="#comparison-guides" class="gk-btn">
+        View available comparisons
+        <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
+      </a>
+      <a href="{% url 'pages:library' %}" class="gk-btn-quiet">
+        Browse agent templates
+      </a>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div>
+      <h2 class="gk-h2">Compare the platform, not just the prompt box</h2>
+      <p class="gk-sub cmpx-lead">
+        AI agent tools can look similar in a demo. The important differences show up in how they run, recover, integrate, and control data once real work starts.
       </p>
-      <div class="gk-ph-ctas">
-        <a href="#comparison-guides" class="gk-btn">
-          View available comparisons
-          <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
-        </a>
-        <a href="{% url 'pages:library' %}" class="gk-btn-quiet">
-          Browse agent templates
-        </a>
-      </div>
+    </div>
+
+    <div class="cmpx-grid2">
+      <article class="gk-card-glass cmpx-card">
+        <div class="cmpx-cardhead">
+          <span class="cmpx-ichip">
+            <i aria-hidden="true" data-lucide="server-cog" class="size-5"></i>
+          </span>
+          <h3>Deployment model</h3>
+        </div>
+        <p>
+          Cloud, self-hosted, local-first, and hybrid architectures create different tradeoffs for scale, governance, and maintenance.
+        </p>
+      </article>
+
+      <article class="gk-card-glass cmpx-card">
+        <div class="cmpx-cardhead">
+          <span class="cmpx-ichip">
+            <i aria-hidden="true" data-lucide="monitor-play" class="size-5"></i>
+          </span>
+          <h3>Browser automation</h3>
+        </div>
+        <p>
+          Reliable web work depends on browser execution, session persistence, proxy controls, and the path from user intent to completed task.
+        </p>
+      </article>
+
+      <article class="gk-card-glass cmpx-card">
+        <div class="cmpx-cardhead">
+          <span class="cmpx-ichip">
+            <i aria-hidden="true" data-lucide="activity" class="size-5"></i>
+          </span>
+          <h3>Agent operations</h3>
+        </div>
+        <p>
+          Scheduling, event triggers, retries, audit trails, and handoffs matter when agents are responsible for repeatable work.
+        </p>
+      </article>
+
+      <article class="gk-card-glass cmpx-card">
+        <div class="cmpx-cardhead">
+          <span class="cmpx-ichip">
+            <i aria-hidden="true" data-lucide="shield-check" class="size-5"></i>
+          </span>
+          <h3>Security and data control</h3>
+        </div>
+        <p>
+          Evaluation should include isolation boundaries, credential handling, observability, and the data paths each agent can touch.
+        </p>
+      </article>
     </div>
   </section>
 
-  <section class="bg-white py-16 sm:py-20">
-    <div class="mx-auto max-w-6xl px-6 sm:px-8 lg:px-12">
-      <div class="max-w-3xl">
-        <h2 class="text-3xl font-light tracking-tight text-slate-950 sm:text-4xl">Compare the platform, not just the prompt box</h2>
-        <p class="mt-4 text-base leading-7 text-slate-700">
-          AI agent tools can look similar in a demo. The important differences show up in how they run, recover, integrate, and control data once real work starts.
-        </p>
-      </div>
+  <section id="comparison-guides" class="gk-section gk-section-plain gk-closer" style="padding-top:56px">
+    <div class="gk-band cmpx-band">
+      <h2>Available comparisons</h2>
+      <p>
+        Start with focused, source-aware comparison guides for teams evaluating where to run production AI agent workflows.
+      </p>
 
-      <div class="mt-10 grid gap-5 md:grid-cols-2">
-        <article class="rounded-lg border border-violet-200 bg-violet-50 p-6">
-          <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
-              <i aria-hidden="true" data-lucide="server-cog" class="size-5"></i>
-            </span>
-            <h3 class="text-lg font-semibold text-slate-950">Deployment model</h3>
-          </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            Cloud, self-hosted, local-first, and hybrid architectures create different tradeoffs for scale, governance, and maintenance.
-          </p>
-        </article>
-
-        <article class="rounded-lg border border-violet-200 bg-violet-50 p-6">
-          <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
-              <i aria-hidden="true" data-lucide="monitor-play" class="size-5"></i>
-            </span>
-            <h3 class="text-lg font-semibold text-slate-950">Browser automation</h3>
-          </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            Reliable web work depends on browser execution, session persistence, proxy controls, and the path from user intent to completed task.
-          </p>
-        </article>
-
-        <article class="rounded-lg border border-violet-200 bg-violet-50 p-6">
-          <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
-              <i aria-hidden="true" data-lucide="activity" class="size-5"></i>
-            </span>
-            <h3 class="text-lg font-semibold text-slate-950">Agent operations</h3>
-          </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            Scheduling, event triggers, retries, audit trails, and handoffs matter when agents are responsible for repeatable work.
-          </p>
-        </article>
-
-        <article class="rounded-lg border border-violet-200 bg-violet-50 p-6">
-          <div class="flex items-center gap-3">
-            <span class="inline-flex size-10 items-center justify-center rounded-lg text-white" style="background:linear-gradient(120deg,#7c3aed,#a855f7)">
-              <i aria-hidden="true" data-lucide="shield-check" class="size-5"></i>
-            </span>
-            <h3 class="text-lg font-semibold text-slate-950">Security and data control</h3>
-          </div>
-          <p class="mt-4 text-sm leading-6 text-slate-700">
-            Evaluation should include isolation boundaries, credential handling, observability, and the data paths each agent can touch.
-          </p>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <section id="comparison-guides" class="py-16 text-white sm:py-20" style="background:linear-gradient(125deg,#241a3f,#46208c 70%,#7c3aed 130%)">
-    <div class="mx-auto max-w-6xl px-6 sm:px-8 lg:px-12">
-      <div class="max-w-3xl">
-        <h2 class="text-3xl font-light tracking-tight sm:text-4xl">Available comparisons</h2>
-        <p class="mt-4 text-base leading-7 text-violet-200">
-          Start with focused, source-aware comparison guides for teams evaluating where to run production AI agent workflows.
-        </p>
-      </div>
-
-      <div class="mt-10 grid gap-5 md:grid-cols-2">
+      <div class="cmpx-grid2">
         {% for comparison in comparisons %}
-          <article id="{{ comparison.competitor_name|slugify }}" class="rounded-lg border border-white/20 bg-white p-6 text-slate-950">
+          <article id="{{ comparison.competitor_name|slugify }}" class="gk-card-edge cmpx-guide">
             <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p class="text-sm font-semibold text-violet-600">{{ comparison.competitor_name }}</p>
-                <h3 class="mt-2 text-2xl font-semibold text-slate-950">{{ comparison.title }}</h3>
+                <p class="cmpx-kicker">{{ comparison.competitor_name }}</p>
+                <h3>{{ comparison.title }}</h3>
               </div>
               {% if comparison.status == "published" %}
                 <span class="inline-flex w-fit rounded-md bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">Published</span>
@@ -133,14 +157,14 @@
                 <span class="inline-flex w-fit rounded-md bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">Coming Soon</span>
               {% endif %}
             </div>
-            <p class="mt-5 text-sm leading-6 text-slate-700">{{ comparison.summary }}</p>
-            <div class="mt-6 flex flex-wrap gap-2">
+            <p class="cmpx-summary">{{ comparison.summary }}</p>
+            <div class="cmpx-chips">
               {% for keyword in comparison.target_keywords %}
-                <span class="rounded-md bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">{{ keyword }}</span>
+                <span class="gk-chip">{{ keyword }}</span>
               {% endfor %}
             </div>
             {% if comparison.status == "published" %}
-              <a href="{% url 'proprietary:comparison_detail' slug=comparison.slug %}" class="mt-7 inline-flex items-center text-sm font-semibold text-violet-600 hover:text-violet-700">
+              <a href="{% url 'proprietary:comparison_detail' slug=comparison.slug %}" class="cmpx-read">
                 Read the comparison
                 <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
               </a>
@@ -151,4 +175,5 @@
     </div>
   </section>
 </main>
+</div>
 {% endblock %}

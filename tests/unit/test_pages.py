@@ -2564,8 +2564,9 @@ class SitemapTests(TestCase):
         self.assertIsNotNone(final_form)
         final_button = final_form.find("button")
         self.assertIsNotNone(final_button)
-        self.assertIn("bg-white", final_button.get("class", []))
-        self.assertIn("text-slate-950", final_button.get("class", []))
+        # Luxe redesign: the closer-band CTA uses the shared conic-ring button
+        # (gk-btn) instead of the old white-on-violet button.
+        self.assertIn("gk-btn", final_button.get("class", []))
 
         json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
         json_ld_by_type = {}

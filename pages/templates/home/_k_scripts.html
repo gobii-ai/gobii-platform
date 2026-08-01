@@ -29,9 +29,9 @@
           ['📤', 'Delivering to Greenhouse', '20 candidates, with screening notes']
         ],
         out: [
-          ['MK', 'M. Kessler', 'Go, K8s, 7 yrs · ex-Plaid', '94% fit'],
-          ['RS', 'R. Santos', 'distributed systems · Stripe', '91% fit'],
-          ['AL', 'A. Liu', 'platform lead · Brex', '89% fit'],
+          ['MK', 'M. Kessler', 'Go, K8s, 7 yrs · ex-Plaid', '94% fit', "{% static 'images/people/face-mk.jpg' %}"],
+          ['RS', 'R. Santos', 'distributed systems · Stripe', '91% fit', "{% static 'images/people/face-rs.jpg' %}"],
+          ['AL', 'A. Liu', 'platform lead · Brex', '89% fit', "{% static 'images/people/face-al.jpg' %}"],
           ['+17', '17 more this week', 'full list waiting in Greenhouse', '']
         ]
       },
@@ -135,8 +135,17 @@
         var row = document.createElement('div');
         row.className = 'gk-cand';
         var avatar = document.createElement('span');
-        avatar.className = 'gk-avatar';
-        avatar.textContent = item[0];
+        if (item[4]) {
+          /* real people get real photos (.gk-face); companies/findings keep text avatars */
+          avatar.className = 'gk-face';
+          var photo = document.createElement('img');
+          photo.src = item[4];
+          photo.alt = '';
+          avatar.appendChild(photo);
+        } else {
+          avatar.className = 'gk-avatar';
+          avatar.textContent = item[0];
+        }
         var text = document.createElement('div');
         var who = document.createElement('div');
         who.className = 'gk-who';

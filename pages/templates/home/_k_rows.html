@@ -1,5 +1,5 @@
 {% load static %}
-<section id="hire-agents" class="gk-rows scroll-mt-24" aria-label="Agents for hire">
+<section id="hire-agents" class="gk-section gk-rows scroll-mt-24" aria-label="Agents for hire">
   {% for group in home_hero_groups %}
     <div class="gk-row-block" data-row="{{ group.key }}" id="row-{{ group.key }}" data-animate>
       <div class="gk-row-title">
@@ -8,7 +8,7 @@
       </div>
       <div class="gk-row-grid">
         {% for worker in group.workers %}
-          <article class="gk-card">
+          <article class="gk-card-edge gk-card">
             <h3>{{ worker.display_name }}</h3>
             <p class="gk-outcome">{{ worker.tagline }}</p>
             <div class="gk-meta">
@@ -19,8 +19,7 @@
                 <span class="gk-chip">{{ tool }}</span>
               {% endfor %}
             </div>
-            <a class="gk-detail" href="{{ worker.detail_url }}">{{ worker.detail_link_label }} &rarr;</a>
-            <div class="gk-foot" style="margin-top:2px">
+            <div class="gk-foot">
               <form method="post" action="{{ worker.hire_url }}" data-lazy-csrf>
                 <input type="hidden" name="source_page" value="home_pretrained_workers" />
                 <input type="hidden" name="trial_onboarding" value="1" />
@@ -29,6 +28,7 @@
                   {% if not user.is_authenticated or home_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
                 </button>
               </form>
+              <a class="gk-detail" href="{{ worker.detail_url }}">{{ worker.detail_link_label }} &rarr;</a>
             </div>
           </article>
         {% endfor %}

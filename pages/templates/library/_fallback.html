@@ -1,26 +1,24 @@
 <div class="space-y-6 pb-10" data-library-ssr-fallback>
-  <section class="gk-page-dark rounded-2xl">
-    <div class="gk-ph">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p class="gk-ph-eyebrow">Discover</p>
-          <h1>
-            {% if selected_category and official_only %}Official {{ selected_category }} AI Employee Templates{% elif selected_category %}{{ selected_category }} AI Employee Templates{% elif official_only %}Official Gobii AI Employee Templates{% else %}AI Employee Template Library{% endif %}
-          </h1>
-          <p class="gk-ph-sub">
-            {% if selected_category and official_only %}Browse official {{ selected_category }} AI employee templates maintained by Gobii.{% elif selected_category %}Browse publicly shared {{ selected_category }} AI employee templates.{% elif official_only %}Browse AI employee templates maintained by Gobii for common workflows.{% else %}Choose a role from Gobii and the community, then customize the AI employee for your workflow.{% endif %}
-          </p>
-          {% if not user.is_authenticated %}
-            <p class="mt-3 text-sm font-medium text-violet-300">Sign in to like templates.</p>
-          {% endif %}
+  <section class="pt-4">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p class="gk-eyebrow">Discover</p>
+        <h1 class="gk-display mt-3">
+          {% if selected_category and official_only %}Official {{ selected_category }} AI Employee Templates{% elif selected_category %}{{ selected_category }} AI Employee Templates{% elif official_only %}Official Gobii AI Employee Templates{% else %}AI Employee Template Library{% endif %}
+        </h1>
+        <p class="gk-sub mt-4 max-w-2xl">
+          {% if selected_category and official_only %}Browse official {{ selected_category }} AI employee templates maintained by Gobii.{% elif selected_category %}Browse publicly shared {{ selected_category }} AI employee templates.{% elif official_only %}Browse AI employee templates maintained by Gobii for common workflows.{% else %}Choose a role from Gobii and the community, then customize the AI employee for your workflow.{% endif %}
+        </p>
+        {% if not user.is_authenticated %}
+          <p class="mt-3 text-sm font-medium text-violet-300">Sign in to like templates.</p>
+        {% endif %}
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="gk-glassrow inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white/80">
+          {% if selected_category or official_only %}{{ payload.totalAgents }} {% if official_only %}official templates{% else %}shared templates{% endif %}{% else %}{{ payload.libraryTotalAgents }} shared templates{% endif %}
         </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="gk-glass inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold">
-            {% if selected_category or official_only %}{{ payload.totalAgents }} {% if official_only %}official templates{% else %}shared templates{% endif %}{% else %}{{ payload.libraryTotalAgents }} shared templates{% endif %}
-          </div>
-          <div class="gk-glass inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold">
-            {% if official_only %}{{ payload.officialTotalLikes }}{% else %}{{ payload.libraryTotalLikes }}{% endif %} likes
-          </div>
+        <div class="gk-glassrow inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white/80">
+          {% if official_only %}{{ payload.officialTotalLikes }}{% else %}{{ payload.libraryTotalLikes }}{% endif %} likes
         </div>
       </div>
     </div>
@@ -28,32 +26,32 @@
 
   <section class="grid gap-6 md:grid-cols-[16rem_minmax(0,1fr)]">
     <aside class="hidden md:block">
-      <div class="gobii-card-base sticky top-24 space-y-4 p-4">
+      <div class="gk-card-glass sticky top-24 space-y-4 p-4">
         <div>
-          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-violet-600">Most Popular</p>
-          <div class="flex w-full items-center justify-between rounded-lg border bg-violet-600 px-3 py-2 text-sm font-semibold text-white" style="border-color:#7c3aed">
+          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-violet-300">Most Popular</p>
+          <div class="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold text-white" style="background:rgba(139,92,246,.35);border:1px solid rgba(196,181,253,.5)">
             <span>Most Popular</span>
-            <span class="rounded-full bg-violet-500 px-2 py-0.5 text-xs text-white">{% if official_only %}{{ payload.officialTotalAgents }}{% else %}{{ payload.libraryTotalAgents }}{% endif %}</span>
+            <span class="gk-chip">{% if official_only %}{{ payload.officialTotalAgents }}{% else %}{{ payload.libraryTotalAgents }}{% endif %}</span>
           </div>
         </div>
 
         <div>
-          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-violet-600">Trust</p>
-          <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-violet-300">Trust</p>
+          <label class="gk-glassrow flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white/80">
             <input type="checkbox" class="rounded border-slate-300 text-emerald-600" {% if official_only %}checked{% endif %} disabled>
-            <i aria-hidden="true" data-lucide="badge-check" class="size-4 text-emerald-600"></i>
+            <i aria-hidden="true" data-lucide="badge-check" class="size-4 text-emerald-300"></i>
             <span>Official templates</span>
           </label>
         </div>
 
         {% if payload.topCategories %}
           <div>
-            <p class="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-violet-600">Categories</p>
+            <p class="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-violet-300">Categories</p>
             <div class="space-y-2">
               {% for category in payload.topCategories %}
-                <div class="flex w-full items-center justify-between rounded-lg border border-violet-100 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                <div class="gk-glassrow flex w-full items-center justify-between px-3 py-2 text-sm font-semibold text-white/80">
                   <span>{{ category.name }}</span>
-                  <span class="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-700">{{ category.count }}</span>
+                  <span class="gk-chip">{{ category.count }}</span>
                 </div>
               {% endfor %}
             </div>
@@ -66,41 +64,41 @@
       {% if payload.agents %}
         <div class="space-y-3">
           {% for agent in payload.agents %}
-            <article class="group relative overflow-hidden rounded-lg border border-slate-200 bg-white px-5 py-4 transition hover:border-violet-200 hover:bg-violet-50 ring-violet-100 focus-within:ring-2">
+            <article class="gk-card-edge group relative overflow-hidden px-5 py-4 focus-within:ring-2 ring-violet-100">
               <div class="pointer-events-none relative z-10 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div class="min-w-0 flex-1 space-y-3">
-                  <div class="flex flex-wrap items-center gap-2 text-xs font-semibold text-violet-700">
-                    <span class="inline-flex items-center gap-2 rounded-full bg-violet-50 px-2.5 py-1">
+                  <div class="flex flex-wrap items-center gap-2 text-xs font-semibold text-violet-200">
+                    <span class="gk-chip inline-flex items-center gap-2">
                       <span class="size-2 rounded-full bg-violet-500" aria-hidden="true"></span>
                       {{ agent.category }}
                     </span>
                     {% if agent.isOfficial %}
-                      <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700" title="Maintained by Gobii">
+                      <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-emerald-300" style="background:rgba(52,211,153,.15)" title="Maintained by Gobii">
                         <i aria-hidden="true" data-lucide="badge-check" class="size-3.5"></i>
                         Official template
                       </span>
                     {% elif agent.publicProfileHandle %}
-                      <span class="text-slate-500">@{{ agent.publicProfileHandle }}</span>
+                      <span class="gk-glass-label">@{{ agent.publicProfileHandle }}</span>
                     {% endif %}
                   </div>
 
                   <div class="space-y-1">
-                    <h2 class="text-base font-semibold text-slate-900 transition sm:text-lg">
+                    <h2 class="text-base font-semibold text-white transition sm:text-lg">
                       <a href="{{ agent.templateUrl }}" class="pointer-events-auto rounded focus-visible:outline-none focus-visible:ring-2 focus:ring-violet-500">
                         {{ agent.name }}
                       </a>
                     </h2>
                     {% if agent.tagline %}
-                      <p class="text-sm font-medium text-slate-700">{{ agent.tagline }}</p>
+                      <p class="text-sm font-medium" style="color:#b7aed4">{{ agent.tagline }}</p>
                     {% endif %}
                   </div>
                 </div>
 
                 <div class="flex items-center justify-between gap-3 sm:flex-col sm:items-end sm:self-stretch">
-                  <span class="pointer-events-none inline-flex items-center gap-1 rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                  <span class="pointer-events-none gk-chip inline-flex items-center gap-1 text-xs font-semibold">
                     <span>{{ agent.likeCount }}</span>
                   </span>
-                  <span class="pointer-events-none inline-flex items-center gap-1 text-sm font-medium text-violet-600 transition">
+                  <span class="pointer-events-none inline-flex items-center gap-1 text-sm font-medium text-violet-300 transition">
                     View {{ agent.name }}
                     <span aria-hidden="true">-&gt;</span>
                   </span>
@@ -110,9 +108,9 @@
           {% endfor %}
         </div>
       {% else %}
-        <div class="gobii-card-base p-8 text-center">
-          <p class="text-sm font-semibold text-slate-800">{% if official_only and selected_category %}No official templates found in this category.{% elif official_only %}No official templates found right now.{% elif selected_category %}No shared templates found in this category.{% else %}No shared templates found right now.{% endif %}</p>
-          <p class="mt-1 text-sm text-slate-600">{% if official_only %}Clear the official filter to browse community templates too.{% elif selected_category %}Try another category.{% else %}Check back soon for newly shared templates.{% endif %}</p>
+        <div class="gk-card-glass p-8 text-center">
+          <p class="text-sm font-semibold text-white">{% if official_only and selected_category %}No official templates found in this category.{% elif official_only %}No official templates found right now.{% elif selected_category %}No shared templates found in this category.{% else %}No shared templates found right now.{% endif %}</p>
+          <p class="mt-1 text-sm" style="color:#a99cc9">{% if official_only %}Clear the official filter to browse community templates too.{% elif selected_category %}Try another category.{% else %}Check back soon for newly shared templates.{% endif %}</p>
         </div>
       {% endif %}
     </div>

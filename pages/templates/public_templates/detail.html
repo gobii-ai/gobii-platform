@@ -22,9 +22,16 @@
   <script type="application/ld+json">{{ template_breadcrumb_json }}</script>
 {% endblock %}
 {% block content %}
-<section class="gk-page-dark">
-  <div class="gk-ph">
-    <nav aria-label="Breadcrumb" class="gk-ph-crumbs font-medium">
+<div class="gk-luxe">
+<div class="gk-aurora-drift" aria-hidden="true"></div>
+<style>
+  .pubtpl-crumbs { font-size: 12.5px; color: #8b7fb8; }
+  .pubtpl-crumbs a { color: #c4b5fd; text-decoration: none; }
+  .pubtpl-crumbs a:hover { color: #fff; }
+</style>
+<section class="relative mx-auto max-w-5xl px-6 pt-16">
+  <div>
+    <nav aria-label="Breadcrumb" class="pubtpl-crumbs font-medium">
       <ol class="flex flex-wrap items-center gap-2">
         <li>
           <a href="{% url 'pages:home' %}" class="transition">Home</a>
@@ -42,7 +49,7 @@
       </ol>
     </nav>
 
-    <div class="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-wide">
+    <div class="mt-6 flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-wide">
       <span class="rounded-full bg-white/10 px-3 py-1 text-violet-200">AI Employee Template</span>
       {% if template_is_gobii_owned %}
       <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-emerald-300" title="Maintained by Gobii">
@@ -55,10 +62,10 @@
       <span class="rounded-full bg-white/10 px-3 py-1 text-violet-200">{{ template_category_label }}</span>
     </div>
 
-    <h1>{{ template_heading }}</h1>
-    <p class="gk-ph-sub">{{ template_tagline }}</p>
+    <h1 class="gk-display mt-4">{{ template_heading }}</h1>
+    <p class="gk-sub mt-4 max-w-2xl">{{ template_tagline }}</p>
     {% if template_is_gobii_owned %}
-    <p class="gk-glass mt-4 inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold text-emerald-300">
+    <p class="gk-glassrow mt-4 inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold text-emerald-300">
       <i aria-hidden="true" data-lucide="shield-check" class="size-4"></i>
       Maintained by Gobii for trusted, reusable workflows.
     </p>
@@ -80,9 +87,9 @@
   </div>
 </section>
 
-<div class="min-h-screen" style="background:linear-gradient(180deg,#faf9fe,#ffffff 60%)">
-  <section class="max-w-5xl mx-auto px-6 pt-16 pb-16">
-    <div class="relative overflow-hidden rounded-3xl border border-violet-100 bg-white/85 shadow-xl">
+<div class="gk-closer">
+  <section class="max-w-5xl mx-auto px-6 pt-12">
+    <div class="relative overflow-hidden rounded-3xl bg-white" style="border:1px solid rgba(233,228,246,.9);box-shadow:0 34px 90px rgba(5,2,18,.55),0 0 70px rgba(168,85,247,.12)">
       <div class="absolute -top-24 -right-24 h-56 w-56 rounded-full blur-3xl" style="background:rgba(168,85,247,.18)" aria-hidden="true"></div>
       <div class="absolute -bottom-24 -left-24 h-56 w-56 rounded-full blur-3xl" style="background:rgba(221,214,254,.5)" aria-hidden="true"></div>
 
@@ -217,6 +224,7 @@
       </div>
     </div>
   </section>
+</div>
 </div>
 {% endblock %}
 

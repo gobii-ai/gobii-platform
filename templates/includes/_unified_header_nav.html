@@ -1,242 +1,274 @@
 {% load i18n %}
 {% url 'account_login' as account_login_url %}
 
-<!-- Unified Header -->
-<header class="sticky top-0 z-50 hs-header transition-all duration-300 !border-none"
-        style="background:#17102b"
-        x-data="{ scrolled: window.scrollY > 10 }"
-        x-init="scrolled = window.scrollY > 10"
-        @scroll.window.passive="scrolled = window.scrollY > 10"
-        :class="{ 'shadow-lg': scrolled }">
+<style>
+  .gk-nav-wrap { position: sticky; top: 12px; z-index: 50; padding: 0 16px; }
+  .gk-nav { display: flex; align-items: center; height: 54px; padding: 0 18px; border-radius: 15px;
+            max-width: 1240px; margin: 0 auto; white-space: nowrap;
+            background: rgba(16,10,30,.85); backdrop-filter: blur(18px);
+            border: 1px solid rgba(255,255,255,.1); box-shadow: 0 8px 30px rgba(5,2,16,.45); }
+  .gk-nav-links { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+  .gk-nav-links > a { color: rgba(255,255,255,.78); text-decoration: none; font-size: 13.5px;
+            padding: 8px 11px; border-radius: 8px; white-space: nowrap; transition: color .12s; }
+  .gk-nav-links > a:hover { color: #fff; }
+  .gk-nav-cta { position: relative; color: #fff !important; font-weight: 550; font-size: 13.5px;
+            padding: 8px 16px !important; border-radius: 10px; margin-left: 8px; border: 2px solid transparent;
+            background: linear-gradient(180deg, #3b2270, #2a1854) padding-box,
+                        conic-gradient(from var(--gkang, 0deg), #7c3aed, #f0abfc, #a855f7, #7c3aed) border-box;
+            transition: transform .14s; }
+  @supports (background: conic-gradient(from 0deg, red, blue)) { .gk-nav-cta { animation: gk-rot 3.2s linear infinite; } }
+  @media (prefers-reduced-motion: reduce) { .gk-nav-cta { animation: none; } }
+  .gk-nav-cta:hover { transform: translateY(-1px); }
+  .gk-dd { position: relative; }
+  .gk-dd-trigger { display: inline-flex; align-items: center; gap: 5px; color: rgba(255,255,255,.78);
+            text-decoration: none; font-size: 13.5px; padding: 8px 11px; border-radius: 8px; cursor: pointer;
+            background: none; border: 0; font-family: inherit; }
+  .gk-dd-trigger:hover { color: #fff; }
+  .gk-dd-trigger svg { width: 11px; height: 11px; opacity: .55; transition: transform .18s ease, opacity .18s; }
+  .gk-dd.gk-open .gk-dd-trigger svg, .gk-dd:hover .gk-dd-trigger svg { transform: rotate(180deg); opacity: 1; }
+  .gk-dd-panel { display: none; position: absolute; top: 100%; right: -120px; padding-top: 12px; z-index: 60; }
+  .gk-dd.gk-open .gk-dd-panel { display: block; }
+  .gk-dd-inner { display: block; width: 268px; background: rgba(22,15,40,.98);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 8px;
+            box-shadow: 0 24px 60px rgba(0,0,0,.55); }
+  .gk-dd-item { display: flex; gap: 11px; align-items: center; padding: 9px 10px; border-radius: 10px;
+            text-decoration: none; }
+  .gk-dd-item:hover { background: rgba(139,92,246,.22); }
+  .gk-dd-ic { width: 30px; height: 30px; border-radius: 8px; background: rgba(139,92,246,.2); display: grid;
+            place-items: center; font-size: 13px; flex-shrink: 0; color: #c4b5fd; }
+  .gk-dd-tx { display: flex; flex-direction: column; min-width: 0; }
+  .gk-dd-t { color: #fff; font-size: 13px; font-weight: 600; line-height: 1.25; }
+  .gk-dd-s { color: #8b7fb8; font-size: 11px; line-height: 1.3; margin-top: 1px; white-space: nowrap; }
+  .gk-burger { display: none; margin-left: 8px; width: 36px; height: 36px; border-radius: 9px; border: 0;
+            background: rgba(255,255,255,.1); color: #fff; font-size: 15px; cursor: pointer;
+            align-items: center; justify-content: center; }
+  @media (max-width: 600px) {
+    .gk-nav-links > a.gk-l, .gk-dd { display: none; }
+    .gk-burger { display: inline-flex; }
+  }
+  @media (max-width: 440px) { .gk-nav-links > a.gk-login { display: none; } }
+  .gk-mobile-panel { position: fixed; top: 78px; left: 16px; right: 16px; z-index: 49;
+            background: rgba(18,12,32,.97); border: 1px solid rgba(255,255,255,.12); border-radius: 16px;
+            padding: 10px; box-shadow: 0 24px 60px rgba(0,0,0,.6); max-height: calc(100vh - 96px);
+            overflow-y: auto; }
+  .gk-mobile-panel a, .gk-mobile-panel button.gk-mm-link { display: block; width: 100%; text-align: left;
+            color: rgba(255,255,255,.85); text-decoration: none; font-size: 14.5px; padding: 12px 14px;
+            border-radius: 10px; background: none; border: 0; font-family: inherit; cursor: pointer; }
+  .gk-mobile-panel a:hover { background: rgba(139,92,246,.22); color: #fff; }
+  .gk-mobile-panel .gk-mm-cta { margin-top: 6px; text-align: center;
+            background: linear-gradient(90deg,#7c3aed,#a855f7); color: #fff; font-weight: 600;
+            box-shadow: 0 4px 14px rgba(124,58,237,.4); }
+  .gk-mobile-panel .gk-mm-sep { height: 1px; background: rgba(255,255,255,.08); margin: 8px 6px; }
+  .gk-mobile-panel .gk-mm-sub { padding-left: 26px; font-size: 13.5px; color: rgba(255,255,255,.7); }
+</style>
 
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex items-center justify-between h-16 !border-none">
-      <!-- Brand -->
-      <a href="{% url 'pages:home' %}" aria-label="Gobii home" class="text-lg font-bold text-white flex items-center h-10">
-        {% include "includes/_header_logo_image.html" %}
-      </a>
-
-      <!-- Desktop Nav - Floating pill style -->
-      <nav class="hidden md:flex items-center gap-x-1">
-        <div class="flex items-center gap-x-1">
-          {% if settings.GOBII_PROPRIETARY_MODE %}
-          <!-- Solutions Dropdown -->
-          <div x-data="{ open: false }" class="relative" @mouseleave="open = false">
-            <button @mouseover="open = true" @click="open = !open"
-                    class="inline-flex items-center gap-x-1 px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white focus:outline-none transition-colors"
-                    :class="{ 'text-white': open }">
-              Solutions
-              <svg class="h-3 w-3 transform transition-transform duration-200" :class="{ 'rotate-180': open }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            <!-- Dropdown panel -->
-            <div x-cloak
-                 x-show="open"
-                 x-transition:enter="transition ease-out duration-150"
-                 x-transition:enter-start="opacity-0 -translate-y-1"
-                 x-transition:enter-end="opacity-100 translate-y-0"
-                 x-transition:leave="transition ease-in duration-100"
-                 x-transition:leave-start="opacity-100 translate-y-0"
-                 x-transition:leave-end="opacity-0 -translate-y-1"
-                 class="absolute left-1/2 -translate-x-1/2 top-full pt-3 w-56 z-50">
-              <div class="bg-white rounded-2xl shadow-xl shadow-violet-500/10 ring-1 ring-violet-100 p-2 overflow-hidden">
-                <div class="flex flex-col gap-0.5">
-                  <a href="{% url 'pages:solution' slug='recruiting' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="users" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Recruiting</span>
-                  </a>
-                  <a href="{% url 'pages:solution' slug='sales' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="briefcase" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Sales</span>
-                  </a>
-                  <a href="{% url 'pages:solution' slug='engineering' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="cpu" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">API</span>
-                  </a>
-                  <a href="{% url 'pages:solutions' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
-                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
-                      <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
-                    </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">All Solutions</span>
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-
-            <a href="{% url 'pages:library' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">Agents</a>
-            <a href="{% url 'proprietary:pricing' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">Pricing</a>
-            <a href="{% url 'proprietary:teams' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">Teams</a>
-            <a href="{% url 'pages:solution' slug='engineering' %}" title="Gobii API - Build AI Agents on our Platform" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">API</a>
-          {% else %}
-            <a href="{% url 'pages:library' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">Agents</a>
-          {% endif %}
-
-          {% if request.user.is_authenticated %}
-            <a href="/app/agents" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">
-              <i data-lucide="bot" class="h-3.5 w-3.5"></i>
-              My Agents
+<!-- Unified Header: floating glass pill -->
+<header class="gk-nav-wrap hs-header !border-none">
+  <div class="gk-nav">
+    <a href="{% url 'pages:home' %}" aria-label="Gobii home" class="flex items-center h-10" style="text-decoration:none">
+      {% include "includes/_header_logo_image.html" %}
+    </a>
+    <nav class="gk-nav-links" aria-label="Main">
+      {% if settings.GOBII_PROPRIETARY_MODE %}
+        <span class="gk-dd" id="gk-dd">
+          <button type="button" class="gk-dd-trigger" id="gk-dd-trigger" aria-expanded="false" aria-haspopup="true">
+            Product
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>
+          </button>
+          <span class="gk-dd-panel" id="gk-dd-panel"><span class="gk-dd-inner">
+            <a class="gk-dd-item" href="{% url 'pages:library' %}">
+              <span class="gk-dd-ic"><i data-lucide="layout-grid" class="h-4 w-4"></i></span>
+              <span class="gk-dd-tx"><span class="gk-dd-t">Agent library</span><span class="gk-dd-s">Premade agents, ready to hire</span></span>
             </a>
-          {% endif %}
-        </div>
-
-        <!-- Auth section -->
-        <div class="flex items-center gap-x-2 ml-3">
-        {% if not request.user.is_authenticated %}
-          {% with request.session.utm_querystring as utm_qs %}
-          <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
-             class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">
-            Log in
-          </a>
-          {% url 'account_signup' as account_signup_url %}
-          <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
-             data-analytics-cta-id="nav_start_trial" data-analytics-placement="header" data-analytics-intent="signup"
-             class="inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold text-white transition-transform hover:-translate-y-px"
-             style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 4px 14px rgba(124,58,237,.3)">
-            Start free trial
-          </a>
-          {% endwith %}
-        {% endif %}
-        {% if request.user.is_authenticated %}
-          <!-- User Profile Dropdown (Desktop) -->
-          <div x-data="{ open: false }" class="relative inline-flex">
-            <button @click="open = !open"
-                    @keydown.escape.window="open = false"
-                    :aria-expanded="open"
-                    class="inline-flex items-center justify-center gap-x-2 rounded-full text-sm font-medium text-white/90 hover:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 transition-colors">
-              {% with social_account_set=request.user.socialaccount_set.all %}
-                {% if social_account_set and social_account_set.0.get_avatar_url %}
-                  <img class="inline-block size-8 rounded-full object-cover ring-2 ring-white/50" src="{{ social_account_set.0.get_avatar_url }}" alt="{{ request.user.email|default:"User Profile" }}">
+            <a class="gk-dd-item" href="{% url 'pages:solution' slug='recruiting' %}">
+              <span class="gk-dd-ic"><i data-lucide="users" class="h-4 w-4"></i></span>
+              <span class="gk-dd-tx"><span class="gk-dd-t">Recruiting</span><span class="gk-dd-s">Candidates, weekly</span></span>
+            </a>
+            <a class="gk-dd-item" href="{% url 'pages:solution' slug='sales' %}">
+              <span class="gk-dd-ic"><i data-lucide="briefcase" class="h-4 w-4"></i></span>
+              <span class="gk-dd-tx"><span class="gk-dd-t">Sales</span><span class="gk-dd-s">Qualified leads</span></span>
+            </a>
+            <a class="gk-dd-item" href="{% url 'proprietary:teams' %}">
+              <span class="gk-dd-ic"><i data-lucide="users-round" class="h-4 w-4"></i></span>
+              <span class="gk-dd-tx"><span class="gk-dd-t">Teams</span><span class="gk-dd-s">Shared workspaces</span></span>
+            </a>
+            <a class="gk-dd-item" href="{% url 'pages:solution' slug='engineering' %}">
+              <span class="gk-dd-ic"><i data-lucide="cpu" class="h-4 w-4"></i></span>
+              <span class="gk-dd-tx"><span class="gk-dd-t">API</span><span class="gk-dd-s">Agents in one request</span></span>
+            </a>
+            <a class="gk-dd-item" href="{% url 'pages:solutions' %}">
+              <span class="gk-dd-ic"><i data-lucide="grip" class="h-4 w-4"></i></span>
+              <span class="gk-dd-tx"><span class="gk-dd-t">All Solutions</span><span class="gk-dd-s">Every workflow we cover</span></span>
+            </a>
+          </span></span>
+        </span>
+        <a class="gk-l" href="{% url 'proprietary:pricing' %}">Pricing</a>
+      {% else %}
+        <a class="gk-l" href="{% url 'pages:library' %}">Agents</a>
+      {% endif %}
+      {% if request.user.is_authenticated %}
+        <a class="gk-l" href="/app/agents">My Agents</a>
+      {% else %}
+        {% with request.session.utm_querystring as utm_qs %}
+        <a class="gk-login gk-l" href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}">Log in</a>
+        {% url 'account_signup' as account_signup_url %}
+        <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
+           data-analytics-cta-id="nav_start_trial" data-analytics-placement="header" data-analytics-intent="signup"
+           class="gk-nav-cta">Start free trial</a>
+        {% endwith %}
+      {% endif %}
+      {% if request.user.is_authenticated %}
+        <!-- User Profile Dropdown (Desktop) -->
+        <div x-data="{ open: false }" class="relative inline-flex" style="margin-left:8px">
+          <button @click="open = !open"
+                  @keydown.escape.window="open = false"
+                  :aria-expanded="open"
+                  class="inline-flex items-center justify-center gap-x-2 rounded-full text-sm font-medium text-white/90 hover:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 transition-colors">
+            {% with social_account_set=request.user.socialaccount_set.all %}
+              {% if social_account_set and social_account_set.0.get_avatar_url %}
+                <img class="inline-block size-8 rounded-full object-cover ring-2 ring-white/50" src="{{ social_account_set.0.get_avatar_url }}" alt="{{ request.user.email|default:"User Profile" }}">
+              {% else %}
+                {% firstof request.user.first_name request.user.email request.user.username as display_name_source %}
+                {% if display_name_source %}
+                  {% with initial=display_name_source|first|upper %}
+                  <div class="inline-flex items-center justify-center size-8 rounded-full bg-violet-500 text-white text-sm font-semibold ring-2 ring-white/50" title="{{ request.user.email|default:request.user.username }}">
+                      {{ initial }}
+                  </div>
+                  {% endwith %}
                 {% else %}
-                  {% firstof request.user.first_name request.user.email request.user.username as display_name_source %}
-                  {% if display_name_source %}
-                    {% with initial=display_name_source|first|upper %}
-                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-violet-500 text-white text-sm font-semibold ring-2 ring-white/50" title="{{ request.user.email|default:request.user.username }}">
-                        {{ initial }}
-                    </div>
-                    {% endwith %}
-                  {% else %}
-                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-gray-300 text-gray-700 text-sm font-semibold ring-2 ring-white/50" title="User Profile">?</div>
-                  {% endif %}
+                  <div class="inline-flex items-center justify-center size-8 rounded-full bg-gray-300 text-gray-700 text-sm font-semibold ring-2 ring-white/50" title="User Profile">?</div>
                 {% endif %}
-              {% endwith %}
-            </button>
-
-            <!-- Dropdown panel -->
-            <div x-cloak
-                 x-show="open"
-                 @click.outside="open = false"
-                 x-transition:enter="transition ease-out duration-150 transform"
-                 x-transition:enter-start="opacity-0 scale-95"
-                 x-transition:enter-end="opacity-100 scale-100"
-                 x-transition:leave="transition ease-in duration-100"
-                 x-transition:leave-start="opacity-100 scale-100"
-                 x-transition:leave-end="opacity-0 scale-95"
-                 class="origin-top-right absolute right-0 top-full mt-2 w-64 bg-white/90 backdrop-blur-md shadow-2xl rounded-xl ring-1 ring-slate-200/50 divide-y divide-gray-200">
-              <div class="py-4 px-5">
-                <p class="text-[11px] uppercase tracking-wide text-gray-500">{% translate 'Signed in as' %}</p>
-                <p class="text-sm font-semibold text-slate-800 truncate">{{ request.user.email|default:request.user.username }}</p>
+              {% endif %}
+            {% endwith %}
+          </button>
+          <div x-cloak
+               x-show="open"
+               @click.outside="open = false"
+               x-transition:enter="transition ease-out duration-150 transform"
+               x-transition:enter-start="opacity-0 scale-95"
+               x-transition:enter-end="opacity-100 scale-100"
+               x-transition:leave="transition ease-in duration-100"
+               x-transition:leave-start="opacity-100 scale-100"
+               x-transition:leave-end="opacity-0 scale-95"
+               class="origin-top-right absolute right-0 top-full mt-2 w-64 bg-white/90 backdrop-blur-md shadow-2xl rounded-xl ring-1 ring-slate-200/50 divide-y divide-gray-200">
+            <div class="py-4 px-5">
+              <p class="text-[11px] uppercase tracking-wide text-gray-500">{% translate 'Signed in as' %}</p>
+              <p class="text-sm font-semibold text-slate-800 truncate">{{ request.user.email|default:request.user.username }}</p>
+            </div>
+            <div class="py-2">
+              {% if request.user.is_staff %}
+              <div class="py-1">
+                <a href="{% url 'admin:index' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                  <i aria-hidden="true" data-lucide="columns-3-cog" class="h-4 w-4 text-slate-500"></i>
+                  Django Admin
+                </a>
               </div>
-              <div class="py-2">
-                {% if request.user.is_staff %}
-                <div class="py-1">
-                  <a href="{% url 'admin:index' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="columns-3-cog" class="h-4 w-4 text-slate-500"></i>
-                    Django Admin
+              <div class="py-1">
+                <a href="{% url 'llm-config' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                  <i aria-hidden="true" data-lucide="settings-2" class="h-4 w-4 text-slate-500"></i>
+                  LLM Config
+                </a>
+              </div>
+              <div class="py-1">
+                <a href="{% url 'staff-platform-mcp' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                  <i aria-hidden="true" data-lucide="server-cog" class="h-4 w-4 text-slate-500"></i>
+                  Platform MCP
+                </a>
+              </div>
+              <div class="py-1">
+                <a href="{% url 'evals' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                  <i aria-hidden="true" data-lucide="beaker" class="h-4 w-4 text-slate-500"></i>
+                  Evals
+                </a>
+              </div>
+              <div class="py-1">
+                <a href="{% url 'system-settings' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                  <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 text-slate-500"></i>
+                  System Settings
+                </a>
+              </div>
+              <div class="py-1">
+                <a href="{% url 'console-status' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                  <i aria-hidden="true" data-lucide="activity" class="h-4 w-4 text-slate-500"></i>
+                  Status
+                </a>
+              </div>
+              <div class="py-1">
+                <a href="{% url 'staff-users' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                  <i aria-hidden="true" data-lucide="users-round" class="h-4 w-4 text-slate-500"></i>
+                  Users &amp; Orgs
+                </a>
+              </div>
+              {% endif %}
+              <div class="py-1">
+                {% if request.session.context_type == 'organization' and request.session.context_id %}
+                  <a href="{% url 'organization_detail' org_id=request.session.context_id %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                    <i aria-hidden="true" data-lucide="building-2" class="h-4 w-4 text-slate-500"></i>
+                    Organization
                   </a>
-                </div>
-                <div class="py-1">
-                  <a href="{% url 'llm-config' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="settings-2" class="h-4 w-4 text-slate-500"></i>
-                    LLM Config
+                {% else %}
+                  <a href="{% url 'profile' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                    <i aria-hidden="true" data-lucide="user-round" class="h-4 w-4 text-slate-500"></i>
+                    Profile
                   </a>
-                </div>
-                <div class="py-1">
-                  <a href="{% url 'staff-platform-mcp' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="server-cog" class="h-4 w-4 text-slate-500"></i>
-                    Platform MCP
-                  </a>
-                </div>
-                <div class="py-1">
-                  <a href="{% url 'evals' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="beaker" class="h-4 w-4 text-slate-500"></i>
-                    Evals
-                  </a>
-                </div>
-                <div class="py-1">
-                  <a href="{% url 'system-settings' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 text-slate-500"></i>
-                    System Settings
-                  </a>
-                </div>
-                <div class="py-1">
-                  <a href="{% url 'console-status' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="activity" class="h-4 w-4 text-slate-500"></i>
-                    Status
-                  </a>
-                </div>
-                <div class="py-1">
-                  <a href="{% url 'staff-users' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="users-round" class="h-4 w-4 text-slate-500"></i>
-                    Users &amp; Orgs
-                  </a>
-                </div>
                 {% endif %}
-
-                <div class="py-1">
-                  {% if request.session.context_type == 'organization' and request.session.context_id %}
-                    <a href="{% url 'organization_detail' org_id=request.session.context_id %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                      <i aria-hidden="true" data-lucide="building-2" class="h-4 w-4 text-slate-500"></i>
-                      Organization
-                    </a>
-                  {% else %}
-                    <a href="{% url 'profile' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                      <i aria-hidden="true" data-lucide="user-round" class="h-4 w-4 text-slate-500"></i>
-                      Profile
-                    </a>
-                  {% endif %}
-                </div>
-
-                <div class="py-1">
-                  <form method="post" action="{% url 'account_logout' %}">
-                    {% csrf_token %}
-                    <button type="submit"
-                            class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                      <i aria-hidden="true" data-lucide="log-out" class="h-4 w-4 text-slate-500"></i>
-                      {% translate 'Sign Out' %}
-                    </button>
-                  </form>
-                </div>
+              </div>
+              <div class="py-1">
+                <form method="post" action="{% url 'account_logout' %}">
+                  {% csrf_token %}
+                  <button type="submit"
+                          class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
+                    <i aria-hidden="true" data-lucide="log-out" class="h-4 w-4 text-slate-500"></i>
+                    {% translate 'Sign Out' %}
+                  </button>
+                </form>
               </div>
             </div>
           </div>
-        {% else %}
-        {% endif %}
-
         </div>
-      </nav>
-
-      <!-- Mobile hamburger -->
-      <button type="button" class="md:hidden flex items-center justify-center w-10 h-10 rounded-lg text-white/90 hover:text-white transition-colors" 
-              x-data="{}" 
-              @click="$dispatch('toggle-mobile-nav')" 
-              aria-label="Toggle navigation">
-        <svg class="flex-shrink-0 w-6 h-6" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
-      </button>
-    </div>
+      {% endif %}
+      <button type="button" class="gk-burger"
+              x-data="{}"
+              @click="$dispatch('toggle-mobile-nav')"
+              aria-label="Toggle navigation">☰</button>
+    </nav>
   </div>
 </header>
 
-<!-- Mobile Navigation Modal -->
-<div x-data="{ showMobileNav: false }" 
+<script>
+(function(){
+  var dd = document.getElementById('gk-dd'), trigger = document.getElementById('gk-dd-trigger'),
+      panel = document.getElementById('gk-dd-panel');
+  if (!dd || !trigger || !panel) return;
+  var lastX = 0, lastY = 0, closeTimer = null, open = false;
+  document.addEventListener('mousemove', function(e){ lastX = e.clientX; lastY = e.clientY; }, { passive: true });
+  function setOpen(v){ open = v; dd.classList.toggle('gk-open', v); trigger.setAttribute('aria-expanded', v ? 'true' : 'false'); }
+  function scheduleClose(){ clearTimeout(closeTimer); closeTimer = setTimeout(tryClose, 90); }
+  function tryClose(){
+    if (!open) return;
+    var inner = panel.firstElementChild.getBoundingClientRect();
+    var t = trigger.getBoundingClientRect();
+    var apex = { x: (t.left + t.right) / 2, y: t.bottom };
+    var a = { x: inner.left, y: inner.top }, b = { x: inner.right, y: inner.top };
+    var pt = { x: lastX, y: lastY };
+    if (inTri(pt, apex, a, b) || inRect(pt, inner) || inRect(pt, t)) { closeTimer = setTimeout(tryClose, 120); return; }
+    setOpen(false);
+  }
+  function inRect(p, r){ return p.x >= r.left - 4 && p.x <= r.right + 4 && p.y >= r.top - 4 && p.y <= r.bottom + 4; }
+  function sgn(p1,p2,p3){ return (p1.x-p3.x)*(p2.y-p3.y)-(p2.x-p3.x)*(p1.y-p3.y); }
+  function inTri(pt,v1,v2,v3){ var d1=sgn(pt,v1,v2), d2=sgn(pt,v2,v3), d3=sgn(pt,v3,v1);
+    return !(((d1<0)||(d2<0)||(d3<0)) && ((d1>0)||(d2>0)||(d3>0))); }
+  trigger.addEventListener('mouseenter', function(){ clearTimeout(closeTimer); setOpen(true); });
+  trigger.addEventListener('click', function(e){ e.preventDefault(); setOpen(!open); });
+  dd.addEventListener('mouseleave', scheduleClose);
+  panel.addEventListener('mouseenter', function(){ clearTimeout(closeTimer); });
+  document.addEventListener('click', function(e){ if (open && !dd.contains(e.target)) setOpen(false); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') setOpen(false); });
+})();
+</script>
+
+<!-- Mobile Navigation Panel -->
+<div x-data="{ showMobileNav: false }"
      @toggle-mobile-nav.window="showMobileNav = !showMobileNav"
      @keydown.escape.window="showMobileNav = false"
      @pagehide.window="showMobileNav = false"
@@ -247,20 +279,6 @@
      @freeze.window="showMobileNav = false"
      @close-mobile-nav.window="showMobileNav = false"
      class="relative z-50">
-     
-  <!-- Background overlay -->
-      <div x-show="showMobileNav"
-       x-transition:enter="ease-out duration-300"
-       x-transition:enter-start="opacity-0"
-       x-transition:enter-end="opacity-100"
-       x-transition:leave="ease-in duration-200"
-       x-transition:leave-start="opacity-100"
-       x-transition:leave-end="opacity-0"
-       @click="showMobileNav = false"
-       class="fixed inset-0 top-16 bg-black/20 backdrop-blur-sm z-40"
-       x-cloak></div>
-  
-  <!-- Mobile Nav Panel (Overlay) -->
   <div x-show="showMobileNav"
        x-transition:enter="ease-out duration-200"
        x-transition:enter-start="opacity-0 -translate-y-2"
@@ -268,152 +286,37 @@
        x-transition:leave="ease-in duration-150"
        x-transition:leave-start="opacity-100 translate-y-0"
        x-transition:leave-end="opacity-0 -translate-y-2"
-       @click.stop
-       class="fixed left-0 right-0 top-16 max-h-[80vh] overflow-y-auto bg-white border-b border-gray-200 shadow-xl z-50"
+       @click.outside="showMobileNav = false"
+       class="gk-mobile-panel"
        x-cloak>
-    
-    <div class="py-4">
-      <div class="px-4 space-y-3 text-sm font-medium">
-        {% if settings.GOBII_PROPRIETARY_MODE %}
-        <!-- Mobile Solutions -->
-        <div x-data="{ expanded: false }">
-            <button @click="expanded = !expanded" class="flex w-full items-center justify-between py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-                Solutions
-                <svg class="h-4 w-4 transform transition-transform" :class="{ 'rotate-180': expanded }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-            </button>
-            <div x-show="expanded" class="pl-4 space-y-1">
-                <a href="{% url 'pages:solution' slug='recruiting' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-violet-700 rounded-lg">
-                    <i aria-hidden="true" data-lucide="users" class="h-4 w-4"></i>
-                    Recruiting
-                </a>
-                <a href="{% url 'pages:solution' slug='sales' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-violet-700 rounded-lg">
-                    <i aria-hidden="true" data-lucide="briefcase" class="h-4 w-4"></i>
-                    Sales
-                </a>
-                <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-violet-700 rounded-lg">
-                    <i aria-hidden="true" data-lucide="cpu" class="h-4 w-4"></i>
-                    API
-                </a>
-                <a href="{% url 'pages:solutions' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-violet-700 rounded-lg">
-                    <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
-                    All Solutions
-                </a>
-            </div>
-        </div>
-
-          <a href="{% url 'proprietary:teams' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">Teams</a>
-          <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">Pricing</a>
-          <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors" title="Build AI Agents with the Gobii API">API</a>
-          <a href="{% url 'proprietary:support' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">Support</a>
-        {% endif %}
-        
-        {% if request.user.is_authenticated %}
-          <a href="/app/agents" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-            <i aria-hidden="true" data-lucide="bot" class="h-4 w-4"></i>
-            My Agents
-          </a>
-          <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-            <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
-            Agents
-          </a>
-          
-          <div class="mt-4 pt-4 border-t border-gray-200">
-            <div class="flex items-center gap-3 px-3 mb-3">
-              {% with social_account_set=request.user.socialaccount_set.all %}
-                {% if social_account_set and social_account_set.0.get_avatar_url %}
-                  <img class="inline-block size-8 rounded-full object-cover" src="{{ social_account_set.0.get_avatar_url }}" alt="{{ request.user.email|default:"User Profile" }}">
-                {% else %}
-                  {% firstof request.user.first_name request.user.email request.user.username as display_name_source %}
-                  {% if display_name_source %}
-                    {% with initial=display_name_source|first|upper %}
-                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-indigo-500 text-white text-sm font-semibold">
-                        {{ initial }}
-                    </div>
-                    {% endwith %}
-                  {% else %}
-                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-indigo-500 text-white text-sm font-semibold">?</div>
-                  {% endif %}
-                {% endif %}
-              {% endwith %}
-              <div>
-                <p class="text-xs text-gray-500">Signed in as</p>
-                <p class="text-sm font-semibold text-slate-800 truncate">{{ request.user.email|default:request.user.username }}</p>
-              </div>
-            </div>
-            
-            {% if request.user.is_staff %}
-            <a href="{% url 'admin:index' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="columns-3-cog" class="h-4 w-4 mr-2 text-slate-500"></i>
-              Django Admin
-            </a>
-            <a href="{% url 'llm-config' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="settings-2" class="h-4 w-4 mr-2 text-slate-500"></i>
-              LLM Config
-            </a>
-            <a href="{% url 'staff-platform-mcp' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="server-cog" class="h-4 w-4 mr-2 text-slate-500"></i>
-              Platform MCP
-            </a>
-            <a href="{% url 'evals' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="beaker" class="h-4 w-4 mr-2 text-slate-500"></i>
-              Evals
-            </a>
-            <a href="{% url 'system-settings' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 mr-2 text-slate-500"></i>
-              System Settings
-            </a>
-            <a href="{% url 'console-status' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="activity" class="h-4 w-4 mr-2 text-slate-500"></i>
-              Status
-            </a>
-            <a href="{% url 'staff-users' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="users-round" class="h-4 w-4 mr-2 text-slate-500"></i>
-              Users &amp; Orgs
-            </a>
-            {% endif %}
-
-            {% if request.session.context_type == 'organization' and request.session.context_id %}
-              <a href="{% url 'organization_detail' org_id=request.session.context_id %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-                <i aria-hidden="true" data-lucide="building-2" class="h-4 w-4 mr-2 text-slate-500"></i>
-                Organization
-              </a>
-            {% else %}
-              <a href="{% url 'profile' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-                <i aria-hidden="true" data-lucide="user-round" class="h-4 w-4 mr-2 text-slate-500"></i>
-                Profile
-              </a>
-            {% endif %}
-            
-            <form method="post" action="{% url 'account_logout' %}" class="mt-2">
-              {% csrf_token %}
-              <button type="submit" class="w-full flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-                <i aria-hidden="true" data-lucide="log-out" class="h-4 w-4 mr-2 text-slate-500"></i>
-                {% translate "Sign Out" %}
-              </button>
-            </form>
-          </div>
-        {% else %}
-          <div class="mt-4 pt-4 border-t border-gray-200 space-y-3">
-            <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
-              Agents
-            </a>
-            {% with request.session.utm_querystring as utm_qs %}
-            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">Login</a>
-            {% url 'account_signup' as account_signup_url %}
-            <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
-               data-analytics-cta-id="nav_start_trial" data-analytics-placement="header_mobile" data-analytics-intent="signup"
-               class="block text-center text-white font-semibold rounded-lg py-2.5 px-3"
-               style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 4px 14px rgba(124,58,237,.3)">
-              Start free trial
-            </a>
-            {% endwith %}
-          </div>
-        {% endif %}
-        
-      </div>
-    </div>
+    {% if settings.GOBII_PROPRIETARY_MODE %}
+      <a href="{% url 'pages:library' %}">Agent library</a>
+      <a class="gk-mm-sub" href="{% url 'pages:solution' slug='recruiting' %}">Recruiting</a>
+      <a class="gk-mm-sub" href="{% url 'pages:solution' slug='sales' %}">Sales</a>
+      <a class="gk-mm-sub" href="{% url 'pages:solution' slug='engineering' %}">API</a>
+      <a class="gk-mm-sub" href="{% url 'pages:solutions' %}">All Solutions</a>
+      <a href="{% url 'proprietary:teams' %}">Teams</a>
+      <a href="{% url 'proprietary:pricing' %}">Pricing</a>
+      <a href="{% url 'proprietary:support' %}">Support</a>
+    {% else %}
+      <a href="{% url 'pages:library' %}">Agents</a>
+    {% endif %}
+    <div class="gk-mm-sep"></div>
+    {% if request.user.is_authenticated %}
+      <a href="/app/agents">My Agents</a>
+      <a href="{% url 'profile' %}">Profile</a>
+      <form method="post" action="{% url 'account_logout' %}">
+        {% csrf_token %}
+        <button type="submit" class="gk-mm-link">{% translate "Sign Out" %}</button>
+      </form>
+    {% else %}
+      {% with request.session.utm_querystring as utm_qs %}
+      <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}">Log in</a>
+      {% url 'account_signup' as account_signup_url %}
+      <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
+         data-analytics-cta-id="nav_start_trial" data-analytics-placement="header_mobile" data-analytics-intent="signup"
+         class="gk-mm-cta">Start free trial</a>
+      {% endwith %}
+    {% endif %}
   </div>
 </div>
