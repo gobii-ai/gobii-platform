@@ -521,6 +521,30 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
             "",
         )
 
+    def test_http_mutation_receipts_do_not_create_multi_source_warning(self):
+        source_read = (
+            "http_request",
+            {"method": "GET", "url": "https://crm.example.test/accounts"},
+            "complete",
+        )
+        mutation_receipt = (
+            "http_request",
+            {"method": "PATCH", "url": "https://crm.example.test/accounts/acct-1"},
+            "complete",
+        )
+
+        self.assertEqual(
+            prompt_context._build_unreconciled_source_model_warning([
+                source_read,
+                mutation_receipt,
+            ]),
+            "",
+        )
+        self.assertEqual(
+            prompt_context._build_unreconciled_source_model_warning([mutation_receipt]),
+            "",
+        )
+
 
 class _PromptSectionCollector:
     def __init__(self):

@@ -3693,8 +3693,8 @@ def _build_unreconciled_source_model_warning(
     """Flag a fresh-source-to-stale-model read in the current work cycle."""
 
     latest_source_index = -1
-    for index, (tool_name, _params, status) in enumerate(recent_calls):
-        if status == "complete" and is_source_bearing_tool(tool_name):
+    for index, (tool_name, params, status) in enumerate(recent_calls):
+        if status == "complete" and _tool_result_is_source_bearing(tool_name, params):
             latest_source_index = index
     if latest_source_index < 0:
         return ""
@@ -3742,8 +3742,8 @@ def _build_unreconciled_source_model_warning(
 
     if not read_tables and not latest_mutation_by_table:
         completed_source_count = sum(
-            status == "complete" and is_source_bearing_tool(tool_name)
-            for tool_name, _params, status in recent_calls
+            status == "complete" and _tool_result_is_source_bearing(tool_name, params)
+            for tool_name, params, status in recent_calls
         )
         if completed_source_count < 2:
             return ""
