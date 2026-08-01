@@ -144,10 +144,21 @@ def github_guidance_blocks_configured_cli_path(text):
             )
         )
     )
-    claims_missing_credentials = (
+    mentions_missing_credentials = (
         any(term in normalized for term in ("secret", "credential"))
         and any(term in normalized for term in ("is missing", "are missing", "not configured", "provide the"))
     )
+    conditional_missing = any(
+        phrase in normalized
+        for phrase in (
+            "if it is missing",
+            "if they are missing",
+            "if secrets are missing",
+            "if credentials are missing",
+            "if not configured",
+        )
+    )
+    claims_missing_credentials = mentions_missing_credentials and not conditional_missing
     return blocks_local_path or reconnect_gated or claims_missing_credentials
 
 
@@ -393,7 +404,7 @@ class CharterJudgePreservesCliGithubSecretWorkflowScenario(CharterMemoryScenario
         routing_profile = get_current_eval_routing_profile()
         with patch(
             "api.agent.core.agent_judge.get_agent_judge_llm_config",
-            side_effect=lambda: get_agent_judge_llm_config(routing_profile=routing_profile),
+            side_effect=lambda **_kwargs: get_agent_judge_llm_config(routing_profile=routing_profile),
         ):
             judge_result = run_manual_agent_judge(agent, tools=tools)
         judge_ran = bool(judge_result.get("ran")) and judge_result.get("status") == "completed"

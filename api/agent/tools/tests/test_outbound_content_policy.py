@@ -76,10 +76,11 @@ class OutboundContentPolicyTests(SimpleTestCase):
                 self.assertIn("code formatting", description)
 
     def test_discord_tool_contract_does_not_recommend_unsupported_tables(self):
-        description = (
-            get_send_discord_message_tool()["function"]["parameters"]["properties"]["message"]["description"]
-        )
+        tool = get_send_discord_message_tool()["function"]
+        description = tool["parameters"]["properties"]["message"]["description"]
 
+        self.assertIn("send one brief kickoff(true) first", tool["description"])
+        self.assertIn("work next response", tool["description"])
         self.assertNotIn("bullets/tables", description)
         self.assertIn("Discord cannot render tables", description)
         self.assertIn("never send pipe-separated columns with a hyphen-divider row", description)

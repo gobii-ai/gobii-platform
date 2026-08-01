@@ -312,6 +312,8 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("separate preferred email/SMS", function["description"])
         self.assertIn("Ask later only when evidence reveals a consequential choice", function["description"])
         self.assertIn("free-text blocker", function["description"])
+        self.assertIn("Missing email/SMS recipient/detail", function["description"])
+        self.assertIn("generic roles do not count", function["description"])
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertEqual(function["parameters"]["properties"]["options"]["maxItems"], 8)

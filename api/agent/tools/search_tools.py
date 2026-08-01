@@ -1461,7 +1461,8 @@ def get_search_tools_tool() -> Dict[str, Any]:
                 "Use for control-plane or agent/team-management requests that may require hidden system skills. "
                 "Use it when you need to choose between structured extractors, web search, scraping, browser automation, or a specialized integration. "
                 "Use already-enabled direct tools such as sqlite_batch, create_csv, or a named integration tool; do not rediscover a matching enabled app/tool. "
-                "Call it again when the task changes and you need different capabilities."
+                "An enabled/already_enabled match is ready: use it next without rediscovery or credential preflight. "
+                "Call search_tools again only when the task changes."
             ),
             "parameters": {
                 "type": "object",
@@ -1490,4 +1491,11 @@ def execute_search_tools(agent: PersistentAgent, params: Dict[str, Any]) -> Tool
     span.set_attribute("search.query", query)
     logger.info("Agent %s searching for tools: %s", agent.id, query)
 
-    return search_tools(agent, query)
+    result = search_tools(agent, query)
+    if result.get("status") == "success":
+        result.setdefault(
+            "next_action",
+            "Use a returned enabled/already-enabled match now. If none fits, explain the setup or limitation; "
+            "do not call search_tools again unless the task changes.",
+        )
+    return result

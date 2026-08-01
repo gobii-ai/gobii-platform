@@ -4558,6 +4558,8 @@ class MCPToolExecutorsTests(TestCase):
         description = tool_def["function"]["description"]
         self.assertIn("no enabled tool clearly fits", description)
         self.assertIn("do not rediscover", description)
+        self.assertIn("enabled/already_enabled match is ready", description)
+        self.assertIn("without rediscovery or credential preflight", description)
         self.assertNotIn("NOT for web search", description)
         
     @patch('api.agent.tools.search_tools.search_tools')
@@ -4576,6 +4578,7 @@ class MCPToolExecutorsTests(TestCase):
         result = execute_search_tools(self.agent, {"query": "test query"})
         self.assertEqual(result["status"], "success")
         self.assertIn("Enabled: mcp_tool_a", result["message"]) 
+        self.assertIn("do not call search_tools again", result["next_action"])
         mock_search.assert_called_once_with(self.agent, "test query")
 
     @patch('api.agent.tools.search_tools.search_tools')

@@ -161,6 +161,7 @@ def _record_plan_tool() -> dict[str, Any]:
                         "items": {"type": "string", "enum": allowed_tool_names},
                         "description": (
                             "Complete post-approval lifecycle, using each direct tool name once in first-use order. "
+                            "Use an enum name exactly; peer messaging is send_agent_message, never a meta_gobii-prefixed name. "
                             "Include create/link/message tools when the user asked to create, deploy, link, or brief. "
                             "Any newly created Gobii that will do work needs an approved link from the manager "
                             "Gobii followed by send_agent_message for its initial briefing."
@@ -1159,7 +1160,10 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             return False
 
         ordered_tools = [str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])]
+        allowed_tools = set(META_GOBII_TOOL_NAMES) | {"send_agent_message", LEGACY_SPAWN_TOOL_NAME}
         if not plan_args.get("skill_needed"):
+            return True
+        if any(tool_name not in allowed_tools for tool_name in ordered_tools):
             return True
         if any(tool_name not in ordered_tools for tool_name in case.expected_tools):
             return True

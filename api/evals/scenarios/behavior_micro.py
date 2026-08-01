@@ -19,6 +19,7 @@ from api.evals.registry import ScenarioRegistry, register_scenario
 from api.evals.tool_params import resolved_tool_param
 from api.evals.stop_policy import (
     split_sql_statements,
+    sqlite_batch_is_read_only,
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_read,
     sqlite_batch_is_only_planning_state_mutation,
@@ -671,11 +672,16 @@ def planning_requests_are_bounded(requests):
     )
 
 
-def has_single_recipient_request(requests):
-    if len(requests) != 1:
-        return False
-    question = str(requests[0].question or "").lower()
-    return any(term in question for term in ("email", "address", "recipient", "client", "contact"))
+def has_recipient_request(requests):
+    for request in requests:
+        content = [str(request.question or "")]
+        for option in getattr(request, "options_json", None) or []:
+            if isinstance(option, dict):
+                content.extend((str(option.get("title") or ""), str(option.get("description") or "")))
+        request_text = " ".join(content).lower()
+        if any(term in request_text for term in ("email", "address", "recipient", "client", "contact")):
+            return True
+    return False
 
 
 class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
@@ -1387,7 +1393,10 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
                 call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
                 and not (self.requires_fallback_copy and call.tool_name == "send_email")
             )
-            or call.tool_name == "sqlite_batch"
+            or (
+                call.tool_name == "sqlite_batch"
+                and not sqlite_batch_is_read_only(call)
+            )
         ]
         request_positions = [
             index for index, call in enumerate(calls)
@@ -3968,7 +3977,15 @@ class CharterPatchesAndCompletesImmediateTaskScenario(CharterMemoryScenario):
             and old != new
             and (not old or old in self.existing_charter)
             and bool(new.strip())
-            and all("__agent_config" not in statement.casefold() for statement in statements[1:])
+            and all(
+                not re.search(
+                    r"\b(?:insert(?:\s+or\s+\w+)?\s+into|replace\s+into|update|delete\s+from)\s+"
+                    r"[\"'`]?(?:__agent_config)[\"'`]?\b",
+                    statement,
+                    re.IGNORECASE,
+                )
+                for statement in statements[1:]
+            )
         )
         rows = self._signal_rows(agent.id)
         normalized = " ".join(rows).casefold()
@@ -4156,6 +4173,11 @@ class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario)
     failure_summary = "Expected one focused patch preserving the role and privacy rule while updating reporting and routing"
     verify_feedback_reply = True
     feedback_reply_options = {"required_reply_concepts": (("morgan",), ("blocker",))}
+    semantic_judge_question = (
+        "Does the updated charter replace the old per-session kickoff/play-by-play behavior with outcome-based reporting "
+        "of changes, blockers, and the next move; route routine follow-ups to Morgan while involving the owner only for "
+        "real blockers; preserve the renewal role and privacy boundary; and omit the one-renewal legal-review instruction?"
+    )
 
     def _charter_check(self, agent, mutation_calls):
         charter = (agent.charter or "").lower()
@@ -4165,10 +4187,6 @@ class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario)
             "Never include customer secrets in team messages.",
         )
         temporary_scope_omitted = "legal review first" not in charter and "put legal" not in charter
-        replaced_old_rule = (
-            "short kickoff and a progress note" not in charter
-            and "route routine follow-ups and blockers to the owner" not in charter
-        )
         learned_reporting = _requires_outcome_report(agent.charter)
         learned_routing = _requires_morgan_routing_boundary(agent.charter)
         used_one_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
@@ -4176,7 +4194,6 @@ class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario)
         passed = (
             preserved
             and temporary_scope_omitted
-            and replaced_old_rule
             and learned_reporting
             and learned_routing
             and used_one_patch
@@ -4545,6 +4562,7 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_human_input", assertion_type="manual"),
+        ScenarioTask(name="verify_direct_route", assertion_type="manual"),
         ScenarioTask(name="verify_no_send_email", assertion_type="manual"),
     ]
 
@@ -4580,13 +4598,18 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_human_input")
         requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
-        if has_single_recipient_request(requests):
+        input_calls = get_tool_calls_for_run(
+            run_id,
+            after=inbound.timestamp,
+            tool_names={"request_human_input"},
+        )
+        if len(input_calls) == 1 and has_recipient_request(requests):
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_human_input",
-                observed_summary="Agent made one tracked request for the missing recipient details.",
+                observed_summary="Agent made one tracked request call covering the missing recipient details.",
             )
         else:
             self.record_task_result(
@@ -4595,9 +4618,36 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_human_input",
                 observed_summary=(
-                    "Agent did not make one recipient-focused tracked request for missing email details; "
-                    f"found {len(requests)} request(s)."
+                    "Agent did not make one recipient-focused tracked request call for missing email details; "
+                    f"found {len(input_calls)} call(s) and {len(requests)} card(s)."
                 ),
+            )
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_direct_route")
+        detours = get_tool_calls_for_run(
+            run_id,
+            after=inbound.timestamp,
+            tool_names={"sqlite_batch", "send_chat_message", "search_tools"},
+        )
+        if detours:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_direct_route",
+                observed_summary=(
+                    "Missing-recipient routing detoured before the tracked request through "
+                    f"{[call.tool_name for call in detours]}."
+                ),
+                artifacts={"step": detours[0].step},
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_direct_route",
+                observed_summary="Missing-recipient routing went directly to tracked human input.",
             )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_no_send_email")

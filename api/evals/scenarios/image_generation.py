@@ -290,7 +290,7 @@ class ImageGenerationScenario(EvalScenario, ScenarioExecutionTools):
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_tool_calls", assertion_type="tool_call"),
-        ScenarioTask(name="verify_prompt_contract", assertion_type="exact_match"),
+        ScenarioTask(name="verify_prompt_contract", assertion_type="llm_judge"),
         ScenarioTask(name="verify_response", assertion_type="exact_match"),
     ]
     case: ImageGenerationCase | None = None
@@ -427,6 +427,30 @@ class ImageGenerationScenario(EvalScenario, ScenarioExecutionTools):
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_prompt_contract")
         calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
         errors = self._prompt_contract_errors(calls)
+        semantic_only = errors and all(
+            error.startswith(("missing prompt term group", "missing distinct asset term"))
+            for error in errors
+        )
+        if semantic_only:
+            prompts = [
+                str((call.tool_params or {}).get("prompt") or "")
+                for call in calls
+            ]
+            choice, _reasoning = self.llm_judge(
+                question=(
+                    "Do the create_image prompts faithfully preserve every material visual requirement in the user's "
+                    "request, allowing natural reordering or intervening adjectives rather than requiring exact phrase "
+                    "matches? For multiple requested assets, each requested variant must appear in a distinct prompt."
+                ),
+                context=(
+                    f"User request:\n{self._case().prompt}\n\n"
+                    f"create_image prompts:\n{prompts}\n\n"
+                    f"Deterministic wording misses:\n{errors}"
+                ),
+                options=["Semantically complete", "Missing a material visual requirement"],
+            )
+            if choice == "Semantically complete":
+                errors = []
         if errors:
             self.record_task_result(
                 run_id,

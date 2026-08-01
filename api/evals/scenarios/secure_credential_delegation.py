@@ -1,4 +1,5 @@
 import json
+import uuid
 from typing import Any
 
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
@@ -76,15 +77,16 @@ class SecureCredentialDelegationScenarioBase(EvalScenario, ScenarioExecutionTool
 
     @staticmethod
     def _create_fixture_agent(manager: PersistentAgent, name: str) -> PersistentAgent:
+        fixture_name = f"{name} {uuid.uuid4().hex[:8]}"
         browser_agent = BrowserUseAgent.objects.create(
             user=manager.user,
-            name=f"{name} {manager.id}",
+            name=fixture_name,
         )
         return PersistentAgent.objects.create(
             user=manager.user,
             organization=manager.organization,
             browser_use_agent=browser_agent,
-            name=name,
+            name=fixture_name,
             charter="Wait for credential provisioning from the manager Gobii.",
             planning_state=PersistentAgent.PlanningState.SKIPPED,
             is_active=False,
@@ -190,9 +192,13 @@ class SecureCredentialDelegationScenarioBase(EvalScenario, ScenarioExecutionTool
             self._seed_prior_state(run_id, agent, fixture_agents, secure_refs)
             self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
             with self.wait_for_agent_idle(agent_id, timeout=180):
+                prompt = self.prompt
+                for fixture in fixture_agents:
+                    base_name = fixture.name.rsplit(" ", 1)[0]
+                    prompt = prompt.replace(base_name, fixture.name)
                 inbound = self.inject_message(
                     agent_id,
-                    self.prompt,
+                    prompt,
                     trigger_processing=True,
                     eval_run_id=run_id,
                     mock_config=mock_config,

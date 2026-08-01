@@ -193,9 +193,9 @@ def get_send_email_tool() -> Dict[str, Any]:
             "name": "send_email",
             "description": (
                 "Body-only HTML; no document tags, Markdown, or long dashes. No <style> blocks/classes; inline CSS only. "
-                "Approval or preparation is not sent: send first, then record returned delivery_status; never infer delivered. "
-                "pending_approval: say it awaits approval; never retry. "
-                "Reports: distinct styled sections/tables, highlighted values, tasteful icon marker and obvious inline-styled badge for status/value. Never leave metrics in plain lists or use Markdown pipe tables."
+                "Approval or preparation is not sent: send, then record returned delivery_status; never infer delivered. "
+                "pending_approval awaits approval; never retry. "
+                "Reports: distinct styled sections/tables, accented headline metric, tasteful icon marker and obvious inline-styled badge. Never leave metrics in plain lists or use Markdown pipe tables."
             ),
             "parameters": {
                 "type": "object",
@@ -228,7 +228,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
-                            "Reports/dashboards should style section headers, tables/cells, key numbers/statuses/changes with visible colors/badges/icons; use styled tables or metric blocks. "
+                            "Reports need an accented headline metric, styled tables or metric blocks, and visible badges/icons. "
                             "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),
                     },

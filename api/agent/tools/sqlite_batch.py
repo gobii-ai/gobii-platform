@@ -59,7 +59,8 @@ DEFAULT_SQLITE_BATCH_TERMINATE_GRACE_SECONDS = 1.0
 DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS = 1.0
 CONFIG_PATCH_NOT_PERSISTED_ERROR = "config_patch_not_persisted"
 CONFIG_PATCH_NOT_PERSISTED_MESSAGE = (
-    "Query not executed: SELECT patch_text(...) only computes a value and does not persist agent config. "
+    "Query not executed: patch_text(...) was not assigned back to the same durable config field. "
+    "For appearance or schedule, assign patch_text(field, :old_text, :new_text) to that field. "
     "Use UPDATE __agent_config SET charter=patch_text(charter, :old_text, :new_text) WHERE id=1 "
     "with `bindings`; set old_text='' to append."
 )
@@ -1946,7 +1947,7 @@ def _is_redundant_transaction_wrapper(sql: str) -> bool:
 
 
 def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
-    persisted_patch_seen = False
+    persisted_patch_fields: set[str] = set()
     for query in queries:
         for statement in sqlparse.parse(query):
             if not _structural_sql(statement):
@@ -1958,13 +1959,26 @@ def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
             )
             if not uses_config_patch:
                 continue
-            if re.search(
-                r"\bcharter\b\s*=\s*patch_text\s*\(",
-                structural_sql,
-                re.IGNORECASE,
-            ):
-                persisted_patch_seen = True
-            elif not persisted_patch_seen:
+
+            patched_fields = {
+                match.group(1).lower()
+                for match in re.finditer(
+                    r"\bpatch_text\s*\(\s*(charter|schedule|appearance)\b",
+                    structural_sql,
+                    re.IGNORECASE,
+                )
+            }
+            persisted_patch_fields.update(
+                match.group(1).lower()
+                for match in re.finditer(
+                    r"\b(charter|schedule|appearance)\b\s*=\s*patch_text\s*\(\s*\1\b",
+                    structural_sql,
+                    re.IGNORECASE,
+                )
+            )
+
+            # A preview is safe only after this same durable field was assigned.
+            if not patched_fields or patched_fields - persisted_patch_fields:
                 return str(statement).strip()
     return None
 
@@ -2296,7 +2310,18 @@ def _execute_sqlite_batch_inner(
             "message": msg,
         }
 
-        if not had_error and not had_warning and will_continue_work is False:
+        if had_error:
+            response["retryable"] = True
+        has_result_rows = any(
+            isinstance(entry.get("result"), list) and bool(entry["result"])
+            for entry in results
+        )
+        if (
+            not had_error
+            and not had_warning
+            and will_continue_work is False
+            and (params.get("_has_user_facing_message") is True or not has_result_rows)
+        ):
             response["auto_sleep_ok"] = True
         if advisories:
             response["advisories"] = [
@@ -2385,15 +2410,20 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "MESSAGE RULE: copy every payload field through a binding/json_extract. `state='...'` is invalid even when "
-                "the matching source payload is bound; use state=:source_status or "
-                "state=json_extract(:source_payload,'$.delivery_status'). Durable world model/exact logic: keyed DDL, set-wise upsert, decision SELECT. "
-                "Structured: derive result_json/item.value over current batch + exact tool_name; no ID/URL filters; keep t.result_id/t.source_url. Prose: inspect once, join top-level rows by result_id. "
-                "Peer/message: use __messages/bound evidence, never rows/__tool_results or SQLite call IDs. Use rows=[] for other structured JSON. Never use sourced SQL literals, import siblings singly, mix historical generic results, or rebuild "
-                "tables. Evolve normalized entities/relations; query counts/joins/coverage/gaps/ranks. Read back keyed writes "
-                "and evidence/URLs in the same batch. Bind messy text via :name; no backslash escapes. Semicolon-separate "
-                "statements. VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before "
-                "ON CONFLICT on exact unique-key columns. group_concat(DISTINCT x) has no separator. No ATTACH."
+                "Domain model/logic for material row reconciliation. First shot: keyed DDL, one set-wise "
+                "upsert, then one filtered/ranked decision SELECT with both answer and supporting rows/URLs; aggregate-only "
+                "is incomplete; deliver without reread. "
+                "Structured: every `is_current_batch=1 AND tool_name='<exact>'` row. HTTP payload path: "
+                "`$.content`; parent fields from result_json, children from json_each(actual array), provenance from "
+                "t.result_id/source_url; rows=[]. Never filter result_id/URL or copy source facts into SQL. "
+                "Prose: inspect the whole set once; join rows to __tool_results, one row/result_id. Never inspect "
+                "messages/contacts for a missing outbound recipient. Structured inbound: first write SELECTs the latest "
+                "non-outbound non-null payload from __messages and json-extracts every field plus message_id; never "
+                "pre-read, bind, or quote payload state. Use normalized keyed entities/relations with provenance. "
+                "Bind messy/authored text. No draft/superseded SQL. "
+                "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. Rank/top via separate SELECT/scalar subquery; "
+                "no ORDER BY/LIMIT in a UNION arm. No `->`, ATTACH, per-item writes, historical "
+                "mixing, or SELECT-all readback."
             ),
             "parameters": {
                 "type": "object",
@@ -2430,28 +2460,25 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     "sql": {
                         "type": "string",
                         "description": (
-                            "SQL. Prose: join `json_each(:rows) r` to __tool_results t on "
-                            "t.result_id=json_extract(r.value,'$.result_id'); use $.fields.<name>; keep "
-                            "t.result_id/t.source_url. Message writes follow MESSAGE RULE using __messages or bound evidence, "
-                            "never rows/__tool_results, sourced literals, or rows=[] prose writes. Prefer a bound "
-                            ":source_payload and json_extract every message field. Config UPDATE: "
-                            "patch_text(charter,:old,:new), old/new in bindings. End writes with keyed readback + "
-                            "decision/detail SELECTs."
+                            "Semicolon-separated SQL. Prose joins json_each(:rows) to __tool_results by result_id and "
+                            "extracts $.fields.*. Message writes derive payload/message_id from __messages, or one bound "
+                            "payload when absent. Config uses patch_text(charter,:old,:new). INSERT SELECT requires "
+                            "WHERE 1=1 before ON CONFLICT. End writes with the requested decision/evidence SELECT."
                         ),
                     },
                     "bindings": {
                         "type": "object",
                         "description": (
-                            "Config requires old/new. Otherwise bind authored/messy values, inspected source fields, or one "
-                            "complete message payload as source_payload. Keys omit colon."
+                            "Named parameters without colons: config old/new, authored/messy values, or one complete "
+                            "payload unavailable in __messages. JSON object, never array/list."
                         ),
                         "additionalProperties": {},
                     },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. True for any read that may trigger another tool (queues included); false when SELECTs answer. "
-                            "Never true only to query SQLite again."
+                            "REQUIRED. True for action-producing reads (all queue reads); false for answer SELECTs. "
+                            "Never true merely to reread SQLite."
                         ),
                     },
                 },

@@ -477,6 +477,9 @@ GOOGLE_SHEETS_NATIVE_CASES = (
             ),
         ),
         response_term_groups=(("polishing", "polished", "formatting", "formatted", "styled"), ("Top Local LLM Models", "sheet")),
+        semantic_response_intent=(
+            "The named Top Local LLM Models spreadsheet was created and visibly formatted or styled."
+        ),
         tags=("create", "format"),
     ),
     GoogleSheetsNativeCase(
@@ -545,6 +548,9 @@ GOOGLE_SHEETS_NATIVE_CASES = (
             ),
         ),
         response_term_groups=(("polishing", "polished", "formatting", "formatted", "styled"),),
+        semantic_response_intent=(
+            "The existing spreadsheet was visibly formatted or styled without duplicating its alternating-row treatment."
+        ),
         tags=("format", "idempotent"),
     ),
     GoogleSheetsNativeCase(

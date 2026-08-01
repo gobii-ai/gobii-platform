@@ -34,6 +34,7 @@ from api.agent.tools.sqlite_batch import (
     _fix_singular_plural_tables,
     _is_redundant_transaction_wrapper,
     _is_typo,
+    _non_persisting_agent_config_patch,
     _SqliteBatchLimits,
     _should_skip_memory_limits_for_virtualapple_emulation,
     _strip_markdown_fences,
@@ -223,8 +224,18 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
     def test_tool_contract_explains_batch_and_upsert_shapes(self):
         tool = get_sqlite_batch_tool()["function"]
 
-        self.assertIn("Semicolon-separate statements", tool["description"])
-        self.assertIn("exact unique-key columns", tool["description"])
+        self.assertIn("one set-wise upsert", tool["description"])
+        self.assertIn("WHERE 1=1 before ON CONFLICT", tool["description"])
+        self.assertIn("parent fields from result_json", tool["description"])
+        self.assertIn("children from json_each(actual array)", tool["description"])
+        self.assertIn("Never filter result_id/URL", tool["description"])
+        self.assertIn("json-extracts every field plus message_id", tool["description"])
+        self.assertIn("deliver without reread", tool["description"])
+        self.assertIn("material row reconciliation", tool["description"])
+        self.assertIn("both answer and supporting rows/URLs", tool["description"])
+        self.assertIn("aggregate-only is incomplete", tool["description"])
+        self.assertIn("inspect the whole set once", tool["description"])
+        self.assertIn("copy source facts into SQL", tool["description"])
         self.assertEqual(tool["parameters"]["properties"]["rows"]["type"], "array")
         self.assertEqual(tool["parameters"]["properties"]["bindings"]["type"], "object")
 
@@ -232,16 +243,13 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         function = get_sqlite_batch_tool()["function"]
         sql_description = function["parameters"]["properties"]["sql"]["description"]
 
-        self.assertIn("Bind messy text via :name", function["description"])
-        self.assertIn("no backslash escapes", function["description"])
-        self.assertIn("Config UPDATE", sql_description)
+        self.assertIn("Bind messy/authored text", function["description"])
         self.assertIn("patch_text(charter,:old,:new)", sql_description)
-        self.assertIn("old/new in bindings", sql_description)
         self.assertIn(
-            "Config requires old/new",
+            "config old/new",
             function["parameters"]["properties"]["bindings"]["description"],
         )
-        self.assertIn("End writes with keyed readback + decision/detail SELECTs", sql_description)
+        self.assertIn("requested decision/evidence SELECT", sql_description)
 
     def test_rows_schema_requires_source_specificity_without_enrichment(self):
         rows = (
@@ -480,6 +488,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
                 )
 
             self.assertEqual(out.get("status"), "error")
+            self.assertIs(out.get("retryable"), True)
             self.assertIn("no such column: missing_column", out.get("message", ""))
             self.assertNotIn(
                 "SQLite does not support PostgreSQL",
@@ -536,6 +545,37 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         self.assertEqual(out.get("status"), "ok", out.get("message"))
         self.assertEqual(charter, "New charter")
+
+    def test_config_patch_preview_requires_same_field_to_be_persisted(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __agent_config("
+                    "id INTEGER PRIMARY KEY, charter TEXT, appearance TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO __agent_config(id, charter, appearance) "
+                    "VALUES (1, 'Old charter', 'Old appearance')"
+                )
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "UPDATE __agent_config SET appearance=patch_text("
+                        "appearance, 'Old appearance', 'New appearance') WHERE id=1;"
+                        "SELECT patch_text(charter, 'Old charter', 'New charter') "
+                        "FROM __agent_config WHERE id=1"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            with sqlite3.connect(db_path) as conn:
+                appearance = conn.execute(
+                    "SELECT appearance FROM __agent_config WHERE id=1"
+                ).fetchone()[0]
+
+        self.assertEqual(out.get("error_code"), "config_patch_not_persisted")
+        self.assertEqual(appearance, "Old appearance")
 
     def test_agent_config_patch_relies_on_patch_target_instead_of_redundant_where(self):
         sql = (
@@ -636,6 +676,19 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         self.assertEqual(out.get("status"), "ok")
         self.assertEqual(charter, "New charter")
+
+    def test_appearance_patch_is_a_persisting_config_update(self):
+        sql = (
+            "UPDATE __agent_config SET appearance=patch_text("
+            "appearance, :old, :new) WHERE id=1"
+        )
+
+        self.assertIsNone(_non_persisting_agent_config_patch([sql]))
+        self.assertIsNotNone(
+            _non_persisting_agent_config_patch(
+                [f"SELECT patch_text(appearance, :old, :new) FROM __agent_config"]
+            )
+        )
 
     def test_agent_config_patch_append_persists_once(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
@@ -778,6 +831,30 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             self.assertEqual(out.get("status"), "ok")
             self.assertTrue(out.get("auto_sleep_ok"))
 
+    def test_nonempty_action_source_does_not_auto_sleep_without_message(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "queries": "SELECT 'job-104' AS job_id",
+                    "will_continue_work": False,
+                },
+            )
+            self.assertEqual(out.get("status"), "ok")
+            self.assertNotIn("auto_sleep_ok", out)
+
+    def test_empty_action_source_can_auto_sleep(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "queries": "SELECT 1 AS job_id WHERE 0",
+                    "will_continue_work": False,
+                },
+            )
+            self.assertEqual(out.get("status"), "ok")
+            self.assertTrue(out.get("auto_sleep_ok"))
+
     def test_invalid_queries_are_rejected(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"queries": ["  "]})
@@ -794,51 +871,39 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         description = definition["function"]["description"]
 
         for expected in (
-            "MESSAGE RULE",
-            "copy every payload field through a binding/json_extract",
-            "`state='...'` is invalid even when the matching source payload is bound",
-            "state=:source_status",
-            "state=json_extract(:source_payload,'$.delivery_status')",
-            "Durable world model/exact logic",
             "keyed DDL",
-            "set-wise upsert",
-            "current batch + exact tool_name",
-            "result_json/item.value",
-            "t.result_id/t.source_url",
-            "inspect once",
-            "top-level rows",
-            "rows=[] for other structured",
-            "no ID/URL filters",
-            "Peer/message: use __messages/bound evidence",
-            "never rows/__tool_results",
-            "SQLite call IDs",
-            "VALUES match columns/no WHERE",
+            "one set-wise upsert",
+            "filtered/ranked decision SELECT",
+            "rows=[]",
+            "is_current_batch=1",
+            "tool_name='<exact>'",
+            "t.result_id/source_url",
+            "inspect the whole set once",
+            "join rows to __tool_results",
+            "latest non-outbound non-null payload",
+            "json-extracts every field plus message_id",
+            "never pre-read, bind",
             "INSERT SELECT needs WHERE 1=1 before ON CONFLICT",
-            "group_concat(DISTINCT x)",
-            "Never use sourced SQL literals",
-            "import siblings singly",
-            "mix historical generic results",
-            "normalized entities/relations",
-            "counts/joins/coverage/gaps/ranks",
-            "Read back keyed writes",
+            "per-item",
+            "historical mixing",
+            "normalized keyed entities/relations",
+            "SELECT-all readback",
+            "No draft/superseded SQL",
+            "Never inspect messages/contacts for a missing outbound recipient",
         ):
             self.assertIn(expected, description)
         continuation_description = (
             definition["function"]["parameters"]["properties"]["will_continue_work"]["description"]
         )
-        self.assertIn("True for any read that may trigger another tool", continuation_description)
-        self.assertIn("queues included", continuation_description)
-        self.assertIn("false when SELECTs answer", continuation_description)
-        self.assertIn("Never true only to query SQLite again", continuation_description)
+        self.assertIn("True for action-producing reads", continuation_description)
+        self.assertIn("all queue reads", continuation_description)
+        self.assertIn("false for answer SELECTs", continuation_description)
+        self.assertIn("Never true merely to reread SQLite", continuation_description)
         rows_schema = definition["function"]["parameters"]["properties"]["rows"]
         self.assertEqual(rows_schema["type"], "array")
         self.assertIn("REQUIRED and non-empty", rows_schema["description"])
         self.assertIn("Use [] for structured/inspection/model-only work", rows_schema["description"])
         self.assertIn("SQL receives :rows", rows_schema["description"])
-        self.assertIn(
-            "rows=[]",
-            definition["function"]["parameters"]["properties"]["sql"]["description"],
-        )
         self.assertEqual(rows_schema["items"]["required"], ["result_id", "fields"])
         self.assertEqual(
             rows_schema["items"]["properties"]["result_id"]["minLength"],
@@ -852,17 +917,14 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         sql_description = definition["function"]["parameters"]["properties"]["sql"]["description"]
         self.assertNotIn("Upsert stable keys; put WHERE 1=1 before ON CONFLICT", description)
         self.assertIn("json_each(:rows)", sql_description)
-        self.assertIn("$.fields.<name>", sql_description)
-        self.assertIn("keep t.result_id/t.source_url", sql_description)
-        self.assertIn("Message writes follow MESSAGE RULE", sql_description)
-        self.assertIn("using __messages or bound evidence", sql_description)
-        self.assertIn("never rows/__tool_results", sql_description)
-        self.assertIn(":source_payload", sql_description)
-        self.assertIn("json_extract every message field", sql_description)
-        self.assertIn("End writes with keyed readback", sql_description)
+        self.assertIn("$.fields.*", sql_description)
+        self.assertIn("Message writes derive payload/message_id from __messages", sql_description)
+        self.assertIn("latest non-outbound non-null payload", description)
+        self.assertIn("json-extracts every field", description)
+        self.assertIn("requested decision/evidence SELECT", sql_description)
         bindings_description = definition["function"]["parameters"]["properties"]["bindings"]["description"]
-        self.assertIn("inspected source fields", bindings_description)
-        self.assertIn("complete message payload as source_payload", bindings_description)
+        self.assertIn("one complete payload unavailable in __messages", bindings_description)
+        self.assertIn("JSON object, never array/list", bindings_description)
         self.assertIn("bindings", definition["function"]["parameters"]["required"])
         self.assertNotIn("before one terminal send", description)
 

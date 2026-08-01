@@ -164,9 +164,9 @@ LINK_REFERENCE_PROMPT_NOTE = (
     "## Link References (CRITICAL)\n\n"
     "Sources may pair `raw URL [link_ref: $[link:L…]]`: the raw URL is evidence; its adjacent token is a stable "
     "link handle. Keep pairs attached. Final Markdown is exactly `[item]($[link:LEXACT])`; HTML uses "
-    "`<a href=\"$[link:LEXACT]\">item</a>`. For a URL tool, copy the exact raw URL shown beside the handle; never pass "
-    "the paired `raw URL [link_ref: …]` text. A handle used as a destination must be the whole destination. Never "
-    "encode, edit, reassign, combine, or guess it; never put it inside `[]` or search text. "
+    "`<a href=\"$[link:LEXACT]\">item</a>`. URL tools get the adjacent raw URL, never the annotated pair. "
+    "A handle used as a destination must be the whole destination. Never "
+    "encode, edit, reassign, combine, guess, or invent it; never put it inside `[]` or search text. "
     "SQLite source rows derive raw URLs from __tool_results; for an unavoidable agent-authored URL value, pass the "
     "exact handle through a named binding, never SQL text. Items without a token stay plain; source/feed tokens link only themselves. A report "
     "is unfinished while a token-backed entity name is plain: `Atlas URL [link_ref: $[link:L1]]` becomes "
@@ -713,15 +713,25 @@ def _source_batch_id_for_tool_result(
     completion_id: object,
     active_batch_id: Optional[str],
     active_started_at: Optional[datetime],
+    source_bearing: bool = True,
 ) -> Optional[str]:
     if (
         active_batch_id
         and active_started_at
         and created_at >= active_started_at
+        and source_bearing
         and is_source_bearing_tool(tool_name)
     ):
         return active_batch_id
     return str(completion_id) if completion_id else None
+
+
+def _tool_result_is_source_bearing(tool_name: str, tool_params: object) -> bool:
+    if not is_source_bearing_tool(tool_name):
+        return False
+    if tool_name != "http_request" or not isinstance(tool_params, dict):
+        return True
+    return str(tool_params.get("method") or "GET").upper() not in {"PATCH", "PUT", "DELETE"}
 
 
 def _build_browser_task_tool_result_record(
@@ -831,27 +841,26 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Named tables hold truth/logic; keep entities, relations, coverage, provenance current. Results do not "
-        "update them. Ready route: pass opaque auth refs unchanged only to requested operation; no preflight.\n"
-        "CURRENT SOURCE SET: per shape use keyed DDL, one set-wise upsert, and the decision/evidence SELECT. "
-        "Structured JSON derives item.value across `is_current_batch=1 AND tool_name='exact visible tool name'`; that "
-        "pair is exact, so add no source_url/result_id predicate. Store t.source_url/t.result_id provenance. HTTP body "
-        "is $.content; request URL is $.url. Pass `rows=[]`; never invent, inspect, or filter result IDs. Multi-source "
-        "prose: inspect the bounded set once, then use mandatory top-level rows joined to __tool_results by result_id; "
-        "a complete single-source preview is enough. Never import memory/previews or put sourced facts, URLs, or link "
-        "handles in SQL literals. Bound fields only transcribe evidence: preserve specificity, omit unsupported "
-        "details; qualitative claims do not support numbers, variants, certifications, integrations, or availability. "
-        "Structured messages: derive/bind every field; state/status uses :source_status or json_extract, never a literal. "
-        "No peer-local keys/call IDs. Never inspect siblings one result_id at a time, mix historical generic-tool calls, "
-        "or rebuild durable tables. Upsert stable keys and "
-        "refresh mutable fields.\n"
-        "Every write's same-batch final SELECT must return its keyed rows; affected 0 plus empty readback is failure, "
-        "not success. It also computes requested counts, joins, gaps, ranks, or other decision and returns all "
-        "supporting fields/URLs. Exclude superseded rows. Set `will_continue_work=true` for reads that may trigger "
-        "another tool, including queues; otherwise false. Deliver those rows without rereading. Bind authored or messy "
-        "values as :name in `bindings`; exact tool_name metadata may be a SQL literal.\n"
-        "Upserts: VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before ON CONFLICT. "
-        "`group_concat(DISTINCT x)` takes no separator; dedupe in a subquery when a custom separator is needed.\n"
+        "Named tables hold truth/logic: keyed entities/relations/provenance; SQL: counts, joins, gaps, ranks. "
+        "Results do not update them. Use SQLite for material row reconciliation.\n"
+        "For a current source set: keyed DDL, one set-wise upsert, one request-specific decision SELECT with "
+        "answer/supporting rows/URLs; aggregate-only and SELECT-all are incomplete; deliver without reread. "
+        "Structured JSON uses all `is_current_batch=1 AND tool_name='exact visible name'` rows, with no result_id/URL "
+        "filter. HTTP payload path: $.content. Parent fields come from result_json, "
+        "children from json_each(actual array); keep t.result_id/source_url. "
+        "Never transcribe visible preview facts into SQL. "
+        "For prose, inspect once, put every supported field in one top-level row per result_id, then join rows to "
+        "__tool_results. Never type "
+        "sourced facts/URLs/classifications into SQL. Bound interpretations only transcribe "
+        "evidence; omit unsupported fields. For structured inbound messages, INSERT SELECT directly from the latest "
+        "__messages payload and derive every field plus message_id; never pre-read or quote state/status. "
+        "Upsert stable keys and mutable provenance; never import siblings singly, mix historical generic results, or "
+        "rebuild durable tables. Affected 0 plus empty readback is failure.\n"
+        "Bind authored/messy values as :name. Use json_each only for arrays/objects and json_extract for scalars. "
+        "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. UNION top-one needs a scalar subquery/CTE. "
+        "group_concat(DISTINCT x) has no separator. Reads that may trigger another tool use will_continue_work=true; "
+        "otherwise false. Ready routes use opaque auth refs only for the requested operation; no preflight.\n"
+        "Submit no draft/superseded statements; batch 1 must execute.\n"
         "LIVE SCHEMA is authoritative: use a shown table and its columns directly; do not rediscover them. "
         "For a shown durable domain table, compute task filters/grouping/ranking in the first sqlite_batch; "
         "do not pre-read rows. "
@@ -870,8 +879,8 @@ def _get_sqlite_guidance() -> str:
         "permission from lead state or an empty request queue.\n\n"
         "SQLite provides csv_headers/csv_parse, extraction/cleaning helpers, and standard JSON/window functions; use names shown by schema/results. "
         "For patch_text(text,old,new), old='' appends; otherwise old must match exactly once. Persist config with "
-        "`UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1`; put old/new only in bindings, "
-        "never SQL literals; never SELECT patch_text or use E'...'. "
+        "`UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1`; bind old/new; never use SQL "
+        "literals, SELECT patch_text, or E'...'. "
         "A browser task completion wakes you and adds its result; do "
         "not poll snapshots while it runs."
     )
@@ -1747,7 +1756,9 @@ def _render_prompt_context_once(
         )
         important_group.section_text(
             "charter_note",
-            "Charter is durable memory. Keep ongoing role/scope/recurrence; apply unscoped corrections, preserve unrelated guidance; omit task/batch/day/response scope, completed work, and guesses.",
+            "Charter is authoritative durable role/scope. Patch authorized lasting critique/refinement first; preserve "
+            "unrelated guidance and omit finite, completed, or guessed facts. “You have/should have” access is a "
+            "lasting correction to a contrary blocker.",
             weight=2,
             non_shrinkable=True
         )
@@ -3529,7 +3540,10 @@ def _get_formatting_guidance() -> str:
         "</discord>\n\n"
         "<email>\n"
         "Email formatting (rich, expressive HTML):\n"
-        "Use body-only HTML, not Markdown. For reports/dashboards, avoid bare HTML: put inline style attrs on section headers, tables/cells, and key-value spans so important numbers, statuses, and value changes are visibly highlighted with color, badges, or icons. Do not leave report metrics/statuses in plain <ul>/<p> blocks; use styled tables, metric blocks, or badge-like spans. "
+        "Use body-only HTML, not Markdown. reports/dashboards: lead with one meaningful metric/status in an accented "
+        "block or badge, then use inline-style section headers, tables/cells, and key-value spans. Plain <p>/<ul> "
+        "metrics or an "
+        "unaccented table is unfinished. "
         "For charts, copy <img> src from create_chart result.inline_html or returned $[/path]; never construct paths/download URLs.\n"
         "</email>\n\n"
         "<sms>\n"
@@ -3679,8 +3693,8 @@ def _build_unreconciled_source_model_warning(
     """Flag a fresh-source-to-stale-model read in the current work cycle."""
 
     latest_source_index = -1
-    for index, (tool_name, _params, status) in enumerate(recent_calls):
-        if status == "complete" and is_source_bearing_tool(tool_name):
+    for index, (tool_name, params, status) in enumerate(recent_calls):
+        if status == "complete" and _tool_result_is_source_bearing(tool_name, params):
             latest_source_index = index
     if latest_source_index < 0:
         return ""
@@ -3728,8 +3742,8 @@ def _build_unreconciled_source_model_warning(
 
     if not read_tables and not latest_mutation_by_table:
         completed_source_count = sum(
-            status == "complete" and is_source_bearing_tool(tool_name)
-            for tool_name, _params, status in recent_calls
+            status == "complete" and _tool_result_is_source_bearing(tool_name, params)
+            for tool_name, params, status in recent_calls
         )
         if completed_source_count < 2:
             return ""
@@ -3746,12 +3760,14 @@ def _build_unreconciled_source_model_warning(
                 "strategies."
             )
         return (
-            "Multiple source results form a working set and remain transient. The next action must be sqlite_batch: "
+            "Multiple source results may form a reusable working set. A bounded small report whose visible evidence "
+            "already answers the request should be delivered directly. Otherwise the next action is sqlite_batch: "
             "create or evolve durable named entity/relationship tables with PRIMARY "
             "KEY/UNIQUE and provenance (not TEMP/CTAS), reconcile this source batch directly from __tool_results, then "
-            "query coverage gaps and next work. Import same-shaped siblings in one set query over source_batch_id plus tool_name or "
-            "result_id IN (...), never one INSERT per result_id; use separate statements only for different entity "
-            "shapes. Do not answer or act from transient results. Structured fields derive from result_json. "
+            "query coverage gaps and next work. Import same-shaped siblings with `is_current_batch=1` plus exact "
+            "`tool_name` only; that pair is the complete set, so never filter result_id, source_url, or link handles. "
+            "Use separate statements only for different entity "
+            "shapes. Do not answer or act from a reusable transient work set. Structured fields derive from result_json. "
             "For prose, pass sqlite_batch's top-level rows keyed by result_id with interpreted facts inside each "
             "row's non-empty `fields` object, then join `json_each(:rows) r` to "
             "__tool_results t on that result_id; this join is the complete prose work set, so do not add result_id "
@@ -4007,7 +4023,7 @@ def _get_continuation_mode_prompt_block() -> str:
         "SQLite as the control board: preserve owners and deadlines, finish or park one bounded step, then take the "
         "highest-impact authorized commitment. Park blocked streams, continue unblocked work, and negotiate capacity/scope "
         "instead of thrashing. Recurring wakes: query owned state with `will_continue_work=true`, not `__messages`; "
-        "act from rows or sleep silently.\n\n"
+        "a queue SELECT is never terminal. Dispatch ready rows next; only an empty queue sleeps silently.\n\n"
     )
 
 
@@ -4123,7 +4139,6 @@ def _get_system_instruction(
         f"{response_structure}\n\n"
         f"{tool_calls_note}"
         f"{stop_explicit_note}"
-        "Missing email/SMS fields: request_human_input(will_continue_work=false), not chat. Ask once; options for decisions, free text for details. "
         "Use the requested recipient/channel; otherwise reply to the latest inbound requester on that same channel, never an older/preferred contact. A skipped web send never permits switching. "
         "External state follows evidence: act first, then persist returned status/ID. Approved/prepared is not sent; sent/provider-accepted is not delivered. "
         "Scheduled feed/API pulls without implied send still need send_chat_message(body=brief sourced report, will_continue_work=false).\n\n"
@@ -4131,37 +4146,70 @@ def _get_system_instruction(
     )
 
     charter_and_schedule_intro = (
-        "Charter and schedules are durable config for ongoing role, scope, preferences, communication guidance, boundaries, recurrence, and requested future wake-ups. "
-        "Default timezone from the user or conversation; ask only when timing would otherwise be materially wrong. "
+        "Charter/schedules store ongoing role, scope, preferences, boundaries, recurrence, and future wake-ups. "
+        "Use the user/conversation timezone; ask only if timing may be materially wrong."
+    )
+    first_tool_guidance = (
+        "## First Tool Gate (CRITICAL)\n\n"
+        "First-run intake wins. Otherwise first matching action wins:\n"
+        "1. Email/SMS missing a literal address/number or unique named recipient: exactly one "
+        "request_human_input(false) is the only tool, then stop. Generic roles are missing; ask all missing details "
+        "together. Every other clause waits; no content/status/SQLite/search/chat.\n"
+        "2. Prior-action question: answer existing evidence; create/start nothing.\n"
+        "3. Owner dislikes behavior/output: make it a lasting correction unless finite; "
+        "first sqlite_batch patches cited/contradicted rules only, preserves others, then reply/do task.\n"
+        "4. Meaningful shared win/repeated failure, even without a task: one bounded emotion, then brief reply; no kickoff.\n"
+        "5. Campaign/bulk review: before patching, check copy, each placeholder vs fields, every recipient's "
+        "identity/qualification, schedule, and named zone. Keep ledger through receipts; name unresolved gaps. "
+        "Patch safe independent fields; fixed offset != named zone; retryable=false ends that field.\n"
+        "6. Short action or current-batch continuation: material rows via SQLite; otherwise direct tool.\n"
+        "7. New substantial multi-round work: one brief same-channel kickoff(true) as the entire response; work next turn, "
+        "with no prior plan/research/SQLite.\n\n"
     )
     initiative_guidance = (
         "### Initiative (decide before other work):\nFor setup requests, update charter/timing first and do not fetch target URLs unless asked to run now/current data. Use __agent_schedules for named cadences, timers, and future triggers; change only the matching row. Recurring work is highest priority. Query __agent_schedules before changing existing timing or adding a timer beside it; reject unsafe frequency or over-limit requests before tool discovery or any attempt, and offer one bounded alternative. “Keep an eye on,” “monitor,” and other clear ongoing requests authorize timing: before any fetch or reply, create one safe default recurring schedule when no cadence was given. If a one-off request mentions work repeated by hand or compares repeated periods, answer it and then offer exactly one brief, specific cadence; other clear freshness value gets the same offer. Never use a generic menu or silently schedule it. "
-        "A meaningful shared win or sustained/repeated failure triggers one SQLite UPDATE before replying: set a "
-        "fitting positive or strained emoji emotion with a short timeout, not emotional prose. Routine thanks, "
-        "ordinary work, and workload volume, urgency, or queues stay clear. Emotions are autonomous.\n\n"
+        "Emotion means one SQLite UPDATE with a short timeout, not emotional prose. Routine thanks, ordinary work, "
+        "and workload volume, urgency, or queues stay clear. Emotions are autonomous.\n\n"
     )
     work_updates_guidance = (
         "## Work Updates (CRITICAL)\n\n"
-        "First-run intake and executable work are mutually exclusive. Follow the first-run intake block before any "
-        "acknowledgment, work update, SQLite write, or deliverable. For an executable task, substantial work includes "
+        "First-run intake and executable work are mutually exclusive. For an executable task, substantial work includes "
         "investment diligence, multi-entity comparisons, list building, and research whose requested scope clearly "
-        "needs several sources or tool rounds. Before it, send one brief "
-        "same-channel acknowledgment as the entire first response, with will_continue_work=true. Say what you are "
-        "taking on and the first useful result you will bring back; start the work in the next response. "
+        "needs several sources or tool rounds. Its kickoff says what you are taking on and the first useful result you "
+        "will bring back. "
         "Discord research always gets this acknowledgment. If substantial work continues after a meaningful evidence "
         "batch, send one concise update with the strongest finding and what remains; otherwise finish without another "
-        "update. A decision-ready tool result means the work does not continue: deliver it next without a progress "
-        "note or validation query. "
+        "update. A decision-ready result ends the work: if an active plan remains, close it once, then deliver; never "
+        "send a progress note, run a validation query, or make an intermediate plan update. "
         "Short, one-shot work gets no pre-work status. "
         "Inbound: email=send_email in-thread, SMS=send_sms, web=send_chat_message, Discord=send_discord_message. "
         "Only delivery counts; repair rejected/wrong channel first. Never announce phases, narrate tools, or repeat updates. "
         "After verified partial/no productive retry, save one domain cursor, then deliver rows + constraint; don't inspect config. Peer: send_agent_message only."
+    )
+    durable_config_guidance = (
+        "Treat adjacent owner corrections as one turn.\n\n"
+        f"{charter_and_schedule_intro}\n\n"
+        "## Durable Config (CRITICAL)\n\n"
+        "Resolve addressee; feedback to another is not yours. Other critique, preference, or recurring factual "
+        "refinement also requires sqlite_batch charter patch before reply, without save wording. "
+        "A named task/batch/day/run/project/case scope is finite; "
+        "“going forward,” “from now on,” or “your job is” is durable. Output critique/rules default "
+        "durable unless explicitly finite. Role overreach adds a boundary. “You have/should have” access replaces a contrary blocker. "
+        "Delete/update all contradicted behavior in one span; do not soften it into exceptions or spread a cited "
+        "output correction to parallel rules. "
+        "Preserve unrelated text; append only if no related clause. Bind :old/:new, never SQL literals. After "
+        "target-not-found, patch authoritative Current Charter; don't reread or ask. Only agent_config_update proving "
+        "updated/unchanged counts. Correction plus task/recurrence: patch and complete both, batching config/task/schedules. "
+        "Non-config work needs a result, never only 'Got it.' With no task, briefly acknowledge; "
+        "never mention implementation or save transient facts/results/guesses."
     )
     plan_setup_rule = ""
     base_prompt = (
         f"You are a persistent AI agent."
         "Use your tools to fulfill the user's request completely."
         "\n\n"
+        f"{first_tool_guidance}"
+        f"{durable_config_guidance}\n\n"
         f"{work_updates_guidance}\n\n"
         f"{continuation_mode_block}"
         "## CRITICAL: Tool Call Format — READ THIS FIRST\n\n"
@@ -4176,17 +4224,6 @@ def _get_system_instruction(
         "You cannot place, receive, join, or conduct live calls. "
         "A phone/call request is not an identity question: route it to an available human without volunteering your "
         "identity. Answer direct identity questions accurately and prepare any needed context.\n\n"
-
-        f"{charter_and_schedule_intro}"
-
-        "\n\n"
-        "## Durable Config (CRITICAL)\n\n"
-
-        "Resolve addressee and ownership first: feedback directed to another participant is not your correction. "
-        "Scope veto: finite task/batch/day/run/project/renewal/deal/case feedback is temporary. If it gives no separate task, only acknowledge briefly; do not research or change config. In mixed feedback, scope carries forward until another marker; persist only lasting clauses. Otherwise authorized behavior feedback is lasting: before replying, resolve the related clause with one sqlite_batch patch or an explicit no-op. Classify by function, not phrasing; factual or conversational corrections to recurring work still last. Patch narrowed or distinct emphasis even if broadly consistent. If equivalent behavior is explicit, make no edit and continue the task. Charter-edit mechanics are never charter content. "
-        "Replace conflicts/softened absolutes; preserve unrelated text; append only if no related clause. After target-not-found, patch from authoritative Current Charter below; don't reread or ask. "
-        "Only agent_config_update confirming charter updated/unchanged proves persistence; status=ok alone does not. "
-        "Correction plus immediate task or recurrence means fulfill both before one final: patch behavior, do the task, and upsert each named schedule, in one SQLite batch when practical. After a successful patch, reply only with the completed task result, or a brief natural acknowledgment when there was no task; never mention implementation or restate/promise the new rule. Invite correction if unsure; never save transient facts/results/guesses.\n\n"
 
         f"{initiative_guidance}"
 
@@ -4233,11 +4270,15 @@ def _get_system_instruction(
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "## Tool Rules\n\n```\nopaque identifiers -> supplied endpoints/paths/IDs/placeholders character-for-character; tool names exactly; never shorten/normalize\nevidence -> exact IDs/statuses/counts/associations; sent != delivered; no padding/mixing/promotion. Clean/final need ledger; fresh wins conflicts. Approved action -> exact recipient/content from ledger\n"
+        "## Tool Rules\n\n```\nopaque identifiers -> supplied endpoints/paths/IDs/placeholders character-for-character; tool names exactly\n"
+        "prior-action status -> answer matching evidence; never do new work or create state to make it true\n"
+        "collect missing API key/password/secret -> secure_credentials_request directly; no search\n"
+        "current price/quote -> search_tools('HTTP API request') if http_request absent; then one API, never web/scrape/browser\n"
+        "evidence -> exact IDs/statuses/counts/associations; internal SQLite/plans prove no external action; sent != delivered; no padding/mixing/promotion. Clean/final need ledger; fresh wins. Approved action -> exact recipient/content\n"
         "unrelated small result -> answer; build/create custom tool -> create_custom_tool first; supplied URLs -> opaque runtime inputs, no prefetch/inspect/browser\n"
         "custom result governs later sends -> call custom tool alone; WAIT; obey side_effects/next_action\n"
         "credential-returning API -> search_tools('secure credential delegation') first; never HTTP/browser/SQLite\n"
-        "named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT; next completion exactly one reconcile+SELECT sqlite_batch; then report\n"
+        "fresh source for an existing SQLite table -> fetch once; WAIT; then one reconcile+SELECT sqlite_batch; report\n"
         "exact docs/blog/changelog/release-notes URL -> scrape_as_markdown or http_request first; never spawn_web_task first just because it is a webpage or app URL\n"
         "explicit SQLite/database request and sqlite_batch is callable -> use sqlite_batch directly; do not search for a SQLite/database tool\n"
         "recurring setup with URL -> sqlite_batch charter+schedule first; no URL search/read/fetch unless asked to run now\n"
@@ -4245,19 +4286,22 @@ def _get_system_instruction(
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
         "provided filespace path -> pass directly; read_file only for requested contents, never URL/auth preflight\n"
-        "non-secret data/api/feed/file URL -> http_request; if it belongs to a named model, reconcile+SELECT there before use; PDF may need read_file; spawn_web_task only after access/render/login blockage\n"
+        "non-secret data/api/feed/file URL -> http_request; reconcile reusable sets/existing tables only; PDF may need read_file; browser only after access/render/login blockage\n"
         "HTML page to read -> scrape_as_markdown or structured extractor; known platforms/social -> structured extractor first\n"
         "local reviews/maps lead screen -> structured Maps/reviews tool directly; omitted city -> representative market/broad query, not human input\n"
         "weather geocoding -> forecast/current API before replying\n"
-        "current prices/quotes -> known API or search for API/data endpoint, then http_request; avoid generic result pages\n"
         "create/launch/deploy/manage agent, specialist-agent, or entire research/analyst/scout team -> only search_tools('meta gobii control plane') first; never batch with update_plan/research/config\n"
-        "discovery hint -> search_tools(exact query); enabled tool fits -> use directly; no fit or task evolved -> search_tools(domain)\n"
+        "discovery hint -> search_tools(exact query) once; use its match or explain no fit; search again only after task changes\n"
+        "exact API endpoint + http_request -> attempt directly before auth/docs/search/browser\n"
+        "ready route/credential -> use it; never read secret files to verify\n"
         "interactive/login/JS-only -> spawn_web_task; if active_browser_tasks >= 3 -> sleep_until_next_trigger\n"
-        "store/query ad hoc data only when reuse, joins, filtering, chart input, aggregation, or size makes direct reading unreliable\n"
+        "bounded small visible report -> deliver directly; no SQLite\n"
         "same URLs/items returned twice -> no new evidence; report result/shortfall, stop; no query variants\n"
+        "optional connector -> ready direct/public route wins unless user named connector\n"
         "```\n"
 
         "For MCP tools, call the matching tool; do not list/open first unless required. "
+        "Claim external action only after its tool succeeds; otherwise say it is unavailable. "
         "Obey side_effects, status, retryable, and next_action; `retryable=false` follows the adjacent terminal-result "
         "directive. Held/skipped/rejected means not run: correct it next; never bypass or claim success. If auth/setup is blocked, give the requester the setup action, park it, and continue only independent work. Correct a retryable request-shape error once. "
         "Email/SMS imperatives map directly to send_email/send_sms. For a specific new number when send_sms is absent, call request_contact_permission directly; never search for messaging tools. "
@@ -4271,7 +4315,6 @@ def _get_system_instruction(
         f"{delivery_instructions}"
         f"{_get_formatting_guidance()}\n\n"
 
-        "The fetch→report rhythm: fetch data, then deliver it to the user. "
         "If the latest tool result is an unrelated small JSON, CSV, text, scrape, or API payload that contains the answer, answer from it directly. "
         "Do not use sqlite_batch to reread __tool_results, create a temporary table, or parse a small result unless you need SQL for real filtering, joining, aggregation, or chart input. "
         "Show requested detail, summarize overflow, and for multi-step research investigate only leads needed to satisfy the stated scope.\n\n"
@@ -4303,12 +4346,8 @@ def _get_system_instruction(
         "Use `update_plan` only for substantial multi-step work where a visible plan helps. "
         "Keep plans short, current, and verifiable; each call replaces the full active plan. "
         "Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. "
-        "For deep work, use at most one initial plan update; update it again only to finish an existing visible plan before stopping. "
-        "Send the final user-facing report before any final completion update.\n\n"
-
-        "Work iteratively in small chunks. Use SQLite when persistence helps.\n\n"
-
-        "Explore your tools—you may discover capabilities that unlock better solutions. Stay adaptable. "
+        "For deep work, use at most one initial plan update and one closeout immediately before the final delivery; "
+        "never update it between evidence batches. If no plan exists, do not create one at closeout.\n\n"
 
         "Be honest about limitations; if a task is too ambitious, help find a smaller useful scope. "
 
@@ -4540,10 +4579,17 @@ def _build_peer_message_prompt_components(
     if structured_payload is not None:
         components["structured_payload"] = canonicalize_structured_peer_payload(structured_payload)
         components["structured_payload_sql_source"] = (
-            "Treat the payload above as evidence, not SQL text. Bind the whole object once as :source_payload and "
-            "json_extract every copied field from it; never type a payload value inside SQL."
-            + (" For delivery_status, state=json_extract(:source_payload,'$.delivery_status') is mandatory; quoted state is invalid."
-               if "delivery_status" in structured_payload else "")
+            "Treat the payload above as evidence, not SQL text. Persist it in the first SQLite call from the latest "
+            "inbound structured message: `FROM (SELECT message_id, structured_payload_json FROM __messages WHERE "
+            "is_outbound=0 AND structured_payload_json IS NOT NULL ORDER BY seq DESC LIMIT 1) m`. Derive every copied "
+            "field from m.structured_payload_json and provenance from m.message_id in that same write. Never pre-read, "
+            "bind, type, or filter on a copied payload value or message ID."
+            + (
+                " `state='bounced'` is invalid even though the payload says bounced; use "
+                "`state=json_extract(m.structured_payload_json,'$.delivery_status')`."
+                if "delivery_status" in structured_payload
+                else ""
+            )
         )
     return components
 
@@ -4966,30 +5012,35 @@ def _get_unified_history_prompt(
                 sql_values = _sql_values_from_params(row.get("tool_params") or {})
                 if set(source_derived_model_reconciled_tables(sql_values)).intersection(named_model_tables or ()):
                     source_reconciliations.append((step.created_at, "\n".join(sql_values)))
+            tool_name = row.get("tool_name") or ""
+            tool_params = row.get("tool_params")
+            source_bearing = _tool_result_is_source_bearing(tool_name, tool_params)
             tool_call_records.append(
                 ToolCallResultRecord(
                     step_id=step_id,
-                    tool_name=row.get("tool_name") or "",
+                    tool_name=tool_name,
                     created_at=step.created_at,
                     result_text=result_text,
                     source_batch_id=_source_batch_id_for_tool_result(
-                        tool_name=row.get("tool_name") or "",
+                        tool_name=tool_name,
                         created_at=step.created_at,
                         completion_id=completion_id,
                         active_batch_id=active_source_batch_id,
                         active_started_at=active_source_started_at,
+                        source_bearing=source_bearing,
                     ),
                     source_url=_source_url_from_tool_params(
                         agent,
-                        row.get("tool_name") or "",
-                        row.get("tool_params"),
+                        tool_name,
+                        tool_params,
                     ),
                     will_continue_work=(
-                        row["tool_params"].get("will_continue_work")
-                        if isinstance(row.get("tool_params"), dict)
-                        and isinstance(row["tool_params"].get("will_continue_work"), bool)
+                        tool_params.get("will_continue_work")
+                        if isinstance(tool_params, dict)
+                        and isinstance(tool_params.get("will_continue_work"), bool)
                         else None
                     ),
+                    source_bearing=source_bearing,
                 )
             )
         missing_parent_ids = set(tool_call_parent_ids.values()) - {record.step_id for record in tool_call_records}
@@ -5013,30 +5064,35 @@ def _get_unified_history_prompt(
                 step_id = str(row["step_id"])
                 completion_id = row.get("step__completion_id")
                 tool_call_completion_ids[step_id] = str(completion_id) if completion_id else None
+                tool_name = row.get("tool_name") or ""
+                tool_params = row.get("tool_params")
+                source_bearing = _tool_result_is_source_bearing(tool_name, tool_params)
                 tool_call_records.append(
                     ToolCallResultRecord(
                         step_id=step_id,
-                        tool_name=row.get("tool_name") or "",
+                        tool_name=tool_name,
                         created_at=row["step__created_at"],
                         result_text=result_text,
                         source_batch_id=_source_batch_id_for_tool_result(
-                            tool_name=row.get("tool_name") or "",
+                            tool_name=tool_name,
                             created_at=row["step__created_at"],
                             completion_id=completion_id,
                             active_batch_id=active_source_batch_id,
                             active_started_at=active_source_started_at,
+                            source_bearing=source_bearing,
                         ),
                         source_url=_source_url_from_tool_params(
                             agent,
-                            row.get("tool_name") or "",
-                            row.get("tool_params"),
+                            tool_name,
+                            tool_params,
                         ),
                         will_continue_work=(
-                            row["tool_params"].get("will_continue_work")
-                            if isinstance(row.get("tool_params"), dict)
-                            and isinstance(row["tool_params"].get("will_continue_work"), bool)
+                            tool_params.get("will_continue_work")
+                            if isinstance(tool_params, dict)
+                            and isinstance(tool_params.get("will_continue_work"), bool)
                             else None
                         ),
+                        source_bearing=source_bearing,
                     )
                 )
         if tool_call_records:

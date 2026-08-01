@@ -181,6 +181,7 @@ class ToolDisplayMetadataTests(TestCase):
         )
 
         self.assertIn("brief natural acknowledgment", updated_charter.result["reply_guidance"])
+        self.assertIn("Non-config reads or writes", updated_charter.result["reply_guidance"])
         self.assertIn("do not read or verify config again", updated_charter.result["reply_guidance"])
         self.assertNotIn("reply_guidance", updated_charter.result["agent_config_update"])
 
@@ -858,7 +859,8 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("Use `update_plan` only for substantial multi-step work", system_content)
         self.assertIn("Keep plans short, current, and verifiable", system_content)
         self.assertIn("each call replaces the full active plan", system_content)
-        self.assertIn("Send the final user-facing report before any final completion update", system_content)
+        self.assertIn("one closeout immediately before the final delivery", system_content)
+        self.assertIn("never update it between evidence batches", system_content)
 
     def test_update_plan_tool_execution_does_not_refresh_runtime_planning_system_skill(self):
         prepared = _PreparedToolExecution(

@@ -67,6 +67,8 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteMultiResultWebSynthesisScenario,
     SqliteNaturalResultAccessScenario,
     SqliteToolResultScenario,
+    _catalog_plan_model_failures,
+    _catalog_plan_row_failures,
     _decision_model_tables,
     _first_shot_source_phase_failures,
     _portfolio_mock,
@@ -86,6 +88,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
+    PersistentAgentSchedule,
     PersistentAgentStep,
     PersistentAgentToolCall,
 )
@@ -123,6 +126,23 @@ class ResumeStateHeuristicTests(SimpleTestCase):
                 "sql": (
                     "CREATE TABLE candidate_progress (next_cursor TEXT, remaining INTEGER); "
                     "INSERT INTO candidate_progress VALUES ('candidate-offset-3', 12);"
+                )
+            },
+        )
+
+        self.assertTrue(_sqlite_call_persists_resume_state(call))
+
+    def test_domain_resume_state_survives_a_schedule_write_in_the_same_batch(self):
+        call = _eval_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "CREATE TABLE batch_progress (next_cursor TEXT, remaining_work INTEGER); "
+                    "INSERT INTO batch_progress VALUES ('lead-025', 75); "
+                    "INSERT INTO __agent_schedules "
+                    "(schedule_key, name, kind, schedule, timezone, instruction, enabled) "
+                    "VALUES ('resume', 'Resume', 'recurring', '*/30 * * * *', 'UTC', "
+                    "'Continue the saved batch.', 1);"
                 )
             },
         )
@@ -323,7 +343,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 reject_duplicate_fetches=True,
             ))
             self.assertEqual(scenario._record_complete_terminal_report("run", after=None), body)
-        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+        self.assertEqual(
+            recorded[-1][0][2],
+            EvalRunTask.Status.PASSED,
+            recorded[-1][1]["observed_summary"],
+        )
 
         failed_fetch = _eval_tool_call(
             "mcp_brightdata_scrape_as_markdown",
@@ -1159,7 +1183,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertFalse(passed)
         self.assertIn("SQLite attempt 1 had execution status error", recorded[-1][1]["observed_summary"])
 
-    def test_sqlite_domain_model_counts_persisted_schema_from_partially_failed_batch(self):
+    def test_sqlite_domain_model_rejects_recovery_after_failed_first_write(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
@@ -1196,7 +1220,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             model_tables = scenario._record_domain_model("run", after=None)
 
         self.assertEqual(model_tables, ("catalog",))
-        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("SQLite attempt 1 had execution status error", recorded[-1][1]["observed_summary"])
 
     def test_sqlite_usage_rejects_preflight_rejected_loop(self):
         scenario, recorded = SqliteToolResultScenario(), []
@@ -1342,7 +1367,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
         self.assertIn("unreliable model writes", recorded[-1][1]["observed_summary"])
 
-    def test_sqlite_domain_model_reuses_downstream_shaped_table(self):
+    def test_sqlite_domain_model_accepts_direct_downstream_shaped_table(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         initial_calls = [
@@ -1352,17 +1377,15 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={"sql": """
-                    CREATE TABLE raw_plans AS
-                    SELECT json_extract(result_json, '$.content.vendor') AS vendor,
-                           child.value AS plan_json,
-                           json_extract(result_json, '$.content.source_url') AS source_url
-                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') child;
                     CREATE TABLE plans(vendor TEXT, plan TEXT, price INTEGER, source_url TEXT,
                                        PRIMARY KEY(vendor, plan));
                     INSERT INTO plans
-                    SELECT vendor, json_extract(plan_json, '$.plan'),
-                           json_extract(plan_json, '$.monthly_price_usd'), source_url
-                    FROM raw_plans;
+                    SELECT json_extract(result_json, '$.content.vendor'),
+                           json_extract(child.value, '$.plan'),
+                           json_extract(child.value, '$.monthly_price_usd'),
+                           json_extract(result_json, '$.content.source_url')
+                    FROM __tool_results
+                    JOIN json_each(result_json, '$.content.plans') child;
                     SELECT vendor, plan FROM plans WHERE price <= 900 ORDER BY price;
                 """},
             )
@@ -1371,7 +1394,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             model_tables = scenario._record_domain_model("run", after=None)
 
         self.assertEqual(model_tables, ("plans",))
-        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+        self.assertEqual(
+            recorded[-1][0][2],
+            EvalRunTask.Status.PASSED,
+            recorded[-1][1]["observed_summary"],
+        )
 
         followup_calls = [
             SimpleNamespace(
@@ -1386,6 +1413,51 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             scenario._record_model_reuse("run", after=None, model_tables=model_tables)
 
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+    def test_catalog_model_integrity_rejects_child_values_used_as_parent_identity(self):
+        correct_rows = [
+            (vendor, "Clinic" if vendor == "CareMesh" else f"Plan {index}", 720, 50)
+            for vendor in ("AxonFlow", "BrightSupport", "CareMesh", "Dockwise")
+            for index in range(18)
+        ]
+        wrong_rows = [
+            (f"Plan {index}", f"Plan {index}", 720, 50)
+            for index in range(72)
+        ]
+
+        self.assertEqual(_catalog_plan_row_failures(correct_rows), [])
+        failures = _catalog_plan_row_failures(wrong_rows)
+        self.assertTrue(any("parent vendor identities" in failure for failure in failures))
+        self.assertTrue(any("parent/child association" in failure for failure in failures))
+
+    def test_catalog_model_integrity_accepts_semantic_plan_and_compliance_column_names(self):
+        rows = [
+            (vendor, "Clinic" if vendor == "CareMesh" and index == 0 else f"Plan {index}", 720, 50, "[]")
+            for vendor in ("AxonFlow", "BrightSupport", "CareMesh", "Dockwise")
+            for index in range(18)
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "catalog.sqlite3"
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "CREATE TABLE vendor_plans("
+                "vendor TEXT, plan_name TEXT, monthly_price_usd INTEGER, included_seats INTEGER, "
+                "compliance_json TEXT, PRIMARY KEY(vendor, plan_name));"
+            )
+            conn.executemany(
+                "INSERT INTO vendor_plans VALUES (?, ?, ?, ?, ?);",
+                rows,
+            )
+            conn.commit()
+            conn.close()
+
+            with patch(
+                "api.evals.scenarios.sqlite_tool_results.agent_sqlite_db",
+                return_value=nullcontext(db_path),
+            ):
+                failures = _catalog_plan_model_failures("agent", ("vendor_plans",))
+
+        self.assertEqual(failures, [])
 
     def test_sqlite_domain_model_rejects_per_result_tables(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
@@ -1550,6 +1622,46 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
         self.assertIn("repeating child rows were not extracted", recorded[-1][1]["observed_summary"])
         self.assertNotIn("stable identity", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_domain_model_reports_missing_decision_without_misdiagnosing_valid_model(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                result='{"status":"ok"}',
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    CREATE TABLE catalog(
+                        vendor TEXT,
+                        plan TEXT,
+                        price INTEGER,
+                        source_url TEXT,
+                        PRIMARY KEY(vendor, plan)
+                    );
+                    INSERT INTO catalog
+                    SELECT json_extract(result_json, '$.content.vendor'),
+                           json_extract(plan.value, '$.name'),
+                           json_extract(plan.value, '$.price'),
+                           source_url
+                    FROM __tool_results
+                    JOIN json_each(result_json, '$.content.plans') plan;
+                    SELECT * FROM catalog ORDER BY vendor, plan;
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ("catalog",))
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        summary = recorded[-1][1]["observed_summary"]
+        self.assertIn("initial decision did not query", summary)
+        self.assertNotIn("stable identity", summary)
+        self.assertNotIn("repeating child rows", summary)
 
     def test_sqlite_domain_model_allows_separate_user_threshold_table(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
@@ -1752,7 +1864,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("where a visible plan helps", instructions)
         self.assertIn("Keep plans short, current, and verifiable", instructions)
         self.assertIn("each call replaces the full active plan", instructions)
-        self.assertIn("Send the final user-facing report before any final completion update", instructions)
+        self.assertIn("one closeout immediately before the final delivery", instructions)
+        self.assertIn("never update it between evidence batches", instructions)
 
     def test_system_instruction_prioritizes_practical_handoffs_and_terminal_results(self):
         class NoContacts:
@@ -1793,6 +1906,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("choose and disclose", description)
         self.assertIn("user asks for targets/scope before setup", description)
         self.assertIn("block a recurring monitor", description)
+        self.assertIn("Missing email/SMS recipient/detail", description)
+        self.assertIn("no preflight/search/chat", description)
+        self.assertIn("generic roles do not count", description)
 
     def test_linkedin_jobs_synthetic_tool_accepts_category_queries(self):
         description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_linkedin_job_listings"][
@@ -1809,6 +1925,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertIn("remaining_work", outreach_description)
         self.assertIn("set a resume schedule", outreach_description)
+        self.assertIn("checking, wrapping up, or preparing", schedule_description)
+        self.assertIn("authoritative first work tool", schedule_description)
+        self.assertIn("do not infer batch state from SQLite", schedule_description)
         self.assertIn("only makes sense when a schedule exists", schedule_description)
 
     def test_fresh_full_tool_result_wrapper_only_describes_visibility(self):
@@ -1991,6 +2110,50 @@ class EffortCalibrationHarnessTests(TestCase):
         )
         run = EvalRun.objects.create(
             scenario_slug="future_work_test",
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        EvalRunTask.objects.create(run=run, name="verify_future_work_preserved", sequence=1)
+
+        passed = EffortCalibrationScenario()._record_future_work_preserved(
+            str(run.id),
+            agent_id=str(agent.id),
+            after=agent.created_at,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_send_outreach_batch"},
+        )
+
+        self.assertTrue(passed)
+        self.assertEqual(
+            run.tasks.get(name="verify_future_work_preserved").status,
+            EvalRunTask.Status.PASSED,
+        )
+
+    def test_future_work_preserved_accepts_named_resume_schedule(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="future_work_named_schedule_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Future Work Named Schedule Browser")
+        agent = PersistentAgent.objects.create(
+            name="Future Work Named Schedule Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+            schedule="",
+        )
+        PersistentAgentSchedule.objects.create(
+            agent=agent,
+            schedule_key="continue_batches",
+            name="Continue batches",
+            instruction="Resume from the persisted cursor.",
+            kind=PersistentAgentSchedule.Kind.RECURRING,
+            expression="*/30 * * * *",
+            timezone="UTC",
+            enabled=True,
+        )
+        run = EvalRun.objects.create(
+            scenario_slug="future_work_named_schedule_test",
             scenario_version="1.0.0",
             agent=agent,
             initiated_by=user,
@@ -2472,12 +2635,45 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn("A skipped web send never permits switching", system_prompt)
-        self.assertIn("Ask once; options for decisions, free text for details", system_prompt)
-        self.assertIn("Replace conflicts/softened absolutes", system_prompt)
+        self.assertIn(
+            "First-run intake wins. Otherwise first matching action wins",
+            system_prompt,
+        )
+        self.assertIn(
+            "Owner dislikes behavior/output",
+            system_prompt,
+        )
+        self.assertIn(
+            "Email/SMS missing a literal address/number or unique named recipient",
+            system_prompt,
+        )
+        self.assertIn(
+            "Generic roles are missing",
+            system_prompt,
+        )
+        self.assertIn("New substantial multi-round work", system_prompt)
+        self.assertIn("Use SQLite for material row reconciliation", system_prompt)
+        self.assertIn("For prose, inspect once", system_prompt)
+        self.assertIn("aggregate-only and SELECT-all are incomplete", system_prompt)
+        self.assertIn("Delete/update all contradicted behavior in one span", system_prompt)
         self.assertIn("append only if no related clause", system_prompt)
-        self.assertIn("Correction plus immediate task or recurrence means fulfill both", system_prompt)
-        self.assertIn("upsert each named schedule", system_prompt)
-        self.assertIn("finite task/batch/day/run/project/renewal/deal/case feedback is temporary", system_prompt)
+        self.assertIn("Correction plus task/recurrence: patch and complete both", system_prompt)
+        self.assertIn("batching config/task/schedules", system_prompt)
+        self.assertIn("Non-config work needs a result", system_prompt)
+        self.assertIn(
+            "A named task/batch/day/run/project/case scope is finite",
+            system_prompt,
+        )
+        self.assertIn(
+            "Other critique, preference, or recurring factual refinement",
+            system_prompt,
+        )
+        self.assertIn(
+            "Output critique/rules default durable",
+            system_prompt,
+        )
+        self.assertIn("requires sqlite_batch charter patch before reply", system_prompt)
+        self.assertIn("Only agent_config_update proving updated/unchanged counts", system_prompt)
         self.assertIn("Set false after delivery/config; future schedules, queued conversations", system_prompt)
         self.assertIn(
             "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
@@ -2485,21 +2681,35 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
-        self.assertIn("enabled tool fits -> use directly", system_prompt)
-        self.assertIn("Ready route", system_prompt)
-        self.assertIn("opaque auth refs unchanged only to requested operation", system_prompt)
+        self.assertIn(
+            "Short action or current-batch continuation: material rows via SQLite",
+            system_prompt,
+        )
+        self.assertIn("Ready routes", system_prompt)
+        self.assertIn("opaque auth refs only for the requested operation", system_prompt)
         self.assertIn("no preflight", system_prompt)
         self.assertIn("credential-returning API -> search_tools('secure credential delegation') first", system_prompt)
-        self.assertIn("named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
+        self.assertIn("fresh source for an existing SQLite table -> fetch once", system_prompt)
         self.assertIn("Named tables hold truth/logic", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
-        self.assertIn("reconcile+SELECT there before use", system_prompt)
-        self.assertIn("spawn_web_task only after access/render/login blockage", system_prompt)
+        self.assertIn(
+            "current price/quote -> search_tools('HTTP API request') if http_request absent",
+            system_prompt,
+        )
+        self.assertIn("then one reconcile+SELECT sqlite_batch", system_prompt)
+        self.assertIn("browser only after access/render/login blockage", system_prompt)
+        self.assertIn(
+            "collect missing API key/password/secret -> secure_credentials_request directly",
+            system_prompt,
+        )
+        self.assertIn("never read secret files to verify", system_prompt)
         self.assertIn("exact docs/blog/changelog/release-notes URL", system_prompt)
         self.assertIn("opaque identifiers", system_prompt)
         self.assertIn("supplied endpoints/paths/IDs/placeholders character-for-character", system_prompt)
         self.assertIn("same URLs/items returned twice -> no new evidence", system_prompt)
         self.assertIn("Held/skipped/rejected means not run", system_prompt)
+        self.assertIn("internal SQLite/plans prove no external action", system_prompt)
+        self.assertIn("Claim external action only after its tool succeeds", system_prompt)
         self.assertIn("Charts: create only when requested/materially useful", system_prompt)
         self.assertIn(
             "Finished answers/briefings/charts/lookups/one-off research are not config changes",
@@ -2516,11 +2726,11 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn(
-            "A decision-ready tool result means the work does not continue",
+            "A decision-ready result ends the work",
             system_prompt,
         )
         self.assertIn(
-            "send one brief same-channel acknowledgment as the entire first response",
+            "with no prior plan/research/SQLite",
             system_prompt,
         )
         self.assertIn("upsert both in a normal domain-progress table", system_prompt)

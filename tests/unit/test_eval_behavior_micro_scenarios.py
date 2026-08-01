@@ -33,6 +33,7 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_INFERS_IMPLICIT_OWNERSHIP_CORRECTION,
     CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK,
     CHARTER_PATCHES_DIRECT_STYLE_CORRECTION,
+    CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK,
     CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK,
     CHARTER_RECOVERS_FROM_NONRETRYABLE_PATCH_FAILURE,
     CHARTER_IGNORES_BATCH_SCOPED_PREFERENCE,
@@ -61,7 +62,7 @@ from api.evals.scenarios.behavior_micro import (
     UPDATE_PLAN_POLICY_EXPECT,
     UPDATE_PLAN_POLICY_OPTIONAL,
     all_requests_have_options,
-    has_single_recipient_request,
+    has_recipient_request,
     planning_requests_are_bounded,
     get_agent_config_mutation_calls_for_run,
     get_forbidden_calls_before_end_planning,
@@ -86,6 +87,7 @@ from api.evals.scenarios.github_credential_retention import (
 )
 from api.evals.scenarios.monitor_pollution import (
     MonitorPollutionScenario,
+    _agent_has_reasonable_pollution_schedule,
     _charter_mentions_pollution_monitoring,
     _schedule_is_reasonable_pollution_monitoring,
 )
@@ -94,6 +96,7 @@ from api.evals.scenarios.sqlite_tool_results import _source_relationship_read_fa
 from api.evals.scenarios.weather_lookup import _is_free_weather_request, _weather_lookup_http_mock
 from api.evals.stop_policy import (
     should_stop_for_eval_policy,
+    sqlite_batch_is_read_only,
     sqlite_batch_mutates_agent_config_field,
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_read,
@@ -113,6 +116,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentSchedule,
     PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentSystemStep,
@@ -811,6 +815,24 @@ class BehaviorMicroHelperTests(TestCase):
         call.save(update_fields=["result"])
         return call
 
+    def test_read_only_sqlite_orientation_is_not_substantive_work(self):
+        read = self._add_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "SELECT result_id, json_extract(result_json, '$.results[0].url') "
+                    "FROM __tool_results WHERE is_current_batch=1"
+                )
+            },
+        )
+        write = self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "CREATE TABLE prospects (id TEXT PRIMARY KEY)"},
+        )
+
+        self.assertTrue(sqlite_batch_is_read_only(read))
+        self.assertFalse(sqlite_batch_is_read_only(write))
+
     def _add_orchestrator_completion(self):
         return PersistentAgentCompletion.objects.create(agent=self.agent, eval_run=self.run)
 
@@ -975,8 +997,15 @@ class BehaviorMicroHelperTests(TestCase):
         scenario = ScenarioRegistry.get(CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION)
         agent = SimpleNamespace(charter=GITHUB_DOCS_CORRECTED_CHARTER)
         patch_call = SimpleNamespace(tool_params={"operations": [{"op": "patch_text"}]})
+        conditional_agent = SimpleNamespace(
+            charter=(
+                f"{GITHUB_DOCS_CORRECTED_CHARTER} "
+                "Use the configured secrets; if they are missing, report the gap."
+            )
+        )
 
         passed, detail = scenario._charter_check(agent, [patch_call])
+        conditional_passed, conditional_detail = scenario._charter_check(conditional_agent, [patch_call])
         no_patch_passed, no_patch_detail = scenario._charter_check(agent, [])
         harmful_agent = SimpleNamespace(
             charter=(
@@ -987,6 +1016,7 @@ class BehaviorMicroHelperTests(TestCase):
         harmful_passed, harmful_detail = scenario._charter_check(harmful_agent, [patch_call])
 
         self.assertTrue(passed, detail)
+        self.assertTrue(conditional_passed, conditional_detail)
         self.assertFalse(no_patch_passed, no_patch_detail)
         self.assertFalse(harmful_passed, harmful_detail)
 
@@ -1122,6 +1152,43 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(scenario._charter_check(agent, [full_append])[0])
         self.assertFalse(scenario._charter_check(agent, [good_call, good_call])[0])
         self.assertFalse(scenario._charter_check(opposite_agent, [opposite_call])[0])
+
+    def test_immediate_task_charter_check_allows_readback_but_rejects_second_config_write(self):
+        scenario = ScenarioRegistry.get(CHARTER_PATCHES_AND_COMPLETES_IMMEDIATE_TASK)
+        old = "Analyze each observation and post a detailed framework with product implications."
+        new = "Record each observation as a signal in the ledger unless analysis is requested."
+        agent = SimpleNamespace(
+            id=self.agent.id,
+            charter=scenario.existing_charter.replace(old, new),
+        )
+
+        def call(trailing_sql):
+            return SimpleNamespace(
+                tool_params={
+                    "sql": (
+                        "UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1;"
+                        "INSERT INTO signal_log(signal) VALUES ('buyers say onboarding takes too long'),"
+                        "('teams want weekly summaries');"
+                        f"{trailing_sql}"
+                    ),
+                    "bindings": {"old": old, "new": new},
+                }
+            )
+
+        with patch.object(
+            scenario,
+            "_signal_rows",
+            return_value=["buyers say onboarding takes too long", "teams want weekly summaries"],
+        ):
+            self.assertTrue(
+                scenario._charter_check(agent, [call("SELECT charter FROM __agent_config;")])[0]
+            )
+            self.assertFalse(
+                scenario._charter_check(
+                    agent,
+                    [call("UPDATE __agent_config SET charter='unsafe';")],
+                )[0]
+            )
 
     def test_domain_refresh_checker_requires_relationship_decision_rows(self):
         imports = (
@@ -1343,6 +1410,26 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(
             scenario._has_completed_expected_work(str(self.agent.id), after=inbound.timestamp)
         )
+
+    def test_monitor_pollution_accepts_named_recurring_schedule(self):
+        self.agent.charter = "Monitor pollution index for Washington DC."
+        self.agent.schedule = None
+        self.agent.save(update_fields=["charter", "schedule"])
+        PersistentAgentSchedule.objects.create(
+            agent=self.agent,
+            schedule_key="dc_pollution_monitor",
+            name="Washington DC pollution monitor",
+            instruction="Check the Washington DC pollution index.",
+            kind=PersistentAgentSchedule.Kind.RECURRING,
+            expression="0 12 * * *",
+            timezone="America/New_York",
+            enabled=True,
+        )
+
+        accepted, reason = _agent_has_reasonable_pollution_schedule(self.agent)
+
+        self.assertTrue(accepted, reason)
+        self.assertIn("dc_pollution_monitor", reason)
 
     def test_custom_tool_common_use_case_exposes_enabled_sandbox_builtin(self):
         scenario = ScenarioRegistry.get("common_use_case_122_custom_tool_bulk_api_sqlite")
@@ -2366,12 +2453,17 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(all_requests_have_options([blank_title]))
 
     def test_missing_recipient_check_accepts_one_focused_free_text_request(self):
-        focused = SimpleNamespace(question="What is the client's email address?")
-        unrelated = SimpleNamespace(question="Which format do you prefer?")
+        focused = SimpleNamespace(question="What is the client's email address?", options_json=[])
+        focused_option = SimpleNamespace(
+            question="What detail should I use?",
+            options_json=[{"title": "Provide it", "description": "Share the client email address."}],
+        )
+        unrelated = SimpleNamespace(question="Which format do you prefer?", options_json=[])
 
-        self.assertTrue(has_single_recipient_request([focused]))
-        self.assertFalse(has_single_recipient_request([focused, unrelated]))
-        self.assertFalse(has_single_recipient_request([unrelated]))
+        self.assertTrue(has_recipient_request([focused]))
+        self.assertTrue(has_recipient_request([focused_option]))
+        self.assertTrue(has_recipient_request([focused, unrelated]))
+        self.assertFalse(has_recipient_request([unrelated]))
 
     def test_planning_request_check_allows_one_free_text_identity_question(self):
         options = SimpleNamespace(

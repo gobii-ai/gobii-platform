@@ -14,6 +14,22 @@ User = get_user_model()
 
 @tag("eval_sim")
 class CustomToolResultContractEvaluatorTests(SimpleTestCase):
+    def test_json_encoded_parameter_schema_exposes_runtime_properties(self):
+        schema = json.dumps(
+            {
+                "type": "object",
+                "properties": {
+                    "source_table": {"type": "string"},
+                    "batch_size": {"type": "integer"},
+                },
+            }
+        )
+
+        self.assertEqual(
+            set(CustomToolResultContractScenario._schema_properties(schema)),
+            {"source_table", "batch_size"},
+        )
+
     def test_rejected_create_retry_does_not_count_as_repeated_success(self):
         rejected = SimpleNamespace(
             status="error",

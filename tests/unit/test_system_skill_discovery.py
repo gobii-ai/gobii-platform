@@ -6,7 +6,10 @@ from django.test import TestCase, tag
 
 from agents.pretrained_worker_definitions import TEMPLATE_DEFINITIONS
 from api.agent.core.prompt_context import build_prompt_context_preview
-from api.agent.system_skills.defaults import RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY
+from api.agent.system_skills.defaults import (
+    RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
+    SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL_KEY,
+)
 from api.agent.system_skills.discovery import (
     format_system_skill_discovery_prompt,
     get_system_skill_discovery_suggestions,
@@ -135,6 +138,45 @@ class SystemSkillDiscoveryTests(TestCase):
             RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
             {definition.skill_key for definition in matches},
         )
+
+    def test_ordinary_credential_collection_does_not_trigger_delegation_skill(self):
+        examples = (
+            "Create a secure credential request for the portal password before logging in.",
+            "Request the missing STRIPE_API_KEY secret so you can call the Stripe API.",
+        )
+
+        for text in examples:
+            with self.subTest(text=text):
+                matches = shortlist_system_skills(
+                    text,
+                    available_tool_names={"search_tools", "secure_api_request"},
+                    limit=len(SYSTEM_SKILL_REGISTRY),
+                    discovery_only=True,
+                )
+                self.assertNotIn(
+                    SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL_KEY,
+                    {definition.skill_key for definition in matches},
+                )
+
+    def test_cross_agent_credential_handoff_triggers_delegation_skill(self):
+        examples = (
+            "Provision credentials from this API and assign the secrets to Gobiis I create.",
+            "Put the service token returned by the API into the worker's encrypted credentials.",
+            "Configure the Google app-password and Microsoft mailboxes for these workers.",
+        )
+
+        for text in examples:
+            with self.subTest(text=text):
+                matches = shortlist_system_skills(
+                    text,
+                    available_tool_names={"search_tools", "secure_api_request"},
+                    limit=len(SYSTEM_SKILL_REGISTRY),
+                    discovery_only=True,
+                )
+                self.assertIn(
+                    SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL_KEY,
+                    {definition.skill_key for definition in matches},
+                )
 
     def test_suggestion_uses_charter(self):
         self.agent.charter = "You are a Talent Scout for technical hiring."

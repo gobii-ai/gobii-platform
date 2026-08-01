@@ -610,6 +610,58 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIn("top-level `rows=[", combined_meta)
         self.assertIn("no sourced SQL literals", combined_meta)
 
+    def test_http_mutation_outcomes_do_not_expand_the_source_work_set(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id="campaign-get",
+                tool_name="http_request",
+                created_at=datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "ok",
+                    "content": {
+                        "campaign": {"id": "cmp-1", "status": "draft"},
+                        "recipients": [{"id": "lead-1", "qualified": False}],
+                    },
+                }),
+                source_batch_id="campaign-batch",
+                source_bearing=True,
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="campaign-patch-rejected",
+                tool_name="http_request",
+                created_at=datetime(2026, 7, 26, 12, 1, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "ok",
+                    "content": {"saved": False, "retryable": False, "error_code": "invalid_timezone"},
+                }),
+                source_batch_id="campaign-batch",
+                source_bearing=False,
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="campaign-patch-saved",
+                tool_name="http_request",
+                created_at=datetime(2026, 7, 26, 12, 2, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "ok",
+                    "content": {"saved": True, "changed_fields": ["sequence"]},
+                }),
+                source_batch_id="campaign-batch",
+                source_bearing=False,
+            ),
+        ]
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(records)},
+            fresh_tool_call_step_ids={record.step_id for record in records},
+        )
+
+        combined_meta = "\n".join(item.meta for item in info.values())
+        self.assertNotIn("PROSE SOURCE WORK SET", combined_meta)
+        self.assertNotIn("multi-source prose model write", combined_meta)
+        self.assertFalse(info["campaign-patch-rejected"].source_reconciliation_directive)
+        self.assertFalse(info["campaign-patch-saved"].source_reconciliation_directive)
+
     def test_scrape_as_markdown_meta_does_not_misclassify_comma_heavy_page_as_csv(self):
         markdown = "# Operations report\n\n" + "\n".join(
             f"Section {index}: implementation, onboarding, controls, and support context."
@@ -816,12 +868,21 @@ class PreviewByteLimitTests(SimpleTestCase):
     """Tests for preview byte limits with large external results."""
 
     @staticmethod
-    def _prepare_http_result(step_id, payload, *, recency=0, fresh=True, **kwargs):
+    def _prepare_http_result(
+        step_id,
+        payload,
+        *,
+        recency=0,
+        fresh=True,
+        will_continue_work=None,
+        **kwargs,
+    ):
         record = tool_results.ToolCallResultRecord(
             step_id=step_id,
             tool_name="http_request",
             created_at=datetime.now(timezone.utc),
             result_text=json.dumps(payload),
+            will_continue_work=will_continue_work,
         )
         params = {"recency_positions": {step_id: recency}, **kwargs}
         if fresh:
@@ -1127,21 +1188,20 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         for expected in (
-            "[SOURCE SET; exact stored arrays:",
-            "exact stored arrays: $.content.prospects(name,title,profile_url)",
-            "No fitting durable model: create one",
+            "[SOURCE SET:",
+            "$.content.prospects(name,title,profile_url)",
+            "No model: CREATE a user table",
             "`json_extract(j.value,'$.profile_url')`",
-            "Use rows=[]",
-            "No pre-read, preview, or bound/copied rows",
-            "add no source_url/result_id/source_batch_id filter",
-            "Use one set-wise write plus decision SELECT",
+            "FIRST/NOW: one sqlite_batch rows=[]",
+            "__tool_results is read-only, never a write target",
+            "No pre-read/bind/copy",
+            "INSERT INTO model SELECT",
+            "json_extract(j.value,'$.name') AS name",
+            "json_extract(j.value,'$.profile_url') AS profile_url",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
-            "Current batch plus tool_name is exact",
-            "Store t.source_url/t.result_id provenance",
-            "Item fields/URLs come from j.value",
-            "Use all paths",
-            "final SELECT returns every known item/source URL for links",
+            "Upsert mutable fields/provenance",
+            "decision SELECT in the same batch",
         ):
             self.assertIn(expected, info.meta)
         self.assertNotIn("[SOURCE ARRAYS", info.preview_text)
@@ -1150,6 +1210,30 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertNotIn("result_id=", info.meta)
         self.assertNotIn("json_extract(j.value,'$.id')", info.meta)
         self.assertIsNone(info.source_reconciliation_directive)
+
+    def test_single_item_api_array_stays_inline_without_forcing_a_new_model(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "events": [{
+                    "release_id": "rel-1",
+                    "service": "Search index",
+                    "source_url": "https://example.test/releases",
+                }],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-continuing-source",
+            payload,
+            named_model_tables=set(),
+            will_continue_work=True,
+        )
+
+        self.assertNotIn("[SOURCE SET:", info.meta)
+        self.assertNotIn("SOURCE SET STORED IN __tool_results", info.preview_text)
+        self.assertIn("rel-1", info.preview_text)
+        self.assertIn("Search index", info.preview_text)
+        self.assertTrue(info.is_inline)
 
     def test_generic_enrichment_array_gets_existing_model_refresh_shape(self):
         payload = {
@@ -1172,13 +1256,13 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         for expected in (
-            "Existing durable tables: contacts",
-            "Refresh in place",
+            "Existing tables: contacts",
+            "Upsert in place",
             "never DELETE/rebuild",
-            "preserve schema and unrelated rows",
-            "Join its scalar key directly to `json_extract(j.value,'$.provider_id')`",
-            "use JSON functions only on j.value/result_json, not model columns",
-            "Introduce every UPDATE alias in FROM/JOIN",
+            "lose unrelated rows",
+            "Join its scalar key to `json_extract(j.value,'$.provider_id')`",
+            "json_extract(j.value,'$.provider_id') AS provider_id",
+            "json_extract(j.value,'$.verified_email') AS verified_email",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
         ):
             self.assertIn(expected, info.meta)
@@ -1227,18 +1311,21 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_columns={"accounts": {"account_id", "company_name"}},
         )
 
-        self.assertIn("No fitting durable model", info.meta)
-        self.assertNotIn("Existing durable tables: accounts", info.meta)
+        self.assertNotIn("[SOURCE SET:", info.meta)
+        self.assertNotIn("Existing tables: accounts", info.meta)
 
     def test_source_write_hint_uses_the_actual_array_identity(self):
         payload = {
             "status": "ok",
             "content": {
-                "events": [{
-                    "release_id": "rel-1",
-                    "service": "Search index",
-                    "source_url": "https://example.test/releases",
-                }]
+                "events": [
+                    {
+                        "release_id": f"rel-{index}",
+                        "service": "Search index",
+                        "source_url": "https://example.test/releases",
+                    }
+                    for index in range(2)
+                ]
             },
         }
         info, _record = self._prepare_http_result(
@@ -1248,9 +1335,38 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         self.assertIn("$.content.events(release_id,service,source_url)", info.meta)
-        self.assertIn("Use the shown stable key `release_id`", info.meta)
         self.assertIn("json_extract(j.value,'$.release_id')", info.meta)
         self.assertNotIn("json_extract(j.value,'$.id')", info.meta)
+
+    def test_source_write_hint_names_parent_fields_without_exposing_values(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "vendor": "AxonFlow",
+                "source_url": "https://example.test/axonflow",
+                "plans": [
+                    {
+                        "plan_id": plan_id,
+                        "price": price,
+                    }
+                    for plan_id, price in (("enterprise", 1500), ("business", 900))
+                ],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-parent-fields",
+            payload,
+            named_model_tables=set(),
+        )
+
+        self.assertIn("Parent $.content(vendor,source_url)", info.meta)
+        self.assertIn(
+            "json_extract(t.result_json,'$.content.<field>')",
+            info.meta,
+        )
+        self.assertIn("AxonFlow", info.preview_text)
+        self.assertNotIn("AxonFlow", info.meta)
+        self.assertNotIn("https://example.test/axonflow", info.meta)
 
     def test_structured_source_sets_are_scoped_to_their_completion_batch(self):
         payload = {
@@ -1303,9 +1419,9 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertEqual(source_set_meta.count("[SOURCE SET"), 1)
         self.assertNotIn("source_batch_id=batch-current", source_set_meta)
         self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
-        self.assertIn("add no source_url/result_id/source_batch_id filter", source_set_meta)
+        self.assertIn("No pre-read/bind/copy", source_set_meta)
         self.assertIn("is_current_batch=1", source_set_meta)
-        self.assertIn("result_id is not item identity", source_set_meta)
+        self.assertIn("Upsert mutable fields/provenance", source_set_meta)
 
         modeled = tool_results.prepare_tool_results_for_prompt(
             records,
@@ -1352,13 +1468,14 @@ class PreviewByteLimitTests(SimpleTestCase):
             "content": {
                 f"entities_{index}": [
                     {
-                        "entity_name": f"Entity {index}",
-                        "profile_url": f"https://example.test/{index}",
+                        "entity_name": f"Entity {index}-{item_index}",
+                        "profile_url": f"https://example.test/{index}/{item_index}",
                         "role": "Owner",
                         "qualification_signal_with_a_deliberately_long_name": "verified",
                         "relationship_context_with_a_deliberately_long_name": "direct",
                         "evidence_observation_with_a_deliberately_long_name": "current",
                     }
+                    for item_index in range(2)
                 ]
                 for index in range(12)
             },
@@ -1370,9 +1487,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         hint = info.meta.split("]\n", 1)[0] + "]\n"
-        schema_list = hint.split("exact stored arrays: ", 1)[1].split(
-            ". No fitting durable model", 1
-        )[0]
+        schema_list = hint.split("[SOURCE SET: ", 1)[1].split(". No model:", 1)[0]
         self.assertLessEqual(len(schema_list.split("; ")), tool_results.MAX_OPTIONAL_SOURCE_ARRAYS)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
 
@@ -1380,15 +1495,18 @@ class PreviewByteLimitTests(SimpleTestCase):
         payload = {
             "status": "ok",
             "content": {
-                "events": [{
-                    "release_id": "rel-1",
-                    "service": "Checkout API",
-                    "starts_at": "2026-07-23T15:30:17Z",
-                    "owner": "Priya Shah",
-                    "status": "approved",
-                    "source_url": "https://example.test/releases.json",
-                    "observed_at": "2026-07-22T14:15:00Z",
-                }],
+                "events": [
+                    {
+                        "release_id": f"rel-{index}",
+                        "service": "Checkout API",
+                        "starts_at": "2026-07-23T15:30:17Z",
+                        "owner": "Priya Shah",
+                        "status": "approved",
+                        "source_url": "https://example.test/releases.json",
+                        "observed_at": "2026-07-22T14:15:00Z",
+                    }
+                    for index in range(2)
+                ],
             },
         }
         info, _record = self._prepare_http_result(
@@ -1399,11 +1517,17 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         hint = info.meta.split("]\n", 1)[0] + "]\n"
         self.assertIn("[SOURCE SET", hint)
-        self.assertIn("$.content.events", hint)
-        self.assertIn("No fitting durable model: create one", hint)
-        self.assertIn("`json_extract(j.value,'$.release_id')` as PRIMARY KEY/UNIQUE", hint)
-        self.assertIn("Use one set-wise write plus decision SELECT", hint)
-        self.assertIn("Item fields/URLs come from j.value", hint)
+        self.assertIn(
+            "$.content.events(release_id,service,starts_at,owner,status,source_url,observed_at)",
+            hint,
+        )
+        self.assertIn("No model: CREATE a user table", hint)
+        self.assertIn("key `json_extract(j.value,'$.release_id')` PRIMARY KEY/UNIQUE", hint)
+        self.assertIn("FIRST/NOW: one sqlite_batch rows=[]", hint)
+        self.assertIn("__tool_results is read-only, never a write target", hint)
+        self.assertIn("No pre-read/bind/copy", hint)
+        self.assertIn("json_extract(j.value,'$.owner') AS owner", hint)
+        self.assertIn("decision SELECT in the same batch", hint)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
 
     def test_four_source_parallel_batch_keeps_each_brief_preview_visible(self):

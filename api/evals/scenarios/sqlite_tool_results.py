@@ -464,17 +464,6 @@ def _insert_values_derive_bound_payload_fields(
     target_name = str(getattr(target, "get_name", lambda: "")() or "").casefold()
     if target_name != table_name.casefold():
         return False
-    values = next(
-        (
-            token
-            for token in tokens
-            if isinstance(token, sqlparse.sql.Values)
-        ),
-        None,
-    )
-    if values is None:
-        return False
-
     if isinstance(target, sqlparse.sql.Function):
         target_parenthesis = next(
             (
@@ -491,11 +480,7 @@ def _insert_values_derive_bound_payload_fields(
             and isinstance(tokens[into_index + 2], sqlparse.sql.Parenthesis)
             else None
         )
-    values_parenthesis = next(
-        (token for token in values.tokens if isinstance(token, sqlparse.sql.Parenthesis)),
-        None,
-    )
-    if target_parenthesis is None or values_parenthesis is None:
+    if target_parenthesis is None:
         return False
 
     def _items(parenthesis):
@@ -514,7 +499,31 @@ def _insert_values_derive_bound_payload_fields(
         )
 
     columns = [item.strip('"`[] ').casefold() for item in _items(target_parenthesis)]
-    expressions = _items(values_parenthesis)
+    values = next(
+        (token for token in tokens if isinstance(token, sqlparse.sql.Values)),
+        None,
+    )
+    if values is not None:
+        values_parenthesis = next(
+            (token for token in values.tokens if isinstance(token, sqlparse.sql.Parenthesis)),
+            None,
+        )
+        expressions = _items(values_parenthesis) if values_parenthesis is not None else []
+    else:
+        select_index = next(
+            (
+                index
+                for index, token in enumerate(tokens)
+                if str(getattr(token, "normalized", "")).casefold() == "select"
+            ),
+            -1,
+        )
+        select_values = tokens[select_index + 1] if 0 <= select_index < len(tokens) - 1 else None
+        expressions = (
+            [str(item).strip() for item in select_values.get_identifiers()]
+            if isinstance(select_values, sqlparse.sql.IdentifierList)
+            else []
+        )
     if len(columns) != len(expressions):
         return False
     assignments = dict(zip(columns, expressions))
@@ -543,12 +552,32 @@ def _derives_bound_structured_message_fields(
 
 
 def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str) -> bool:
+    if _insert_select_derives_structured_outcome(lowered_statement):
+        return True
+
     assignment_sources = {
         "state": "delivery_status",
         "provider_message_id": "provider_message_id",
         "sent_at": "sent_at",
     }
     for column, source_field in assignment_sources.items():
+        scalar_message_extract = re.search(
+            rf"\b{column}\s*=\s*json_extract\s*\(\s*\(\s*select\s+structured_payload_json\s+"
+            rf"from\s+(?P<source>[a-z_][a-z0-9_]*)\b.*?\)\s*,\s*['\"]\$.{source_field}['\"]\s*\)",
+            lowered_statement,
+            flags=re.DOTALL,
+        )
+        if scalar_message_extract is not None:
+            source = scalar_message_extract.group("source")
+            direct_message_source = source == "__messages"
+            message_cte_source = re.search(
+                rf"\b{re.escape(source)}\s+as\s*\(\s*select\b.+?\bstructured_payload_json\b"
+                rf".+?\bfrom\s+__messages\b",
+                lowered_statement,
+                flags=re.DOTALL,
+            )
+            if direct_message_source or message_cte_source is not None:
+                continue
         match = re.search(
             rf"\b{column}\s*=\s*(.+?)(?=,\s*(?:state|provider_message_id|sent_at|"
             rf"source_message_id)\s*=|\bfrom\b|\bwhere\b)",
@@ -561,12 +590,81 @@ def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str)
     return where_match is not None and "recipient" in where_match.group(1)
 
 
+def _insert_select_derives_structured_outcome(statement: str) -> bool:
+    parsed = sqlparse.parse(statement)
+    if len(parsed) != 1:
+        return False
+    tokens = [token for token in parsed[0].tokens if not token.is_whitespace]
+    target = next(
+        (
+            tokens[index + 1]
+            for index, token in enumerate(tokens[:-1])
+            if str(getattr(token, "normalized", "")).casefold() == "into"
+        ),
+        None,
+    )
+    if not isinstance(target, sqlparse.sql.Function):
+        return False
+    target_columns = next(
+        (
+            token
+            for token in target.tokens
+            if isinstance(token, sqlparse.sql.Parenthesis)
+        ),
+        None,
+    )
+    projection = next(
+        (
+            tokens[index + 1]
+            for index, token in enumerate(tokens[:-1])
+            if str(getattr(token, "normalized", "")).casefold() == "select"
+        ),
+        None,
+    )
+    if target_columns is None or not isinstance(projection, sqlparse.sql.IdentifierList):
+        return False
+
+    column_list = next(
+        (
+            token
+            for token in target_columns.tokens
+            if isinstance(token, sqlparse.sql.IdentifierList)
+        ),
+        None,
+    )
+    if column_list is None:
+        return False
+    columns = [
+        str(item).strip('"`[] ').casefold()
+        for item in column_list.get_identifiers()
+    ]
+    expressions = [str(item).strip() for item in projection.get_identifiers()]
+    if len(columns) != len(expressions):
+        return False
+    assignments = dict(zip(columns, expressions))
+    return all(
+        _direct_source_assignment(assignments.get(column, ""), source_field)
+        for column, source_field in {
+            "recipient": "recipient",
+            "state": "delivery_status",
+            "provider_message_id": "provider_message_id",
+            "sent_at": "sent_at",
+        }.items()
+    )
+
+
 def _direct_source_assignment(expression: str, source_field: str) -> bool:
     expression, field = expression.strip(), re.escape(source_field)
     if re.fullmatch(rf"(?:[a-z_][a-z0-9_]*\.)?{field}", expression):
         return True
     json_extract_pattern = rf"json_extract\s*\(\s*[:a-z_][a-z0-9_.:]*\s*,\s*['\"]\$.{field}['\"]\s*\)"
-    return bool(re.fullmatch(json_extract_pattern, expression))
+    if re.fullmatch(json_extract_pattern, expression):
+        return True
+    message_subquery_pattern = (
+        rf"json_extract\s*\(\s*\(\s*select\s+structured_payload_json\s+from\s+__messages\b"
+        rf".+?\)\s*,\s*['\"]\$.{field}['\"]\s*\)"
+    )
+    return bool(re.fullmatch(message_subquery_pattern, expression, flags=re.DOTALL))
 
 
 def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL) -> list[str]:
@@ -1852,6 +1950,52 @@ def _persisted_identity_tables(agent_id: str, table_names: set[str]) -> set[str]
     return identity_tables
 
 
+def _catalog_plan_row_failures(rows) -> list[str]:
+    expected_vendors = {"AxonFlow", "BrightSupport", "CareMesh", "Dockwise"}
+    vendors = {str(row[0]) for row in rows}
+    failures = []
+    if vendors != expected_vendors:
+        failures.append(f"catalog model changed parent vendor identities: {sorted(vendors)}")
+    if len(rows) != 72:
+        failures.append(f"catalog model stored {len(rows)} of 72 plan rows")
+    if ("CareMesh", "Clinic", 720, 50) not in rows:
+        failures.append("catalog model lost the CareMesh Clinic parent/child association")
+    return failures
+
+
+def _catalog_plan_model_failures(agent_id: str, table_names: Iterable[str]) -> list[str]:
+    required_columns = {
+        "vendor",
+        "monthly_price_usd",
+        "included_seats",
+    }
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            for table_name in table_names:
+                quoted = '"' + table_name.replace('"', '""') + '"'
+                columns = {
+                    str(row[1]).casefold()
+                    for row in conn.execute(f"PRAGMA table_info({quoted});")
+                }
+                if (
+                    not required_columns.issubset(columns)
+                    or not {"plan", "plan_name"}.intersection(columns)
+                    or not {"compliance", "compliance_json"}.intersection(columns)
+                ):
+                    continue
+                plan_column = "plan" if "plan" in columns else "plan_name"
+                rows = conn.execute(
+                    f"SELECT vendor, {plan_column}, monthly_price_usd, included_seats "
+                    f"FROM {quoted};"
+                ).fetchall()
+                return _catalog_plan_row_failures(rows)
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+    return ["catalog model did not expose the requested vendor/plan fields"]
+
+
 def _source_array_first_write_failures(sqlite_calls, model_table: str | None) -> list[str]:
     calls = list(sqlite_calls)
     if len(calls) != 1:
@@ -2271,9 +2415,9 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
             candidate_tables=summary.working_table_names,
         )
         read_tables = _decision_model_tables(successful_sql, model_tables)
-        has_stable_identity = bool(read_tables) and set(read_tables).issubset(identity_tables)
+        has_stable_identity = bool(model_tables) and set(model_tables).issubset(identity_tables)
         reusable_tables = tuple(table for table in model_tables if table in identity_tables)
-        row_derived_model_tables = set(read_tables).intersection(row_model_tables)
+        row_derived_model_tables = set(model_tables).intersection(row_model_tables)
         manually_populated_model_tables = set(summary.manual_values_table_names).intersection(model_tables)
         repeated_import_tables = _repeated_source_import_tables(
             str((call.tool_params or {}).get("sql") or "") for call in successful_calls
@@ -2290,7 +2434,15 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
                 "tool_result_row_loop",
             }
         })
-        failures = [message for failed, message in (
+        failures = _sqlite_attempt_failures(calls)
+        if successful_calls and getattr(successful_calls[0].step, "agent_id", None):
+            failures.extend(
+                _catalog_plan_model_failures(
+                    str(successful_calls[0].step.agent_id),
+                    model_tables,
+                )
+            )
+        failures.extend(message for failed, message in (
             (not successful_calls, "no successful sqlite_batch call observed"),
             (summary.tool_result_statement_count < 1 or summary.uses_json_functions < 1, "domain model was not derived from tool-result JSON"),
             (summary.aggregate_tool_result_queries < 1, "domain model did not import tool results in aggregate"),
@@ -2315,7 +2467,7 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
                 f"durable source rows were hand-entered with VALUES in {sorted(manually_populated_model_tables)}",
             ),
             (bool(model_advisories), f"SQLite reported unreliable model writes: {model_advisories}"),
-        ) if failed]
+        ) if failed)
         self.record_task_result(
             run_id,
             None,

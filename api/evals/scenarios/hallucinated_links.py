@@ -1310,8 +1310,10 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
             "Does the response attach every shown link to the correct entity according to the expected map, preserve "
             "the distinction among similarly named entities, and avoid presenting an item link for entities listed as "
             "having no returned item URL? Only absolute HTTP(S) destinations are valid links; treat naked reference IDs, "
-            "relative destinations, placeholders, and bare host/path values as invalid rather than grounded. Judge semantic "
-            "association only; an omitted required URL is checked separately."
+            "relative destinations, placeholders, and bare host/path values as invalid rather than grounded. Punctuation "
+            "alone in an empty table cell is not a link. Judge semantic association only; omitted required URLs are checked "
+            "separately. Choose Misassociated only if you can name an entity and the wrong absolute URL attached to it; "
+            "otherwise choose Grounded."
         )
         choice, reasoning = self.llm_judge(
             question=question,

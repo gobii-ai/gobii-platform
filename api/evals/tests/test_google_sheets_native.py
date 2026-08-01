@@ -90,6 +90,8 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         self.assertIn("formatted", first_group)
         self.assertIn("styled", first_group)
         self.assertEqual(existing_case.response_term_groups[0], first_group)
+        self.assertIn("visibly formatted", create_case.semantic_response_intent)
+        self.assertIn("alternating-row", existing_case.semantic_response_intent)
 
     def test_formatting_guidance_stops_after_successful_batch_update(self):
         with patch("api.agent.system_skills.defaults._native_integration_connected", return_value=True):

@@ -70,7 +70,7 @@ SHORT_RESULT_ID_MIN_LEN = 6
 SHORT_RESULT_ID_MAX_LEN = 12
 MAX_OPTIONAL_SOURCE_ARRAYS = 2
 MAX_OPTIONAL_SOURCE_PATH_CHARS = 160
-MAX_OPTIONAL_SOURCE_FIELDS = 6
+MAX_OPTIONAL_SOURCE_FIELDS = 8
 MAX_OPTIONAL_SOURCE_FIELD_CHARS = 48
 MAX_OPTIONAL_SOURCE_HINT_CHARS = 900
 PROSE_INSPECTION_TOTAL_CHARS = 8_000
@@ -116,6 +116,7 @@ class ToolCallResultRecord:
     source_batch_id: Optional[str] = None
     source_url: Optional[str] = None
     will_continue_work: Optional[bool] = None
+    source_bearing: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,10 @@ class ToolResultPromptInfo:
     is_inline: bool
     source_reconciliation_directive: Optional[str]
     suppress_from_prompt: bool = False
+
+
+def _record_is_source_bearing(record: ToolCallResultRecord) -> bool:
+    return is_source_bearing_tool(record.tool_name) and record.source_bearing is not False
 
 
 def entity_name_stem(value: str) -> str:
@@ -182,13 +187,13 @@ def _source_item_key(fields: Sequence[str]) -> str | None:
 
 def _optional_source_array_schemas(
     analysis: ResultAnalysis | None,
-) -> tuple[tuple[str, str, str | None], ...]:
+) -> tuple[tuple[str, str, str | None, tuple[str, ...]], ...]:
     json_analysis = analysis.json_analysis if analysis else None
     if not json_analysis:
         return ()
 
     ordered = (json_analysis.primary_array, *json_analysis.secondary_arrays)
-    schemas: list[tuple[str, str, str | None]] = []
+    schemas: list[tuple[str, str, str | None, tuple[str, ...]]] = []
     seen_paths: set[str] = set()
     for item in ordered:
         if (
@@ -204,7 +209,12 @@ def _optional_source_array_schemas(
             if len(field) <= MAX_OPTIONAL_SOURCE_FIELD_CHARS
         ][:MAX_OPTIONAL_SOURCE_FIELDS]
         field_summary = ",".join(fields)
-        schemas.append((item.path, f"{item.path}({field_summary})", _source_item_key(fields)))
+        schemas.append((
+            item.path,
+            f"{item.path}({field_summary})",
+            _source_item_key(fields),
+            tuple(fields),
+        ))
         seen_paths.add(item.path)
         if len(schemas) >= MAX_OPTIONAL_SOURCE_ARRAYS:
             break
@@ -215,53 +225,100 @@ def _build_optional_source_write_hint(
     tool_name: str,
     analysis: ResultAnalysis | None,
     model_tables: Sequence[str] = (),
+    payload: object | None = None,
+    reusable_source_set: bool = False,
 ) -> str:
     """Give source-shape mechanics that fit both new and existing domain models."""
     schemas = _optional_source_array_schemas(analysis)
     if not schemas or len(tool_name) > 100:
         return ""
 
-    first_path, _first_schema, first_key = schemas[0]
+    json_analysis = analysis.json_analysis if analysis else None
+    source_arrays = (
+        (json_analysis.primary_array, *json_analysis.secondary_arrays)
+        if json_analysis
+        else ()
+    )
+    has_reusable_set = any(
+        item
+        and item.item_fields
+        and item.path == schemas[0][0]
+        and item.length >= 2
+        for item in source_arrays
+    )
+    if not model_tables and not has_reusable_set and not reusable_source_set:
+        return ""
+
+    first_path, _first_schema, first_key, first_fields = schemas[0]
     first_path = first_path.replace("'", "''")
+    parent_path = first_path.rsplit(".", 1)[0]
+    parent_value = payload
+    if parent_path != "$":
+        for segment in parent_path.removeprefix("$.").split("."):
+            if not isinstance(parent_value, dict):
+                parent_value = None
+                break
+            parent_value = parent_value.get(segment)
+    parent_fields = (
+        tuple(
+            str(key)
+            for key, value in parent_value.items()
+            if not isinstance(value, (dict, list))
+            and len(str(key)) <= MAX_OPTIONAL_SOURCE_FIELD_CHARS
+        )[:MAX_OPTIONAL_SOURCE_FIELDS]
+        if isinstance(parent_value, dict)
+        else ()
+    )
     escaped_tool_name = tool_name.replace("'", "''")
+
     def render_hint(schema_text: str) -> str:
         key_expr = (
             f"`json_extract(j.value,'$.{first_key}')`"
             if first_key
             else "a stable key derived only from shown item fields"
         )
+        safe_fields = [
+            field for field in first_fields
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field)
+        ]
+        select_shape = ", ".join(
+            f"json_extract(j.value,'$.{field}') AS {field}"
+            for field in safe_fields
+        )
         if model_tables:
             table_list = ",".join(sorted(model_tables)[:4])
             model_guidance = (
-                f"Existing durable tables: {table_list}. Refresh in place; never DELETE/rebuild; preserve schema and "
-                f"unrelated rows. Join its scalar key directly to {key_expr}; use JSON functions only on j.value/result_json, "
-                "not model columns. Introduce every UPDATE alias in FROM/JOIN. "
+                f"Existing tables: {table_list}. Upsert in place; never DELETE/rebuild or lose unrelated rows. "
+                f"Join its scalar key to {key_expr}. "
             )
         else:
-            stable_key_guidance = (
-                f" Use the shown stable key `{first_key}`; do not invent identity."
-                if first_key
-                else ""
-            )
-            model_guidance = (
-                f"No fitting durable model: create one with {key_expr} "
-                f"as PRIMARY KEY/UNIQUE, then upsert.{stable_key_guidance} "
-            )
+            model_guidance = f"No model: CREATE a user table; key {key_expr} PRIMARY KEY/UNIQUE. "
+        parent_guidance = (
+            f" Parent {parent_path}({','.join(parent_fields)}): "
+            f"json_extract(t.result_json,'{parent_path}.<field>')."
+            if parent_fields and not model_tables
+            else ""
+        )
+        select_guidance = (
+            f"INSERT ... SELECT {select_shape} "
+            if select_shape
+            else "INSERT ... SELECT item fields "
+        )
         return (
-            f"[SOURCE SET; exact stored arrays: {schema_text}. "
+            f"[SOURCE SET: {schema_text}. "
             f"{model_guidance}"
-            "Use rows=[]. No pre-read, preview, or bound/copied rows. Current batch plus tool_name is exact; add no "
-            "source_url/result_id/source_batch_id filter. "
-            "Use one set-wise write plus decision SELECT: `FROM __tool_results AS t, "
+            "FIRST/NOW: one sqlite_batch rows=[]; __tool_results is read-only, never a write target. "
+            "No pre-read/bind/copy. "
+            f"INSERT INTO model {select_guidance.removeprefix('INSERT ... ')}FROM __tool_results AS t, "
             f"json_each(t.result_json,'{first_path}') AS j "
             f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
-            "Store t.source_url/t.result_id provenance. Item fields/URLs come from j.value; result_id is not item "
-            "identity. Use all paths; final SELECT returns every known item/source URL for links.]\n"
+            "Upsert mutable fields/provenance; then decision SELECT in the same batch."
+            f"{parent_guidance}]\n"
         )
 
-    hint = render_hint("; ".join(schema for _path, schema, _key in schemas))
+    hint = render_hint("; ".join(schema for _path, schema, _key, _fields in schemas))
     if len(hint) > MAX_OPTIONAL_SOURCE_HINT_CHARS:
-        hint = render_hint("; ".join(path for path, _schema, _key in schemas))
+        hint = render_hint("; ".join(path for path, _schema, _key, _fields in schemas))
     return hint if len(hint) <= MAX_OPTIONAL_SOURCE_HINT_CHARS else ""
 
 
@@ -337,7 +394,7 @@ def prepare_tool_results_for_prompt(
     source_records = [
         record
         for record in records
-        if is_source_bearing_tool(record.tool_name)
+        if _record_is_source_bearing(record)
     ]
     current_source_record = (
         max(source_records, key=lambda record: record.created_at)
@@ -356,7 +413,7 @@ def prepare_tool_results_for_prompt(
     for record in sorted(records, key=lambda item: item.created_at):
         if (
             not record.result_text
-            or not is_source_bearing_tool(record.tool_name)
+            or not _record_is_source_bearing(record)
             or (
                 record.source_batch_id is not None
                 and record.tool_name == current_source_tool_name
@@ -427,7 +484,7 @@ def prepare_tool_results_for_prompt(
         if (
             stored_in_db
             and is_current_source_batch
-            and is_source_bearing_tool(record.tool_name)
+            and _record_is_source_bearing(record)
             and not _entity_arrays(analysis)
             and 1 < len(work_set) <= MAX_ACTIVE_PROSE_PREVIEWS
             and (
@@ -447,14 +504,14 @@ def prepare_tool_results_for_prompt(
             current_source_batch_id is not None
             and not is_current_source_batch
             and record.tool_name == current_source_tool_name
-            and is_source_bearing_tool(record.tool_name)
+            and _record_is_source_bearing(record)
         )
         if is_historical_same_tool_source:
             context_hint = None
             preview_text = None
             is_inline = False
         keep_source_import_hint = (
-            is_source_bearing_tool(record.tool_name)
+            _record_is_source_bearing(record)
             and is_fresh_tool_call
             and is_current_source_batch
         )
@@ -514,6 +571,8 @@ def prepare_tool_results_for_prompt(
                 record.tool_name,
                 analysis,
                 tuple(refresh_model_tables),
+                _load_json_payload(stored_json, analysis),
+                reusable_source_set=len(source_work_set_ids.get(record.tool_name, ())) >= 2,
             )
         preserve_raw_model_source_values = bool(
             source_write_hint_prefix and refresh_model_tables
@@ -522,6 +581,17 @@ def prepare_tool_results_for_prompt(
             source_write_hint_prefix = ""
         elif source_write_hint_prefix:
             emitted_source_write_hints.add(source_write_hint_prefix)
+            if record.will_continue_work is True:
+                # The source set stays losslessly available in __tool_results. For
+                # continuing work, a second value-level copy invites transcription
+                # instead of the set-wise import needed for the durable model.
+                context_hint = None
+                preview_text = (
+                    "[SOURCE SET STORED IN __tool_results. Create/evolve the durable model and use the exact "
+                    "result_meta INSERT ... SELECT shape now; __tool_results is read-only source. Do not inspect "
+                    "or copy the source first.]"
+                )
+                is_inline = False
         if requires_source_import:
             # A second visible copy invites literal transcription and wastes prompt space.
             context_hint = None
@@ -570,6 +640,7 @@ def prepare_tool_results_for_prompt(
         is_prose_work_set = (
             stored_in_db
             and is_current_source_batch
+            and _record_is_source_bearing(record)
             and not _entity_arrays(analysis)
             and (is_scrape_markdown or len(work_set) > 1)
         )

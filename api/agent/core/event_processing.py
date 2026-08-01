@@ -1846,7 +1846,7 @@ CHARTER_PATCH_PARAMETERS = {
                 "Use already_satisfied when an equivalent rule is present; this is not a charter mutation."
             ),
         },
-        "target_charter_text": {"type": "string", "description": "Smallest exact contiguous span copied from <charter> that covers every adjacent rule conflicting with the lasting feedback. Preserve lookalikes for other actors/contexts. A general role/workflow and prior output are not targets. Empty if no charter rule controls the behavior."},
+        "target_charter_text": {"type": "string", "description": "Smallest exact contiguous span copied from <charter> that occurs once and covers every related clause changed by the lasting feedback, including adjacent sentences. If wording repeats, include the full actor/audience sentence. Preserve lookalikes for other actors/contexts. A general role/workflow and prior output are not targets. Empty if no charter rule controls the behavior."},
         "replacement_charter_text": {"type": "string", "description": "Complete operational replacement for the target. Apply only the operative lasting behavior, leave no contradiction, and preserve unrelated text inside the target span verbatim. Empty when decision is already_satisfied."},
     },
     "required": ["decision", "target_charter_text", "replacement_charter_text"],
@@ -2848,6 +2848,7 @@ def _annotate_agent_config_update_result(
     if charter_confirmed:
         result["reply_guidance"] = (
             "Reply only with the completed task result, or a brief natural acknowledgment such as 'Got it.' when there was no task. "
+            "Non-config reads or writes in this batch are task work, so report their result rather than only acknowledging. "
             "This confirmation is final; do not read or verify config again. Never mention charter, config, saved/stored state, "
             "implementation, or restate/promise the rule."
         )
@@ -3104,13 +3105,10 @@ def _compile_charter_patch_tool_call(tool_call: Any, current_charter: str | None
         elif not old:
             return None
 
-    quoted_old = old.replace("'", "''")
-    quoted_new = new.replace("'", "''")
     arguments = json.dumps({
-        "sql": (
-            "UPDATE __agent_config SET charter=patch_text(charter, "
-            f"'{quoted_old}', '{quoted_new}') WHERE id=1"
-        ),
+        "rows": [],
+        "sql": "UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1",
+        "bindings": {"old": old, "new": new},
         "will_continue_work": True,
     })
     call_id = tool_call.get("id") if isinstance(tool_call, dict) else getattr(tool_call, "id", None)
@@ -7184,7 +7182,7 @@ def _run_agent_loop(
                         "Otherwise patch only that lasting behavior; temporary scope and immediate work must not appear in the replacement. "
                         "CURRENT CHARTER (<charter>), the only source for a nonempty target: "
                         + json.dumps(agent.charter or "")
-                        + ". Scope ordinary corrections to the criticized actor, audience, workflow, and condition; preserve similar rules elsewhere. For role/ownership feedback, state what is owned and remove or qualify conflicting ownership/direction; a named incident is evidence, not scope, and only explicit human reassignment expands the role. If no charter rule controls it, use an empty target and one concise operational rule, not copied feedback or prior output. Otherwise replace the smallest exact contiguous span covering conflicts, preserving unrelated text inside it verbatim."
+                        + ". Scope ordinary corrections to the criticized actor, audience, workflow, and condition; preserve similar rules elsewhere. For role/ownership feedback, state what is owned and remove or qualify conflicting ownership/direction; a named incident is evidence, not scope, and only explicit human reassignment expands the role. If no charter rule controls it, use an empty target and one concise operational rule, not copied feedback or prior output. Otherwise replace one exact contiguous span covering every related clause the feedback changes, including adjacent sentences, so no old contradiction remains. The target must occur exactly once; when wording repeats, include the full actor/audience sentence. Preserve unrelated text inside it verbatim."
                     )
                     prompt_notice = "\n\n".join(filter(None, (
                         prompt_notice,
@@ -8011,7 +8009,6 @@ def _run_agent_loop(
                     stale_prompt_checker=_is_orchestrator_prompt_stale,
                 )
                 tools = executed_batch.tools
-
                 if not executed_batch.abort_after_execution or _get_processing_abort_reason(agent.id) is None:
                     runtime_errors, config_apply = _apply_runtime_updates()
                     _annotate_agent_config_update_result(

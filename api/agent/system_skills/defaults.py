@@ -1023,6 +1023,8 @@ WEBHOOKS_SYSTEM_SKILL = SystemSkillDefinition(
         "callback url",
         "http callback",
         "provider event trigger",
+        "pipedream",
+        "pipedream http trigger",
     ),
     discovery_triggers=(
         "webhook",
@@ -1030,6 +1032,7 @@ WEBHOOKS_SYSTEM_SKILL = SystemSkillDefinition(
         "callback url",
         "events trigger you",
         "events wake you",
+        "pipedream",
     ),
     prompt_instructions=(
         "Use native Gobii webhooks for webhook setup and delivery. An inbound webhook is a secret-bearing Gobii "
@@ -1160,7 +1163,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "For team creation after approval, inspect config options and existing agents when useful, then create the "
         "requested Gobiis and link this invoking Gobii to each target it must brief. After each link is enabled, use "
         "send_agent_message for the initial briefing and for all later questions, handoffs, replies, status updates, "
-        "and coordination. If a needed manager-to-target link is not already part of the approved graph, include it "
+        "and coordination; there is no `meta_gobii_send_agent_message` tool. If a needed manager-to-target link is not already part of the approved graph, include it "
         "in the proposal and obtain approval before creating it. There is no unlinked control-plane message fallback. "
         "A single-Gobii request that says to "
         "brief, hand off, or send updates stays one Gobii unless the user asks for a team or multiple Gobiis.\n"
@@ -1214,15 +1217,19 @@ SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL = SystemSkillDefinition(
     discovery_triggers=(
         "secure credential delegation",
         "provision credentials",
-        "assign secrets",
+        "assign secrets to gobiis",
+        "child secret",
+        "encrypted credentials",
+        "service token returned",
         "mailbox provisioning",
         "email workers",
-        "credential",
-        "credentials",
-        "mailbox",
         "mailboxes",
         "app password",
-        "api response",
+        "app-password",
+        "manager gobii credentials",
+        "secure api response",
+        "credential distribution",
+        "secret handoff",
     ),
     prompt_instructions=(
         "Use `secure_api_request` when an API response may contain passwords, app passwords, tokens, OTPs, or other "

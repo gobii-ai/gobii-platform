@@ -85,8 +85,8 @@ def get_update_plan_tool() -> dict[str, Any]:
                 "Use only for real multi-step work where a persistent user-visible plan is useful. Do not use for "
                 "quick lookups, simple research answers, simple latest/current company/news/batch reports, "
                 "scheduled briefings, or one-shot chart requests.\n"
-                "For deep work, use at most one initial plan update; do not call this again just to mark research done, "
-                "narrate progress, or prepare the final response.\n"
+                "For deep work, use at most one initial update and one closeout immediately before final delivery; "
+                "never update it between evidence batches or create one at closeout.\n"
                 "Provide a list of plan items, each with a step and status.\n"
                 "At most one step can be doing at a time.\n"
                 "Every call replaces the full current active plan, including the deliverable references. "
@@ -477,7 +477,7 @@ def format_current_plan_for_prompt(agent) -> str:
     if snapshot.todo_count or snapshot.doing_count:
         heading += (
             " before final delivery: mark its delivery step done in update_plan (the following send completes it), "
-            "then send once with false; leave other requests parked"
+            "then send once with false; leave other requests parked. Do not update this plan between evidence batches"
         )
     lines = [
         heading,

@@ -316,6 +316,78 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             )
         )
 
+    def test_structured_peer_import_accepts_insert_select_upsert(self):
+        fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
+        sql = (
+            "INSERT INTO outreach_threads "
+            "(thread_id, recipient, owner_name, state, provider_message_id, sent_at, source_message_id) "
+            "SELECT 'manager:wave:prospect-77', "
+            "json_extract(m.structured_payload_json, '$.recipient'), "
+            "'Seller One', json_extract(m.structured_payload_json, '$.delivery_status'), "
+            "json_extract(m.structured_payload_json, '$.provider_message_id'), "
+            "json_extract(m.structured_payload_json, '$.sent_at'), m.message_id "
+            "FROM (SELECT message_id, structured_payload_json FROM __messages "
+            "WHERE is_outbound=0 AND structured_payload_json IS NOT NULL "
+            "ORDER BY seq DESC LIMIT 1) m "
+            "ON CONFLICT(recipient) DO UPDATE SET "
+            "state=excluded.state, provider_message_id=excluded.provider_message_id, "
+            "sent_at=excluded.sent_at, source_message_id=excluded.source_message_id"
+        )
+
+        self.assertTrue(_derives_structured_message_fields(sql, fields))
+        self.assertFalse(
+            _derives_structured_message_fields(
+                sql.replace(
+                    "json_extract(m.structured_payload_json, '$.delivery_status')",
+                    "'bounced'",
+                ),
+                fields,
+            )
+        )
+
+    def test_structured_peer_import_accepts_direct_message_scalar_subqueries(self):
+        fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
+        latest_payload = (
+            "(SELECT structured_payload_json FROM __messages "
+            "WHERE is_outbound=0 AND structured_payload_json IS NOT NULL "
+            "ORDER BY seq DESC LIMIT 1)"
+        )
+        sql = (
+            "UPDATE outreach_threads SET "
+            f"state=json_extract({latest_payload},'$.delivery_status'), "
+            f"provider_message_id=json_extract({latest_payload},'$.provider_message_id'), "
+            f"sent_at=json_extract({latest_payload},'$.sent_at') "
+            f"WHERE recipient=json_extract({latest_payload},'$.recipient')"
+        )
+
+        self.assertTrue(_derives_structured_message_fields(sql, fields))
+        self.assertFalse(
+            _derives_structured_message_fields(
+                sql.replace(
+                    f"state=json_extract({latest_payload},'$.delivery_status')",
+                    "state='bounced'",
+                ),
+                fields,
+            )
+        )
+
+        cte_sql = (
+            "WITH inbound AS (SELECT message_id, structured_payload_json FROM __messages "
+            "WHERE is_outbound=0 ORDER BY seq DESC LIMIT 1) "
+            "UPDATE outreach_threads SET "
+            "state=json_extract((SELECT structured_payload_json FROM inbound),'$.delivery_status'), "
+            "provider_message_id=json_extract((SELECT structured_payload_json FROM inbound),'$.provider_message_id'), "
+            "sent_at=json_extract((SELECT structured_payload_json FROM inbound),'$.sent_at') "
+            "WHERE recipient=json_extract((SELECT structured_payload_json FROM inbound),'$.recipient')"
+        )
+        self.assertTrue(_derives_structured_message_fields(cte_sql, fields))
+        self.assertFalse(
+            _derives_structured_message_fields(
+                cte_sql.replace("FROM __messages", "FROM unrelated_payloads"),
+                fields,
+            )
+        )
+
     def test_bound_structured_peer_import_derives_every_field(self):
         payload = {
             "recipient": "jordan@northstar.example.test",
@@ -425,6 +497,25 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                     "INSERT INTO operational_events",
                     'INSERT OR IGNORE INTO "operational_events"',
                 ),
+                table_name="operational_events",
+                placeholder=":source_payload",
+                expected_fields=set(payload),
+            )
+        )
+        select_sql = sql.replace(
+            "VALUES (json_extract(:source_payload,'$.event_id'), "
+            "json_extract(:source_payload,'$.event_type'), "
+            "json_extract(:source_payload,'$.thread_key'), "
+            "json_extract(:source_payload,'$.occurred_at'), :source_message_id)",
+            "SELECT json_extract(:source_payload,'$.event_id'), "
+            "json_extract(:source_payload,'$.event_type'), "
+            "json_extract(:source_payload,'$.thread_key'), "
+            "json_extract(:source_payload,'$.occurred_at'), :source_message_id "
+            "WHERE 1=1",
+        )
+        self.assertTrue(
+            _insert_values_derive_bound_payload_fields(
+                select_sql,
                 table_name="operational_events",
                 placeholder=":source_payload",
                 expected_fields=set(payload),

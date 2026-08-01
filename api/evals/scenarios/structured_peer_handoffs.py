@@ -366,7 +366,7 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
                 outbound_attachments = list(outbound[0].attachments.all())
                 received_attachments = list(received[0].attachments.all())
                 passed = (
-                    tool_payload is None
+                    payloads_match
                     and len(attachment_paths) == 1
                     and len(outbound_attachments) == 1
                     and len(received_attachments) == 1

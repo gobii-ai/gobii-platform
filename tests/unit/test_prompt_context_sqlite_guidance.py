@@ -102,6 +102,27 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertEqual((first, second), ("request-one", "request-one"))
         self.assertEqual(non_source, "completion-one")
 
+    def test_http_mutations_are_not_source_bearing_results(self):
+        self.assertTrue(
+            prompt_context._tool_result_is_source_bearing(
+                "http_request",
+                {"method": "GET"},
+            )
+        )
+        self.assertTrue(
+            prompt_context._tool_result_is_source_bearing(
+                "http_request",
+                {"method": "POST"},
+            )
+        )
+        for method in ("PATCH", "PUT", "DELETE"):
+            self.assertFalse(
+                prompt_context._tool_result_is_source_bearing(
+                    "http_request",
+                    {"method": method},
+                )
+            )
+
     def test_source_url_metadata_uses_one_exact_source_request_url(self):
         self.assertEqual(
             prompt_context._source_url_from_tool_params(
@@ -128,53 +149,42 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
 
     def test_sqlite_guidance_tracks_bounded_set_coverage(self):
         guidance = prompt_context._get_sqlite_guidance()
+        self.assertIn("Never transcribe visible preview facts into SQL", guidance)
+        self.assertIn("Submit no draft/superseded statements", guidance)
 
         self.assertIn("Named tables hold truth/logic", guidance)
-        self.assertIn("entities, relations, coverage, provenance current", guidance)
+        self.assertIn("keyed entities/relations/provenance", guidance)
         self.assertIn("Results do not update them", guidance)
-        self.assertIn("Ready route", guidance)
-        self.assertIn("opaque auth refs unchanged only to requested operation", guidance)
+        self.assertIn("Ready routes", guidance)
+        self.assertIn("opaque auth refs only for the requested operation", guidance)
         self.assertIn("no preflight", guidance)
-        self.assertIn("CURRENT SOURCE SET", guidance)
+        self.assertIn("current source set", guidance)
         self.assertIn("one set-wise upsert", guidance)
-        self.assertIn("decision/evidence SELECT", guidance)
+        self.assertIn("request-specific decision SELECT", guidance)
         self.assertIn(
-            "is_current_batch=1 AND tool_name='exact visible tool name'",
+            "is_current_batch=1 AND tool_name='exact visible name'",
             guidance,
         )
-        self.assertIn("item.value", guidance)
-        self.assertIn("HTTP body is $.content", guidance)
-        self.assertIn("request URL is $.url", guidance)
-        self.assertIn("Pass `rows=[]`", guidance)
-        self.assertIn("add no source_url/result_id predicate", guidance)
-        self.assertIn("Store t.source_url/t.result_id provenance", guidance)
-        self.assertIn("Multi-source prose", guidance)
-        self.assertIn("inspect the bounded set once", guidance)
-        self.assertIn("Never import memory/previews", guidance)
-        self.assertIn("mandatory top-level rows", guidance)
-        self.assertIn("joined to __tool_results by result_id", guidance)
-        self.assertIn("put sourced facts, URLs, or link handles in SQL literals", guidance)
-        self.assertIn("Bound fields only transcribe evidence", guidance)
-        self.assertIn("qualitative claims do not support numbers", guidance)
-        self.assertIn("Structured messages: derive/bind every field", guidance)
-        self.assertIn("state/status uses :source_status or json_extract", guidance)
-        self.assertIn("never a literal", guidance)
-        self.assertIn("No peer-local keys/call IDs", guidance)
-        self.assertIn("one result_id at a time", guidance)
-        self.assertIn("Upsert stable keys and refresh mutable fields", guidance)
-        self.assertIn("same-batch final SELECT must return its keyed rows", guidance)
-        self.assertIn("affected 0 plus empty readback is failure", guidance)
-        self.assertIn("counts, joins, gaps, ranks", guidance)
-        self.assertIn("`will_continue_work=true` for reads that may trigger another tool", guidance)
-        self.assertIn("including queues; otherwise false", guidance)
-        self.assertIn("Deliver those rows without rereading", guidance)
-        self.assertIn("values as :name in `bindings`", guidance)
-        self.assertIn("exact tool_name metadata may be a SQL literal", guidance)
-        self.assertIn("Upserts: VALUES match columns/no WHERE", guidance)
+        self.assertIn("Parent fields come from result_json", guidance)
+        self.assertIn("children from json_each(actual array)", guidance)
+        self.assertIn("every supported field in one top-level row per result_id", guidance)
+        self.assertIn("join rows to __tool_results", guidance)
+        self.assertIn("Never type sourced facts/URLs/classifications into SQL", guidance)
+        self.assertIn("Bound interpretations only transcribe evidence", guidance)
+        self.assertIn("INSERT SELECT directly from the latest __messages payload", guidance)
+        self.assertIn("derive every field plus message_id", guidance)
+        self.assertIn("never pre-read or quote state/status", guidance)
+        self.assertIn("never import siblings singly", guidance)
+        self.assertIn("Upsert stable keys and mutable provenance", guidance)
+        self.assertIn("Affected 0 plus empty readback is failure", guidance)
+        self.assertIn("Bind authored/messy values as :name", guidance)
         self.assertIn("INSERT SELECT needs WHERE 1=1 before ON CONFLICT", guidance)
+        self.assertIn("UNION top-one needs a scalar subquery/CTE", guidance)
+        self.assertIn("Reads that may trigger another tool use will_continue_work=true", guidance)
         self.assertIn("LIVE SCHEMA is authoritative", guidance)
         self.assertIn("do not rediscover them", guidance)
         self.assertIn("shown durable domain table", guidance)
+        self.assertIn("aggregate-only and SELECT-all are incomplete", guidance)
         self.assertIn("first sqlite_batch", guidance)
         self.assertIn("call 1 only targeted sqlite_master", guidance)
         self.assertIn("meaningful domain noun from the request", guidance)
@@ -437,15 +447,17 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
             second_source,
         ])
 
-        self.assertIn("form a working set and remain transient", warning)
-        self.assertIn("next action must be sqlite_batch", warning)
+        self.assertIn("may form a reusable working set", warning)
+        self.assertIn("bounded small report", warning)
+        self.assertIn("Otherwise the next action is sqlite_batch", warning)
         self.assertIn("durable named entity/relationship tables", warning)
         self.assertIn("PRIMARY KEY/UNIQUE and provenance (not TEMP/CTAS)", warning)
         self.assertIn("reconcile this source batch", warning)
         self.assertIn("query coverage gaps", warning)
-        self.assertIn("Import same-shaped siblings in one set query", warning)
+        self.assertIn("Import same-shaped siblings with `is_current_batch=1`", warning)
+        self.assertIn("never filter result_id, source_url, or link handles", warning)
         self.assertIn("separate statements only for different entity shapes", warning)
-        self.assertIn("Do not answer or act from transient results", warning)
+        self.assertIn("Do not answer or act from a reusable transient work set", warning)
         self.assertNotIn("FIRST-RUN GUIDED INTAKE", warning)
 
         inspection = (
@@ -506,6 +518,30 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
                 second_source,
                 modeled,
             ]),
+            "",
+        )
+
+    def test_http_mutation_receipts_do_not_create_multi_source_warning(self):
+        source_read = (
+            "http_request",
+            {"method": "GET", "url": "https://crm.example.test/accounts"},
+            "complete",
+        )
+        mutation_receipt = (
+            "http_request",
+            {"method": "PATCH", "url": "https://crm.example.test/accounts/acct-1"},
+            "complete",
+        )
+
+        self.assertEqual(
+            prompt_context._build_unreconciled_source_model_warning([
+                source_read,
+                mutation_receipt,
+            ]),
+            "",
+        )
+        self.assertEqual(
+            prompt_context._build_unreconciled_source_model_warning([mutation_receipt]),
             "",
         )
 
