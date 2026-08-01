@@ -17,15 +17,50 @@ def append_footer_if_needed(
     html_body: str,
     plaintext_body: str,
 ) -> tuple[str, str]:
+    updated_html, updated_plain, _ = _append_footer(
+        agent,
+        html_body,
+        plaintext_body,
+        consume_throttle_footer=True,
+    )
+    return updated_html, updated_plain
+
+
+def append_footer_for_review(
+    agent: PersistentAgent | None,
+    html_body: str,
+    plaintext_body: str,
+) -> tuple[str, str, bool]:
+    """Render a reviewable footer without consuming one-time delivery state."""
+    return _append_footer(
+        agent,
+        html_body,
+        plaintext_body,
+        consume_throttle_footer=False,
+    )
+
+
+def consume_reviewed_throttle_footer(agent: PersistentAgent | None) -> None:
+    if agent is not None:
+        _consume_throttle_footer_if_pending(agent)
+
+
+def _append_footer(
+    agent: PersistentAgent | None,
+    html_body: str,
+    plaintext_body: str,
+    *,
+    consume_throttle_footer: bool,
+) -> tuple[str, str, bool]:
     """
     Append a configured footer to the provided HTML/plaintext bodies when the
     owning agent is associated with a free plan (or an organization without seats).
     """
     if not agent:
-        return html_body, plaintext_body
+        return html_body, plaintext_body, False
 
     if not _should_apply_footer(agent):
-        if switch_is_active(AGENT_CRON_THROTTLE):
+        if consume_throttle_footer and switch_is_active(AGENT_CRON_THROTTLE):
             try:
                 redis_client = get_redis_client()
                 redis_client.delete(cron_throttle_pending_footer_key(str(agent.id)))
@@ -35,25 +70,32 @@ def append_footer_if_needed(
                     agent.id,
                     exc_info=True,
                 )
-        return html_body, plaintext_body
+        return html_body, plaintext_body, False
 
-    throttle_footer = _consume_throttle_footer_if_pending(agent)
+    throttle_footer = _throttle_footer_if_pending(
+        agent,
+        consume=consume_throttle_footer,
+    )
     if throttle_footer is not None:
         updated_html = _append_section(html_body, throttle_footer.html_content)
         updated_plain = _append_section(plaintext_body, throttle_footer.text_content, separator="\n\n")
-        return updated_html, updated_plain
+        return updated_html, updated_plain, True
 
     footer = _pick_random_footer()
     if footer is None:
-        return html_body, plaintext_body
+        return html_body, plaintext_body, False
 
     updated_html = _append_section(html_body, footer.html_content)
     updated_plain = _append_section(plaintext_body, footer.text_content, separator="\n\n")
 
-    return updated_html, updated_plain
+    return updated_html, updated_plain, False
 
 
 def _consume_throttle_footer_if_pending(agent: PersistentAgent):
+    return _throttle_footer_if_pending(agent, consume=True)
+
+
+def _throttle_footer_if_pending(agent: PersistentAgent, *, consume: bool):
     if not switch_is_active(AGENT_CRON_THROTTLE):
         return None
 
@@ -93,17 +135,18 @@ def _consume_throttle_footer_if_pending(agent: PersistentAgent):
         upgrade_link=upgrade_link,
     )
 
-    try:
-        redis_client.delete(pending_key)
-        ttl_days = int(getattr(settings, "AGENT_CRON_THROTTLE_NOTICE_TTL_DAYS", 7))
-        ttl_seconds = max(1, ttl_days * 86400)
-        redis_client.set(
-            cron_throttle_footer_cooldown_key(str(agent.id)),
-            "1",
-            ex=ttl_seconds,
-        )
-    except Exception:
-        logger.debug("Failed to consume throttle footer pending flag for agent %s", agent.id, exc_info=True)
+    if consume:
+        try:
+            redis_client.delete(pending_key)
+            ttl_days = int(getattr(settings, "AGENT_CRON_THROTTLE_NOTICE_TTL_DAYS", 7))
+            ttl_seconds = max(1, ttl_days * 86400)
+            redis_client.set(
+                cron_throttle_footer_cooldown_key(str(agent.id)),
+                "1",
+                ex=ttl_seconds,
+            )
+        except Exception:
+            logger.debug("Failed to consume throttle footer pending flag for agent %s", agent.id, exc_info=True)
 
     return footer
 

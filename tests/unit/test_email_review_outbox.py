@@ -6,7 +6,7 @@ from unittest.mock import patch
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 from waffle.testutils import override_flag
@@ -527,6 +527,58 @@ class EmailReviewOutboxTests(TestCase):
         self.assertEqual(payload["bodyHtml"], review.rendered_html_body)
         self.assertIn("Replacement &amp; final", payload["bodyHtml"])
         self.assertEqual(review.rendered_plaintext_body, "Replacement & final")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_review_render_defers_throttle_footer_consumption_until_approval(self, _delay_mock):
+        class _FakeRedis:
+            def __init__(self):
+                self.values = {}
+
+            def get(self, key):
+                return self.values.get(key)
+
+            def set(self, key, value, ex=None):
+                self.values[key] = value
+                return True
+
+            def delete(self, key):
+                self.values.pop(key, None)
+                return 1
+
+        from api.services.cron_throttle import (
+            cron_throttle_footer_cooldown_key,
+            cron_throttle_pending_footer_key,
+        )
+
+        fake_redis = _FakeRedis()
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        cooldown_key = cron_throttle_footer_cooldown_key(str(self.agent.id))
+        fake_redis.set(pending_key, "1")
+
+        with (
+            patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
+            patch("api.agent.comms.email_footer_service.get_redis_client", return_value=fake_redis),
+        ):
+            review = queue_message_for_review(self._message())
+            self.assertTrue(review.rendered_includes_throttle_footer)
+            self.assertTrue(fake_redis.get(pending_key))
+            self.assertFalse(fake_redis.get(cooldown_key))
+
+            review = update_pending_review_message(
+                review,
+                actor=self.owner,
+                expected_version=1,
+                changes={"body": "Final reviewed body"},
+            )
+            self.assertTrue(review.rendered_includes_throttle_footer)
+            self.assertTrue(fake_redis.get(pending_key))
+            self.assertFalse(fake_redis.get(cooldown_key))
+
+            approve_review(review, actor=self.owner, expected_version=2)
+
+        self.assertFalse(fake_redis.get(pending_key))
+        self.assertTrue(fake_redis.get(cooldown_key))
 
     def test_expiry_records_manager_visible_action(self):
         review = queue_message_for_review(self._message())

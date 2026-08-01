@@ -17,4 +17,9 @@ class Migration(migrations.Migration):
             name="rendered_plaintext_body",
             field=models.TextField(blank=True),
         ),
+        migrations.AddField(
+            model_name="outboundemailreview",
+            name="rendered_includes_throttle_footer",
+            field=models.BooleanField(default=False),
+        ),
     ]

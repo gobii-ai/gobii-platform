@@ -9,6 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
+from api.agent.comms.email_footer_service import consume_reviewed_throttle_footer
 from api.agent.comms.email_transport_content import render_email_transport_content
 from api.agent.comms.email_threading import get_message_contact_address
 from api.models import (
@@ -183,14 +184,14 @@ def compute_message_content_hash(message: PersistentAgentMessage) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _render_review_revision(message: PersistentAgentMessage) -> tuple[str, str]:
-    html_body, plaintext_body, html_snippet = render_email_transport_content(message)
+def _render_review_revision(message: PersistentAgentMessage) -> tuple[str, str, bool]:
+    html_body, plaintext_body, html_snippet, includes_throttle_footer = render_email_transport_content(message)
     message.raw_payload = merge_chat_body_html_cache(
         message.raw_payload,
         message.body,
         rendered_html=html_snippet,
     )
-    return html_body, plaintext_body
+    return html_body, plaintext_body, includes_throttle_footer
 
 
 def queue_message_for_review(message: PersistentAgentMessage) -> OutboundEmailReview:
@@ -198,7 +199,7 @@ def queue_message_for_review(message: PersistentAgentMessage) -> OutboundEmailRe
         raise OutboundEmailReviewError("Only outbound email can be placed in the Outbox.")
     snapshot_message_attachments(message)
     content_hash = compute_message_content_hash(message)
-    rendered_html_body, rendered_plaintext_body = _render_review_revision(message)
+    rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(message)
     message.latest_status = DeliveryStatus.PENDING_APPROVAL
     message.latest_error_code = ""
     message.latest_error_message = ""
@@ -209,6 +210,7 @@ def queue_message_for_review(message: PersistentAgentMessage) -> OutboundEmailRe
         content_hash=content_hash,
         rendered_html_body=rendered_html_body,
         rendered_plaintext_body=rendered_plaintext_body,
+        rendered_includes_throttle_footer=includes_throttle_footer,
         expires_at=timezone.now() + timedelta(days=OUTBOX_EXPIRY_DAYS),
     )
     track_review_event(
@@ -349,13 +351,14 @@ def update_pending_review_message(
         message.body = str(changes["body"] or "")
     if "attachmentNodeIds" in changes:
         replace_message_attachments(message, changes["attachmentNodeIds"])
-    rendered_html_body, rendered_plaintext_body = _render_review_revision(message)
+    rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(message)
     message.save()
 
     locked.content_version += 1
     locked.content_hash = compute_message_content_hash(message)
     locked.rendered_html_body = rendered_html_body
     locked.rendered_plaintext_body = rendered_plaintext_body
+    locked.rendered_includes_throttle_footer = includes_throttle_footer
     locked.last_edited_at = timezone.now()
     locked.last_edited_by = actor
     locked.save(
@@ -364,6 +367,7 @@ def update_pending_review_message(
             "content_hash",
             "rendered_html_body",
             "rendered_plaintext_body",
+            "rendered_includes_throttle_footer",
             "last_edited_at",
             "last_edited_by",
             "updated_at",
@@ -464,6 +468,8 @@ def approve_review(
     if review_thread_changed(locked) and not acknowledge_thread_changed:
         raise OutboundEmailReviewError("thread_changed")
     authorize_reviewed_external_contacts(message)
+    if locked.rendered_includes_throttle_footer:
+        consume_reviewed_throttle_footer(message.owner_agent)
 
     now = timezone.now()
     locked.status = OutboundEmailReview.Status.APPROVED
