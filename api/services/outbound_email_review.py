@@ -184,8 +184,15 @@ def compute_message_content_hash(message: PersistentAgentMessage) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _render_review_revision(message: PersistentAgentMessage) -> tuple[str, str, bool]:
-    html_body, plaintext_body, html_snippet, includes_throttle_footer = render_email_transport_content(message)
+def _render_review_revision(
+    message: PersistentAgentMessage,
+    *,
+    allow_throttle_footer: bool,
+) -> tuple[str, str, bool]:
+    html_body, plaintext_body, html_snippet, includes_throttle_footer = render_email_transport_content(
+        message,
+        allow_throttle_footer=allow_throttle_footer,
+    )
     message.raw_payload = merge_chat_body_html_cache(
         message.raw_payload,
         message.body,
@@ -194,19 +201,29 @@ def _render_review_revision(message: PersistentAgentMessage) -> tuple[str, str, 
     return html_body, plaintext_body, includes_throttle_footer
 
 
+@transaction.atomic
 def queue_message_for_review(message: PersistentAgentMessage) -> OutboundEmailReview:
     if not message.is_outbound or message.from_endpoint.channel != CommsChannel.EMAIL:
         raise OutboundEmailReviewError("Only outbound email can be placed in the Outbox.")
+    agent = PersistentAgent.objects.select_for_update().get(pk=message.owner_agent_id)
     snapshot_message_attachments(message)
     content_hash = compute_message_content_hash(message)
-    rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(message)
+    throttle_footer_available = not OutboundEmailReview.objects.filter(
+        agent=agent,
+        status=OutboundEmailReview.Status.PENDING,
+        rendered_includes_throttle_footer=True,
+    ).exists()
+    rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(
+        message,
+        allow_throttle_footer=throttle_footer_available,
+    )
     message.latest_status = DeliveryStatus.PENDING_APPROVAL
     message.latest_error_code = ""
     message.latest_error_message = ""
     message.save(update_fields=["raw_payload", "latest_status", "latest_error_code", "latest_error_message"])
     review = OutboundEmailReview.objects.create(
         message=message,
-        agent=message.owner_agent,
+        agent=agent,
         content_hash=content_hash,
         rendered_html_body=rendered_html_body,
         rendered_plaintext_body=rendered_plaintext_body,
@@ -351,7 +368,10 @@ def update_pending_review_message(
         message.body = str(changes["body"] or "")
     if "attachmentNodeIds" in changes:
         replace_message_attachments(message, changes["attachmentNodeIds"])
-    rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(message)
+    rendered_html_body, rendered_plaintext_body, includes_throttle_footer = _render_review_revision(
+        message,
+        allow_throttle_footer=locked.rendered_includes_throttle_footer,
+    )
     message.save()
 
     locked.content_version += 1

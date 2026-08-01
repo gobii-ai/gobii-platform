@@ -22,4 +22,15 @@ class Migration(migrations.Migration):
             name="rendered_includes_throttle_footer",
             field=models.BooleanField(default=False),
         ),
+        migrations.AddConstraint(
+            model_name="outboundemailreview",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(
+                    ("rendered_includes_throttle_footer", True),
+                    ("status", "pending"),
+                ),
+                fields=("agent",),
+                name="outbox_one_pending_throttle_footer",
+            ),
+        ),
     ]

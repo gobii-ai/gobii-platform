@@ -30,6 +30,8 @@ def append_footer_for_review(
     agent: PersistentAgent | None,
     html_body: str,
     plaintext_body: str,
+    *,
+    allow_throttle_footer: bool = True,
 ) -> tuple[str, str, bool]:
     """Render a reviewable footer without consuming one-time delivery state."""
     return _append_footer(
@@ -37,6 +39,7 @@ def append_footer_for_review(
         html_body,
         plaintext_body,
         consume_throttle_footer=False,
+        allow_throttle_footer=allow_throttle_footer,
     )
 
 
@@ -51,6 +54,7 @@ def _append_footer(
     plaintext_body: str,
     *,
     consume_throttle_footer: bool,
+    allow_throttle_footer: bool = True,
 ) -> tuple[str, str, bool]:
     """
     Append a configured footer to the provided HTML/plaintext bodies when the
@@ -72,9 +76,13 @@ def _append_footer(
                 )
         return html_body, plaintext_body, False
 
-    throttle_footer = _throttle_footer_if_pending(
-        agent,
-        consume=consume_throttle_footer,
+    throttle_footer = (
+        _throttle_footer_if_pending(
+            agent,
+            consume=consume_throttle_footer,
+        )
+        if allow_throttle_footer
+        else None
     )
     if throttle_footer is not None:
         updated_html = _append_section(html_body, throttle_footer.html_content)

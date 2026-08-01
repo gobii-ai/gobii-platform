@@ -12278,6 +12278,16 @@ class OutboundEmailReview(models.Model):
             models.Index(fields=["agent", "status", "-queued_at"], name="outbox_agent_status_idx"),
             models.Index(fields=["status", "expires_at"], name="outbox_status_expiry_idx"),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent"],
+                condition=models.Q(
+                    status="pending",
+                    rendered_includes_throttle_footer=True,
+                ),
+                name="outbox_one_pending_throttle_footer",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"OutboundEmailReview<{self.id}:{self.status}>"
