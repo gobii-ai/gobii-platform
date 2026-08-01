@@ -36,6 +36,7 @@ class NativeHttpCase:
     expected_http_requests: tuple[HttpRequestExpectation, ...]
     forbidden_url_terms: tuple[tuple[str, ...], ...] = ()
     response_term_groups: tuple[tuple[str, ...], ...] = ()
+    semantic_response_intent: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
 
     def mock_config(self) -> dict[str, dict[str, Any]]:
@@ -350,6 +351,26 @@ class NativeHttpScenarioBase(EvalScenario, ScenarioExecutionTools):
                 artifacts={"message": final_response} if final_response else {},
             )
             return
+
+        if case.semantic_response_intent and final_response:
+            choice, reasoning = self.llm_judge(
+                question=(
+                    "Does the final response clearly communicate this required outcome, even if it uses different "
+                    f"words? Required outcome: {case.semantic_response_intent}"
+                ),
+                context=f"User request:\n{case.prompt}\n\nFinal response:\n{body}",
+                options=["Required outcome communicated", "Required outcome missing"],
+            )
+            if choice == "Required outcome communicated":
+                self.record_task_result(
+                    run_id,
+                    None,
+                    EvalRunTask.Status.PASSED,
+                    task_name="verify_response",
+                    observed_summary=f"Semantic response judge accepted equivalent wording: {reasoning}",
+                    artifacts={"message": final_response},
+                )
+                return
 
         self.record_task_result(
             run_id,

@@ -552,6 +552,9 @@ def _derives_bound_structured_message_fields(
 
 
 def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str) -> bool:
+    if _insert_select_derives_structured_outcome(lowered_statement):
+        return True
+
     assignment_sources = {
         "state": "delivery_status",
         "provider_message_id": "provider_message_id",
@@ -585,6 +588,69 @@ def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str)
             return False
     where_match = re.search(r"\bwhere\b(.+)", lowered_statement, flags=re.DOTALL)
     return where_match is not None and "recipient" in where_match.group(1)
+
+
+def _insert_select_derives_structured_outcome(statement: str) -> bool:
+    parsed = sqlparse.parse(statement)
+    if len(parsed) != 1:
+        return False
+    tokens = [token for token in parsed[0].tokens if not token.is_whitespace]
+    target = next(
+        (
+            tokens[index + 1]
+            for index, token in enumerate(tokens[:-1])
+            if str(getattr(token, "normalized", "")).casefold() == "into"
+        ),
+        None,
+    )
+    if not isinstance(target, sqlparse.sql.Function):
+        return False
+    target_columns = next(
+        (
+            token
+            for token in target.tokens
+            if isinstance(token, sqlparse.sql.Parenthesis)
+        ),
+        None,
+    )
+    projection = next(
+        (
+            tokens[index + 1]
+            for index, token in enumerate(tokens[:-1])
+            if str(getattr(token, "normalized", "")).casefold() == "select"
+        ),
+        None,
+    )
+    if target_columns is None or not isinstance(projection, sqlparse.sql.IdentifierList):
+        return False
+
+    column_list = next(
+        (
+            token
+            for token in target_columns.tokens
+            if isinstance(token, sqlparse.sql.IdentifierList)
+        ),
+        None,
+    )
+    if column_list is None:
+        return False
+    columns = [
+        str(item).strip('"`[] ').casefold()
+        for item in column_list.get_identifiers()
+    ]
+    expressions = [str(item).strip() for item in projection.get_identifiers()]
+    if len(columns) != len(expressions):
+        return False
+    assignments = dict(zip(columns, expressions))
+    return all(
+        _direct_source_assignment(assignments.get(column, ""), source_field)
+        for column, source_field in {
+            "recipient": "recipient",
+            "state": "delivery_status",
+            "provider_message_id": "provider_message_id",
+            "sent_at": "sent_at",
+        }.items()
+    )
 
 
 def _direct_source_assignment(expression: str, source_field: str) -> bool:

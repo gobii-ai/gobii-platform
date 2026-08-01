@@ -19,6 +19,7 @@ from api.evals.registry import ScenarioRegistry, register_scenario
 from api.evals.tool_params import resolved_tool_param
 from api.evals.stop_policy import (
     split_sql_statements,
+    sqlite_batch_is_read_only,
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_read,
     sqlite_batch_is_only_planning_state_mutation,
@@ -1392,7 +1393,10 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
                 call.tool_name in SUBSTANTIVE_WORK_TOOL_NAMES
                 and not (self.requires_fallback_copy and call.tool_name == "send_email")
             )
-            or call.tool_name == "sqlite_batch"
+            or (
+                call.tool_name == "sqlite_batch"
+                and not sqlite_batch_is_read_only(call)
+            )
         ]
         request_positions = [
             index for index, call in enumerate(calls)

@@ -316,6 +316,35 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             )
         )
 
+    def test_structured_peer_import_accepts_insert_select_upsert(self):
+        fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
+        sql = (
+            "INSERT INTO outreach_threads "
+            "(thread_id, recipient, owner_name, state, provider_message_id, sent_at, source_message_id) "
+            "SELECT 'manager:wave:prospect-77', "
+            "json_extract(m.structured_payload_json, '$.recipient'), "
+            "'Seller One', json_extract(m.structured_payload_json, '$.delivery_status'), "
+            "json_extract(m.structured_payload_json, '$.provider_message_id'), "
+            "json_extract(m.structured_payload_json, '$.sent_at'), m.message_id "
+            "FROM (SELECT message_id, structured_payload_json FROM __messages "
+            "WHERE is_outbound=0 AND structured_payload_json IS NOT NULL "
+            "ORDER BY seq DESC LIMIT 1) m "
+            "ON CONFLICT(recipient) DO UPDATE SET "
+            "state=excluded.state, provider_message_id=excluded.provider_message_id, "
+            "sent_at=excluded.sent_at, source_message_id=excluded.source_message_id"
+        )
+
+        self.assertTrue(_derives_structured_message_fields(sql, fields))
+        self.assertFalse(
+            _derives_structured_message_fields(
+                sql.replace(
+                    "json_extract(m.structured_payload_json, '$.delivery_status')",
+                    "'bounced'",
+                ),
+                fields,
+            )
+        )
+
     def test_structured_peer_import_accepts_direct_message_scalar_subqueries(self):
         fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
         latest_payload = (

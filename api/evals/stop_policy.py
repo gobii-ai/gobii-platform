@@ -112,6 +112,15 @@ def sqlite_batch_is_only_eval_bookkeeping_read(tool_call) -> bool:
     )
 
 
+def sqlite_batch_is_read_only(tool_call) -> bool:
+    sql = sqlite_batch_sql(tool_call)
+    if not sql:
+        return False
+
+    statements = split_sql_statements(sql)
+    return bool(statements) and not any(sql_mutates(statement) for statement in statements)
+
+
 def sqlite_batch_mutates_agent_config_field(tool_call, field_name: str) -> bool:
     if field_name not in AGENT_CONFIG_FIELD_PATTERNS:
         return False

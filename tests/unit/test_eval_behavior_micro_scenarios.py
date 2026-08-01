@@ -96,6 +96,7 @@ from api.evals.scenarios.sqlite_tool_results import _source_relationship_read_fa
 from api.evals.scenarios.weather_lookup import _is_free_weather_request, _weather_lookup_http_mock
 from api.evals.stop_policy import (
     should_stop_for_eval_policy,
+    sqlite_batch_is_read_only,
     sqlite_batch_mutates_agent_config_field,
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_read,
@@ -813,6 +814,24 @@ class BehaviorMicroHelperTests(TestCase):
         call.result = '{"status":"ok","results":[{"message":"Query 0 affected 1 rows."}]}'
         call.save(update_fields=["result"])
         return call
+
+    def test_read_only_sqlite_orientation_is_not_substantive_work(self):
+        read = self._add_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "SELECT result_id, json_extract(result_json, '$.results[0].url') "
+                    "FROM __tool_results WHERE is_current_batch=1"
+                )
+            },
+        )
+        write = self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "CREATE TABLE prospects (id TEXT PRIMARY KEY)"},
+        )
+
+        self.assertTrue(sqlite_batch_is_read_only(read))
+        self.assertFalse(sqlite_batch_is_read_only(write))
 
     def _add_orchestrator_completion(self):
         return PersistentAgentCompletion.objects.create(agent=self.agent, eval_run=self.run)
