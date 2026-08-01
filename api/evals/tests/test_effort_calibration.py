@@ -2652,7 +2652,7 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn("New substantial multi-round work", system_prompt)
-        self.assertIn("Never use SQLite for a bounded small report", system_prompt)
+        self.assertIn("Use SQLite for material row reconciliation", system_prompt)
         self.assertIn("For prose, inspect once", system_prompt)
         self.assertIn("aggregate-only and SELECT-all are incomplete", system_prompt)
         self.assertIn("Delete/update all contradicted behavior in one span", system_prompt)
@@ -2681,7 +2681,10 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
-        self.assertIn("Short action or current-batch continuation: call its tool directly", system_prompt)
+        self.assertIn(
+            "Short action or current-batch continuation: material rows via SQLite",
+            system_prompt,
+        )
         self.assertIn("Ready routes", system_prompt)
         self.assertIn("opaque auth refs only for the requested operation", system_prompt)
         self.assertIn("no preflight", system_prompt)
