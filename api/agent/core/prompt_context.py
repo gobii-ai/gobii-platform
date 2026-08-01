@@ -4018,7 +4018,8 @@ def _get_continuation_mode_prompt_block() -> str:
     return (
         "## Continuation Mode\n\n"
         "Continue from history and state without restarting solved work. Identify the latest result or blocker, then "
-        "take the smallest concrete next action and follow tool retry/setup guidance. Reconcile fresh completion/outcome "
+        "take the smallest concrete next action and follow tool retry/setup guidance. When structured result_meta gives "
+        "an import shape, execute it next without pre-reading or copying its source. Reconcile fresh completion/outcome "
         "events into canonical state before counts/queues. Under load, use the plan and "
         "SQLite as the control board: preserve owners and deadlines, finish or park one bounded step, then take the "
         "highest-impact authorized commitment. Park blocked streams, continue unblocked work, and negotiate capacity/scope "

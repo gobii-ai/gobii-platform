@@ -1185,6 +1185,7 @@ class PreviewByteLimitTests(SimpleTestCase):
             "step-first-model",
             payload,
             named_model_tables=set(),
+            will_continue_work=True,
         )
 
         for expected in (
@@ -1206,6 +1207,9 @@ class PreviewByteLimitTests(SimpleTestCase):
             self.assertIn(expected, info.meta)
         self.assertNotIn("[SOURCE ARRAYS", info.preview_text)
         self.assertNotIn(" VALUES ", info.preview_text)
+        self.assertIn("NEXT: one sqlite_batch rows=[],bindings={}", info.preview_text)
+        self.assertIn("INSERT ... SELECT, then decision SELECT in that batch", info.preview_text)
+        self.assertIn("Never SELECT/inspect/copy __tool_results first", info.preview_text)
         self.assertEqual(info.meta.count("[SOURCE SET"), 1)
         self.assertNotIn("result_id=", info.meta)
         self.assertNotIn("json_extract(j.value,'$.id')", info.meta)

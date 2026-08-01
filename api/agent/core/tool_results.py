@@ -587,9 +587,9 @@ def prepare_tool_results_for_prompt(
                 # instead of the set-wise import needed for the durable model.
                 context_hint = None
                 preview_text = (
-                    "[SOURCE SET STORED IN __tool_results. Create/evolve the durable model and use the exact "
-                    "result_meta INSERT ... SELECT shape now; __tool_results is read-only source. Do not inspect "
-                    "or copy the source first.]"
+                    "[NEXT: one sqlite_batch rows=[],bindings={}. CREATE/evolve the model, use result_meta's "
+                    "INSERT ... SELECT, then decision SELECT in that batch. Never SELECT/inspect/copy "
+                    "__tool_results first.]"
                 )
                 is_inline = False
         if requires_source_import:

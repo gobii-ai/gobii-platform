@@ -34,6 +34,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     _insert_values_derive_bound_payload_fields,
     _mutation_target_table,
     _repeated_source_import_tables,
+    _release_source_url_column,
     _schema_grounded_read_failures,
     _sqlite_attempt_failures,
     _source_array_first_write_failures,
@@ -89,6 +90,17 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
         FROM release_events
         ORDER BY starts_at;
     """
+
+    def test_release_model_accepts_semantic_provenance_column_names(self):
+        self.assertEqual(
+            _release_source_url_column({"release_id", "event_source_url"}),
+            "event_source_url",
+        )
+        self.assertEqual(
+            _release_source_url_column({"release_id", "feed_source_url"}),
+            "feed_source_url",
+        )
+        self.assertIsNone(_release_source_url_column({"release_id", "service"}))
 
     def test_schema_grounding_accepts_direct_live_schema_read(self):
         call = _sqlite_call(
