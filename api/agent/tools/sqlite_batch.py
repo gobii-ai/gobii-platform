@@ -1947,7 +1947,7 @@ def _is_redundant_transaction_wrapper(sql: str) -> bool:
 
 
 def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
-    persisted_patch_seen = False
+    persisted_patch_fields: set[str] = set()
     for query in queries:
         for statement in sqlparse.parse(query):
             if not _structural_sql(statement):
@@ -1959,13 +1959,26 @@ def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
             )
             if not uses_config_patch:
                 continue
-            if re.search(
-                r"\b(charter|schedule|appearance)\b\s*=\s*patch_text\s*\(\s*\1\b",
-                structural_sql,
-                re.IGNORECASE,
-            ):
-                persisted_patch_seen = True
-            elif not persisted_patch_seen:
+
+            patched_fields = {
+                match.group(1).lower()
+                for match in re.finditer(
+                    r"\bpatch_text\s*\(\s*(charter|schedule|appearance)\b",
+                    structural_sql,
+                    re.IGNORECASE,
+                )
+            }
+            persisted_patch_fields.update(
+                match.group(1).lower()
+                for match in re.finditer(
+                    r"\b(charter|schedule|appearance)\b\s*=\s*patch_text\s*\(\s*\1\b",
+                    structural_sql,
+                    re.IGNORECASE,
+                )
+            )
+
+            # A preview is safe only after this same durable field was assigned.
+            if not patched_fields or patched_fields - persisted_patch_fields:
                 return str(statement).strip()
     return None
 

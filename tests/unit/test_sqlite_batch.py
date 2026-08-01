@@ -546,6 +546,37 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertEqual(out.get("status"), "ok", out.get("message"))
         self.assertEqual(charter, "New charter")
 
+    def test_config_patch_preview_requires_same_field_to_be_persisted(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __agent_config("
+                    "id INTEGER PRIMARY KEY, charter TEXT, appearance TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO __agent_config(id, charter, appearance) "
+                    "VALUES (1, 'Old charter', 'Old appearance')"
+                )
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "UPDATE __agent_config SET appearance=patch_text("
+                        "appearance, 'Old appearance', 'New appearance') WHERE id=1;"
+                        "SELECT patch_text(charter, 'Old charter', 'New charter') "
+                        "FROM __agent_config WHERE id=1"
+                    ),
+                    "will_continue_work": True,
+                },
+            )
+            with sqlite3.connect(db_path) as conn:
+                appearance = conn.execute(
+                    "SELECT appearance FROM __agent_config WHERE id=1"
+                ).fetchone()[0]
+
+        self.assertEqual(out.get("error_code"), "config_patch_not_persisted")
+        self.assertEqual(appearance, "Old appearance")
+
     def test_agent_config_patch_relies_on_patch_target_instead_of_redundant_where(self):
         sql = (
             "UPDATE __agent_config SET charter=patch_text("
