@@ -1147,13 +1147,13 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
-        source_links = [
+        closer_links = [
             link
-            for link in soup.find_all("a", {"href": "#create-agent-form"})
-            if "Start Free Trial" in link.get_text(" ", strip=True)
+            for link in soup.find_all("a", {"href": "#hire-agents"})
+            if "Hire your first agent" in link.get_text(" ", strip=True)
         ]
-        self.assertGreaterEqual(len(source_links), 1)
-        self.assertContains(response, "#create-agent-form")
+        self.assertGreaterEqual(len(closer_links), 1)
+        self.assertContains(response, 'id="create-agent-form"')
         self.assertNotContains(response, "scroll-margin-top: 6rem")
         self.assertNotContains(response, "getCreateAgentScrollTop")
         self.assertNotContains(response, "header.hs-header")

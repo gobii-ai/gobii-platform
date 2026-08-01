@@ -438,7 +438,7 @@
 
     {% include "partials/_immersive_overlay_styles.html" %}
   </style>
-  {% if home_use_k %}{% include "home/_k_styles.html" %}{% endif %}
+  {% include "home/_k_styles.html" %}
 {% endblock %}
 {% block content %}
 {% if home_use_k %}
@@ -466,7 +466,7 @@
       <!-- Main Headline -->
       {% include "home/_hero.html" %}
 
-      {% include "home/_spawn_module.html" %}
+      <div class="gk-spawn contents">{% include "home/_spawn_module.html" %}</div>
 
     </div>
   </section>
@@ -1361,3 +1361,5 @@
     {% vite_asset 'src/homepageIntegrations.tsx' %}
   {% endif %}
 {% endblock %}
+
+{% block footer %}{% if home_use_k %}{% include "home/_k_footer.html" %}{% else %}{{ block.super }}{% endif %}{% endblock %}

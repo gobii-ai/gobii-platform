@@ -7,15 +7,16 @@
   <div class="gk-light">
     {% include "home/_k_rows.html" %}
     {% include "home/_k_how_it_works.html" %}
-    <section id="what-is-gobii" class="relative py-10 sm:py-12" aria-labelledby="what-is-gobii-heading" data-animate>
-      <div class="max-w-3xl mx-auto px-6 text-center">
-        <h2 id="what-is-gobii-heading" class="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">What is Gobii?</h2>
-        <p class="mt-4 text-base sm:text-lg leading-relaxed text-slate-600">
+    <section id="what-is-gobii" class="gk-block" aria-labelledby="what-is-gobii-heading" data-animate>
+      <div class="gk-sect-head" style="margin-bottom:0">
+        <span class="gk-eyebrow">THE BIG PICTURE</span>
+        <h2 id="what-is-gobii-heading">What is Gobii?</h2>
+        <p class="gk-sect-sub" style="font-size:16px;max-width:56ch;margin-left:auto;margin-right:auto;line-height:1.7">
           Gobii is an AI agent platform that gives businesses always-on virtual employees capable of browser automation, web research, data collection, and workflow execution.
         </p>
       </div>
     </section>
-    {% include "home/_value_sections.html" %}
+    {% include "home/_k_value_sections.html" %}
     {% include "home/_k_integrations.html" %}
     {% include "home/_k_pricing.html" %}
     {% include "home/_k_faq.html" %}
@@ -25,12 +26,12 @@
         <h2 id="build-your-own-heading">Need something we haven't premade?</h2>
         <p class="gk-sect-sub">Describe the work in plain English and a custom agent takes it from there.</p>
       </div>
-      <div class="relative max-w-5xl mx-auto px-6 pb-4">
+      <div class="gk-spawn relative max-w-5xl mx-auto px-6 pb-4">
         {% include "home/_spawn_module.html" %}
       </div>
     </section>
     {% include "home/_directory.html" %}
-    {% include "home/_vision_and_trust.html" %}
+    {% include "home/_k_closer.html" %}
   </div>
 </main>
 {% include "home/_k_scripts.html" %}
