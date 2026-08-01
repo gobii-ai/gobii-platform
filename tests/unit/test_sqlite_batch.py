@@ -34,6 +34,7 @@ from api.agent.tools.sqlite_batch import (
     _fix_singular_plural_tables,
     _is_redundant_transaction_wrapper,
     _is_typo,
+    _non_persisting_agent_config_patch,
     _SqliteBatchLimits,
     _should_skip_memory_limits_for_virtualapple_emulation,
     _strip_markdown_fences,
@@ -644,6 +645,19 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         self.assertEqual(out.get("status"), "ok")
         self.assertEqual(charter, "New charter")
+
+    def test_appearance_patch_is_a_persisting_config_update(self):
+        sql = (
+            "UPDATE __agent_config SET appearance=patch_text("
+            "appearance, :old, :new) WHERE id=1"
+        )
+
+        self.assertIsNone(_non_persisting_agent_config_patch([sql]))
+        self.assertIsNotNone(
+            _non_persisting_agent_config_patch(
+                [f"SELECT patch_text(appearance, :old, :new) FROM __agent_config"]
+            )
+        )
 
     def test_agent_config_patch_append_persists_once(self):
         with self._with_temp_db() as (db_path, _token, _tmp):

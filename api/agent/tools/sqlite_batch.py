@@ -59,7 +59,8 @@ DEFAULT_SQLITE_BATCH_TERMINATE_GRACE_SECONDS = 1.0
 DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS = 1.0
 CONFIG_PATCH_NOT_PERSISTED_ERROR = "config_patch_not_persisted"
 CONFIG_PATCH_NOT_PERSISTED_MESSAGE = (
-    "Query not executed: SELECT patch_text(...) only computes a value and does not persist agent config. "
+    "Query not executed: patch_text(...) was not assigned back to the same durable config field. "
+    "For appearance or schedule, assign patch_text(field, :old_text, :new_text) to that field. "
     "Use UPDATE __agent_config SET charter=patch_text(charter, :old_text, :new_text) WHERE id=1 "
     "with `bindings`; set old_text='' to append."
 )
@@ -1959,7 +1960,7 @@ def _non_persisting_agent_config_patch(queries: List[str]) -> Optional[str]:
             if not uses_config_patch:
                 continue
             if re.search(
-                r"\bcharter\b\s*=\s*patch_text\s*\(",
+                r"\b(charter|schedule|appearance)\b\s*=\s*patch_text\s*\(\s*\1\b",
                 structural_sql,
                 re.IGNORECASE,
             ):
