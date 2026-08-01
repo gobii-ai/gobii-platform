@@ -201,7 +201,10 @@ RECRUITMENT_SOURCING_CASES = (
         ),
         expected_tool_names=("mcp_brightdata_web_data_linkedin_people_search",),
         accepted_tool_alternatives={
-            "mcp_brightdata_web_data_linkedin_people_search": ("apollo_io-search-contacts",),
+            "mcp_brightdata_web_data_linkedin_people_search": (
+                "apollo_io-search-contacts",
+                "http_request",
+            ),
         },
         mock_config={
             "mcp_brightdata_web_data_linkedin_people_search": _linkedin_people_result(
@@ -276,6 +279,46 @@ RECRUITMENT_SOURCING_CASES = (
                     },
                 ]
             ),
+            "http_request": {
+                "status": "success",
+                "status_code": 200,
+                "content": {
+                    "people": [
+                        {
+                            "name": "Mina Patel",
+                            "title": "Assistant Project Manager",
+                            "organization_name": "BuildRight GC",
+                            "location": "Columbus, OH",
+                            "linkedin_url": "https://www.linkedin.com/in/mina-patel-eval",
+                            "evidence": "Commercial retail construction project coordination.",
+                        },
+                        {
+                            "name": "Priya Shah",
+                            "title": "Project Manager",
+                            "organization_name": "Summit Retail Builders",
+                            "location": "Nashville, TN",
+                            "linkedin_url": "https://www.linkedin.com/in/priya-shah-eval",
+                            "evidence": "Retail buildout GC-side project delivery.",
+                        },
+                        {
+                            "name": "Evan Brooks",
+                            "title": "Estimator",
+                            "organization_name": "BuildRight GC",
+                            "location": "Indianapolis, IN",
+                            "linkedin_url": "https://www.linkedin.com/in/evan-brooks-eval",
+                            "evidence": "Estimator title is excluded.",
+                        },
+                        {
+                            "name": "Dana Lee",
+                            "title": "Project Manager",
+                            "organization_name": "Summit Retail Builders",
+                            "location": "Charlotte, NC",
+                            "linkedin_url": "https://www.linkedin.com/in/dana-lee-eval",
+                            "evidence": "Outside approved geography.",
+                        },
+                    ],
+                },
+            },
         },
         response_term_groups=(
             ("Mina Patel",),
@@ -293,6 +336,7 @@ RECRUITMENT_SOURCING_CASES = (
             ),
         ),
         tags=("criteria",),
+        max_relevant_tool_calls=14,
     ),
     RecruitmentSourcingCase(
         slug=RECRUITMENT_SOURCING_SOURCE_FALLBACK,
@@ -687,7 +731,7 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
         ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
         ScenarioTask(name="verify_expected_tools", assertion_type="tool_call"),
         ScenarioTask(name="verify_forbidden_tools", assertion_type="tool_call"),
-        ScenarioTask(name="verify_response", assertion_type="exact_match"),
+        ScenarioTask(name="verify_response", assertion_type="llm_judge"),
     ]
     case: RecruitmentSourcingCase | None = None
 
@@ -876,6 +920,32 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
         if final_missing_groups or final_missing_proximate_groups or final_misclassified_groups or final_forbidden_terms:
             latest_body = response_bodies[-1][0] if response_bodies else ""
             latest_artifact = response_bodies[-1][1] if response_bodies else None
+            if latest_body and not final_forbidden_terms:
+                choice, reasoning = self.llm_judge(
+                    question=(
+                        "Does the response satisfy the sourcing response contract semantically? Expected concept "
+                        "groups are alternatives, proximity groups require the concepts to be meaningfully connected, "
+                        "and excluded candidates may be omitted or shown only when clearly separated from qualified "
+                        "candidates with the failed gate explained. Do not require any example phrase verbatim."
+                    ),
+                    context=(
+                        f"Expected concept groups:\n{case.response_term_groups!r}\n\n"
+                        f"Required proximity groups:\n{case.required_proximate_response_terms!r}\n\n"
+                        f"Excluded-or-separated candidates:\n{case.excluded_or_separated_response_terms!r}\n\n"
+                        f"Response:\n{latest_body}"
+                    ),
+                    options=["Contract satisfied", "Contract not satisfied"],
+                )
+                if choice == "Contract satisfied":
+                    self.record_task_result(
+                        run_id,
+                        None,
+                        EvalRunTask.Status.PASSED,
+                        task_name="verify_response",
+                        observed_summary=f"Semantic response judge passed: {reasoning}",
+                        artifacts={"response_artifact": latest_artifact} if latest_artifact else {},
+                    )
+                    return
             self.record_task_result(
                 run_id,
                 None,

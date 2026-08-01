@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, tag
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError
 from api.agent.system_skills import shortlist_system_skills
+from api.agent.system_skills.defaults import META_GOBII_SYSTEM_SKILL
 from api.agent.tools.meta_gobii_names import META_GOBII_TOOL_NAMES
 from api.agent.tools.search_tools import get_search_tools_tool
 from api.evals.meta_gobii import _planned_extra_scope_items
@@ -113,7 +114,21 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
 
         self.assertIn("send_agent_message", ordered_tools["items"]["enum"])
         self.assertNotIn("meta_gobii_send_agent_message", ordered_tools["items"]["enum"])
+        self.assertIn(
+            "there is no `meta_gobii_send_agent_message` tool",
+            META_GOBII_SYSTEM_SKILL.prompt_instructions,
+        )
         self.assertIn("never a meta_gobii-prefixed name", ordered_tools["description"])
+
+    def test_schema_invalid_plan_uses_deterministic_fallback(self):
+        case = _implicit_research_team_case()
+        plan_args = _implicit_research_team_plan_args()
+        plan_args["ordered_tools"] = [
+            *plan_args["ordered_tools"],
+            "meta_gobii_send_agent_message",
+        ]
+
+        self.assertTrue(MetaGobiiSystemSkillScenario._plan_args_need_fallback(case, plan_args))
 
     def test_extra_scope_filter_allows_explicit_resource_limit_request(self):
         prompt = (

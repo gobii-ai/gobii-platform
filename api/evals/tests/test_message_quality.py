@@ -148,6 +148,10 @@ class MessageQualityScenarioTests(SimpleTestCase):
         )
 
     def test_outbox_notice_requires_review_and_non_delivery_language(self):
+        self.assertEqual(
+            EmailReviewOutboxCommunicationScenario.tasks[-1].assertion_type,
+            "llm_judge",
+        )
         self.assertTrue(
             EmailReviewOutboxCommunicationScenario._notice_reports_pending_approval(
                 "The email is awaiting approval in the Outbox and has not been sent."

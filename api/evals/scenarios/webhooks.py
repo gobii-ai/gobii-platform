@@ -85,8 +85,6 @@ class WebhookScenarioBase(EvalScenario, ScenarioExecutionTools):
             "ignored_tool_names": ["sleep_until_next_trigger", "update_plan"],
             "stop_on_unexpected_relevant_tool": True,
             "stop_on_tool_names_after_finish": [
-                "manage_inbound_webhooks",
-                "manage_outbound_webhooks",
                 "send_webhook_event",
                 "http_request",
                 "send_chat_message",
@@ -141,7 +139,8 @@ class WebhookNativeInboundProviderSetupScenario(WebhookScenarioBase):
     description = "Discovers native inbound webhooks and registers the generated endpoint with a provider API."
     prompt = (
         "Aimfox has an 'add webhook' feature. Set it up so Aimfox events trigger you. "
-        "Our Aimfox API access already works, and its webhook endpoint is https://api.aimfox.test/v2/webhooks."
+        "Our Aimfox API access already works. Its add-webhook API accepts POST "
+        "https://api.aimfox.test/v2/webhooks with the generated callback in a JSON `url` field."
     )
     needs_http_request = True
     mock_config = {

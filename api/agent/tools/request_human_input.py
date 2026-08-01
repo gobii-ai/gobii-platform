@@ -86,6 +86,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "than asking which vendor/company. Web cards stay pending; follow result guidance to mirror exact cards "
                 "to a separate preferred email/SMS. Ask later only when evidence reveals a consequential choice. Outside intake, "
                 "omit options only for a genuine free-text blocker; use message tools for non-blocking questions. "
+                "Missing email/SMS recipient/detail: call once with false, no preflight/search/chat; generic roles do not count. "
                 f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
             "parameters": {

@@ -831,30 +831,22 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Named tables hold truth/logic; keep entities, relations, coverage, provenance current. Results do not "
-        "update them. Ready route: pass opaque auth refs unchanged only to requested operation; no preflight.\n"
-        "CURRENT SOURCE SET when SQL is materially needed, never for a bounded small report: keyed DDL for every "
-        "relevant entity/relation array, one set-wise upsert, then final "
-        "decision/evidence SELECT. Structured JSON derives item.value across `is_current_batch=1 AND tool_name='exact "
-        "visible tool name'`; add no source_url/result_id filter and store t.source_url/t.result_id. HTTP body is "
-        "$.content; request URL is $.url. Use json_each only on arrays/objects and json_extract on scalars, never `->` "
-        "operators. INSERT...SELECT...ON CONFLICT needs `WHERE 1=1`. Pass "
-        "`rows=[]`; never invent/inspect/filter result IDs. Multi-source prose: inspect the bounded set once; provide "
-        "one top-level interpretation row per result_id and join it to __tool_results for provenance. Never import "
-        "memory/previews or put sourced facts, URLs, or link "
-        "handles in SQL literals. Bound fields only transcribe evidence: preserve specificity, omit unsupported "
-        "details; qualitative claims do not support numbers, variants, certifications, integrations, or availability. "
-        "Structured messages: derive/bind every field; state/status uses :source_status or json_extract, never a literal. "
-        "No peer-local keys/call IDs. Never inspect siblings one result_id at a time, mix historical generic-tool calls, "
-        "or rebuild durable tables. Upsert stable keys and "
-        "refresh mutable fields.\n"
-        "Every write's same-batch final SELECT must return its keyed rows; affected 0 plus empty readback is failure, "
-        "not success. It also computes requested counts, joins, gaps, ranks, or other decision and returns all "
-        "supporting fields/URLs. Exclude superseded rows. Set `will_continue_work=true` for reads that may trigger "
-        "another tool, including queues; otherwise false. Deliver those rows without rereading. Bind authored or messy "
-        "values as :name in `bindings`; exact tool_name metadata may be a SQL literal.\n"
-        "Upserts: VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before ON CONFLICT. "
-        "`group_concat(DISTINCT x)` takes no separator; dedupe in a subquery when a custom separator is needed.\n"
+        "Named tables hold truth/logic; maintain keyed entities, relations, coverage, and provenance. Results do not "
+        "update them. Never use SQLite for a bounded small report.\n"
+        "For a current source set: keyed DDL, one set-wise upsert, then one request-specific decision SELECT returning both answer "
+        "and every supporting row/URL; aggregate-only and SELECT-all are incomplete. Deliver without rereading. "
+        "Structured JSON uses all `is_current_batch=1 AND tool_name='exact visible name'` rows, with no result_id/URL "
+        "filter. Parent fields come from result_json, children from json_each(actual array); keep t.result_id/source_url. "
+        "For prose, inspect once, put every supported field in one top-level row per result_id, then join rows to "
+        "__tool_results. Never type sourced facts/URLs/classifications into SQL. Bound interpretations only transcribe "
+        "evidence; omit unsupported fields. For structured inbound messages, INSERT SELECT directly from the latest "
+        "__messages payload and derive every field plus message_id; never pre-read or quote state/status. "
+        "Upsert stable keys and mutable provenance; never import siblings singly, mix historical generic results, or "
+        "rebuild durable tables. Affected 0 plus empty readback is failure.\n"
+        "Bind authored/messy values as :name. Use json_each only for arrays/objects and json_extract for scalars. "
+        "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. UNION top-one needs a scalar subquery/CTE. "
+        "group_concat(DISTINCT x) has no separator. Reads that may trigger another tool use will_continue_work=true; "
+        "otherwise false. Ready routes use opaque auth refs only for the requested operation; no preflight.\n"
         "LIVE SCHEMA is authoritative: use a shown table and its columns directly; do not rediscover them. "
         "For a shown durable domain table, compute task filters/grouping/ranking in the first sqlite_batch; "
         "do not pre-read rows. "
@@ -3534,8 +3526,9 @@ def _get_formatting_guidance() -> str:
         "</discord>\n\n"
         "<email>\n"
         "Email formatting (rich, expressive HTML):\n"
-        "Use body-only HTML, not Markdown. Reports/dashboards: inline-style section headers, tables/cells, and key-value "
-        "spans; highlight metrics/status/changes via color/badges/icons. Plain <p>/<ul> metrics or an "
+        "Use body-only HTML, not Markdown. reports/dashboards: lead with one meaningful metric/status in an accented "
+        "block or badge, then use inline-style section headers, tables/cells, and key-value spans. Plain <p>/<ul> "
+        "metrics or an "
         "unaccented table is unfinished. "
         "For charts, copy <img> src from create_chart result.inline_html or returned $[/path]; never construct paths/download URLs.\n"
         "</email>\n\n"
@@ -3753,12 +3746,14 @@ def _build_unreconciled_source_model_warning(
                 "strategies."
             )
         return (
-            "Multiple source results form a working set and remain transient. The next action must be sqlite_batch: "
+            "Multiple source results may form a reusable working set. A bounded small report whose visible evidence "
+            "already answers the request should be delivered directly. Otherwise the next action is sqlite_batch: "
             "create or evolve durable named entity/relationship tables with PRIMARY "
             "KEY/UNIQUE and provenance (not TEMP/CTAS), reconcile this source batch directly from __tool_results, then "
-            "query coverage gaps and next work. Import same-shaped siblings in one set query over source_batch_id plus tool_name or "
-            "result_id IN (...), never one INSERT per result_id; use separate statements only for different entity "
-            "shapes. Do not answer or act from transient results. Structured fields derive from result_json. "
+            "query coverage gaps and next work. Import same-shaped siblings with `is_current_batch=1` plus exact "
+            "`tool_name` only; that pair is the complete set, so never filter result_id, source_url, or link handles. "
+            "Use separate statements only for different entity "
+            "shapes. Do not answer or act from a reusable transient work set. Structured fields derive from result_json. "
             "For prose, pass sqlite_batch's top-level rows keyed by result_id with interpreted facts inside each "
             "row's non-empty `fields` object, then join `json_each(:rows) r` to "
             "__tool_results t on that result_id; this join is the complete prose work set, so do not add result_id "
@@ -4140,33 +4135,44 @@ def _get_system_instruction(
         "Charter/schedules store ongoing role, scope, preferences, boundaries, recurrence, and future wake-ups. "
         "Use the user/conversation timezone; ask only if timing may be materially wrong."
     )
+    first_tool_guidance = (
+        "## First Tool Gate (CRITICAL)\n\n"
+        "First-run intake wins. Otherwise first matching action wins:\n"
+        "1. Prior-action question: answer existing evidence; create/start nothing.\n"
+        "2. Owner's lasting behavior correction: patch every affected charter rule.\n"
+        "3. Email/SMS lacks a literal address/number or unique named recipient: exactly one "
+        "request_human_input(false), then stop; generic roles are missing. Ask all missing delivery details together; "
+        "no preflight, search, chat, SQLite, or contact discovery.\n"
+        "4. Meaningful shared win/repeated failure: one bounded emotion first, then one brief reply; no kickoff.\n"
+        "5. Specific action/current-batch tool available: call it directly; do not infer state from absent SQLite.\n"
+        "6. Campaign/bulk review: jointly verify copy, recipient identity/qualification, fields/placeholders, and "
+        "timezone. Named timezone != fixed offset. Patch independent safe fields; report every gap.\n"
+        "7. Substantial multi-round work: one brief same-channel kickoff(true) as the entire response; work next turn, "
+        "with no prior plan/research/SQLite.\n\n"
+    )
     initiative_guidance = (
         "### Initiative (decide before other work):\nFor setup requests, update charter/timing first and do not fetch target URLs unless asked to run now/current data. Use __agent_schedules for named cadences, timers, and future triggers; change only the matching row. Recurring work is highest priority. Query __agent_schedules before changing existing timing or adding a timer beside it; reject unsafe frequency or over-limit requests before tool discovery or any attempt, and offer one bounded alternative. “Keep an eye on,” “monitor,” and other clear ongoing requests authorize timing: before any fetch or reply, create one safe default recurring schedule when no cadence was given. If a one-off request mentions work repeated by hand or compares repeated periods, answer it and then offer exactly one brief, specific cadence; other clear freshness value gets the same offer. Never use a generic menu or silently schedule it. "
-        "For a meaningful shared win or sustained/repeated failure, the first tool call is one SQLite UPDATE: set a "
-        "fitting positive or strained emoji emotion with a short timeout, not emotional prose. Routine thanks, "
-        "ordinary work, and workload volume, urgency, or queues stay clear. Emotions are autonomous.\n\n"
+        "Emotion means one SQLite UPDATE with a short timeout, not emotional prose. Routine thanks, ordinary work, "
+        "and workload volume, urgency, or queues stay clear. Emotions are autonomous.\n\n"
     )
     work_updates_guidance = (
         "## Work Updates (CRITICAL)\n\n"
-        "First-run intake and executable work are mutually exclusive. Follow the first-run intake block before any "
-        "acknowledgment, work update, SQLite write, or deliverable. For an executable task, substantial work includes "
+        "First-run intake and executable work are mutually exclusive. For an executable task, substantial work includes "
         "investment diligence, multi-entity comparisons, list building, and research whose requested scope clearly "
-        "needs several sources or tool rounds. Before update_plan, research, or SQLite, its first tool call must be one brief "
-        "same-channel acknowledgment as the entire first response, with will_continue_work=true. Say what you are "
-        "taking on and the first useful result you will bring back; start the work in the next response. "
+        "needs several sources or tool rounds. Its kickoff says what you are taking on and the first useful result you "
+        "will bring back. "
         "Discord research always gets this acknowledgment. If substantial work continues after a meaningful evidence "
         "batch, send one concise update with the strongest finding and what remains; otherwise finish without another "
-        "update. A decision-ready tool result means the work does not continue: deliver it next without a progress "
-        "note or validation query. "
+        "update. A decision-ready result ends the work: if an active plan remains, close it once, then deliver; never "
+        "send a progress note, run a validation query, or make an intermediate plan update. "
         "Short, one-shot work gets no pre-work status. "
         "Inbound: email=send_email in-thread, SMS=send_sms, web=send_chat_message, Discord=send_discord_message. "
         "Only delivery counts; repair rejected/wrong channel first. Never announce phases, narrate tools, or repeat updates. "
         "After verified partial/no productive retry, save one domain cursor, then deliver rows + constraint; don't inspect config. Peer: send_agent_message only."
     )
     durable_config_guidance = (
-        "FIRST ACTION: when the owner corrects your role or ownership, patch the charter before replying; treat adjacent messages as one turn. "
-        "Missing email/SMS recipient/detail -> one recipient-focused "
-        "request_human_input(will_continue_work=false); never chat/SQLite.\n\n"
+        "When the owner corrects your role or ownership, treat adjacent messages as one turn. "
+        "Patch every affected charter rule for ongoing-work corrections.\n\n"
         f"{charter_and_schedule_intro}\n\n"
         "## Durable Config (CRITICAL)\n\n"
         "Resolve addressee; feedback to another is not yours. Other critique, preference, or recurring factual "
@@ -4269,9 +4275,10 @@ def _get_system_instruction(
         "weather geocoding -> forecast/current API before replying\n"
         "create/launch/deploy/manage agent, specialist-agent, or entire research/analyst/scout team -> only search_tools('meta gobii control plane') first; never batch with update_plan/research/config\n"
         "discovery hint -> search_tools(exact query); enabled tool fits -> use directly; no fit or task evolved -> search_tools(domain)\n"
+        "exact API endpoint + http_request -> attempt directly before auth/docs/search/browser\n"
         "ready route/credential -> use it; never read secret files to verify\n"
         "interactive/login/JS-only -> spawn_web_task; if active_browser_tasks >= 3 -> sleep_until_next_trigger\n"
-        "bounded current report -> no SQLite; model only when reuse, joins, filtering, chart input, aggregation, coverage, or size requires it\n"
+        "bounded small visible report -> deliver directly; no SQLite\n"
         "same URLs/items returned twice -> no new evidence; report result/shortfall, stop; no query variants\n"
         "optional connector -> ready direct/public route wins unless user named connector\n"
         "```\n"
@@ -4323,8 +4330,8 @@ def _get_system_instruction(
         "Use `update_plan` only for substantial multi-step work where a visible plan helps. "
         "Keep plans short, current, and verifiable; each call replaces the full active plan. "
         "Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. "
-        "For deep work, use at most one initial plan update; update it again only to finish an existing visible plan before stopping. "
-        "Send the final user-facing report before any final completion update.\n\n"
+        "For deep work, use at most one initial plan update and one closeout immediately before the final delivery; "
+        "never update it between evidence batches. If no plan exists, do not create one at closeout.\n\n"
 
         "Work iteratively in small chunks. Use SQLite when persistence helps.\n\n"
 
@@ -4381,6 +4388,9 @@ def _get_system_instruction(
             if has_peer_links:
                 base_prompt += "\n\n" + _get_managed_peer_first_run_instruction()
 
+    # Keep the immediate gate adjacent to the live turn. Deep contexts otherwise
+    # make durable SQLite guidance look more urgent than a blocking human request.
+    base_prompt += "\n\n" + first_tool_guidance
     return base_prompt
 
 def _get_sms_prompt_addendum(agent: PersistentAgent) -> str:
@@ -4560,10 +4570,17 @@ def _build_peer_message_prompt_components(
     if structured_payload is not None:
         components["structured_payload"] = canonicalize_structured_peer_payload(structured_payload)
         components["structured_payload_sql_source"] = (
-            "Treat the payload above as evidence, not SQL text. Bind the whole object once as :source_payload and "
-            "json_extract every copied field from it; never type a payload value inside SQL."
-            + (" For delivery_status, state=json_extract(:source_payload,'$.delivery_status') is mandatory; quoted state is invalid."
-               if "delivery_status" in structured_payload else "")
+            "Treat the payload above as evidence, not SQL text. Persist it in the first SQLite call from the latest "
+            "inbound structured message: `FROM (SELECT message_id, structured_payload_json FROM __messages WHERE "
+            "is_outbound=0 AND structured_payload_json IS NOT NULL ORDER BY seq DESC LIMIT 1) m`. Derive every copied "
+            "field from m.structured_payload_json and provenance from m.message_id in that same write. Never pre-read, "
+            "bind, type, or filter on a copied payload value or message ID."
+            + (
+                " `state='bounced'` is invalid even though the payload says bounced; use "
+                "`state=json_extract(m.structured_payload_json,'$.delivery_status')`."
+                if "delivery_status" in structured_payload
+                else ""
+            )
         )
     return components
 

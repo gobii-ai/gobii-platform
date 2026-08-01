@@ -46,7 +46,14 @@ class PeerStructuredPayloadPromptTests(SimpleTestCase):
             },
         )
 
-        self.assertIn("state=json_extract(:source_payload,'$.delivery_status')", components["structured_payload_sql_source"])
+        self.assertIn("__messages", components["structured_payload_sql_source"])
+        self.assertIn("ORDER BY seq DESC LIMIT 1", components["structured_payload_sql_source"])
+        self.assertIn(
+            "state=json_extract(m.structured_payload_json,'$.delivery_status')",
+            components["structured_payload_sql_source"],
+        )
+        self.assertIn("`state='bounced'` is invalid", components["structured_payload_sql_source"])
+        self.assertNotIn(":source_payload", components["structured_payload_sql_source"])
 
     def test_prose_and_payload_remain_distinct_components(self):
         components = _build_peer_message_prompt_components(

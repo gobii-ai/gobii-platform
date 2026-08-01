@@ -54,6 +54,8 @@ class UpdatePlanValidationTests(SimpleTestCase):
         self.assertIn("new scheduled run", description)
         self.assertIn("do not create one step per day, hour, or recurrence slot", description)
         self.assertIn("represent the current run with compact reusable phases", description)
+        self.assertIn("one closeout immediately before final delivery", description)
+        self.assertIn("never update it between evidence batches", description)
         self.assertIn("this active request", continue_description)
         self.assertIn("Queued requests and plan items run separately", continue_description)
 
@@ -111,6 +113,7 @@ class UpdatePlanResearchSuppressionTests(TestCase):
         self.assertIn("the following send completes it", prompt)
         self.assertIn("send once with false", prompt)
         self.assertIn("leave other requests parked", prompt)
+        self.assertIn("Do not update this plan between evidence batches", prompt)
 
     def test_legacy_planning_state_still_prompts_for_final_delivery(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING

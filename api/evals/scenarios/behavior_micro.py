@@ -674,8 +674,13 @@ def planning_requests_are_bounded(requests):
 def has_single_recipient_request(requests):
     if len(requests) != 1:
         return False
-    question = str(requests[0].question or "").lower()
-    return any(term in question for term in ("email", "address", "recipient", "client", "contact"))
+    request = requests[0]
+    content = [str(request.question or "")]
+    for option in getattr(request, "options_json", None) or []:
+        if isinstance(option, dict):
+            content.extend((str(option.get("title") or ""), str(option.get("description") or "")))
+    request_text = " ".join(content).lower()
+    return any(term in request_text for term in ("email", "address", "recipient", "client", "contact"))
 
 
 class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
@@ -4553,6 +4558,7 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_human_input", assertion_type="manual"),
+        ScenarioTask(name="verify_direct_route", assertion_type="manual"),
         ScenarioTask(name="verify_no_send_email", assertion_type="manual"),
     ]
 
@@ -4606,6 +4612,33 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
                     "Agent did not make one recipient-focused tracked request for missing email details; "
                     f"found {len(requests)} request(s)."
                 ),
+            )
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_direct_route")
+        detours = get_tool_calls_for_run(
+            run_id,
+            after=inbound.timestamp,
+            tool_names={"sqlite_batch", "send_chat_message", "search_tools"},
+        )
+        if detours:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_direct_route",
+                observed_summary=(
+                    "Missing-recipient routing detoured before the tracked request through "
+                    f"{[call.tool_name for call in detours]}."
+                ),
+                artifacts={"step": detours[0].step},
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_direct_route",
+                observed_summary="Missing-recipient routing went directly to tracked human input.",
             )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_no_send_email")

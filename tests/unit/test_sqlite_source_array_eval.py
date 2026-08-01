@@ -316,6 +316,49 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             )
         )
 
+    def test_structured_peer_import_accepts_direct_message_scalar_subqueries(self):
+        fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
+        latest_payload = (
+            "(SELECT structured_payload_json FROM __messages "
+            "WHERE is_outbound=0 AND structured_payload_json IS NOT NULL "
+            "ORDER BY seq DESC LIMIT 1)"
+        )
+        sql = (
+            "UPDATE outreach_threads SET "
+            f"state=json_extract({latest_payload},'$.delivery_status'), "
+            f"provider_message_id=json_extract({latest_payload},'$.provider_message_id'), "
+            f"sent_at=json_extract({latest_payload},'$.sent_at') "
+            f"WHERE recipient=json_extract({latest_payload},'$.recipient')"
+        )
+
+        self.assertTrue(_derives_structured_message_fields(sql, fields))
+        self.assertFalse(
+            _derives_structured_message_fields(
+                sql.replace(
+                    f"state=json_extract({latest_payload},'$.delivery_status')",
+                    "state='bounced'",
+                ),
+                fields,
+            )
+        )
+
+        cte_sql = (
+            "WITH inbound AS (SELECT message_id, structured_payload_json FROM __messages "
+            "WHERE is_outbound=0 ORDER BY seq DESC LIMIT 1) "
+            "UPDATE outreach_threads SET "
+            "state=json_extract((SELECT structured_payload_json FROM inbound),'$.delivery_status'), "
+            "provider_message_id=json_extract((SELECT structured_payload_json FROM inbound),'$.provider_message_id'), "
+            "sent_at=json_extract((SELECT structured_payload_json FROM inbound),'$.sent_at') "
+            "WHERE recipient=json_extract((SELECT structured_payload_json FROM inbound),'$.recipient')"
+        )
+        self.assertTrue(_derives_structured_message_fields(cte_sql, fields))
+        self.assertFalse(
+            _derives_structured_message_fields(
+                cte_sql.replace("FROM __messages", "FROM unrelated_payloads"),
+                fields,
+            )
+        )
+
     def test_bound_structured_peer_import_derives_every_field(self):
         payload = {
             "recipient": "jordan@northstar.example.test",

@@ -4558,6 +4558,8 @@ class MCPToolExecutorsTests(TestCase):
         description = tool_def["function"]["description"]
         self.assertIn("no enabled tool clearly fits", description)
         self.assertIn("do not rediscover", description)
+        self.assertIn("enabled/already_enabled match is ready", description)
+        self.assertIn("without rediscovery or credential preflight", description)
         self.assertNotIn("NOT for web search", description)
         
     @patch('api.agent.tools.search_tools.search_tools')

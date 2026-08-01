@@ -2387,19 +2387,18 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "MESSAGE RULE: copy every payload field through a binding/json_extract; source message ID too. "
-                "`state='...'` is invalid even when the matching source payload is bound: state=:source_status or "
-                "state=json_extract(:source_payload,'$.delivery_status'). Durable world model/exact logic: keyed DDL per "
-                "entity/relation array; set-wise upsert; decision SELECT; deliver next, no reread. Structured: "
-                "result_json/item.value over current batch + exact tool_name; no ID/URL filters; keep "
-                "t.result_id/t.source_url. json_extract scalars; json_each arrays/objects; aliases belong in FROM/JOIN. "
-                "Prose: inspect once; join top-level rows by result_id. Peer/message: use __messages/bound evidence, never "
-                "rows/__tool_results or SQLite call IDs. Use rows=[] for other structured JSON. Never use sourced SQL "
-                "literals, import siblings singly, mix historical generic results, or rebuild. Evolve normalized "
-                "entities/relations; query counts/joins/coverage/gaps/ranks. Read back keyed writes/evidence/URLs same-batch. "
-                "Bind text via :name; no backslash escapes/`->`. Semicolon-separate "
-                "statements. VALUES match columns/no WHERE; INSERT SELECT needs WHERE 1=1 before ON CONFLICT on exact "
-                "unique-key columns. group_concat(DISTINCT x) has no separator. No ATTACH."
+                "Durable domain model/material SQL only; skip bounded small reports. First shot: keyed DDL, one set-wise "
+                "upsert, then one filtered/ranked decision SELECT with both answer and supporting rows/URLs; aggregate-only "
+                "is incomplete; deliver without reread. "
+                "Structured results use every `is_current_batch=1 AND tool_name='<exact>'` row: parent fields from "
+                "result_json, children from json_each(actual array), provenance from t.result_id/source_url, rows=[]. "
+                "Never filter result_id/URL or copy source facts into SQL. Prose: inspect the whole set once, then pass "
+                "every result_id/supported field in rows and join rows to __tool_results in one write. "
+                "Structured inbound message: first write SELECTs the latest non-outbound non-null payload from "
+                "__messages and json-extracts every field plus message_id; never pre-read, bind, or quote payload state. "
+                "Other payloads bind one complete object. Evolve normalized keyed entities/relations and provenance. "
+                "Bind messy/authored text. INSERT SELECT needs WHERE 1=1 before ON CONFLICT. No `->`, ATTACH, per-item "
+                "writes, historical mixing, or SELECT-all readback."
             ),
             "parameters": {
                 "type": "object",
@@ -2436,20 +2435,17 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     "sql": {
                         "type": "string",
                         "description": (
-                            "SQL. Prose: join `json_each(:rows) r` to __tool_results t on "
-                            "t.result_id=json_extract(r.value,'$.result_id'); use $.fields.<name>; keep "
-                            "t.result_id/t.source_url. Message writes follow MESSAGE RULE using __messages or bound evidence, "
-                            "never rows/__tool_results, sourced literals, or rows=[] prose writes. Prefer a bound "
-                            ":source_payload and json_extract every message field. Config UPDATE: "
-                            "patch_text(charter,:old,:new), old/new in bindings. End writes with keyed readback + "
-                            "decision/detail SELECTs."
+                            "Semicolon-separated SQL. Prose joins json_each(:rows) to __tool_results by result_id and "
+                            "extracts $.fields.*. Message writes derive payload/message_id from __messages, or one bound "
+                            "payload when absent. Config uses patch_text(charter,:old,:new). INSERT SELECT requires "
+                            "WHERE 1=1 before ON CONFLICT. End writes with the requested decision/evidence SELECT."
                         ),
                     },
                     "bindings": {
                         "type": "object",
                         "description": (
-                            "Config requires old/new. Otherwise bind authored/messy values, inspected source fields, or one "
-                            "complete message payload as source_payload. Keys omit colon."
+                            "Named parameters without colons: config old/new, authored/messy values, or one complete "
+                            "payload unavailable in __messages. JSON object, never array/list."
                         ),
                         "additionalProperties": {},
                     },

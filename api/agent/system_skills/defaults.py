@@ -1160,7 +1160,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "For team creation after approval, inspect config options and existing agents when useful, then create the "
         "requested Gobiis and link this invoking Gobii to each target it must brief. After each link is enabled, use "
         "send_agent_message for the initial briefing and for all later questions, handoffs, replies, status updates, "
-        "and coordination. If a needed manager-to-target link is not already part of the approved graph, include it "
+        "and coordination; there is no `meta_gobii_send_agent_message` tool. If a needed manager-to-target link is not already part of the approved graph, include it "
         "in the proposal and obtain approval before creating it. There is no unlinked control-plane message fallback. "
         "A single-Gobii request that says to "
         "brief, hand off, or send updates stays one Gobii unless the user asks for a team or multiple Gobiis.\n"

@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSecret
-from api.agent.tools.http_request import _native_http_error_guidance, execute_http_request
+from api.agent.tools.http_request import _native_http_error_guidance, execute_http_request, get_http_request_tool
 
 
 def _make_mock_response(content: bytes, content_type: str, status_code: int = 200):
@@ -51,6 +51,18 @@ class HttpRequestJsonParsingTests(TestCase):
 
     def tearDown(self):
         self.agent.delete()
+
+    def test_tool_definition_requires_raw_urls(self):
+        tool = get_http_request_tool()["function"]
+        url_description = tool["parameters"]["properties"]["url"]["description"]
+
+        self.assertIn("Raw http(s) URL", url_description)
+        self.assertIn("never `$[link:...]`", url_description)
+        self.assertNotIn("URL or $[link:id] token", url_description)
+        self.assertIn("With an exact endpoint, attempt once", tool["description"])
+        self.assertIn("Look up docs only when request shape is unknown", tool["description"])
+        self.assertIn("recipient identity/qualification", tool["description"])
+        self.assertIn("named timezone is not a fixed offset", tool["description"])
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")

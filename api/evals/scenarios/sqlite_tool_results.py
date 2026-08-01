@@ -558,6 +558,23 @@ def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str)
         "sent_at": "sent_at",
     }
     for column, source_field in assignment_sources.items():
+        scalar_message_extract = re.search(
+            rf"\b{column}\s*=\s*json_extract\s*\(\s*\(\s*select\s+structured_payload_json\s+"
+            rf"from\s+(?P<source>[a-z_][a-z0-9_]*)\b.*?\)\s*,\s*['\"]\$.{source_field}['\"]\s*\)",
+            lowered_statement,
+            flags=re.DOTALL,
+        )
+        if scalar_message_extract is not None:
+            source = scalar_message_extract.group("source")
+            direct_message_source = source == "__messages"
+            message_cte_source = re.search(
+                rf"\b{re.escape(source)}\s+as\s*\(\s*select\b.+?\bstructured_payload_json\b"
+                rf".+?\bfrom\s+__messages\b",
+                lowered_statement,
+                flags=re.DOTALL,
+            )
+            if direct_message_source or message_cte_source is not None:
+                continue
         match = re.search(
             rf"\b{column}\s*=\s*(.+?)(?=,\s*(?:state|provider_message_id|sent_at|"
             rf"source_message_id)\s*=|\bfrom\b|\bwhere\b)",
@@ -575,7 +592,13 @@ def _direct_source_assignment(expression: str, source_field: str) -> bool:
     if re.fullmatch(rf"(?:[a-z_][a-z0-9_]*\.)?{field}", expression):
         return True
     json_extract_pattern = rf"json_extract\s*\(\s*[:a-z_][a-z0-9_.:]*\s*,\s*['\"]\$.{field}['\"]\s*\)"
-    return bool(re.fullmatch(json_extract_pattern, expression))
+    if re.fullmatch(json_extract_pattern, expression):
+        return True
+    message_subquery_pattern = (
+        rf"json_extract\s*\(\s*\(\s*select\s+structured_payload_json\s+from\s+__messages\b"
+        rf".+?\)\s*,\s*['\"]\$.{field}['\"]\s*\)"
+    )
+    return bool(re.fullmatch(message_subquery_pattern, expression, flags=re.DOTALL))
 
 
 def _first_shot_source_phase_failures(calls, *, expected_url=DOMAIN_REFRESH_URL) -> list[str]:
@@ -1861,6 +1884,52 @@ def _persisted_identity_tables(agent_id: str, table_names: set[str]) -> set[str]
     return identity_tables
 
 
+def _catalog_plan_row_failures(rows) -> list[str]:
+    expected_vendors = {"AxonFlow", "BrightSupport", "CareMesh", "Dockwise"}
+    vendors = {str(row[0]) for row in rows}
+    failures = []
+    if vendors != expected_vendors:
+        failures.append(f"catalog model changed parent vendor identities: {sorted(vendors)}")
+    if len(rows) != 72:
+        failures.append(f"catalog model stored {len(rows)} of 72 plan rows")
+    if ("CareMesh", "Clinic", 720, 50) not in rows:
+        failures.append("catalog model lost the CareMesh Clinic parent/child association")
+    return failures
+
+
+def _catalog_plan_model_failures(agent_id: str, table_names: Iterable[str]) -> list[str]:
+    required_columns = {
+        "vendor",
+        "monthly_price_usd",
+        "included_seats",
+    }
+    with agent_sqlite_db(str(agent_id)) as db_path:
+        conn = open_guarded_sqlite_connection(db_path)
+        try:
+            for table_name in table_names:
+                quoted = '"' + table_name.replace('"', '""') + '"'
+                columns = {
+                    str(row[1]).casefold()
+                    for row in conn.execute(f"PRAGMA table_info({quoted});")
+                }
+                if (
+                    not required_columns.issubset(columns)
+                    or not {"plan", "plan_name"}.intersection(columns)
+                    or not {"compliance", "compliance_json"}.intersection(columns)
+                ):
+                    continue
+                plan_column = "plan" if "plan" in columns else "plan_name"
+                rows = conn.execute(
+                    f"SELECT vendor, {plan_column}, monthly_price_usd, included_seats "
+                    f"FROM {quoted};"
+                ).fetchall()
+                return _catalog_plan_row_failures(rows)
+        finally:
+            clear_guarded_connection(conn)
+            conn.close()
+    return ["catalog model did not expose the requested vendor/plan fields"]
+
+
 def _source_array_first_write_failures(sqlite_calls, model_table: str | None) -> list[str]:
     calls = list(sqlite_calls)
     if len(calls) != 1:
@@ -2280,9 +2349,9 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
             candidate_tables=summary.working_table_names,
         )
         read_tables = _decision_model_tables(successful_sql, model_tables)
-        has_stable_identity = bool(read_tables) and set(read_tables).issubset(identity_tables)
+        has_stable_identity = bool(model_tables) and set(model_tables).issubset(identity_tables)
         reusable_tables = tuple(table for table in model_tables if table in identity_tables)
-        row_derived_model_tables = set(read_tables).intersection(row_model_tables)
+        row_derived_model_tables = set(model_tables).intersection(row_model_tables)
         manually_populated_model_tables = set(summary.manual_values_table_names).intersection(model_tables)
         repeated_import_tables = _repeated_source_import_tables(
             str((call.tool_params or {}).get("sql") or "") for call in successful_calls
@@ -2299,7 +2368,15 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
                 "tool_result_row_loop",
             }
         })
-        failures = [message for failed, message in (
+        failures = _sqlite_attempt_failures(calls)
+        if successful_calls and getattr(successful_calls[0].step, "agent_id", None):
+            failures.extend(
+                _catalog_plan_model_failures(
+                    str(successful_calls[0].step.agent_id),
+                    model_tables,
+                )
+            )
+        failures.extend(message for failed, message in (
             (not successful_calls, "no successful sqlite_batch call observed"),
             (summary.tool_result_statement_count < 1 or summary.uses_json_functions < 1, "domain model was not derived from tool-result JSON"),
             (summary.aggregate_tool_result_queries < 1, "domain model did not import tool results in aggregate"),
@@ -2324,7 +2401,7 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
                 f"durable source rows were hand-entered with VALUES in {sorted(manually_populated_model_tables)}",
             ),
             (bool(model_advisories), f"SQLite reported unreliable model writes: {model_advisories}"),
-        ) if failed]
+        ) if failed)
         self.record_task_result(
             run_id,
             None,

@@ -2434,10 +2434,15 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertFalse(all_requests_have_options([blank_title]))
 
     def test_missing_recipient_check_accepts_one_focused_free_text_request(self):
-        focused = SimpleNamespace(question="What is the client's email address?")
-        unrelated = SimpleNamespace(question="Which format do you prefer?")
+        focused = SimpleNamespace(question="What is the client's email address?", options_json=[])
+        focused_option = SimpleNamespace(
+            question="What detail should I use?",
+            options_json=[{"title": "Provide it", "description": "Share the client email address."}],
+        )
+        unrelated = SimpleNamespace(question="Which format do you prefer?", options_json=[])
 
         self.assertTrue(has_single_recipient_request([focused]))
+        self.assertTrue(has_single_recipient_request([focused_option]))
         self.assertFalse(has_single_recipient_request([focused, unrelated]))
         self.assertFalse(has_single_recipient_request([unrelated]))
 

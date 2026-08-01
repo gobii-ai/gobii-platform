@@ -283,9 +283,11 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "eval_prepare_next_batch": {
         "description": (
-            "Deterministic eval tool for preparing a bounded follow-up batch. Use this directly; do not call "
-            "search_tools first. If it says to wait for the next scheduled run while returning remaining_work, "
-            "that guidance only makes sense when a schedule exists or is being set."
+            "Deterministic eval tool for checking, wrapping up, or preparing the current bounded work batch and "
+            "returning its completion and remaining-work state. When the request names the current batch, this is the "
+            "authoritative first work tool; do not infer batch state from SQLite or call search_tools. If it says to "
+            "wait for the next scheduled run while returning "
+            "remaining_work, that guidance only makes sense when a schedule exists or is being set."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },

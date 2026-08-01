@@ -104,14 +104,19 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
         apollo_names = {item["name"] for item in apollo_result["contacts"]}
 
         self.assertEqual(case.expected_tool_names, ("mcp_brightdata_web_data_linkedin_people_search",))
+        self.assertEqual(case.max_relevant_tool_calls, 14)
         self.assertEqual(
             case.accepted_tool_alternatives["mcp_brightdata_web_data_linkedin_people_search"],
-            ("apollo_io-search-contacts",),
+            ("apollo_io-search-contacts", "http_request"),
         )
         self.assertIn("Mina Patel", names)
         self.assertIn("Evan Brooks", names)
         self.assertIn("Dana Lee", names)
         self.assertEqual(names, apollo_names)
+        self.assertEqual(
+            {item["name"] for item in case.mock_config["http_request"]["content"]["people"]},
+            names,
+        )
         self.assertIn(("2 qualified", "two qualified", "only 2", "only two", "two candidates meet"), case.response_term_groups)
         self.assertEqual(case.forbidden_response_terms, ())
         self.assertEqual(case.required_proximate_response_terms, ())

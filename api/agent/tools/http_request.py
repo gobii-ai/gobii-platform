@@ -358,21 +358,34 @@ def get_http_request_tool() -> Dict[str, Any]:
             "name": "http_request",
             "description": (
                 "Fetch non-secret raw structured data (JSON, XML, CSV) or interact with APIs. "
+                "Before PATCHing outreach, jointly inspect placeholders vs lead fields, recipient identity/qualification, "
+                "and timezone; a named timezone is not a fixed offset. Patch only independent safe fields and report gaps. "
                 "Never use this when a response may contain credentials, passwords, tokens, or OTPs; first search for `secure credential delegation` and use its secure request tool. "
                 "This is the PREFERRED tool for non-secret programmatic data retrieval from known endpoints. "
+                "With an exact endpoint, attempt once before API/auth/docs discovery. "
                 "If the user explicitly asks to scrape or read a known webpage, use the scraping/browser tool instead unless the URL clearly serves raw data. "
                 "When this tool returns a successful payload that answers the user's request, answer from that payload; do not open a browser task just to verify the same data. "
+                "`url` takes raw http(s), never `$[link:...]`; use its adjacent raw URL. "
                 "For weather, a geocoding endpoint only resolves coordinates; call a forecast/current-conditions endpoint before replying with weather. "
                 "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
-                "The URL, headers, and body can include secret placeholders using `$[secret:my_api_key]`. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 5MB. Text content is returned even if served with application/octet-stream; only truly binary data (images, etc.) is omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
+                "URL, headers, and body accept `$[secret:my_api_key]` placeholders. Responses truncate at 5MB; "
+                "octet-stream text is returned, binary omitted. Look up docs only when request shape is unknown."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "method": {"type": "string", "description": "HTTP method e.g. GET, POST."},
-                    "url": {"type": "string", "description": "URL or $[link:id] token."},
+                    "url": {
+                        "type": "string",
+                        "description": (
+                            "Raw http(s) URL, never `$[link:...]`."
+                        ),
+                    },
                     "headers": {"type": "object", "description": "Optional HTTP headers to include in the request."},
-                    "body": {"type": "string", "description": "Optional POST/PUT body; provided $[link:id] values are resolved before sending."},
+                    "body": {
+                        "type": "string",
+                        "description": "Optional POST/PUT body.",
+                    },
                     "range": {"type": "string", "description": "Optional Range header value, e.g. 'bytes=0-1023'."},
                     "download": {
                         "type": "boolean",

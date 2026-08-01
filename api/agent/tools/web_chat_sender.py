@@ -284,7 +284,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send a web-chat message. Follow Work Updates for acknowledgment and milestone timing. "
+                "Send web chat. For new substantial multi-source work, send one brief kickoff(true) first; work next response. "
+                "Follow Work Updates for later milestone timing. "
                 "Tracked blocking choices use request_human_input cards, never prose. During GUIDED INTAKE, at most "
                 "one concise orientation note is allowed; "
                 "if one is already in history, the next user-visible action must be the choice cards, not another note. "

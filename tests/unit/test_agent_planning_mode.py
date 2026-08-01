@@ -153,22 +153,33 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
 
         self.assertIn("Outside that first-assignment rule", prompt)
-        self.assertIn("send one brief same-channel acknowledgment as the entire first response", prompt)
+        self.assertIn("Substantial multi-round work: one brief same-channel kickoff(true)", prompt)
         self.assertIn("With any tool call, leave response content empty", prompt)
         self.assertIn("Response content with tool calls is user-facing", prompt)
         self.assertIn("investment diligence, multi-entity comparisons", prompt)
         self.assertIn("the first useful result you will bring back", prompt)
         self.assertIn("continues after a meaningful evidence batch", prompt)
         self.assertIn("strongest finding and what remains", prompt)
-        self.assertIn("A decision-ready tool result means the work does not continue", prompt)
+        self.assertIn("A decision-ready result ends the work", prompt)
         self.assertIn("Never announce phases", prompt)
         self.assertIn("explicit sends for Work Updates", prompt)
         self.assertIn("First-run intake and executable work are mutually exclusive", prompt)
-        self.assertIn("before any acknowledgment, work update, SQLite write, or deliverable", prompt)
+        self.assertIn("First-run intake wins", prompt)
+        self.assertIn("Prior-action question", prompt)
+        self.assertIn("create/start nothing", prompt)
+        self.assertIn("exact API endpoint + http_request", prompt)
+        self.assertIn("Specific action/current-batch tool available", prompt)
+        self.assertIn("Meaningful shared win/repeated failure", prompt)
+        self.assertIn("Campaign/bulk review", prompt)
+        self.assertIn("jointly verify copy", prompt)
         self.assertIn("email=send_email in-thread", prompt)
         self.assertIn("repair rejected/wrong channel first", prompt)
         self.assertIn(
-            "Follow Work Updates for acknowledgment and milestone timing",
+            "Follow Work Updates for later milestone timing",
+            send_chat["function"]["description"],
+        )
+        self.assertIn(
+            "send one brief kickoff(true) first",
             send_chat["function"]["description"],
         )
         self.assertIn(

@@ -67,6 +67,8 @@ from api.evals.scenarios.sqlite_tool_results import (
     SqliteMultiResultWebSynthesisScenario,
     SqliteNaturalResultAccessScenario,
     SqliteToolResultScenario,
+    _catalog_plan_model_failures,
+    _catalog_plan_row_failures,
     _decision_model_tables,
     _first_shot_source_phase_failures,
     _portfolio_mock,
@@ -324,7 +326,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 reject_duplicate_fetches=True,
             ))
             self.assertEqual(scenario._record_complete_terminal_report("run", after=None), body)
-        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+        self.assertEqual(
+            recorded[-1][0][2],
+            EvalRunTask.Status.PASSED,
+            recorded[-1][1]["observed_summary"],
+        )
 
         failed_fetch = _eval_tool_call(
             "mcp_brightdata_scrape_as_markdown",
@@ -1160,7 +1166,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertFalse(passed)
         self.assertIn("SQLite attempt 1 had execution status error", recorded[-1][1]["observed_summary"])
 
-    def test_sqlite_domain_model_counts_persisted_schema_from_partially_failed_batch(self):
+    def test_sqlite_domain_model_rejects_recovery_after_failed_first_write(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         calls = [
@@ -1197,7 +1203,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             model_tables = scenario._record_domain_model("run", after=None)
 
         self.assertEqual(model_tables, ("catalog",))
-        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        self.assertIn("SQLite attempt 1 had execution status error", recorded[-1][1]["observed_summary"])
 
     def test_sqlite_usage_rejects_preflight_rejected_loop(self):
         scenario, recorded = SqliteToolResultScenario(), []
@@ -1343,7 +1350,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
         self.assertIn("unreliable model writes", recorded[-1][1]["observed_summary"])
 
-    def test_sqlite_domain_model_reuses_downstream_shaped_table(self):
+    def test_sqlite_domain_model_accepts_direct_downstream_shaped_table(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
         initial_calls = [
@@ -1353,17 +1360,15 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 result='{"status":"ok"}',
                 tool_name="sqlite_batch",
                 tool_params={"sql": """
-                    CREATE TABLE raw_plans AS
-                    SELECT json_extract(result_json, '$.content.vendor') AS vendor,
-                           child.value AS plan_json,
-                           json_extract(result_json, '$.content.source_url') AS source_url
-                    FROM __tool_results JOIN json_each(result_json, '$.content.plans') child;
                     CREATE TABLE plans(vendor TEXT, plan TEXT, price INTEGER, source_url TEXT,
                                        PRIMARY KEY(vendor, plan));
                     INSERT INTO plans
-                    SELECT vendor, json_extract(plan_json, '$.plan'),
-                           json_extract(plan_json, '$.monthly_price_usd'), source_url
-                    FROM raw_plans;
+                    SELECT json_extract(result_json, '$.content.vendor'),
+                           json_extract(child.value, '$.plan'),
+                           json_extract(child.value, '$.monthly_price_usd'),
+                           json_extract(result_json, '$.content.source_url')
+                    FROM __tool_results
+                    JOIN json_each(result_json, '$.content.plans') child;
                     SELECT vendor, plan FROM plans WHERE price <= 900 ORDER BY price;
                 """},
             )
@@ -1372,7 +1377,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             model_tables = scenario._record_domain_model("run", after=None)
 
         self.assertEqual(model_tables, ("plans",))
-        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+        self.assertEqual(
+            recorded[-1][0][2],
+            EvalRunTask.Status.PASSED,
+            recorded[-1][1]["observed_summary"],
+        )
 
         followup_calls = [
             SimpleNamespace(
@@ -1387,6 +1396,51 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             scenario._record_model_reuse("run", after=None, model_tables=model_tables)
 
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.PASSED)
+
+    def test_catalog_model_integrity_rejects_child_values_used_as_parent_identity(self):
+        correct_rows = [
+            (vendor, "Clinic" if vendor == "CareMesh" else f"Plan {index}", 720, 50)
+            for vendor in ("AxonFlow", "BrightSupport", "CareMesh", "Dockwise")
+            for index in range(18)
+        ]
+        wrong_rows = [
+            (f"Plan {index}", f"Plan {index}", 720, 50)
+            for index in range(72)
+        ]
+
+        self.assertEqual(_catalog_plan_row_failures(correct_rows), [])
+        failures = _catalog_plan_row_failures(wrong_rows)
+        self.assertTrue(any("parent vendor identities" in failure for failure in failures))
+        self.assertTrue(any("parent/child association" in failure for failure in failures))
+
+    def test_catalog_model_integrity_accepts_semantic_plan_and_compliance_column_names(self):
+        rows = [
+            (vendor, "Clinic" if vendor == "CareMesh" and index == 0 else f"Plan {index}", 720, 50, "[]")
+            for vendor in ("AxonFlow", "BrightSupport", "CareMesh", "Dockwise")
+            for index in range(18)
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "catalog.sqlite3"
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "CREATE TABLE vendor_plans("
+                "vendor TEXT, plan_name TEXT, monthly_price_usd INTEGER, included_seats INTEGER, "
+                "compliance_json TEXT, PRIMARY KEY(vendor, plan_name));"
+            )
+            conn.executemany(
+                "INSERT INTO vendor_plans VALUES (?, ?, ?, ?, ?);",
+                rows,
+            )
+            conn.commit()
+            conn.close()
+
+            with patch(
+                "api.evals.scenarios.sqlite_tool_results.agent_sqlite_db",
+                return_value=nullcontext(db_path),
+            ):
+                failures = _catalog_plan_model_failures("agent", ("vendor_plans",))
+
+        self.assertEqual(failures, [])
 
     def test_sqlite_domain_model_rejects_per_result_tables(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
@@ -1551,6 +1605,46 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
         self.assertIn("repeating child rows were not extracted", recorded[-1][1]["observed_summary"])
         self.assertNotIn("stable identity", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_domain_model_reports_missing_decision_without_misdiagnosing_valid_model(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                status="complete",
+                result='{"status":"ok"}',
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    CREATE TABLE catalog(
+                        vendor TEXT,
+                        plan TEXT,
+                        price INTEGER,
+                        source_url TEXT,
+                        PRIMARY KEY(vendor, plan)
+                    );
+                    INSERT INTO catalog
+                    SELECT json_extract(result_json, '$.content.vendor'),
+                           json_extract(plan.value, '$.name'),
+                           json_extract(plan.value, '$.price'),
+                           source_url
+                    FROM __tool_results
+                    JOIN json_each(result_json, '$.content.plans') plan;
+                    SELECT * FROM catalog ORDER BY vendor, plan;
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            model_tables = scenario._record_domain_model("run", after=None)
+
+        self.assertEqual(model_tables, ("catalog",))
+        self.assertEqual(recorded[-1][0][2], EvalRunTask.Status.FAILED)
+        summary = recorded[-1][1]["observed_summary"]
+        self.assertIn("initial decision did not query", summary)
+        self.assertNotIn("stable identity", summary)
+        self.assertNotIn("repeating child rows", summary)
 
     def test_sqlite_domain_model_allows_separate_user_threshold_table(self):
         scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
@@ -1753,7 +1847,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("where a visible plan helps", instructions)
         self.assertIn("Keep plans short, current, and verifiable", instructions)
         self.assertIn("each call replaces the full active plan", instructions)
-        self.assertIn("Send the final user-facing report before any final completion update", instructions)
+        self.assertIn("one closeout immediately before the final delivery", instructions)
+        self.assertIn("never update it between evidence batches", instructions)
 
     def test_system_instruction_prioritizes_practical_handoffs_and_terminal_results(self):
         class NoContacts:
@@ -1794,6 +1889,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("choose and disclose", description)
         self.assertIn("user asks for targets/scope before setup", description)
         self.assertIn("block a recurring monitor", description)
+        self.assertIn("Missing email/SMS recipient/detail", description)
+        self.assertIn("no preflight/search/chat", description)
+        self.assertIn("generic roles do not count", description)
 
     def test_linkedin_jobs_synthetic_tool_accepts_category_queries(self):
         description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_linkedin_job_listings"][
@@ -1810,6 +1908,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertIn("remaining_work", outreach_description)
         self.assertIn("set a resume schedule", outreach_description)
+        self.assertIn("checking, wrapping up, or preparing", schedule_description)
+        self.assertIn("authoritative first work tool", schedule_description)
+        self.assertIn("do not infer batch state from SQLite", schedule_description)
         self.assertIn("only makes sense when a schedule exists", schedule_description)
 
     def test_fresh_full_tool_result_wrapper_only_describes_visibility(self):
@@ -2518,14 +2619,25 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("A skipped web send never permits switching", system_prompt)
         self.assertIn(
-            "FIRST ACTION: when the owner corrects your role or ownership, patch the charter before replying; treat adjacent messages as one turn",
+            "First-run intake wins. Otherwise first matching action wins",
             system_prompt,
         )
         self.assertIn(
-            "Missing email/SMS recipient/detail -> one recipient-focused request_human_input(will_continue_work=false); never chat/SQLite",
+            "Owner's lasting behavior correction: patch every affected charter rule",
             system_prompt,
         )
-        self.assertIn("bounded current report -> no SQLite", system_prompt)
+        self.assertIn(
+            "Email/SMS lacks a literal address/number or unique named recipient",
+            system_prompt,
+        )
+        self.assertIn(
+            "generic roles are missing",
+            system_prompt,
+        )
+        self.assertIn("Substantial multi-round work", system_prompt)
+        self.assertIn("Never use SQLite for a bounded small report", system_prompt)
+        self.assertIn("For prose, inspect once", system_prompt)
+        self.assertIn("aggregate-only and SELECT-all are incomplete", system_prompt)
         self.assertIn("Replace one span covering every affected related clause", system_prompt)
         self.assertIn("append only if no related clause", system_prompt)
         self.assertIn("Correction plus task/recurrence: patch and complete both", system_prompt)
@@ -2553,8 +2665,8 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
         self.assertIn("enabled tool fits -> use directly", system_prompt)
-        self.assertIn("Ready route", system_prompt)
-        self.assertIn("opaque auth refs unchanged only to requested operation", system_prompt)
+        self.assertIn("Ready routes", system_prompt)
+        self.assertIn("opaque auth refs only for the requested operation", system_prompt)
         self.assertIn("no preflight", system_prompt)
         self.assertIn("credential-returning API -> search_tools('secure credential delegation') first", system_prompt)
         self.assertIn("named model + explicit fresh non-secret source/URL -> http_request only, no text/send/plan; WAIT", system_prompt)
@@ -2594,11 +2706,11 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn(
-            "A decision-ready tool result means the work does not continue",
+            "A decision-ready result ends the work",
             system_prompt,
         )
         self.assertIn(
-            "Before update_plan, research, or SQLite, its first tool call must be one brief same-channel acknowledgment",
+            "with no prior plan/research/SQLite",
             system_prompt,
         )
         self.assertIn("upsert both in a normal domain-progress table", system_prompt)
