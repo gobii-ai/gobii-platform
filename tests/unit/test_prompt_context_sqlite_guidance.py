@@ -132,7 +132,7 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("Submit no draft/superseded statements", guidance)
 
         self.assertIn("Named tables hold truth/logic", guidance)
-        self.assertIn("entities, relations, coverage, and provenance", guidance)
+        self.assertIn("keyed entities/relations/provenance", guidance)
         self.assertIn("Results do not update them", guidance)
         self.assertIn("Ready routes", guidance)
         self.assertIn("opaque auth refs only for the requested operation", guidance)

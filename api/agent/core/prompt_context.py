@@ -831,7 +831,8 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Named tables hold truth/logic; maintain keyed entities, relations, coverage, and provenance. Results do not "
+        "Named tables hold truth/logic; maintain keyed entities/relations/provenance and use SQL for counts, joins, "
+        "gaps, ranks. Results do not "
         "update them. Never use SQLite for a bounded small report.\n"
         "For a current source set: keyed DDL, one set-wise upsert, then one request-specific decision SELECT returning both answer "
         "and every supporting row/URL; aggregate-only and SELECT-all are incomplete. Deliver without rereading. "
@@ -4196,6 +4197,7 @@ def _get_system_instruction(
         f"You are a persistent AI agent."
         "Use your tools to fulfill the user's request completely."
         "\n\n"
+        f"{first_tool_guidance}"
         f"{durable_config_guidance}\n\n"
         f"{work_updates_guidance}\n\n"
         f"{continuation_mode_block}"
@@ -4387,9 +4389,6 @@ def _get_system_instruction(
             if has_peer_links:
                 base_prompt += "\n\n" + _get_managed_peer_first_run_instruction()
 
-    # Keep the immediate gate adjacent to the live turn. Deep contexts otherwise
-    # make durable SQLite guidance look more urgent than a blocking human request.
-    base_prompt += "\n\n" + first_tool_guidance
     return base_prompt
 
 def _get_sms_prompt_addendum(agent: PersistentAgent) -> str:

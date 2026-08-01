@@ -153,7 +153,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
 
         self.assertIn("Outside that first-assignment rule", prompt)
-        self.assertIn("Substantial multi-round work: one brief same-channel kickoff(true)", prompt)
+        self.assertIn("New substantial multi-round work: one brief same-channel kickoff(true)", prompt)
         self.assertIn("With any tool call, leave response content empty", prompt)
         self.assertIn("Response content with tool calls is user-facing", prompt)
         self.assertIn("investment diligence, multi-entity comparisons", prompt)
@@ -168,7 +168,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Prior-action question", prompt)
         self.assertIn("create/start nothing", prompt)
         self.assertIn("exact API endpoint + http_request", prompt)
-        self.assertIn("Specific action/current-batch tool available", prompt)
+        self.assertIn("Short action or current-batch continuation", prompt)
         self.assertIn("Meaningful shared win/repeated failure", prompt)
         self.assertIn("Campaign/bulk review", prompt)
         self.assertIn("jointly verify copy", prompt)
