@@ -1140,16 +1140,14 @@ class PreviewByteLimitTests(SimpleTestCase):
             "$.content.prospects(name,title,profile_url)",
             "No model: CREATE",
             "`json_extract(j.value,'$.profile_url')`",
-            "NEXT: one sqlite_batch rows=[]",
-            "no pre-read, copied/bound preview facts, or result_id/source_url filters",
-            "Parent: json_extract(t.result_json,'$.content.<field>')",
-            "items: json_extract(j.value,'$.<field>')",
-            "Import plus decision SELECT",
+            "FIRST/NOW: one sqlite_batch rows=[]",
+            "never SELECT/preview/bind/copy source rows",
+            "json_extract(j.value,'$.name') AS name",
+            "json_extract(j.value,'$.profile_url') AS profile_url",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
-            "Keep t.source_url/t.result_id only as provenance",
-            "Use all shown paths",
-            "final SELECT returns all known item fields/source URLs",
+            "Upsert mutable fields/provenance",
+            "decision SELECT in the same batch",
         ):
             self.assertIn(expected, info.meta)
         self.assertNotIn("[SOURCE ARRAYS", info.preview_text)
@@ -1208,8 +1206,8 @@ class PreviewByteLimitTests(SimpleTestCase):
             "never DELETE/rebuild",
             "lose unrelated rows",
             "Join its scalar key to `json_extract(j.value,'$.provider_id')`",
-            "JSON functions only on j.value/result_json",
-            "Declare UPDATE aliases",
+            "json_extract(j.value,'$.provider_id') AS provider_id",
+            "json_extract(j.value,'$.verified_email') AS verified_email",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
         ):
             self.assertIn(expected, info.meta)
@@ -1360,9 +1358,9 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertEqual(source_set_meta.count("[SOURCE SET"), 1)
         self.assertNotIn("source_batch_id=batch-current", source_set_meta)
         self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
-        self.assertIn("no pre-read, copied/bound preview facts", source_set_meta)
+        self.assertIn("never SELECT/preview/bind/copy source rows", source_set_meta)
         self.assertIn("is_current_batch=1", source_set_meta)
-        self.assertIn("t.source_url/t.result_id only as provenance", source_set_meta)
+        self.assertIn("Upsert mutable fields/provenance", source_set_meta)
 
         modeled = tool_results.prepare_tool_results_for_prompt(
             records,
@@ -1460,10 +1458,10 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
         self.assertIn("No model: CREATE", hint)
         self.assertIn("`json_extract(j.value,'$.release_id')` as PRIMARY KEY/UNIQUE", hint)
-        self.assertIn("NEXT: one sqlite_batch rows=[]", hint)
-        self.assertIn("Parent: json_extract(t.result_json,'$.content.<field>')", hint)
-        self.assertIn("Import plus decision SELECT", hint)
-        self.assertIn("t.source_url/t.result_id only as provenance", hint)
+        self.assertIn("FIRST/NOW: one sqlite_batch rows=[]", hint)
+        self.assertIn("never SELECT/preview/bind/copy source rows", hint)
+        self.assertIn("json_extract(j.value,'$.owner') AS owner", hint)
+        self.assertIn("decision SELECT in the same batch", hint)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
 
     def test_four_source_parallel_batch_keeps_each_brief_preview_visible(self):

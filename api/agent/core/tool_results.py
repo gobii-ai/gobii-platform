@@ -182,13 +182,13 @@ def _source_item_key(fields: Sequence[str]) -> str | None:
 
 def _optional_source_array_schemas(
     analysis: ResultAnalysis | None,
-) -> tuple[tuple[str, str, str | None], ...]:
+) -> tuple[tuple[str, str, str | None, tuple[str, ...]], ...]:
     json_analysis = analysis.json_analysis if analysis else None
     if not json_analysis:
         return ()
 
     ordered = (json_analysis.primary_array, *json_analysis.secondary_arrays)
-    schemas: list[tuple[str, str, str | None]] = []
+    schemas: list[tuple[str, str, str | None, tuple[str, ...]]] = []
     seen_paths: set[str] = set()
     for item in ordered:
         if (
@@ -204,7 +204,12 @@ def _optional_source_array_schemas(
             if len(field) <= MAX_OPTIONAL_SOURCE_FIELD_CHARS
         ][:MAX_OPTIONAL_SOURCE_FIELDS]
         field_summary = ",".join(fields)
-        schemas.append((item.path, f"{item.path}({field_summary})", _source_item_key(fields)))
+        schemas.append((
+            item.path,
+            f"{item.path}({field_summary})",
+            _source_item_key(fields),
+            tuple(fields),
+        ))
         seen_paths.add(item.path)
         if len(schemas) >= MAX_OPTIONAL_SOURCE_ARRAYS:
             break
@@ -222,7 +227,7 @@ def _build_optional_source_write_hint(
     if not schemas or len(tool_name) > 100:
         return ""
 
-    first_path, _first_schema, first_key = schemas[0]
+    first_path, _first_schema, first_key, first_fields = schemas[0]
     first_path = first_path.replace("'", "''")
     parent_path = first_path.rsplit(".", 1)[0]
     parent_value = payload
@@ -243,50 +248,54 @@ def _build_optional_source_write_hint(
         else ()
     )
     escaped_tool_name = tool_name.replace("'", "''")
+
     def render_hint(schema_text: str) -> str:
         key_expr = (
             f"`json_extract(j.value,'$.{first_key}')`"
             if first_key
             else "a stable key derived only from shown item fields"
         )
+        safe_fields = [
+            field for field in first_fields
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field)
+        ]
+        select_shape = ", ".join(
+            f"json_extract(j.value,'$.{field}') AS {field}"
+            for field in safe_fields
+        )
         if model_tables:
             table_list = ",".join(sorted(model_tables)[:4])
             model_guidance = (
                 f"Existing tables: {table_list}. Upsert in place; never DELETE/rebuild or lose unrelated rows. "
-                f"Join its scalar key to {key_expr}; JSON functions only on j.value/result_json. Declare UPDATE aliases. "
+                f"Join its scalar key to {key_expr}. "
             )
         else:
-            model_guidance = (
-                f"No model: CREATE with {key_expr} as PRIMARY KEY/UNIQUE, then upsert. "
-            )
-        if model_tables:
-            parent_guidance = ""
-        elif parent_fields:
-            parent_guidance = (
-                f"Parent {parent_path}({','.join(parent_fields)}): "
-                f"json_extract(t.result_json,'{parent_path}.<field>'); "
-                "items: json_extract(j.value,'$.<field>'). "
-            )
-        else:
-            parent_guidance = (
-                f"Parent: json_extract(t.result_json,'{parent_path}.<field>'); "
-                "items: json_extract(j.value,'$.<field>'). "
-            )
+            model_guidance = f"No model: CREATE with {key_expr} as PRIMARY KEY/UNIQUE. "
+        parent_guidance = (
+            f" Parent {parent_path}({','.join(parent_fields)}): "
+            f"json_extract(t.result_json,'{parent_path}.<field>')."
+            if parent_fields and not model_tables
+            else ""
+        )
+        select_guidance = (
+            f"INSERT ... SELECT {select_shape} "
+            if select_shape
+            else "INSERT ... SELECT item fields "
+        )
         return (
             f"[SOURCE SET: {schema_text}. "
             f"{model_guidance}"
-            "NEXT: one sqlite_batch rows=[]; no pre-read, copied/bound preview facts, or result_id/source_url filters. "
-            f"{parent_guidance}"
-            "Import plus decision SELECT: `FROM __tool_results AS t, "
+            "FIRST/NOW: one sqlite_batch rows=[]; never SELECT/preview/bind/copy source rows. "
+            f"{select_guidance}FROM __tool_results AS t, "
             f"json_each(t.result_json,'{first_path}') AS j "
             f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
-            "Keep t.source_url/t.result_id only as provenance. Use all shown paths; final SELECT returns all known "
-            "item fields/source URLs.]\n"
+            "Upsert mutable fields/provenance; then decision SELECT in the same batch."
+            f"{parent_guidance}]\n"
         )
 
-    hint = render_hint("; ".join(schema for _path, schema, _key in schemas))
+    hint = render_hint("; ".join(schema for _path, schema, _key, _fields in schemas))
     if len(hint) > MAX_OPTIONAL_SOURCE_HINT_CHARS:
-        hint = render_hint("; ".join(path for path, _schema, _key in schemas))
+        hint = render_hint("; ".join(path for path, _schema, _key, _fields in schemas))
     return hint if len(hint) <= MAX_OPTIONAL_SOURCE_HINT_CHARS else ""
 
 
