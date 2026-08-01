@@ -19,76 +19,57 @@
 <meta name="twitter:image" content="{{ ai_employees_social_image_url }}">
 <meta name="twitter:image:alt" content="{{ ai_employees_social_image_alt }}">
 <script type="application/ld+json">{{ ai_employees_structured_data_json }}</script>
-<style>
-  .ai-employees-hero {
-    position: relative;
-    overflow: hidden;
-    background: #faf9fe;
-  }
-  .ai-employees-hero::before {
-    content: "";
-    position: absolute;
-    top: -260px;
-    right: -140px;
-    width: 720px;
-    height: 520px;
-    border-radius: 50%;
-    pointer-events: none;
-    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
-    filter: blur(60px);
-  }
-</style>
 {% endblock %}
 
 {% block content %}
-<section class="ai-employees-hero relative isolate overflow-hidden">
-  <div class="mx-auto max-w-7xl px-6 pb-16 pt-5 sm:px-8 lg:px-12 lg:pb-20">
-    <nav class="flex items-center gap-2 text-sm text-slate-600" aria-label="Breadcrumb">
-      <a href="{% url 'pages:home' %}" class="font-medium text-slate-900 hover:text-violet-700">Gobii</a>
-      <i data-lucide="chevron-right" class="h-4 w-4 text-slate-400"></i>
+<section class="gk-page-dark">
+  <div class="gk-ph">
+    <nav class="gk-ph-crumbs flex items-center gap-2" aria-label="Breadcrumb">
+      <a href="{% url 'pages:home' %}" class="font-medium">Gobii</a>
+      <i data-lucide="chevron-right" class="h-4 w-4"></i>
       <span>AI Employees</span>
     </nav>
 
-    <div class="mt-20 max-w-4xl lg:mt-28">
-      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">AI employees for business workflows</p>
-      <h1 class="mt-5 max-w-4xl text-4xl font-light leading-[1.05] tracking-tight text-slate-950 sm:text-5xl lg:text-7xl">
+    <div class="max-w-4xl">
+      <p class="gk-ph-eyebrow">AI employees for business workflows</p>
+      <h1>
         AI Employees for Real Work
       </h1>
-      <p class="mt-6 max-w-3xl text-lg leading-8 text-slate-600 sm:text-xl">
+      <p class="gk-ph-sub">
         Gobii helps teams deploy supervised, persistent AI employees that browse, research, collect data, prepare outputs, and hand work back with sources and review points intact.
       </p>
-      <div class="mt-9 flex flex-col gap-3 sm:flex-row">
-        <a href="{% url 'proprietary:pricing' %}" class="inline-flex items-center justify-center gap-2 rounded-lg px-6 py-3 text-sm font-semibold text-white transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
+      <div class="gk-ph-ctas">
+        <a href="{% url 'proprietary:pricing' %}" class="gk-btn">
           View pricing
           <i data-lucide="arrow-right" class="h-4 w-4"></i>
         </a>
-        <a href="#workflow-examples" class="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200 bg-white px-6 py-3 text-sm font-semibold text-slate-900 transition hover:border-violet-400 hover:text-violet-700">
+        <a href="#workflow-examples" class="gk-btn-quiet">
           See workflows
           <i data-lucide="workflow" class="h-4 w-4"></i>
         </a>
       </div>
 
       <nav class="mt-8 flex max-w-3xl flex-wrap gap-6 gap-y-3 text-sm" aria-label="AI employees page sections">
-        <a href="#definition" class="font-medium text-slate-600 hover:text-violet-700">Definition</a>
-        <a href="#workflow-examples" class="font-medium text-slate-600 hover:text-violet-700">Workflows</a>
-        <a href="#product-proof" class="font-medium text-slate-600 hover:text-violet-700">Product proof</a>
-        <a href="#deployment" class="font-medium text-slate-600 hover:text-violet-700">Deployment</a>
-        <a href="#pricing" class="font-medium text-slate-600 hover:text-violet-700">Pricing</a>
-        <a href="#faq" class="font-medium text-slate-600 hover:text-violet-700">FAQ</a>
+        <a href="#definition" class="font-medium text-violet-300 hover:text-white">Definition</a>
+        <a href="#workflow-examples" class="font-medium text-violet-300 hover:text-white">Workflows</a>
+        <a href="#product-proof" class="font-medium text-violet-300 hover:text-white">Product proof</a>
+        <a href="#deployment" class="font-medium text-violet-300 hover:text-white">Deployment</a>
+        <a href="#pricing" class="font-medium text-violet-300 hover:text-white">Pricing</a>
+        <a href="#faq" class="font-medium text-violet-300 hover:text-white">FAQ</a>
       </nav>
 
       <dl class="mt-12 grid max-w-4xl gap-3 sm:grid-cols-3">
-        <div class="rounded-lg border border-violet-100 bg-white p-4">
-          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-violet-600">Deploy</dt>
-          <dd class="mt-2 text-sm leading-6 text-slate-700">Start with a defined workflow, approved sources, and a clear output format.</dd>
+        <div class="gk-glass p-4">
+          <dt class="gk-glass-label text-xs font-semibold uppercase tracking-[0.14em]">Deploy</dt>
+          <dd class="mt-2 text-sm leading-6 text-white/70">Start with a defined workflow, approved sources, and a clear output format.</dd>
         </div>
-        <div class="rounded-lg border border-violet-100 bg-white p-4">
-          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-violet-600">Supervise</dt>
-          <dd class="mt-2 text-sm leading-6 text-slate-700">Set review gates where human judgment, compliance, or relationship context matters.</dd>
+        <div class="gk-glass p-4">
+          <dt class="gk-glass-label text-xs font-semibold uppercase tracking-[0.14em]">Supervise</dt>
+          <dd class="mt-2 text-sm leading-6 text-white/70">Set review gates where human judgment, compliance, or relationship context matters.</dd>
         </div>
-        <div class="rounded-lg border border-violet-100 bg-white p-4">
-          <dt class="text-xs font-semibold uppercase tracking-[0.14em] text-violet-600">Handoff</dt>
-          <dd class="mt-2 text-sm leading-6 text-slate-700">Receive source-linked work that can move into sheets, CRMs, docs, or downstream tools.</dd>
+        <div class="gk-glass p-4">
+          <dt class="gk-glass-label text-xs font-semibold uppercase tracking-[0.14em]">Handoff</dt>
+          <dd class="mt-2 text-sm leading-6 text-white/70">Receive source-linked work that can move into sheets, CRMs, docs, or downstream tools.</dd>
         </div>
       </dl>
     </div>

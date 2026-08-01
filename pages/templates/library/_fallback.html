@@ -1,24 +1,26 @@
 <div class="space-y-6 pb-10" data-library-ssr-fallback>
-  <section class="gobii-card-base px-6 py-6 sm:px-8">
-    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div class="space-y-2">
-        <p class="text-xs font-semibold uppercase tracking-[0.14em] text-violet-600">Discover</p>
-        <h1 class="text-2xl font-light tracking-tight text-slate-900 sm:text-3xl">
-          {% if selected_category and official_only %}Official {{ selected_category }} AI Employee Templates{% elif selected_category %}{{ selected_category }} AI Employee Templates{% elif official_only %}Official Gobii AI Employee Templates{% else %}AI Employee Template Library{% endif %}
-        </h1>
-        <p class="max-w-3xl text-sm text-slate-600 sm:text-base">
-          {% if selected_category and official_only %}Browse official {{ selected_category }} AI employee templates maintained by Gobii.{% elif selected_category %}Browse publicly shared {{ selected_category }} AI employee templates.{% elif official_only %}Browse AI employee templates maintained by Gobii for common workflows.{% else %}Choose a role from Gobii and the community, then customize the AI employee for your workflow.{% endif %}
-        </p>
-        {% if not user.is_authenticated %}
-          <p class="text-sm font-medium text-violet-700">Sign in to like templates.</p>
-        {% endif %}
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <div class="inline-flex items-center gap-2 rounded-full border border-violet-100 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700">
-          {% if selected_category or official_only %}{{ payload.totalAgents }} {% if official_only %}official templates{% else %}shared templates{% endif %}{% else %}{{ payload.libraryTotalAgents }} shared templates{% endif %}
+  <section class="gk-page-dark rounded-2xl">
+    <div class="gk-ph">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p class="gk-ph-eyebrow">Discover</p>
+          <h1>
+            {% if selected_category and official_only %}Official {{ selected_category }} AI Employee Templates{% elif selected_category %}{{ selected_category }} AI Employee Templates{% elif official_only %}Official Gobii AI Employee Templates{% else %}AI Employee Template Library{% endif %}
+          </h1>
+          <p class="gk-ph-sub">
+            {% if selected_category and official_only %}Browse official {{ selected_category }} AI employee templates maintained by Gobii.{% elif selected_category %}Browse publicly shared {{ selected_category }} AI employee templates.{% elif official_only %}Browse AI employee templates maintained by Gobii for common workflows.{% else %}Choose a role from Gobii and the community, then customize the AI employee for your workflow.{% endif %}
+          </p>
+          {% if not user.is_authenticated %}
+            <p class="mt-3 text-sm font-medium text-violet-300">Sign in to like templates.</p>
+          {% endif %}
         </div>
-        <div class="inline-flex items-center gap-2 rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700">
-          {% if official_only %}{{ payload.officialTotalLikes }}{% else %}{{ payload.libraryTotalLikes }}{% endif %} likes
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="gk-glass inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold">
+            {% if selected_category or official_only %}{{ payload.totalAgents }} {% if official_only %}official templates{% else %}shared templates{% endif %}{% else %}{{ payload.libraryTotalAgents }} shared templates{% endif %}
+          </div>
+          <div class="gk-glass inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold">
+            {% if official_only %}{{ payload.officialTotalLikes }}{% else %}{{ payload.libraryTotalLikes }}{% endif %} likes
+          </div>
         </div>
       </div>
     </div>

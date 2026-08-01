@@ -8,24 +8,6 @@
 {{ block.super }}
 {% include "solutions/_seo_meta.html" %}
 <style>
-  .recruiting-hero {
-    position: relative;
-    overflow: hidden;
-    background: #faf9fe;
-  }
-  .recruiting-hero::before {
-    content: "";
-    position: absolute;
-    top: -260px;
-    right: -140px;
-    width: 720px;
-    height: 520px;
-    border-radius: 50%;
-    pointer-events: none;
-    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
-    filter: blur(60px);
-  }
-
   .agent-card {
     transition: all 0.2s ease;
   }
@@ -40,59 +22,53 @@
 
 {% block content %}
 <!-- Hero Section -->
-<div class="recruiting-hero -mt-16 min-h-[600px] lg:min-h-[700px]">
-  <section class="relative z-10">
-    <div class="relative max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
+<section class="gk-page-dark">
+  <div class="gk-ph">
+    <h1>
+      AI recruiting agents for
+      <span class="gk-accent">candidate sourcing</span>
+    </h1>
 
-      <!-- Hero Content -->
-      <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
-        <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
-          AI recruiting agents for
-          <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">candidate sourcing</span>
-        </h1>
+    <p class="gk-ph-sub">
+      Deploy AI agents that source candidates, screen resumes, and nurture talent pipelines around the clock.
+    </p>
 
-        <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
-          Deploy AI agents that source candidates, screen resumes, and nurture talent pipelines around the clock.
-        </p>
+    <div class="gk-ph-ctas">
+      <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="recruiting_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+        {% csrf_token %}
+        <input type="hidden" name="source_page" value="recruiting_hero" />
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+        <button type="submit" class="gk-btn w-full sm:w-auto group">
+          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy AI Employee{% endif %}
+          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
+      <a href="#how-it-works" class="gk-btn-quiet w-full sm:w-auto">
+        See how it works
+      </a>
+    </div>
+    {% include "solutions/_crawlable_related_link.html" %}
 
-        <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="recruiting_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
-            {% csrf_token %}
-            <input type="hidden" name="source_page" value="recruiting_hero" />
-            <input type="hidden" name="trial_onboarding" value="1" />
-            <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-            <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 text-white font-semibold rounded-lg transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
-              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy AI Employee{% endif %}
-              <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-              </svg>
-            </button>
-          </form>
-          <a href="#how-it-works" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white text-slate-900 font-medium rounded-lg border border-violet-200 hover:border-violet-400 hover:text-violet-700 shadow-sm transition-all duration-200">
-            See how it works
-          </a>
-        </div>
-        {% include "solutions/_crawlable_related_link.html" %}
-
-        <!-- Inline stats -->
-        <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">
-          <div>
-            <div class="text-3xl font-light text-gray-900">10x</div>
-            <p class="text-sm text-gray-800 mt-1">Faster sourcing</p>
-          </div>
-          <div>
-            <div class="text-3xl font-light text-gray-900">80%</div>
-            <p class="text-sm text-gray-800 mt-1">Time saved</p>
-          </div>
-          <div>
-            <div class="text-3xl font-light text-gray-900">24/7</div>
-            <p class="text-sm text-gray-800 mt-1">Always on</p>
-          </div>
-        </div>
+    <!-- Inline stats -->
+    <div class="gk-glass mt-14 inline-flex flex-wrap gap-x-14 gap-y-5 p-5">
+      <div>
+        <div class="text-3xl font-light">10x</div>
+        <p class="gk-glass-label text-sm mt-1">Faster sourcing</p>
+      </div>
+      <div>
+        <div class="text-3xl font-light">80%</div>
+        <p class="gk-glass-label text-sm mt-1">Time saved</p>
+      </div>
+      <div>
+        <div class="text-3xl font-light">24/7</div>
+        <p class="gk-glass-label text-sm mt-1">Always on</p>
       </div>
     </div>
-  </section>
-</div>
+  </div>
+</section>
 
 <!-- Agents Section -->
 <section class="relative bg-white pb-12">

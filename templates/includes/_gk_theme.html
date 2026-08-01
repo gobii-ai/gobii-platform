@@ -1,0 +1,43 @@
+<style>
+  /* ===== Gobii k theme: shared shell for every marketing page ===== */
+  .gk-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none;
+            background: linear-gradient(90deg, #7c3aed, #a855f7); color: #fff; border: 0;
+            font-weight: 600; padding: 14px 28px; border-radius: 11px; font-size: 15px; cursor: pointer;
+            box-shadow: 0 6px 24px rgba(124,58,237,.45), inset 0 1px 0 rgba(255,255,255,.2);
+            transition: transform .12s ease, box-shadow .12s ease; }
+  .gk-btn:hover { transform: translateY(-1px); box-shadow: 0 12px 32px rgba(124,58,237,.55), inset 0 1px 0 rgba(255,255,255,.2); color: #fff; }
+  .gk-btn-quiet { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none;
+                  background: rgba(255,255,255,.08); color: #ece9f6; border: 1px solid rgba(255,255,255,.2);
+                  font-weight: 500; padding: 13px 24px; border-radius: 11px; font-size: 14.5px; cursor: pointer;
+                  transition: background .12s ease; }
+  .gk-btn-quiet:hover { background: rgba(255,255,255,.14); color: #fff; }
+  .gk-btn-sm { padding: 10px 22px; font-size: 13.5px; box-shadow: 0 4px 14px rgba(124,58,237,.3); white-space: nowrap; }
+  .gk-accent { font-weight: 400; background: linear-gradient(90deg, #c4b5fd, #f0abfc);
+               -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  /* dark page hero band — every marketing page opens with this */
+  .gk-page-dark { position: relative; overflow: hidden; color: #ece9f6;
+                  background: linear-gradient(150deg, #17102b 0%, #241a3f 48%, #46208c 125%); }
+  .gk-page-dark::before { content: ''; position: absolute; width: 720px; height: 420px; border-radius: 50%;
+    filter: blur(80px); opacity: .45; pointer-events: none;
+    background: radial-gradient(closest-side, rgba(168,85,247,.5), transparent);
+    top: -160px; right: 6%; }
+  .gk-ph { position: relative; max-width: 1100px; margin: 0 auto; padding: 60px 48px 56px; }
+  .gk-ph-center { text-align: center; }
+  .gk-ph-eyebrow { font-size: 12px; letter-spacing: 2.5px; font-weight: 600; color: #c4b5fd;
+                   text-transform: uppercase; }
+  .gk-ph h1 { font-weight: 300; letter-spacing: -1px; color: #fff; font-size: clamp(30px, 4vw, 44px);
+              line-height: 1.12; margin: 14px 0 0; text-wrap: balance; }
+  .gk-ph-sub { color: #b7aed4; font-size: 16.5px; line-height: 1.65; margin: 14px 0 0; max-width: 56ch;
+               text-wrap: pretty; }
+  .gk-ph-center .gk-ph-sub { margin-left: auto; margin-right: auto; }
+  .gk-ph-ctas { display: flex; gap: 12px; margin-top: 26px; flex-wrap: wrap; align-items: center; }
+  .gk-ph-center .gk-ph-ctas { justify-content: center; }
+  .gk-ph-crumbs { position: relative; font-size: 12.5px; color: #b7aed4; margin-bottom: 14px; }
+  .gk-ph-crumbs a { color: #c4b5fd; text-decoration: none; }
+  .gk-ph-crumbs a:hover { color: #fff; }
+  .gk-glass { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+              border-radius: 16px; color: #fff; }
+  .gk-glass .gk-glass-label { color: #b7aed4; }
+  @media (max-width: 900px) { .gk-ph { padding: 40px 22px 38px; } }
+</style>

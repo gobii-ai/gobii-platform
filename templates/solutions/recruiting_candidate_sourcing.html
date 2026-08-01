@@ -7,24 +7,6 @@
 {{ block.super }}
 {% include "solutions/_seo_meta.html" %}
 <style>
-  .candidate-sourcing-hero {
-    position: relative;
-    overflow: hidden;
-    background: #faf9fe;
-  }
-  .candidate-sourcing-hero::before {
-    content: "";
-    position: absolute;
-    top: -260px;
-    right: -140px;
-    width: 720px;
-    height: 520px;
-    border-radius: 50%;
-    pointer-events: none;
-    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
-    filter: blur(60px);
-  }
-
   .workflow-line {
     background: linear-gradient(180deg, rgba(124, 58, 237, 0.28), rgba(168, 85, 247, 0.28));
   }
@@ -94,65 +76,61 @@
 {% endblock %}
 
 {% block content %}
-<div class="candidate-sourcing-hero -mt-16 min-h-[640px] lg:min-h-[720px]">
-  <section class="relative z-10">
-    <div class="max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
-      <div class="max-w-2xl">
-        <nav class="flex flex-wrap items-center gap-2 text-sm text-slate-700" aria-label="Breadcrumb">
-          <a href="{% url 'pages:solutions' %}" class="font-medium text-violet-600 hover:text-violet-700">Solutions</a>
-          <span aria-hidden="true">/</span>
-          <a href="{% url 'pages:solution' 'recruiting' %}" class="font-medium text-violet-600 hover:text-violet-700">Recruiting</a>
-          <span aria-hidden="true">/</span>
-          <span>Candidate sourcing</span>
-        </nav>
+<section class="gk-page-dark">
+  <div class="gk-ph">
+    <nav class="gk-ph-crumbs flex flex-wrap items-center gap-2" aria-label="Breadcrumb">
+      <a href="{% url 'pages:solutions' %}">Solutions</a>
+      <span aria-hidden="true">/</span>
+      <a href="{% url 'pages:solution' 'recruiting' %}">Recruiting</a>
+      <span aria-hidden="true">/</span>
+      <span>Candidate sourcing</span>
+    </nav>
 
-        <p class="mt-10 text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">AI candidate sourcing</p>
-        <h1 class="mt-4 text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-slate-950 leading-[1.08]">
-          AI candidate sourcing for
-          <span class="font-normal text-violet-600">recruiter-reviewed shortlists</span>
-        </h1>
+    <p class="gk-ph-eyebrow">AI candidate sourcing</p>
+    <h1>
+      AI candidate sourcing for
+      <span class="gk-accent">recruiter-reviewed shortlists</span>
+    </h1>
 
-        <p class="mt-6 text-lg text-slate-700 leading-relaxed max-w-xl">
-          Give Gobii a role brief and a sourcing direction. Your AI agent searches approved sources, qualifies profiles against your criteria, and returns organized candidate data for your team to review.
-        </p>
+    <p class="gk-ph-sub">
+      Give Gobii a role brief and a sourcing direction. Your AI agent searches approved sources, qualifies profiles against your criteria, and returns organized candidate data for your team to review.
+    </p>
 
-        <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
-            {% csrf_token %}
-            <input type="hidden" name="source_page" value="candidate_sourcing_hero" />
-            <input type="hidden" name="trial_onboarding" value="1" />
-            <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-            <button type="submit" class="candidate-sourcing-primary-cta w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 text-white font-semibold rounded-lg">
-              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy Candidate Sourcing Employee{% endif %}
-              <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-              </svg>
-            </button>
-          </form>
-          <a href="#candidate-sourcing-workflow" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white text-slate-900 font-medium rounded-lg border border-violet-200 hover:border-violet-400 hover:text-violet-700 shadow-sm transition-all duration-200" data-analytics-cta-id="candidate_sourcing_hero_workflow" data-analytics-placement="hero" data-analytics-intent="view_workflow">
-            See the workflow
-          </a>
-        </div>
-        {% include "solutions/_crawlable_related_link.html" %}
-
-        <dl class="mt-14 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
-          <div class="border-l-2 border-violet-300 pl-4">
-            <dt class="text-2xl font-light text-slate-950">24/7</dt>
-            <dd class="mt-1 text-sm text-slate-700">Persistent sourcing runs</dd>
-          </div>
-          <div class="border-l-2 border-violet-300 pl-4">
-            <dt class="text-2xl font-light text-slate-950">CSV</dt>
-            <dd class="mt-1 text-sm text-slate-700">Sheets and export-ready data</dd>
-          </div>
-          <div class="border-l-2 border-violet-300 pl-4">
-            <dt class="text-2xl font-light text-slate-950">Review</dt>
-            <dd class="mt-1 text-sm text-slate-700">Recruiters approve fit and outreach</dd>
-          </div>
-        </dl>
-      </div>
+    <div class="gk-ph-ctas">
+      <form method="post" action="{% url 'pages:public_template_hire' 'recruiting' 'candidate-sourcing-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+        {% csrf_token %}
+        <input type="hidden" name="source_page" value="candidate_sourcing_hero" />
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+        <button type="submit" class="gk-btn w-full sm:w-auto group">
+          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy Candidate Sourcing Employee{% endif %}
+          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
+      <a href="#candidate-sourcing-workflow" class="gk-btn-quiet w-full sm:w-auto" data-analytics-cta-id="candidate_sourcing_hero_workflow" data-analytics-placement="hero" data-analytics-intent="view_workflow">
+        See the workflow
+      </a>
     </div>
-  </section>
-</div>
+    {% include "solutions/_crawlable_related_link.html" %}
+
+    <dl class="gk-glass mt-14 grid grid-cols-1 sm:grid-cols-3 gap-4 p-5 max-w-2xl">
+      <div class="border-l-2 border-violet-300 pl-4">
+        <dt class="text-2xl font-light">24/7</dt>
+        <dd class="gk-glass-label mt-1 text-sm">Persistent sourcing runs</dd>
+      </div>
+      <div class="border-l-2 border-violet-300 pl-4">
+        <dt class="text-2xl font-light">CSV</dt>
+        <dd class="gk-glass-label mt-1 text-sm">Sheets and export-ready data</dd>
+      </div>
+      <div class="border-l-2 border-violet-300 pl-4">
+        <dt class="text-2xl font-light">Review</dt>
+        <dd class="gk-glass-label mt-1 text-sm">Recruiters approve fit and outreach</dd>
+      </div>
+    </dl>
+  </div>
+</section>
 
 <section id="candidate-sourcing-workflow" class="relative bg-white py-20 lg:py-28">
   <div class="max-w-6xl mx-auto px-6">

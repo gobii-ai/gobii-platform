@@ -1,18 +1,13 @@
-<header class="sticky top-0 z-50 bg-transparent hs-header transition-all duration-300 !border-none"
+<header class="sticky top-0 z-50 hs-header transition-all duration-300 !border-none"
+        style="background:#17102b"
         x-data="{ scrolled: window.scrollY > 10 }"
         x-init="scrolled = window.scrollY > 10"
         @scroll.window.passive="scrolled = window.scrollY > 10"
-        :class="{ 'backdrop-blur-md': scrolled }">
-  <div class="absolute inset-0 bg-white/75 z-[-1]"
-       x-data
-       x-init="$el.style.opacity = Math.min(window.scrollY / 400, 1)"
-       @scroll.window.passive="$el.style.opacity = Math.min(window.scrollY / 400, 1)"
-       style="opacity: 0; transition: opacity 0.1s linear;">
-  </div>
+        :class="{ 'shadow-lg': scrolled }">
 
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="flex items-center h-16 !border-none">
-      <a href="{% url 'pages:home' %}" aria-label="Gobii home" class="text-lg font-bold text-slate-900 flex items-center h-10">
+      <a href="{% url 'pages:home' %}" aria-label="Gobii home" class="text-lg font-bold text-white flex items-center h-10">
         {% include "includes/_header_logo_image.html" %}
       </a>
     </div>

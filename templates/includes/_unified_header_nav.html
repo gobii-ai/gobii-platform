@@ -2,23 +2,17 @@
 {% url 'account_login' as account_login_url %}
 
 <!-- Unified Header -->
-<header class="sticky top-0 z-50 bg-transparent hs-header transition-all duration-300 !border-none"
+<header class="sticky top-0 z-50 hs-header transition-all duration-300 !border-none"
+        style="background:#17102b"
         x-data="{ scrolled: window.scrollY > 10 }"
         x-init="scrolled = window.scrollY > 10"
         @scroll.window.passive="scrolled = window.scrollY > 10"
-        :class="{ 'backdrop-blur-md': scrolled }">
-  <!-- Fluid Background Tint Layer -->
-  <div class="absolute inset-0 bg-white/75 z-[-1]"
-       x-data
-       x-init="$el.style.opacity = Math.min(window.scrollY / 400, 1)"
-       @scroll.window.passive="$el.style.opacity = Math.min(window.scrollY / 400, 1)"
-       style="opacity: 0; transition: opacity 0.1s linear;">
-  </div>
+        :class="{ 'shadow-lg': scrolled }">
 
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="flex items-center justify-between h-16 !border-none">
       <!-- Brand -->
-      <a href="{% url 'pages:home' %}" aria-label="Gobii home" class="text-lg font-bold text-slate-900 flex items-center h-10">
+      <a href="{% url 'pages:home' %}" aria-label="Gobii home" class="text-lg font-bold text-white flex items-center h-10">
         {% include "includes/_header_logo_image.html" %}
       </a>
 
@@ -29,8 +23,8 @@
           <!-- Solutions Dropdown -->
           <div x-data="{ open: false }" class="relative" @mouseleave="open = false">
             <button @mouseover="open = true" @click="open = !open"
-                    class="inline-flex items-center gap-x-1 px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 focus:outline-none transition-colors"
-                    :class="{ 'text-slate-950': open }">
+                    class="inline-flex items-center gap-x-1 px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white focus:outline-none transition-colors"
+                    :class="{ 'text-white': open }">
               Solutions
               <svg class="h-3 w-3 transform transition-transform duration-200" :class="{ 'rotate-180': open }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -78,16 +72,16 @@
             </div>
           </div>
 
-            <a href="{% url 'pages:library' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">Agents</a>
-            <a href="{% url 'proprietary:pricing' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">Pricing</a>
-            <a href="{% url 'proprietary:teams' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">Teams</a>
-            <a href="{% url 'pages:solution' slug='engineering' %}" title="Gobii API - Build AI Agents on our Platform" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">API</a>
+            <a href="{% url 'pages:library' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">Agents</a>
+            <a href="{% url 'proprietary:pricing' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">Pricing</a>
+            <a href="{% url 'proprietary:teams' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">Teams</a>
+            <a href="{% url 'pages:solution' slug='engineering' %}" title="Gobii API - Build AI Agents on our Platform" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">API</a>
           {% else %}
-            <a href="{% url 'pages:library' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">Agents</a>
+            <a href="{% url 'pages:library' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">Agents</a>
           {% endif %}
 
           {% if request.user.is_authenticated %}
-            <a href="/app/agents" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">
+            <a href="/app/agents" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">
               <i data-lucide="bot" class="h-3.5 w-3.5"></i>
               My Agents
             </a>
@@ -99,7 +93,7 @@
         {% if not request.user.is_authenticated %}
           {% with request.session.utm_querystring as utm_qs %}
           <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
-             class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">
+             class="px-3 py-2 rounded-lg text-sm font-medium text-white/90 hover:text-white transition-colors">
             Log in
           </a>
           {% url 'account_signup' as account_signup_url %}
@@ -117,7 +111,7 @@
             <button @click="open = !open"
                     @keydown.escape.window="open = false"
                     :aria-expanded="open"
-                    class="inline-flex items-center justify-center gap-x-2 rounded-full text-sm font-medium text-slate-700 hover:text-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 transition-colors">
+                    class="inline-flex items-center justify-center gap-x-2 rounded-full text-sm font-medium text-white/90 hover:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 transition-colors">
               {% with social_account_set=request.user.socialaccount_set.all %}
                 {% if social_account_set and social_account_set.0.get_avatar_url %}
                   <img class="inline-block size-8 rounded-full object-cover ring-2 ring-white/50" src="{{ social_account_set.0.get_avatar_url }}" alt="{{ request.user.email|default:"User Profile" }}">
@@ -125,7 +119,7 @@
                   {% firstof request.user.first_name request.user.email request.user.username as display_name_source %}
                   {% if display_name_source %}
                     {% with initial=display_name_source|first|upper %}
-                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-indigo-500 text-white text-sm font-semibold ring-2 ring-white/50" title="{{ request.user.email|default:request.user.username }}">
+                    <div class="inline-flex items-center justify-center size-8 rounded-full bg-violet-500 text-white text-sm font-semibold ring-2 ring-white/50" title="{{ request.user.email|default:request.user.username }}">
                         {{ initial }}
                     </div>
                     {% endwith %}
@@ -231,7 +225,7 @@
       </nav>
 
       <!-- Mobile hamburger -->
-      <button type="button" class="md:hidden flex items-center justify-center w-10 h-10 rounded-lg text-slate-700 hover:text-violet-700 transition-colors" 
+      <button type="button" class="md:hidden flex items-center justify-center w-10 h-10 rounded-lg text-white/90 hover:text-white transition-colors" 
               x-data="{}" 
               @click="$dispatch('toggle-mobile-nav')" 
               aria-label="Toggle navigation">

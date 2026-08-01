@@ -1,6 +1,5 @@
 {% load static %}
 
-{% if home_dark_header %}
 <span class="flex items-center gap-2">
   <img src="{% static 'images/gobii-fish.svg' %}"
        alt=""
@@ -13,14 +12,3 @@
        fetchpriority="high">
   <span class="text-[21px] font-light tracking-[0.2px] leading-none text-white -translate-y-[1px]">gobii</span>
 </span>
-{% else %}
-<img src="{% static 'images/gobii_fish_with_text_purple_nav_2x.webp' %}"
-     srcset="{% static 'images/gobii_fish_with_text_purple_nav_1x.webp' %} 1x, {% static 'images/gobii_fish_with_text_purple_nav_2x.webp' %} 2x, {% static 'images/gobii_fish_with_text_purple_nav_3x.webp' %} 3x"
-     alt="Gobii Fish Wordmark"
-     class="h-10 w-auto"
-     width="108"
-     height="40"
-     loading="eager"
-     decoding="async"
-     fetchpriority="high">
-{% endif %}

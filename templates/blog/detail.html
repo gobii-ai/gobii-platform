@@ -38,45 +38,53 @@
 {% endblock %}
 
 {% block content %}
-<article class="bg-white">
-  <div class="mx-auto max-w-3xl px-6 py-16">
-    <a href="{% url 'proprietary:blog_index' %}" class="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-700">
-      <svg class="mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
-      </svg>
-      Back to blog
-    </a>
+<article>
+  <section class="gk-page-dark">
+    <div class="gk-ph">
+      <div class="mx-auto max-w-3xl">
+        <a href="{% url 'proprietary:blog_index' %}" class="inline-flex items-center text-sm font-medium text-violet-300 hover:text-white">
+          <svg class="mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to blog
+        </a>
 
-    <h1 class="mt-6 text-4xl font-light tracking-tight text-slate-900">{{ post.meta.title }}</h1>
+        <h1>{{ post.meta.title }}</h1>
 
-    <div class="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-500">
-      {% if post.published_at %}
-        <time datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"F j, Y" }}</time>
-      {% endif %}
-      {% if post.updated_at and post.updated_at != post.published_at %}
-        <span class="h-1 w-1 rounded-full bg-slate-300"></span>
-        <time datetime="{{ post.updated_at|date:'c' }}">Updated {{ post.updated_at|date:"F j, Y" }}</time>
-      {% endif %}
-      {% if post.meta.author %}
-        <span class="h-1 w-1 rounded-full bg-slate-300"></span>
-        {% if post.meta.author_url %}
-        <a href="{{ post.meta.author_url }}" rel="author" class="font-medium text-slate-700 underline decoration-slate-300 underline-offset-4 hover:text-violet-700">{{ post.meta.author }}</a>
-        {% else %}
-        <span>{{ post.meta.author }}</span>
+        <div class="gk-ph-sub flex flex-wrap items-center gap-3">
+          {% if post.published_at %}
+            <time datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"F j, Y" }}</time>
+          {% endif %}
+          {% if post.updated_at and post.updated_at != post.published_at %}
+            <span class="h-1 w-1 rounded-full bg-slate-300"></span>
+            <time datetime="{{ post.updated_at|date:'c' }}">Updated {{ post.updated_at|date:"F j, Y" }}</time>
+          {% endif %}
+          {% if post.meta.author %}
+            <span class="h-1 w-1 rounded-full bg-slate-300"></span>
+            {% if post.meta.author_url %}
+            <a href="{{ post.meta.author_url }}" rel="author" class="font-medium text-violet-300 underline decoration-slate-300 underline-offset-4 hover:text-white">{{ post.meta.author }}</a>
+            {% else %}
+            <span>{{ post.meta.author }}</span>
+            {% endif %}
+          {% endif %}
+          {% if post.meta.last_reviewed %}
+            <span class="h-1 w-1 rounded-full bg-slate-300"></span>
+            <span>Last reviewed {{ post.meta.last_reviewed }}</span>
+          {% endif %}
+        </div>
+
+        {% if post.summary %}
+          <p class="gk-ph-sub">{{ post.summary }}</p>
         {% endif %}
-      {% endif %}
-      {% if post.meta.last_reviewed %}
-        <span class="h-1 w-1 rounded-full bg-slate-300"></span>
-        <span>Last reviewed {{ post.meta.last_reviewed }}</span>
-      {% endif %}
+      </div>
     </div>
+  </section>
 
-    {% if post.summary %}
-      <p class="mt-6 text-lg leading-relaxed text-slate-600">{{ post.summary }}</p>
-    {% endif %}
-
-    <div class="prose prose-slate prose-headings:font-normal mt-10 max-w-none lg:prose-lg">
-      {{ post.html|safe }}
+  <div class="bg-white">
+    <div class="mx-auto max-w-3xl px-6 py-12">
+      <div class="prose prose-slate prose-headings:font-normal max-w-none lg:prose-lg">
+        {{ post.html|safe }}
+      </div>
     </div>
   </div>
 </article>

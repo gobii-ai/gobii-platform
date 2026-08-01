@@ -10,36 +10,19 @@
 {% endblock %}
 
 {% block content %}
-<style>
-  .gk-prequal-hero {
-    position: relative;
-    overflow: hidden;
-    background: #faf9fe;
-  }
-  .gk-prequal-hero::before {
-    content: "";
-    position: absolute;
-    top: -260px;
-    right: -140px;
-    width: 720px;
-    height: 520px;
-    border-radius: 50%;
-    pointer-events: none;
-    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
-    filter: blur(60px);
-  }
-</style>
-<section class="gk-prequal-hero py-16 sm:py-20">
-  <div class="relative max-w-5xl mx-auto px-6">
-    <div class="text-center max-w-3xl mx-auto">
-      <p class="text-xs uppercase tracking-[0.3em] text-violet-600 font-medium">Enterprise pre-qualification</p>
-      <h1 class="mt-4 text-3xl sm:text-4xl font-light tracking-tight text-slate-900">Let's design your deployment.</h1>
-      <p class="mt-4 text-lg text-slate-600">
-        Share a few details about your team and goals. If it is a fit, we will send a scheduling link.
-      </p>
-    </div>
+<section class="gk-page-dark">
+  <div class="gk-ph gk-ph-center">
+    <p class="gk-ph-eyebrow">Enterprise pre-qualification</p>
+    <h1>Let's design your deployment.</h1>
+    <p class="gk-ph-sub">
+      Share a few details about your team and goals. If it is a fit, we will send a scheduling link.
+    </p>
+  </div>
+</section>
 
-    <div class="mt-12 gobii-card-base p-8 sm:p-10">
+<section class="py-12 sm:py-16">
+  <div class="relative max-w-5xl mx-auto px-6">
+    <div class="gobii-card-base p-8 sm:p-10">
       <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
         <div>
           <p class="text-sm font-medium text-slate-900">What happens next</p>

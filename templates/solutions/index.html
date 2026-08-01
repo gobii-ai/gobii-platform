@@ -16,25 +16,6 @@
 <meta name="twitter:title" content="AI Agent Solutions for Teams | Gobii">
 <meta name="twitter:description" content="Explore Gobii AI agent solutions for recruiting, sales, and API automation.">
 <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/solutions/sales-hero.jpg' %}">
-<style>
-  .solutions-hero-k {
-    position: relative;
-    overflow: hidden;
-    background: #faf9fe;
-  }
-  .solutions-hero-k::before {
-    content: "";
-    position: absolute;
-    top: -260px;
-    right: -140px;
-    width: 720px;
-    height: 520px;
-    border-radius: 50%;
-    pointer-events: none;
-    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
-    filter: blur(60px);
-  }
-</style>
 <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -105,24 +86,22 @@
 {% endblock %}
 
 {% block content %}
-<section class="relative solutions-hero-k">
-  <div class="relative mx-auto max-w-7xl px-6 pb-16 pt-24 sm:px-8 lg:px-12 lg:pb-24 lg:pt-28">
-    <div class="max-w-3xl">
-      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">Gobii solutions</p>
-      <h1 class="mt-5 text-4xl font-light leading-[1.08] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
-        AI agent solutions for teams that need work done
-      </h1>
-      <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
-        Gobii agents browse the web, collect data, monitor changes, and complete repeatable workflows across sales, recruiting, and API automation.
-      </p>
-      <div class="mt-9 flex flex-col gap-3 sm:flex-row">
-        <a href="#solution-paths" class="inline-flex items-center justify-center rounded-lg px-6 py-3 text-sm font-semibold text-white transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
-          Explore solutions
-        </a>
-        <a href="{% url 'pages:library' %}" class="inline-flex items-center justify-center rounded-lg border border-violet-200 bg-white px-6 py-3 text-sm font-semibold text-slate-900 transition hover:border-violet-400 hover:text-violet-700">
-          Browse agent templates
-        </a>
-      </div>
+<section class="gk-page-dark">
+  <div class="gk-ph">
+    <p class="gk-ph-eyebrow">Gobii solutions</p>
+    <h1>
+      AI agent solutions for teams that need work done
+    </h1>
+    <p class="gk-ph-sub">
+      Gobii agents browse the web, collect data, monitor changes, and complete repeatable workflows across sales, recruiting, and API automation.
+    </p>
+    <div class="gk-ph-ctas">
+      <a href="#solution-paths" class="gk-btn">
+        Explore solutions
+      </a>
+      <a href="{% url 'pages:library' %}" class="gk-btn-quiet">
+        Browse agent templates
+      </a>
     </div>
   </div>
 </section>

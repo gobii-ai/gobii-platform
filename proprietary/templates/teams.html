@@ -21,25 +21,6 @@
 <meta name="twitter:description" content="Gobii for Teams gives growing teams shared AI agents, pooled task credits, private templates, shared credentials, and one simple team bill.">
 <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/teams-og-1200x630.jpg' %}">
 <meta name="twitter:image:alt" content="Gobii for Teams shared AI agent workspace">
-<style>
-  .teams-hero {
-    position: relative;
-    overflow: hidden;
-    background: #faf9fe;
-  }
-  .teams-hero::before {
-    content: "";
-    position: absolute;
-    top: -260px;
-    right: -140px;
-    width: 720px;
-    height: 520px;
-    border-radius: 50%;
-    pointer-events: none;
-    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
-    filter: blur(60px);
-  }
-</style>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -91,56 +72,54 @@
 {% url 'account_signup' as teams_signup_url %}
 {% url 'account_signup_modal' as teams_signup_modal_url %}
 
-<section class="teams-hero text-slate-950">
-  <div class="relative z-10 mx-auto max-w-7xl px-6 pb-14 pt-10 sm:px-8 sm:pb-16 sm:pt-12 lg:px-12 lg:pb-20 lg:pt-16">
-    <div class="max-w-2xl">
-      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-violet-600">Gobii for Teams</p>
-      <h1 class="mt-5 text-4xl font-light leading-[1.08] tracking-normal text-slate-950 sm:text-5xl lg:text-6xl">
-        One shared workspace for your AI agent team
-      </h1>
-      <p class="mt-6 max-w-xl text-lg leading-8 text-slate-700">
-        Give teammates shared agents, shared setup, pooled task credits, and one place to manage the AI work moving across your business.
-      </p>
-      <div class="mt-9 flex flex-col gap-3 sm:flex-row">
-        <a
-          href="{% if user.is_authenticated %}{{ team_offer.start_url }}{% else %}{{ teams_signup_url }}?next=%2Fapp%2Forganization{% endif %}"
-          {% if not user.is_authenticated %}data-auth-modal-link data-auth-modal-url="{{ teams_signup_modal_url }}?next=%2Fapp%2Forganization"{% endif %}
-          data-analytics-cta-id="teams_hero_start"
-          data-analytics-placement="teams_hero"
-          data-analytics-intent="start_team"
-          data-analytics-label="Start a Team"
-          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg px-6 py-3 text-sm font-semibold text-white transition-transform hover:-translate-y-px focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-white" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)"
-        >
-          Start a Team
-          <i data-lucide="arrow-right" class="h-4 w-4"></i>
-        </a>
-        <a
-          href="{% url 'proprietary:pricing' %}#pricing"
-          data-analytics-cta-id="teams_hero_pricing"
-          data-analytics-placement="teams_hero"
-          data-analytics-intent="view_pricing"
-          data-analytics-label="See Pricing"
-          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white/80 px-6 py-3 text-sm font-semibold text-slate-900 backdrop-blur-sm transition hover:border-violet-400 hover:text-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-white"
-        >
-          See Pricing
-        </a>
-      </div>
-      <div class="mt-8 max-w-2xl rounded-lg border border-slate-200 bg-white/95 p-4 shadow-[0_18px_40px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:mt-10">
-        <dl class="grid grid-cols-3 gap-3 sm:gap-6">
-          <div>
-            <dt class="text-2xl font-light text-slate-950 sm:text-3xl">{{ team_offer.price_per_seat_display }}</dt>
-            <dd class="mt-1 text-xs leading-5 text-slate-700 sm:text-sm">seat / month</dd>
-          </div>
-          <div>
-            <dt class="text-2xl font-light text-slate-950 sm:text-3xl">{{ team_offer.credits_per_seat_display }}</dt>
-            <dd class="mt-1 text-xs leading-5 text-slate-700 sm:text-sm">credits / seat</dd>
-          </div>
-          <div>
-            <dt class="text-2xl font-light text-slate-950 sm:text-3xl">{{ team_offer.api_rate_limit_display }}</dt>
-            <dd class="mt-1 text-xs leading-5 text-slate-700 sm:text-sm">API / minute</dd>
-          </div>
-        </dl>
-      </div>
+<section class="gk-page-dark">
+  <div class="gk-ph">
+    <p class="gk-ph-eyebrow">Gobii for Teams</p>
+    <h1>
+      One shared workspace for your AI agent team
+    </h1>
+    <p class="gk-ph-sub">
+      Give teammates shared agents, shared setup, pooled task credits, and one place to manage the AI work moving across your business.
+    </p>
+    <div class="gk-ph-ctas">
+      <a
+        href="{% if user.is_authenticated %}{{ team_offer.start_url }}{% else %}{{ teams_signup_url }}?next=%2Fapp%2Forganization{% endif %}"
+        {% if not user.is_authenticated %}data-auth-modal-link data-auth-modal-url="{{ teams_signup_modal_url }}?next=%2Fapp%2Forganization"{% endif %}
+        data-analytics-cta-id="teams_hero_start"
+        data-analytics-placement="teams_hero"
+        data-analytics-intent="start_team"
+        data-analytics-label="Start a Team"
+        class="gk-btn"
+      >
+        Start a Team
+        <i data-lucide="arrow-right" class="h-4 w-4"></i>
+      </a>
+      <a
+        href="{% url 'proprietary:pricing' %}#pricing"
+        data-analytics-cta-id="teams_hero_pricing"
+        data-analytics-placement="teams_hero"
+        data-analytics-intent="view_pricing"
+        data-analytics-label="See Pricing"
+        class="gk-btn-quiet"
+      >
+        See Pricing
+      </a>
+    </div>
+    <div class="gk-glass mt-8 max-w-2xl p-5 sm:mt-10">
+      <dl class="grid grid-cols-3 gap-3 sm:gap-6">
+        <div>
+          <dt class="text-2xl font-light sm:text-3xl">{{ team_offer.price_per_seat_display }}</dt>
+          <dd class="gk-glass-label mt-1 text-xs leading-5 sm:text-sm">seat / month</dd>
+        </div>
+        <div>
+          <dt class="text-2xl font-light sm:text-3xl">{{ team_offer.credits_per_seat_display }}</dt>
+          <dd class="gk-glass-label mt-1 text-xs leading-5 sm:text-sm">credits / seat</dd>
+        </div>
+        <div>
+          <dt class="text-2xl font-light sm:text-3xl">{{ team_offer.api_rate_limit_display }}</dt>
+          <dd class="gk-glass-label mt-1 text-xs leading-5 sm:text-sm">API / minute</dd>
+        </div>
+      </dl>
     </div>
   </div>
 </section>

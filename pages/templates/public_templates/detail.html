@@ -22,67 +22,71 @@
   <script type="application/ld+json">{{ template_breadcrumb_json }}</script>
 {% endblock %}
 {% block content %}
-<div class="min-h-screen" style="background:linear-gradient(180deg,#faf9fe,#ffffff 60%)">
-  <section class="max-w-5xl mx-auto px-6 pt-16 pb-16">
-    <nav aria-label="Breadcrumb" class="text-sm font-medium">
-      <ol class="flex flex-wrap items-center gap-2 text-slate-600">
+<section class="gk-page-dark">
+  <div class="gk-ph">
+    <nav aria-label="Breadcrumb" class="gk-ph-crumbs font-medium">
+      <ol class="flex flex-wrap items-center gap-2">
         <li>
-          <a href="{% url 'pages:home' %}" class="text-violet-600 hover:text-violet-700 transition">Home</a>
+          <a href="{% url 'pages:home' %}" class="transition">Home</a>
         </li>
-        <li aria-hidden="true" class="text-slate-400">/</li>
+        <li aria-hidden="true">/</li>
         <li>
-          <a href="{% url 'pages:library' %}" class="text-violet-600 hover:text-violet-700 transition">Library</a>
+          <a href="{% url 'pages:library' %}" class="transition">Library</a>
         </li>
-        <li aria-hidden="true" class="text-slate-400">/</li>
+        <li aria-hidden="true">/</li>
         <li>
-          <a href="{{ template_category_url }}" class="text-violet-600 hover:text-violet-700 transition">{{ template_category_label }}</a>
+          <a href="{{ template_category_url }}" class="transition">{{ template_category_label }}</a>
         </li>
-        <li aria-hidden="true" class="text-slate-400">/</li>
-        <li aria-current="page" class="text-slate-800">{{ template.display_name }}</li>
+        <li aria-hidden="true">/</li>
+        <li aria-current="page" class="text-white/70">{{ template.display_name }}</li>
       </ol>
     </nav>
 
-    <div class="mt-6 relative overflow-hidden rounded-3xl border border-violet-100 bg-white/85 shadow-xl">
+    <div class="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-wide">
+      <span class="rounded-full bg-white/10 px-3 py-1 text-violet-200">AI Employee Template</span>
+      {% if template_is_gobii_owned %}
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-emerald-300" title="Maintained by Gobii">
+        <i aria-hidden="true" data-lucide="badge-check" class="size-3.5"></i>
+        Official template
+      </span>
+      {% else %}
+      <span class="rounded-full bg-white/10 px-3 py-1 text-violet-200">@{{ public_profile_handle }}</span>
+      {% endif %}
+      <span class="rounded-full bg-white/10 px-3 py-1 text-violet-200">{{ template_category_label }}</span>
+    </div>
+
+    <h1>{{ template_heading }}</h1>
+    <p class="gk-ph-sub">{{ template_tagline }}</p>
+    {% if template_is_gobii_owned %}
+    <p class="gk-glass mt-4 inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold text-emerald-300">
+      <i aria-hidden="true" data-lucide="shield-check" class="size-4"></i>
+      Maintained by Gobii for trusted, reusable workflows.
+    </p>
+    {% endif %}
+
+    <div class="mt-8 flex flex-wrap gap-3 text-sm text-violet-200">
+      <span class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1">
+        Cadence: {{ schedule_description|default:base_schedule }}
+      </span>
+      <span class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1">
+        Contact: {{ contact_method_label }}
+      </span>
+      {% if default_tools %}
+      <span class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1">
+        {{ default_tools|length }} tools enabled
+      </span>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<div class="min-h-screen" style="background:linear-gradient(180deg,#faf9fe,#ffffff 60%)">
+  <section class="max-w-5xl mx-auto px-6 pt-16 pb-16">
+    <div class="relative overflow-hidden rounded-3xl border border-violet-100 bg-white/85 shadow-xl">
       <div class="absolute -top-24 -right-24 h-56 w-56 rounded-full blur-3xl" style="background:rgba(168,85,247,.18)" aria-hidden="true"></div>
       <div class="absolute -bottom-24 -left-24 h-56 w-56 rounded-full blur-3xl" style="background:rgba(221,214,254,.5)" aria-hidden="true"></div>
 
-      <div class="relative px-10 py-12">
-        <div class="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-wide">
-          <span class="rounded-full bg-violet-100 px-3 py-1 text-violet-700">AI Employee Template</span>
-          {% if template_is_gobii_owned %}
-          <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-emerald-800" title="Maintained by Gobii">
-            <i aria-hidden="true" data-lucide="badge-check" class="size-3.5"></i>
-            Official template
-          </span>
-          {% else %}
-          <span class="rounded-full bg-violet-50 px-3 py-1 text-violet-700">@{{ public_profile_handle }}</span>
-          {% endif %}
-          <span class="rounded-full bg-violet-50 px-3 py-1 text-violet-700">{{ template_category_label }}</span>
-        </div>
-
-        <h1 class="mt-6 text-4xl sm:text-5xl font-light tracking-tight text-slate-900">{{ template_heading }}</h1>
-        <p class="mt-4 text-lg text-slate-600 max-w-3xl">{{ template_tagline }}</p>
-        {% if template_is_gobii_owned %}
-        <p class="mt-4 inline-flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
-          <i aria-hidden="true" data-lucide="shield-check" class="size-4"></i>
-          Maintained by Gobii for trusted, reusable workflows.
-        </p>
-        {% endif %}
-
-        <div class="mt-8 flex flex-wrap gap-3 text-sm text-slate-700">
-          <span class="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1">
-            Cadence: {{ schedule_description|default:base_schedule }}
-          </span>
-          <span class="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1">
-            Contact: {{ contact_method_label }}
-          </span>
-          {% if default_tools %}
-          <span class="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1">
-            {{ default_tools|length }} tools enabled
-          </span>
-          {% endif %}
-        </div>
-
+      <div class="relative px-10 pt-4 pb-12">
         <form method="post" action="{{ template_hire_url }}" class="mt-8">
           {% csrf_token %}
           <input type="hidden" name="source_page" value="public_template_detail" />

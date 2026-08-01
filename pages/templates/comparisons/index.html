@@ -24,48 +24,27 @@
 <meta name="twitter:image:alt" content="{{ comparisons_social_image_alt }}">
 <script type="application/ld+json">{{ comparisons_structured_data_json }}</script>
 <script type="application/ld+json">{{ comparisons_breadcrumb_json }}</script>
-<style>
-  .comparisons-hero {
-    position: relative;
-    overflow: hidden;
-    background: #faf9fe;
-  }
-  .comparisons-hero::before {
-    content: "";
-    position: absolute;
-    top: -260px;
-    right: -140px;
-    width: 720px;
-    height: 520px;
-    border-radius: 50%;
-    pointer-events: none;
-    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
-    filter: blur(60px);
-  }
-</style>
 {% endblock %}
 
 {% block content %}
 <main id="main-content" class="bg-white">
-  <section class="comparisons-hero relative isolate">
-    <div class="relative mx-auto max-w-6xl px-6 py-20 sm:px-8 sm:py-24 lg:px-12 lg:py-28">
-      <div class="max-w-3xl">
-        <p class="text-sm font-semibold uppercase text-violet-600">Gobii comparisons</p>
-        <h1 class="mt-5 text-4xl font-light tracking-tight leading-[1.08] text-slate-950 sm:text-5xl lg:text-6xl">
-          AI agent platform comparisons
-        </h1>
-        <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
-          Evaluate Gobii against other AI agent platforms with practical criteria for deployment, browser automation, operations, and production readiness.
-        </p>
-        <div class="mt-9 flex flex-col gap-3 sm:flex-row">
-          <a href="#comparison-guides" class="inline-flex items-center justify-center rounded-lg px-6 py-3 text-sm font-semibold text-white transition-transform hover:-translate-y-px" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
-            View available comparisons
-            <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
-          </a>
-          <a href="{% url 'pages:library' %}" class="inline-flex items-center justify-center rounded-lg border border-violet-200 bg-white px-6 py-3 text-sm font-semibold text-slate-900 transition hover:border-violet-400 hover:text-violet-700">
-            Browse agent templates
-          </a>
-        </div>
+  <section class="gk-page-dark">
+    <div class="gk-ph">
+      <p class="gk-ph-eyebrow">Gobii comparisons</p>
+      <h1>
+        AI agent platform comparisons
+      </h1>
+      <p class="gk-ph-sub">
+        Evaluate Gobii against other AI agent platforms with practical criteria for deployment, browser automation, operations, and production readiness.
+      </p>
+      <div class="gk-ph-ctas">
+        <a href="#comparison-guides" class="gk-btn">
+          View available comparisons
+          <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
+        </a>
+        <a href="{% url 'pages:library' %}" class="gk-btn-quiet">
+          Browse agent templates
+        </a>
       </div>
     </div>
   </section>

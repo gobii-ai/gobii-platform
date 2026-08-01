@@ -28,51 +28,29 @@
 {% endblock %}
 
 {% block content %}
-<style>
-  .gk-about-hero {
-    position: relative;
-    overflow: hidden;
-    background: #faf9fe;
-  }
-  .gk-about-hero::before {
-    content: "";
-    position: absolute;
-    top: -260px;
-    right: -140px;
-    width: 720px;
-    height: 520px;
-    border-radius: 50%;
-    pointer-events: none;
-    background: radial-gradient(closest-side, rgba(168, 85, 247, 0.16), transparent);
-    filter: blur(60px);
-  }
-</style>
-<section class="gk-about-hero text-slate-900">
-  <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-    <div class="max-w-3xl">
-      <h1 class="text-4xl font-light tracking-tight sm:text-5xl">About Gobii</h1>
-      <p class="mt-5 max-w-2xl text-2xl font-light leading-snug text-slate-700 sm:text-3xl">
-        AI employees for teams with real work to do.
-      </p>
-      {% if settings.GOBII_PROPRIETARY_MODE %}
-      {% url 'account_signup' as about_signup_url %}
-      {% url 'account_signup_modal' as about_signup_modal_url %}
-      <div class="mt-8 flex flex-col gap-3 sm:flex-row">
-        <a
-          href="/"
-          data-analytics-cta-id="about_start_free_trial"
-          data-analytics-placement="about_hero"
-          data-analytics-intent="start_trial"
-          data-analytics-label="Try Gobii Today"
-          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold text-white transition-transform hover:-translate-y-px focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2"
-          style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)"
-        >
-          Try Gobii Today
-          <i data-lucide="arrow-right" class="h-4 w-4"></i>
-        </a>
-      </div>
-      {% endif %}
+<section class="gk-page-dark">
+  <div class="gk-ph">
+    <h1>About Gobii</h1>
+    <p class="gk-ph-sub">
+      AI employees for teams with real work to do.
+    </p>
+    {% if settings.GOBII_PROPRIETARY_MODE %}
+    {% url 'account_signup' as about_signup_url %}
+    {% url 'account_signup_modal' as about_signup_modal_url %}
+    <div class="gk-ph-ctas">
+      <a
+        href="/"
+        data-analytics-cta-id="about_start_free_trial"
+        data-analytics-placement="about_hero"
+        data-analytics-intent="start_trial"
+        data-analytics-label="Try Gobii Today"
+        class="gk-btn"
+      >
+        Try Gobii Today
+        <i data-lucide="arrow-right" class="h-4 w-4"></i>
+      </a>
     </div>
+    {% endif %}
   </div>
 </section>
 
