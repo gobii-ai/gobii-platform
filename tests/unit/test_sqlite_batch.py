@@ -230,7 +230,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertIn("Never filter result_id/URL", tool["description"])
         self.assertIn("json-extracts every field plus message_id", tool["description"])
         self.assertIn("deliver without reread", tool["description"])
-        self.assertIn("skip bounded small reports", tool["description"])
+        self.assertIn("material row reconciliation", tool["description"])
         self.assertIn("both answer and supporting rows/URLs", tool["description"])
         self.assertIn("aggregate-only is incomplete", tool["description"])
         self.assertIn("inspect the whole set once", tool["description"])

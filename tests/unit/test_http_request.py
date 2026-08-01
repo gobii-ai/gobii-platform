@@ -61,7 +61,7 @@ class HttpRequestJsonParsingTests(TestCase):
         self.assertNotIn("URL or $[link:id] token", url_description)
         self.assertIn("With an exact endpoint, attempt once", tool["description"])
         self.assertIn("Look up docs only when request shape is unknown", tool["description"])
-        self.assertIn("recipient identity/qualification", tool["description"])
+        self.assertIn("every recipient's identity/qualification", tool["description"])
         self.assertIn("named timezone is not a fixed offset", tool["description"])
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")

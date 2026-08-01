@@ -97,9 +97,10 @@ class OutreachCampaignSafetyScenarioTests(SimpleTestCase):
         description = get_http_request_tool()["function"]["description"]
 
         self.assertIn("Before any outreach PATCH", description)
+        self.assertIn("persist an SQLite QA ledger", description)
         self.assertIn("each placeholder vs lead fields", description)
         self.assertIn("every recipient's identity/qualification", description)
-        self.assertIn("Final must report every gap", description)
+        self.assertIn("Final must report every gap after receipts", description)
         self.assertIn("stop on retryable=false", description)
 
     def test_http_mocks_route_by_method_and_never_fall_through_to_network(self):

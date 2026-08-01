@@ -2396,7 +2396,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Durable domain model/logic; skip bounded small reports. First shot: keyed DDL, one set-wise "
+                "Domain model/logic for material row reconciliation. First shot: keyed DDL, one set-wise "
                 "upsert, then one filtered/ranked decision SELECT with both answer and supporting rows/URLs; aggregate-only "
                 "is incomplete; deliver without reread. "
                 "Structured: every `is_current_batch=1 AND tool_name='<exact>'` row. HTTP payload path: "
