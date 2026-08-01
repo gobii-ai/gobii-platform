@@ -1098,8 +1098,7 @@ class HomePageTests(TestCase):
             "capable of browser automation, web research, data collection, and workflow execution.",
             normalized_page_text,
         )
-        self.assertIn("Deploy an AI Employee", normalized_page_text)
-        self.assertIn("Put a proven AI employee to work in minutes", normalized_page_text)
+        self.assertIn("Browse the full agent library", normalized_page_text)
         self.assertNotRegex(normalized_page_text, r"(?i)\b(?:worker|coworker)s?\b")
         self.assertNotIn("Source candidates", normalized_page_text)
         self.assertNotIn("Need LinkedIn Recruiter?", normalized_page_text)

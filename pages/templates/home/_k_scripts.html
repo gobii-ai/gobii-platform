@@ -197,7 +197,7 @@
       });
       if (cta) {
         cta.textContent = CTA_LABELS[key] || CTA_LABELS.all;
-        cta.setAttribute('href', key === 'all' ? '#ai-employees' : '#row-' + key);
+        cta.setAttribute('href', key === 'all' ? '#hire-agents' : '#row-' + key);
       }
       renderDemo(key);
       window.requestAnimationFrame(syncHeadlineHeight);
