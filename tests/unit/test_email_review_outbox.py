@@ -12,6 +12,7 @@ from django.utils import timezone
 from waffle.testutils import override_flag
 
 from api.agent.comms.outbound_delivery import (
+    _approved_email_transport_content,
     _claim_email_for_delivery,
     _prepare_email_attachments,
     deliver_agent_email,
@@ -487,6 +488,46 @@ class EmailReviewOutboxTests(TestCase):
         self.assertIn("<p>First line<br />Second &amp; line</p>", payload["bodyHtml"])
         self.assertIn('class="email-body"', payload["bodyHtml"])
 
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_approval_reuses_the_exact_reviewed_transport_content(self, _delay_mock):
+        message = self._message()
+        message.body = "First line\nSecond & line"
+        message.save(update_fields=["body"])
+        review = queue_message_for_review(message)
+        reviewed_payload = serialize_outbox_review(review, detail=True)
+
+        approve_review(review, actor=self.owner, expected_version=1)
+
+        review.refresh_from_db()
+        message.refresh_from_db()
+        self.assertEqual(review.rendered_html_body, reviewed_payload["bodyHtml"])
+        self.assertEqual(
+            review.rendered_plaintext_body,
+            "First line\nSecond & line",
+        )
+        frozen_content = _approved_email_transport_content(message)
+        self.assertIsNotNone(frozen_content)
+        html_body, plaintext_body = frozen_content
+        self.assertEqual(html_body, review.rendered_html_body)
+        self.assertEqual(plaintext_body, review.rendered_plaintext_body)
+
+    def test_saved_body_edit_replaces_the_reviewed_transport_revision(self):
+        review = queue_message_for_review(self._message())
+        original_html = review.rendered_html_body
+
+        review = update_pending_review_message(
+            review,
+            actor=self.owner,
+            expected_version=1,
+            changes={"body": "Replacement & final"},
+        )
+
+        payload = serialize_outbox_review(review, detail=True)
+        self.assertNotEqual(review.rendered_html_body, original_html)
+        self.assertEqual(payload["bodyHtml"], review.rendered_html_body)
+        self.assertIn("Replacement &amp; final", payload["bodyHtml"])
+        self.assertEqual(review.rendered_plaintext_body, "Replacement & final")
+
     def test_expiry_records_manager_visible_action(self):
         review = queue_message_for_review(self._message())
         review.expires_at = timezone.now() - timedelta(seconds=1)
@@ -747,6 +788,28 @@ class EmailReviewOutboxTests(TestCase):
         self.assertFalse(message.cc_endpoints.exists())
         self.assertEqual(review.status, OutboundEmailReview.Status.PENDING)
         self.assertEqual(review.content_version, 1)
+        delay_mock.assert_not_called()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_outbox_api_requires_edits_to_be_saved_before_approval(self, delay_mock):
+        message = self._message("reviewed-copy@example.com")
+        review = queue_message_for_review(message)
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            reverse("console_outbox_approve", kwargs={"outbox_id": review.id}),
+            data={"expectedVersion": 1, "body": "<p>Unreviewed replacement</p>"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content.decode())
+        self.assertIn("Save edits as a new Outbox revision", response.json()["message"])
+        review.refresh_from_db()
+        message.refresh_from_db()
+        self.assertEqual(review.status, OutboundEmailReview.Status.PENDING)
+        self.assertEqual(review.content_version, 1)
+        self.assertEqual(message.body, "<p>Hello</p>")
         delay_mock.assert_not_called()
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)

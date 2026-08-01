@@ -12249,6 +12249,8 @@ class OutboundEmailReview(models.Model):
     content_hash = models.CharField(max_length=64)
     approved_version = models.PositiveIntegerField(null=True, blank=True)
     approved_content_hash = models.CharField(max_length=64, blank=True)
+    rendered_html_body = models.TextField(blank=True)
+    rendered_plaintext_body = models.TextField(blank=True)
     queued_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     last_edited_at = models.DateTimeField(null=True, blank=True)

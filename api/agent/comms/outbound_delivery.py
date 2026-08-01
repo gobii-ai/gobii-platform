@@ -268,6 +268,22 @@ def _prepare_email_content(message: PersistentAgentMessage, body_raw: str) -> tu
     return append_footer_if_needed(agent, html_snippet, plaintext_body)
 
 
+def _approved_email_transport_content(
+    message: PersistentAgentMessage,
+) -> tuple[str, str] | None:
+    try:
+        review = message.outbound_email_review
+    except OutboundEmailReview.DoesNotExist:
+        review = None
+    if (
+        review is not None
+        and review.status == OutboundEmailReview.Status.APPROVED
+        and review.rendered_html_body
+    ):
+        return review.rendered_html_body, review.rendered_plaintext_body
+    return None
+
+
 def _should_suppress_display_name(from_endpoint) -> bool:
     if from_endpoint is None:
         return False
@@ -911,15 +927,16 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 message,
                 suppress_configured_account_name=False,
             )
-            body_raw = message.body
-
-            # content conversion
-            html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
-            _cache_chat_body_html_for_message(message, html_snippet)
-            html_body = render_to_string(
-                "emails/persistent_agent_email.html",
-                {"body": html_snippet},
-            )
+            approved_content = _approved_email_transport_content(message)
+            if approved_content is not None:
+                html_body, plaintext_body = approved_content
+            else:
+                html_snippet, plaintext_body = _prepare_email_content(message, message.body)
+                _cache_chat_body_html_for_message(message, html_snippet)
+                html_body = render_to_string(
+                    "emails/persistent_agent_email.html",
+                    {"body": html_snippet},
+                )
             prepared_attachments, html_body = _prepare_email_attachments(message, html_body)
             if prepared_attachments:
                 logger.info(
@@ -1038,9 +1055,12 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 "present" if postmark_token else "missing",
                 message.id,
             )
-        body_raw = message.body
-        html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
-        _cache_chat_body_html_for_message(message, html_snippet)
+        approved_content = _approved_email_transport_content(message)
+        if approved_content is not None:
+            html_snippet, plaintext_body = approved_content
+        else:
+            html_snippet, plaintext_body = _prepare_email_content(message, message.body)
+            _cache_chat_body_html_for_message(message, html_snippet)
 
         # Log simulated content details for parity with non-prod simulation branch
         logger.info(
@@ -1103,8 +1123,12 @@ def deliver_agent_email(message: PersistentAgentMessage):
         
         # For simulation, also show content conversion results
         logger.info("SIMULATION - Processing content conversion for message %s", message.id)
-        html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
-        _cache_chat_body_html_for_message(message, html_snippet)
+        approved_content = _approved_email_transport_content(message)
+        if approved_content is not None:
+            html_snippet, plaintext_body = approved_content
+        else:
+            html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
+            _cache_chat_body_html_for_message(message, html_snippet)
         
         logger.info(
             "SIMULATION - Content conversion results for message %s: "
@@ -1196,27 +1220,25 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         # Detect content type and convert appropriately
         logger.info("Starting content type detection and conversion for message %s", message.id)
-        html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
-        _cache_chat_body_html_for_message(message, html_snippet)
+        approved_content = _approved_email_transport_content(message)
+        if approved_content is not None:
+            html_body, plaintext_body = approved_content
+        else:
+            html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
+            _cache_chat_body_html_for_message(message, html_snippet)
+            html_body = render_to_string(
+                "emails/persistent_agent_email.html",
+                {"body": html_snippet},
+            )
         
         # Log the conversion results
         logger.info(
             "Content conversion completed for message %s. HTML snippet length: %d, plaintext length: %d",
             message.id,
-            len(html_snippet),
+            len(html_body),
             len(plaintext_body)
         )
 
-        # Wrap with our mobile-first template
-        logger.info("Wrapping HTML snippet with email template for message %s", message.id)
-        html_body = render_to_string(
-            "emails/persistent_agent_email.html",
-            {
-                "body": html_snippet,
-            },
-        )
-        
-        # Log the final template-wrapped HTML
         logger.info(
             "Email template rendering complete for message %s. Final HTML body length: %d",
             message.id,

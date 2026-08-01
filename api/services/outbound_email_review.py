@@ -8,6 +8,8 @@ from django.core.validators import validate_email
 from django.db import transaction
 from django.utils import timezone
 
+from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
+from api.agent.comms.email_transport_content import render_email_transport_content
 from api.agent.comms.email_threading import get_message_contact_address
 from api.models import (
     AgentEmailAccount,
@@ -181,19 +183,32 @@ def compute_message_content_hash(message: PersistentAgentMessage) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _render_review_revision(message: PersistentAgentMessage) -> tuple[str, str]:
+    html_body, plaintext_body, html_snippet = render_email_transport_content(message)
+    message.raw_payload = merge_chat_body_html_cache(
+        message.raw_payload,
+        message.body,
+        rendered_html=html_snippet,
+    )
+    return html_body, plaintext_body
+
+
 def queue_message_for_review(message: PersistentAgentMessage) -> OutboundEmailReview:
     if not message.is_outbound or message.from_endpoint.channel != CommsChannel.EMAIL:
         raise OutboundEmailReviewError("Only outbound email can be placed in the Outbox.")
     snapshot_message_attachments(message)
     content_hash = compute_message_content_hash(message)
+    rendered_html_body, rendered_plaintext_body = _render_review_revision(message)
     message.latest_status = DeliveryStatus.PENDING_APPROVAL
     message.latest_error_code = ""
     message.latest_error_message = ""
-    message.save(update_fields=["latest_status", "latest_error_code", "latest_error_message"])
+    message.save(update_fields=["raw_payload", "latest_status", "latest_error_code", "latest_error_message"])
     review = OutboundEmailReview.objects.create(
         message=message,
         agent=message.owner_agent,
         content_hash=content_hash,
+        rendered_html_body=rendered_html_body,
+        rendered_plaintext_body=rendered_plaintext_body,
         expires_at=timezone.now() + timedelta(days=OUTBOX_EXPIRY_DAYS),
     )
     track_review_event(
@@ -334,13 +349,26 @@ def update_pending_review_message(
         message.body = str(changes["body"] or "")
     if "attachmentNodeIds" in changes:
         replace_message_attachments(message, changes["attachmentNodeIds"])
+    rendered_html_body, rendered_plaintext_body = _render_review_revision(message)
     message.save()
 
     locked.content_version += 1
     locked.content_hash = compute_message_content_hash(message)
+    locked.rendered_html_body = rendered_html_body
+    locked.rendered_plaintext_body = rendered_plaintext_body
     locked.last_edited_at = timezone.now()
     locked.last_edited_by = actor
-    locked.save(update_fields=["content_version", "content_hash", "last_edited_at", "last_edited_by", "updated_at"])
+    locked.save(
+        update_fields=[
+            "content_version",
+            "content_hash",
+            "rendered_html_body",
+            "rendered_plaintext_body",
+            "last_edited_at",
+            "last_edited_by",
+            "updated_at",
+        ]
+    )
     _record_review_action(
         locked,
         actor=actor,
@@ -419,11 +447,10 @@ def approve_review(
     if locked.content_version != expected_version:
         raise StaleOutboxVersionError("stale_version")
     if changes:
-        locked = update_pending_review_message(
-            locked,
-            actor=actor,
-            expected_version=expected_version,
-            changes=changes,
+        if {"to", "cc", "bcc"} & changes.keys():
+            raise OutboundEmailReviewError("Outbox recipients cannot be changed after queueing.")
+        raise OutboundEmailReviewError(
+            "Save edits as a new Outbox revision before approving it."
         )
 
     message = locked.message

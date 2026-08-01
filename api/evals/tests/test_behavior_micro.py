@@ -31,6 +31,9 @@ APOLLO_CONNECT_SEARCH = "common_use_case_136_apollo_connect_tool_search"
 SLACK_CONNECT_SEARCH = "common_use_case_137_slack_connect_tool_search"
 SQLITE_EXPORT_QUERY_CSV = "common_use_case_086_sqlite_export_query_csv"
 MONITORING_SCOPE_QUESTION = "common_use_case_099_request_monitoring_scope"
+SMALL_SOURCING_DELIVERS_BEFORE_AUTOMATION = (
+    "common_use_case_140_small_sourcing_delivers_before_automation"
+)
 
 
 @tag("eval_sim")
@@ -207,3 +210,19 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
             self.assertIn("secure_credentials_request", policy["stop_on_tool_names"])
             self.assertIn("spawn_web_task", policy["stop_on_tool_names"])
             self.assertEqual(policy["stop_when_all_seen"], [{"tool_name": "search_tools"}])
+
+    def test_small_sourcing_prefers_direct_research_over_meta_work(self):
+        cases = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
+        case = cases[SMALL_SOURCING_DELIVERS_BEFORE_AUTOMATION]
+        scenario = ScenarioRegistry.get(SMALL_SOURCING_DELIVERS_BEFORE_AUTOMATION)
+
+        self.assertEqual(
+            case.expected_tools,
+            ("mcp_brightdata_web_data_linkedin_people_search",),
+        )
+        self.assertIn("create_custom_tool", case.forbidden_tools)
+        self.assertIn("create_custom_tool", scenario._tool_names_to_enable())
+        self.assertIn(
+            "create_custom_tool",
+            scenario._build_eval_stop_policy()["stop_on_tool_names"],
+        )
