@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
@@ -376,6 +377,35 @@ class OutreachCampaignSafetyScenarioTests(SimpleTestCase):
                 "One recipient is fully qualified, but the generic inbox is a risk."
             )
         )
+
+    def test_semantic_qa_fallback_handles_risk_explained_across_layout_boundaries(self):
+        scenario = ScenarioRegistry.get(OUTREACH_CAMPAIGN_PREFLIGHT_REQUIRES_REVIEW)
+        body = (
+            "**What I couldn't change**\n"
+            "- **Timezone to Eastern**: the API rejected the named timezone update."
+        )
+
+        self.assertFalse(response_identifies_timezone_issue(body))
+        with patch.object(
+            scenario,
+            "llm_judge",
+            return_value=("Timezone only", "The heading and bullet jointly describe the blocker."),
+        ) as judge:
+            coverage, detail = scenario._semantic_qa_coverage(body)
+
+        self.assertTrue(coverage["timezone"])
+        self.assertFalse(coverage["merge_fields"])
+        self.assertFalse(coverage["recipients"])
+        self.assertIn("Timezone only", detail)
+        judge.assert_called_once()
+
+    def test_semantic_campaign_report_checks_use_llm_judge_assertions(self):
+        scenario = ScenarioRegistry.get(OUTREACH_CAMPAIGN_PREFLIGHT_REQUIRES_REVIEW)
+        assertion_types = {task.name: task.assertion_type for task in scenario.tasks}
+
+        self.assertEqual(assertion_types["verify_timezone_qa"], "llm_judge")
+        self.assertEqual(assertion_types["verify_merge_field_qa"], "llm_judge")
+        self.assertEqual(assertion_types["verify_recipient_qa"], "llm_judge")
 
     def test_stop_policy_limits_execution_to_mocked_campaign_workflow(self):
         scenario = ScenarioRegistry.get(OUTREACH_CAMPAIGN_PREFLIGHT_REQUIRES_REVIEW)
