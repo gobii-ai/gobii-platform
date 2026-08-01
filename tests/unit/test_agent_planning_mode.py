@@ -168,6 +168,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Prior-action question", prompt)
         self.assertIn("create/start nothing", prompt)
         self.assertIn("exact API endpoint + http_request", prompt)
+        self.assertIn("execute it next without pre-reading or copying its source", prompt)
         self.assertIn("Short action or current-batch continuation", prompt)
         self.assertIn("Meaningful shared win/repeated failure", prompt)
         self.assertIn("Campaign/bulk review", prompt)

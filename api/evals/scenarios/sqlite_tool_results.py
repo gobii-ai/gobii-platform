@@ -1881,6 +1881,13 @@ def _domain_refresh_state_failures(agent_id: str) -> list[str]:
     return _inspect_domain_refresh_state(agent_id)[0]
 
 
+def _release_source_url_column(column_names: set[str]) -> str | None:
+    for column_name in ("source_url", "event_source_url", "feed_source_url"):
+        if column_name in column_names:
+            return column_name
+    return None
+
+
 def _inspect_release_model(agent_id: str) -> tuple[list[str], str | None]:
     expected = {
         (*row, RELEASE_CALENDAR_URL, RELEASE_CALENDAR_OBSERVED_AT)
@@ -1901,12 +1908,14 @@ def _inspect_release_model(agent_id: str) -> tuple[list[str], str | None]:
                 names = {column[1] for column in columns}
                 required = {
                     "release_id", "service", "starts_at", "owner", "status",
-                    "source_url", "observed_at",
+                    "observed_at",
                 }
-                if not required.issubset(names):
+                source_url_column = _release_source_url_column(names)
+                if not required.issubset(names) or source_url_column is None:
                     continue
                 rows = conn.execute(
-                    f"SELECT release_id, service, starts_at, owner, status, source_url, observed_at "
+                    f"SELECT release_id, service, starts_at, owner, status, "
+                    f'"{source_url_column}", observed_at '
                     f"FROM {quoted};"
                 ).fetchall()
                 unique_indexes = [

@@ -4018,7 +4018,8 @@ def _get_continuation_mode_prompt_block() -> str:
     return (
         "## Continuation Mode\n\n"
         "Continue from history and state without restarting solved work. Identify the latest result or blocker, then "
-        "take the smallest concrete next action and follow tool retry/setup guidance. Reconcile fresh completion/outcome "
+        "take the smallest concrete next action and follow tool retry/setup guidance. When structured result_meta gives "
+        "an import shape, execute it next without pre-reading or copying its source. Reconcile fresh completion/outcome "
         "events into canonical state before counts/queues. Under load, use the plan and "
         "SQLite as the control board: preserve owners and deadlines, finish or park one bounded step, then take the "
         "highest-impact authorized commitment. Park blocked streams, continue unblocked work, and negotiate capacity/scope "
@@ -4286,7 +4287,7 @@ def _get_system_instruction(
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
         "provided filespace path -> pass directly; read_file only for requested contents, never URL/auth preflight\n"
-        "non-secret data/api/feed/file URL -> http_request; reconcile reusable sets/existing tables only; PDF may need read_file; browser only after access/render/login blockage\n"
+        "non-secret data/api/feed/file URL -> http_request; PDF may need read_file; browser only after access/render/login blockage\n"
         "HTML page to read -> scrape_as_markdown or structured extractor; known platforms/social -> structured extractor first\n"
         "local reviews/maps lead screen -> structured Maps/reviews tool directly; omitted city -> representative market/broad query, not human input\n"
         "weather geocoding -> forecast/current API before replying\n"
