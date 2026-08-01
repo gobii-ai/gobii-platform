@@ -132,6 +132,23 @@ class ResumeStateHeuristicTests(SimpleTestCase):
 
         self.assertTrue(_sqlite_call_persists_resume_state(call))
 
+    def test_domain_resume_state_survives_a_schedule_write_in_the_same_batch(self):
+        call = _eval_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "CREATE TABLE batch_progress (next_cursor TEXT, remaining_work INTEGER); "
+                    "INSERT INTO batch_progress VALUES ('lead-025', 75); "
+                    "INSERT INTO __agent_schedules "
+                    "(schedule_key, name, kind, schedule, timezone, instruction, enabled) "
+                    "VALUES ('resume', 'Resume', 'recurring', '*/30 * * * *', 'UTC', "
+                    "'Continue the saved batch.', 1);"
+                )
+            },
+        )
+
+        self.assertTrue(_sqlite_call_persists_resume_state(call))
+
 
 @tag("eval_sim")
 class EffortCalibrationSuiteTests(SimpleTestCase):

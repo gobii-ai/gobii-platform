@@ -498,6 +498,11 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _schema_properties(parameters_schema: Any) -> dict[str, Any]:
+        if isinstance(parameters_schema, str):
+            try:
+                parameters_schema = json.loads(parameters_schema)
+            except json.JSONDecodeError:
+                return {}
         if not isinstance(parameters_schema, dict):
             return {}
         properties = parameters_schema.get("properties") or {}

@@ -327,8 +327,14 @@ def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
     if str(call.status or "").lower() != "complete":
         return False
 
-    sql = sqlite_batch_sql(call).lower()
-    if "__agent_config" in sql or "__agent_schedules" in sql:
+    domain_statements = [
+        statement
+        for statement in split_sql_statements(sqlite_batch_sql(call))
+        if "__agent_config" not in statement.casefold()
+        and "__agent_schedules" not in statement.casefold()
+    ]
+    sql = ";\n".join(domain_statements).lower()
+    if not sql:
         return False
     has_remaining_state = bool(re.search(r"\bremaining(?:_work)?\b", sql)) or bool(
         re.search(r"(?:\b\d+\s+(?:remaining|pending)\b|\b(?:remaining|pending)\D{0,20}\d+\b)", sql)
