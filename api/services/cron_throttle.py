@@ -64,13 +64,61 @@ def claim_pending_cron_throttle_footer(agent_id: str, *, ttl_seconds: int) -> bo
     from api.models import OutboundEmailReview, PersistentAgent
 
     with transaction.atomic():
+        pending_review = (
+            OutboundEmailReview.objects.select_for_update()
+            .select_related("message")
+            .filter(
+                agent_id=agent_id,
+                status=OutboundEmailReview.Status.PENDING,
+                rendered_includes_throttle_footer=True,
+            )
+            .first()
+        )
         PersistentAgent.objects.select_for_update().only("id").get(pk=agent_id)
-        if OutboundEmailReview.objects.filter(
-            agent_id=agent_id,
-            status=OutboundEmailReview.Status.PENDING,
-            rendered_includes_throttle_footer=True,
-        ).exists():
+        if pending_review is None:
+            pending_review = (
+                OutboundEmailReview.objects.select_for_update()
+                .select_related("message")
+                .filter(
+                    agent_id=agent_id,
+                    status=OutboundEmailReview.Status.PENDING,
+                    rendered_includes_throttle_footer=True,
+                )
+                .first()
+            )
+        if not has_pending_cron_throttle_footer(agent_id):
             return False
+        if pending_review is not None:
+            from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
+            from api.agent.comms.email_transport_content import render_email_transport_content
+
+            message = pending_review.message
+            html_body, plaintext_body, html_snippet, includes_throttle_footer = render_email_transport_content(
+                message,
+                include_throttle_footer=False,
+            )
+            message.raw_payload = merge_chat_body_html_cache(
+                message.raw_payload,
+                message.body,
+                rendered_html=html_snippet,
+            )
+            message.save(update_fields=["raw_payload"])
+
+            # The transport revision changed, so stale browser approvals must refresh
+            # even though the authored message content and its hash are unchanged.
+            pending_review.content_version += 1
+            pending_review.rendered_html_body = html_body
+            pending_review.rendered_plaintext_body = plaintext_body
+            pending_review.rendered_includes_throttle_footer = includes_throttle_footer
+            pending_review.save(
+                update_fields=[
+                    "content_version",
+                    "rendered_html_body",
+                    "rendered_plaintext_body",
+                    "rendered_includes_throttle_footer",
+                    "updated_at",
+                ]
+            )
         return consume_pending_cron_throttle_footer(agent_id, ttl_seconds=ttl_seconds)
 
 

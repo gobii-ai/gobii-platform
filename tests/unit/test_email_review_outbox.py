@@ -44,6 +44,7 @@ from api.services.outbound_email_policy import (
 )
 from api.services.outbound_email_review import (
     OutboundEmailReviewError,
+    StaleOutboxVersionError,
     approve_review,
     compute_message_content_hash,
     discard_review,
@@ -587,11 +588,18 @@ class EmailReviewOutboxTests(TestCase):
             self.assertFalse(second.rendered_includes_throttle_footer)
             self.assertNotIn("temporarily adjusted", second.rendered_plaintext_body)
             direct_html, direct_plaintext = append_footer_if_needed(self.agent, "Direct", "Direct")
-            self.assertNotIn("temporarily adjusted", direct_html)
-            self.assertNotIn("temporarily adjusted", direct_plaintext)
-            self.assertTrue(fake_redis.get(pending_key))
+            self.assertIn("/subscribe/pro/", direct_html)
+            self.assertIn("/subscribe/pro/", direct_plaintext)
+            self.assertFalse(fake_redis.get(pending_key))
+            first.refresh_from_db()
+            self.assertFalse(first.rendered_includes_throttle_footer)
+            self.assertNotIn("temporarily adjusted", first.rendered_plaintext_body)
+            self.assertEqual(first.content_version, 2)
+            with self.assertRaisesRegex(StaleOutboxVersionError, "stale_version"):
+                approve_review(first, actor=self.owner, expected_version=1)
 
-            discard_review(first, actor=self.owner, expected_version=1)
+            discard_review(first, actor=self.owner, expected_version=2)
+            fake_redis.set(pending_key, "1")
             third = queue_message_for_review(self._message("third@example.com"))
             self.assertTrue(third.rendered_includes_throttle_footer)
 

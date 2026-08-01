@@ -1250,7 +1250,7 @@ class SMSThrottleNoticeTests(TestCase):
     @patch("api.agent.comms.outbound_delivery.switch_is_active", return_value=True)
     @patch("api.services.cron_throttle.get_redis_client")
     @patch("api.agent.comms.outbound_delivery.sms.send_sms", return_value="sms123")
-    def test_deliver_agent_sms_does_not_consume_footer_reserved_by_outbox(
+    def test_deliver_agent_sms_moves_footer_from_pending_outbox_to_actual_send(
         self,
         mock_send,
         mock_get_redis,
@@ -1271,10 +1271,12 @@ class SMSThrottleNoticeTests(TestCase):
             body="Pending review",
             raw_payload={},
         )
-        OutboundEmailReview.objects.create(
+        review = OutboundEmailReview.objects.create(
             message=reserved_message,
             agent=self.agent,
             content_hash="a" * 64,
+            rendered_html_body="Pending review with throttle notice",
+            rendered_plaintext_body="Pending review with throttle notice 🥺",
             rendered_includes_throttle_footer=True,
             expires_at=timezone.now() + timedelta(days=1),
         )
@@ -1290,8 +1292,12 @@ class SMSThrottleNoticeTests(TestCase):
         deliver_agent_sms(message)
 
         sent_body = mock_send.call_args.kwargs.get("body", "")
-        self.assertNotIn("🥺", sent_body)
-        self.assertTrue(fake_redis.get(pending_key))
+        self.assertIn("🥺", sent_body)
+        self.assertFalse(fake_redis.get(pending_key))
+        review.refresh_from_db()
+        self.assertFalse(review.rendered_includes_throttle_footer)
+        self.assertNotIn("🥺", review.rendered_plaintext_body)
+        self.assertEqual(review.content_version, 2)
 
 
 @tag("batch_outbound_delivery")
