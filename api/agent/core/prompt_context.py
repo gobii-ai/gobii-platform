@@ -4287,7 +4287,7 @@ def _get_system_instruction(
         "localhost/private/rendered/login page -> spawn_web_task (or retry with it after scrape/http cannot access)\n"
         "webpage screenshot/visual capture/PDF/rendered artifact -> spawn_web_task\n"
         "provided filespace path -> pass directly; read_file only for requested contents, never URL/auth preflight\n"
-        "non-secret data/api/feed/file URL -> http_request; reconcile reusable sets/existing tables only; PDF may need read_file; browser only after access/render/login blockage\n"
+        "non-secret data/api/feed/file URL -> http_request; PDF may need read_file; browser only after access/render/login blockage\n"
         "HTML page to read -> scrape_as_markdown or structured extractor; known platforms/social -> structured extractor first\n"
         "local reviews/maps lead screen -> structured Maps/reviews tool directly; omitted city -> representative market/broad query, not human input\n"
         "weather geocoding -> forecast/current API before replying\n"
