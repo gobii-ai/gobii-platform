@@ -564,10 +564,50 @@ class EmailReviewOutboxTests(TestCase):
             self.assertTrue(fake_redis.get(pending_key))
             self.assertFalse(fake_redis.get(cooldown_key))
 
-            approve_review(review, actor=self.owner, expected_version=2)
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_review(review, actor=self.owner, expected_version=2)
 
         self.assertFalse(fake_redis.get(pending_key))
         self.assertTrue(fake_redis.get(cooldown_key))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
+    def test_approval_removes_obsolete_free_plan_notice_and_requires_refresh(self, delay_mock):
+        from api.services.cron_throttle import cron_throttle_pending_footer_key
+
+        fake_redis = _FakeRedis()
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        fake_redis.set(pending_key, "1")
+
+        with (
+            patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
+            patch("api.agent.comms.email_footer_service._should_apply_footer", return_value=True),
+        ):
+            review = queue_message_for_review(self._message())
+        self.assertTrue(review.rendered_includes_throttle_footer)
+        self.assertIn("/subscribe/pro/", review.rendered_plaintext_body)
+
+        with (
+            patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
+            patch("api.agent.comms.email_footer_service._should_apply_footer", return_value=False),
+        ):
+            with self.assertRaisesRegex(StaleOutboxVersionError, "stale_version"):
+                approve_review(review, actor=self.owner, expected_version=1)
+
+            review.refresh_from_db()
+            self.assertEqual(review.content_version, 2)
+            self.assertFalse(review.rendered_includes_throttle_footer)
+            self.assertNotIn("/subscribe/pro/", review.rendered_plaintext_body)
+            self.assertFalse(fake_redis.get(pending_key))
+
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_review(review, actor=self.owner, expected_version=2)
+
+        review.refresh_from_db()
+        self.assertEqual(review.status, OutboundEmailReview.Status.APPROVED)
+        delay_mock.assert_called_once_with(str(review.id))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_throttle_footer_is_reserved_for_one_pending_review_and_released_after_review_ends(self):

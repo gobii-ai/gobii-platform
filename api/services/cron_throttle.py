@@ -60,79 +60,51 @@ def consume_pending_cron_throttle_footer(agent_id: str, *, ttl_seconds: int) -> 
     return True
 
 
+def _pending_throttle_review_for_update(agent_id: str):
+    from api.models import OutboundEmailReview
+
+    return (
+        OutboundEmailReview.objects.select_for_update()
+        .select_related("message")
+        .filter(
+            agent_id=agent_id,
+            status=OutboundEmailReview.Status.PENDING,
+            rendered_includes_throttle_footer=True,
+        )
+        .first()
+    )
+
+
+def _remove_pending_review_throttle_footer(review) -> None:
+    from api.services.outbound_email_review import remove_reviewed_throttle_footer
+
+    if review is not None:
+        remove_reviewed_throttle_footer(review)
+
+
 def claim_pending_cron_throttle_footer(agent_id: str, *, ttl_seconds: int) -> bool:
-    from api.models import OutboundEmailReview, PersistentAgent
+    from api.models import PersistentAgent
 
     with transaction.atomic():
-        pending_review = (
-            OutboundEmailReview.objects.select_for_update()
-            .select_related("message")
-            .filter(
-                agent_id=agent_id,
-                status=OutboundEmailReview.Status.PENDING,
-                rendered_includes_throttle_footer=True,
-            )
-            .first()
-        )
+        pending_review = _pending_throttle_review_for_update(agent_id)
         PersistentAgent.objects.select_for_update().only("id").get(pk=agent_id)
         if pending_review is None:
-            pending_review = (
-                OutboundEmailReview.objects.select_for_update()
-                .select_related("message")
-                .filter(
-                    agent_id=agent_id,
-                    status=OutboundEmailReview.Status.PENDING,
-                    rendered_includes_throttle_footer=True,
-                )
-                .first()
-            )
+            pending_review = _pending_throttle_review_for_update(agent_id)
         if not has_pending_cron_throttle_footer(agent_id):
             return False
-        if pending_review is not None:
-            from api.agent.comms.chat_email_display_cache import merge_chat_body_html_cache
-            from api.agent.comms.email_transport_content import render_email_transport_content
-
-            message = pending_review.message
-            html_body, plaintext_body, html_snippet, includes_throttle_footer = render_email_transport_content(
-                message,
-                include_throttle_footer=False,
-            )
-            message.raw_payload = merge_chat_body_html_cache(
-                message.raw_payload,
-                message.body,
-                rendered_html=html_snippet,
-            )
-            message.save(update_fields=["raw_payload"])
-
-            # The transport revision changed, so stale browser approvals must refresh
-            # even though the authored message content and its hash are unchanged.
-            pending_review.content_version += 1
-            pending_review.rendered_html_body = html_body
-            pending_review.rendered_plaintext_body = plaintext_body
-            pending_review.rendered_includes_throttle_footer = includes_throttle_footer
-            pending_review.save(
-                update_fields=[
-                    "content_version",
-                    "rendered_html_body",
-                    "rendered_plaintext_body",
-                    "rendered_includes_throttle_footer",
-                    "updated_at",
-                ]
-            )
+        _remove_pending_review_throttle_footer(pending_review)
         return consume_pending_cron_throttle_footer(agent_id, ttl_seconds=ttl_seconds)
 
 
 def clear_pending_cron_throttle_footer(agent_id: str) -> bool:
-    from api.models import OutboundEmailReview, PersistentAgent
+    from api.models import PersistentAgent
 
     with transaction.atomic():
+        pending_review = _pending_throttle_review_for_update(agent_id)
         PersistentAgent.objects.select_for_update().only("id").get(pk=agent_id)
-        if OutboundEmailReview.objects.filter(
-            agent_id=agent_id,
-            status=OutboundEmailReview.Status.PENDING,
-            rendered_includes_throttle_footer=True,
-        ).exists():
-            return False
+        if pending_review is None:
+            pending_review = _pending_throttle_review_for_update(agent_id)
+        _remove_pending_review_throttle_footer(pending_review)
         redis_client = get_redis_client()
         return bool(redis_client.delete(cron_throttle_pending_footer_key(agent_id)))
 
