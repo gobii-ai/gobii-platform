@@ -4,11 +4,10 @@
   Two namespaces, both safe to use anywhere:
     .gkw-*  emulated third-party app windows (Greenhouse, HubSpot, Apollo,
             LinkedIn Recruiter, Google Sheets, Discord, iMessage, Gmail, agent DB)
-    .gkv-*  data-viz primitives (KPI tiles, magnitude meters, line charts)
 
-  Chart colours were validated, not eyeballed: the categorical set
-  #9061f9 / #0d9f74 / #c2410c / #2563eb passes all six checks of the dataviz
-  validator against the Luxe dark surface (#16102b) — worst adjacent CVD deltaE 10.9,
+  Sections that need charts or category colours use the validated categorical set
+  #9061f9 / #0d9f74 / #c2410c / #2563eb — it passes all six checks of the dataviz
+  validator against the Luxe dark surface (#16102b), worst adjacent CVD deltaE 10.9,
   normal-vision deltaE 28.0. Do not substitute hues without re-running it.
 
   Rows animate via .gkw-row; sections re-trigger them by clearing inline
@@ -120,10 +119,6 @@
   .gkw-bub.me { align-self: flex-end; background: #007aff; color: #fff; border-bottom-right-radius: 5px; }
   .gkw-bub.them { align-self: flex-start; background: #e9e9eb; color: #111; border-bottom-left-radius: 5px; }
   .gkw-bub small { display: block; font-size: 10px; opacity: .72; margin-top: 3px; }
-  .gkw-typing { align-self: flex-start; background: #e9e9eb; border-radius: 17px; padding: 10px 13px; display: flex; gap: 4px; }
-  .gkw-typing i { width: 6px; height: 6px; border-radius: 50%; background: #9a9aa0; animation: gkw-bounce 1.2s infinite; }
-  .gkw-typing i:nth-child(2) { animation-delay: .16s; } .gkw-typing i:nth-child(3) { animation-delay: .32s; }
-  @keyframes gkw-bounce { 0%,60%,100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-4px); opacity: 1; } }
   /* ---------- discord ---------- */
   .gkw-dc { background: #313338; font-family: 'gg sans', Arial, sans-serif; }
   .gkw-dcbar { display: flex; align-items: center; gap: 8px; padding: 9px 13px; background: #2b2d31;
@@ -179,36 +174,7 @@
   
 
   /* ---- chart primitives: thin marks, recessive axes, direct labels ---- */
-  .gkv-kpirow { display: grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); gap: clamp(10px,1.6vw,18px); }
-  .gkv-kpi { padding: clamp(14px,1.8vw,20px); border-radius: 16px; border: 1px solid rgba(255,255,255,.09);
-       background: rgba(255,255,255,.04); }
-  .gkv-kpi .val { display: flex; align-items: baseline; gap: 5px; color: #fff; font-weight: 250;
-            letter-spacing: -1.6px; font-variant-numeric: tabular-nums; font-size: clamp(28px,3.6vw,44px); line-height: 1; }
-  .gkv-kpi .val small { font-size: clamp(12px,1.3vw,15px); font-weight: 600; letter-spacing: 0; color: #b3a8d2; }
-  .gkv-kpi .lab { color: #b3a8d2; font-size: clamp(10.5px,1.15vw,12px); margin-top: 7px; letter-spacing: .2px; }
-  .gkv-kpi .delta { display: inline-flex; align-items: center; gap: 4px; margin-top: 9px; font-size: 10.5px;
-              font-weight: 700; color: #34d399; background: rgba(52,211,153,.12); border-radius: 999px; padding: 3px 9px; }
   /* magnitude meter: single hue, 4px rounded data-end anchored to the track */
-  .gkv-meter { height: 6px; border-radius: 999px; background: rgba(255,255,255,.09); overflow: hidden; margin-top: 12px; }
-  .gkv-meter i { display: block; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg,#7c3aed,#a78bfa);
-           transition: width 1.4s cubic-bezier(.22,.9,.3,1); }
-  .gkv-meterlab { display: flex; justify-content: space-between; font-size: 10.5px; color: #b3a8d2; margin-top: 7px; }
-  .gkv-meterlab b { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .gkv-chart { position: relative; }
-  .gkv-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
-  .gkv-grid line { stroke: rgba(255,255,255,.07); stroke-width: 1; }
-  .gkv-axis text { fill: #9d92c0; font-size: 10px; }
-  .gkv-serie { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .gkv-dot { r: 4.5; stroke: #16102b; stroke-width: 2; }
-  .gkv-dlabel { fill: #fff; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .gkv-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
-  .gkv-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #b3a8d2; }
-  .gkv-legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
-  .gkv-tip { position: absolute; pointer-events: none; opacity: 0; transition: opacity .12s;
-       background: rgba(10,6,24,.96); border: 1px solid rgba(255,255,255,.14); border-radius: 9px;
-       padding: 7px 10px; font-size: 11px; color: #ece9f6; white-space: nowrap; z-index: 5;
-       box-shadow: 0 10px 30px rgba(3,1,12,.6); transform: translate(-50%,-115%); }
-  .gkv-tip b { color: #fff; font-variant-numeric: tabular-nums; }
 
   /* Rows arrive only when a section asks. The gate is the .gkw-live ancestor:
      without it a row stays invisible forever, so never render a window that
@@ -216,6 +182,5 @@
   .gkw-live .gkw-row { animation: gkw-rowin .4s forwards; }
   @media (prefers-reduced-motion: reduce) {
     .gkw-row { opacity: 1 !important; transform: none !important; animation: none !important; }
-    .gkv-meter i { transition: none !important; }
   }
 </style>
