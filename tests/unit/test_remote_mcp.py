@@ -1,5 +1,6 @@
 import base64
 import json
+import tomllib
 import uuid
 from contextlib import ExitStack
 from decimal import Decimal
@@ -235,12 +236,14 @@ class RemoteMCPViewTests(TestCase):
             {"subscribe": False, "listChanged": False},
         )
         server_info = payload["result"]["serverInfo"]
+        project_metadata = tomllib.loads((settings.BASE_DIR / "pyproject.toml").read_text())
+        project_version = project_metadata["project"]["version"]
         self.assertEqual(
             server_info,
             {
                 "name": "gobii",
                 "title": "Gobii",
-                "version": "2.19.0",
+                "version": project_version,
                 "description": (
                     "Create, manage, message, coordinate, and inspect persistent AI agents from MCP clients."
                 ),

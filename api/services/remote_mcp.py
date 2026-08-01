@@ -66,7 +66,7 @@ from util.trial_enforcement import can_user_use_personal_agents_and_api
 
 
 MCP_PROTOCOL_VERSION = "2025-11-25"
-REMOTE_MCP_SERVER_VERSION = "2.19.0"
+REMOTE_MCP_SERVER_VERSION = "2.30.1"
 REMOTE_MCP_DESCRIPTION = (
     "Create, manage, message, coordinate, and inspect persistent AI agents from MCP clients."
 )
