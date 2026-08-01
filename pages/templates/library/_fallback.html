@@ -1,118 +1,153 @@
-<div class="space-y-6 pb-10" data-library-ssr-fallback>
-  <section class="pt-4">
-    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <p class="gk-eyebrow">Discover</p>
-        <h1 class="gk-display mt-3">
-          {% if selected_category and official_only %}Official {{ selected_category }} AI Employee Templates{% elif selected_category %}{{ selected_category }} AI Employee Templates{% elif official_only %}Official Gobii AI Employee Templates{% else %}AI Employee Template Library{% endif %}
-        </h1>
-        <p class="gk-sub mt-4 max-w-2xl">
-          {% if selected_category and official_only %}Browse official {{ selected_category }} AI employee templates maintained by Gobii.{% elif selected_category %}Browse publicly shared {{ selected_category }} AI employee templates.{% elif official_only %}Browse AI employee templates maintained by Gobii for common workflows.{% else %}Choose a role from Gobii and the community, then customize the AI employee for your workflow.{% endif %}
-        </p>
-        {% if not user.is_authenticated %}
-          <p class="mt-3 text-sm font-medium text-violet-300">Sign in to like templates.</p>
-        {% endif %}
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <div class="gk-glassrow inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white/80">
-          {% if selected_category or official_only %}{{ payload.totalAgents }} {% if official_only %}official templates{% else %}shared templates{% endif %}{% else %}{{ payload.libraryTotalAgents }} shared templates{% endif %}
-        </div>
-        <div class="gk-glassrow inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white/80">
-          {% if official_only %}{{ payload.officialTotalLikes }}{% else %}{{ payload.libraryTotalLikes }}{% endif %} likes
-        </div>
-      </div>
-    </div>
-  </section>
+{% comment %}
+  Server-rendered Agent Library.
 
-  <section class="grid gap-6 md:grid-cols-[16rem_minmax(0,1fr)]">
-    <aside class="hidden md:block">
-      <div class="gk-card-glass sticky top-24 space-y-4 p-4">
-        <div>
-          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-violet-300">Most Popular</p>
-          <div class="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold text-white" style="background:rgba(139,92,246,.35);border:1px solid rgba(196,181,253,.5)">
-            <span>Most Popular</span>
-            <span class="gk-chip">{% if official_only %}{{ payload.officialTotalAgents }}{% else %}{{ payload.libraryTotalAgents }}{% endif %}</span>
-          </div>
-        </div>
+  This is what crawlers and no-JS visitors get, so it stays a *genuine*
+  fallback: every agent on the first page is present as real text with a real
+  link, the category counts are real, and the official filter is a working
+  query-string link (?official=true) rather than a dead checkbox.
 
-        <div>
-          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-violet-300">Trust</p>
-          <label class="gk-glassrow flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white/80">
-            <input type="checkbox" class="rounded border-slate-300 text-emerald-600" {% if official_only %}checked{% endif %} disabled>
-            <i aria-hidden="true" data-lucide="badge-check" class="size-4 text-emerald-300"></i>
-            <span>Official templates</span>
-          </label>
-        </div>
-
-        {% if payload.topCategories %}
-          <div>
-            <p class="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-violet-300">Categories</p>
-            <div class="space-y-2">
-              {% for category in payload.topCategories %}
-                <div class="gk-glassrow flex w-full items-center justify-between px-3 py-2 text-sm font-semibold text-white/80">
-                  <span>{{ category.name }}</span>
-                  <span class="gk-chip">{{ category.count }}</span>
-                </div>
-              {% endfor %}
-            </div>
-          </div>
-        {% endif %}
-      </div>
-    </aside>
-
-    <div class="space-y-4">
-      {% if payload.agents %}
-        <div class="space-y-3">
-          {% for agent in payload.agents %}
-            <article class="gk-card-edge group relative overflow-hidden px-5 py-4 focus-within:ring-2 ring-violet-100">
-              <div class="pointer-events-none relative z-10 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div class="min-w-0 flex-1 space-y-3">
-                  <div class="flex flex-wrap items-center gap-2 text-xs font-semibold text-violet-200">
-                    <span class="gk-chip inline-flex items-center gap-2">
-                      <span class="size-2 rounded-full bg-violet-500" aria-hidden="true"></span>
-                      {{ agent.category }}
-                    </span>
-                    {% if agent.isOfficial %}
-                      <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-emerald-300" style="background:rgba(52,211,153,.15)" title="Maintained by Gobii">
-                        <i aria-hidden="true" data-lucide="badge-check" class="size-3.5"></i>
-                        Official template
-                      </span>
-                    {% elif agent.publicProfileHandle %}
-                      <span class="gk-glass-label">@{{ agent.publicProfileHandle }}</span>
-                    {% endif %}
-                  </div>
-
-                  <div class="space-y-1">
-                    <h2 class="text-base font-semibold text-white transition sm:text-lg">
-                      <a href="{{ agent.templateUrl }}" class="pointer-events-auto rounded focus-visible:outline-none focus-visible:ring-2 focus:ring-violet-500">
-                        {{ agent.name }}
-                      </a>
-                    </h2>
-                    {% if agent.tagline %}
-                      <p class="text-sm font-medium" style="color:#b7aed4">{{ agent.tagline }}</p>
-                    {% endif %}
-                  </div>
-                </div>
-
-                <div class="flex items-center justify-between gap-3 sm:flex-col sm:items-end sm:self-stretch">
-                  <span class="pointer-events-none gk-chip inline-flex items-center gap-1 text-xs font-semibold">
-                    <span>{{ agent.likeCount }}</span>
-                  </span>
-                  <span class="pointer-events-none inline-flex items-center gap-1 text-sm font-medium text-violet-300 transition">
-                    View {{ agent.name }}
-                    <span aria-hidden="true">-&gt;</span>
-                  </span>
-                </div>
-              </div>
-            </article>
-          {% endfor %}
-        </div>
-      {% else %}
-        <div class="gk-card-glass p-8 text-center">
-          <p class="text-sm font-semibold text-white">{% if official_only and selected_category %}No official templates found in this category.{% elif official_only %}No official templates found right now.{% elif selected_category %}No shared templates found in this category.{% else %}No shared templates found right now.{% endif %}</p>
-          <p class="mt-1 text-sm" style="color:#a99cc9">{% if official_only %}Clear the official filter to browse community templates too.{% elif selected_category %}Try another category.{% else %}Check back soon for newly shared templates.{% endif %}</p>
-        </div>
+  Styling mirrors the React screen (frontend/src/screens/LibraryScreen.tsx) in
+  the Gobii Luxe language. Classes are prefixed .gklibf- and scoped here so
+  nothing depends on the frozen Tailwind bundle; React replaces this subtree on
+  mount, taking these styles with it.
+{% endcomment %}
+<style>
+  .gklibf { color: #ece9f6; padding-bottom: 32px; position: relative; z-index: 1; }
+  .gklibf :where(p, h1, h2, ul, li) { margin: 0; }
+  .gklibf a:focus-visible, .gklibf-pill:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 2px; border-radius: 8px; }
+  .gklibf-head { display: flex; align-items: flex-end; gap: clamp(14px,2.4vw,28px); flex-wrap: wrap;
+                 margin-bottom: clamp(14px,2vw,22px); }
+  .gklibf-headmain { flex: 1 1 260px; min-width: min(100%, 240px); }
+  .gklibf-h1 { font-weight: 300; letter-spacing: -1.2px; color: #fff; font-size: clamp(26px,3.6vw,44px);
+               line-height: 1.12; margin: 9px 0 8px; text-wrap: balance; }
+  .gklibf-lead { color: #b7aed4; font-size: clamp(13px,1.35vw,15px); line-height: 1.6; max-width: 56ch; text-wrap: pretty; }
+  .gklibf-signin { margin-top: 10px; font-size: 12.5px; color: #c4b5fd; }
+  .gklibf-stats { display: flex; flex-wrap: wrap; gap: 8px; font-variant-numeric: tabular-nums; }
+  .gklibf-stat { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: #cfc7e8;
+                 background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.1);
+                 border-radius: 999px; padding: 6px 13px; }
+  .gklibf-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: clamp(14px,2.2vw,22px); }
+  .gklibf-pill { font: inherit; font-size: 12.5px; line-height: 1.2; color: #d5cdec; border-radius: 999px;
+                 padding: 9px 15px; min-height: 40px; display: inline-flex; align-items: center; gap: 6px;
+                 border: 1px solid transparent; white-space: nowrap; text-decoration: none;
+                 background: linear-gradient(rgba(20,13,38,.9),rgba(20,13,38,.9)) padding-box,
+                             linear-gradient(120deg,rgba(196,181,253,.35),rgba(255,255,255,.06)) border-box; }
+  a.gklibf-pill:hover { color: #fff; }
+  .gklibf-pill.is-on { color: #fff;
+                 background: linear-gradient(rgba(139,92,246,.32),rgba(139,92,246,.32)) padding-box,
+                             linear-gradient(120deg,#c4b5fd,#f0abfc) border-box;
+                 box-shadow: 0 6px 20px rgba(168,85,247,.35); }
+  .gklibf-pill .n { opacity: .6; font-variant-numeric: tabular-nums; }
+  .gklibf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 248px), 1fr));
+                 gap: clamp(11px,1.5vw,15px); align-items: stretch; }
+  .gklibf-card { position: relative; display: flex; flex-direction: column; border-radius: 16px; overflow: hidden;
+                 border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); }
+  .gklibf-top { display: flex; align-items: flex-start; gap: 11px; padding: 15px 15px 11px; }
+  .gklibf-mono { width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0; display: grid; place-items: center;
+                 font-size: 12.5px; font-weight: 700; letter-spacing: .3px; color: #fff; background-color: #9061f9;
+                 background-image: linear-gradient(140deg, rgba(255,255,255,.2), rgba(255,255,255,0));
+                 box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+  .gklibf-nm { font-size: 14px; font-weight: 600; letter-spacing: -.1px; line-height: 1.3; }
+  .gklibf-nm a { color: #fff; text-decoration: none; }
+  .gklibf-nm a:hover { color: #f0abfc; }
+  .gklibf-tg { color: #a99cc9; font-size: 11.5px; line-height: 1.5; margin-top: 4px; }
+  .gklibf-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0 15px 13px; margin-top: auto; }
+  .gklibf-catchip { font-size: 10px; border-radius: 999px; padding: 3px 9px; color: #e9dcff; white-space: nowrap;
+                    border: 1px solid rgba(255,255,255,.12); background: rgba(139,92,246,.18); }
+  .gklibf-official { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; color: #34d399; }
+  .gklibf-handle { font-size: 10.5px; color: #8b7fb8; }
+  .gklibf-likes { margin-left: auto; font-size: 11px; color: #8b7fb8; font-variant-numeric: tabular-nums; }
+  .gklibf-desc { border-top: 1px solid rgba(255,255,255,.07); background: rgba(6,3,16,.42); padding: 9px 11px;
+                 font-size: 10.5px; line-height: 1.55; color: #a99cc9; }
+  .gklibf-more { border-top: 1px solid rgba(255,255,255,.07); background: rgba(6,3,16,.42); padding: 9px 11px; }
+  .gklibf-more a { font-size: 11px; font-weight: 600; color: #c4b5fd; text-decoration: none; }
+  .gklibf-more a:hover { color: #f0abfc; }
+  .gklibf-notice { border-radius: 18px; border: 1px solid rgba(255,255,255,.11); background: rgba(255,255,255,.045);
+                   padding: clamp(22px,4vw,34px); text-align: center; }
+  .gklibf-notice p:first-child { color: #fff; font-size: 15px; font-weight: 600; }
+  .gklibf-notice p + p { color: #a99cc9; font-size: 13px; margin-top: 7px; line-height: 1.6; }
+</style>
+<div class="gklibf" data-library-ssr-fallback>
+  <div class="gklibf-head">
+    <div class="gklibf-headmain">
+      <p class="gk-eyebrow">Discover</p>
+      <h1 class="gklibf-h1">
+        {% if selected_category and official_only %}Official {{ selected_category }} AI Employee Templates{% elif selected_category %}{{ selected_category }} AI Employee Templates{% elif official_only %}Official Gobii AI Employee Templates{% else %}AI Employee Template Library{% endif %}
+      </h1>
+      <p class="gklibf-lead">
+        {% if selected_category and official_only %}Browse official {{ selected_category }} AI employee templates maintained by Gobii.{% elif selected_category %}Browse publicly shared {{ selected_category }} AI employee templates.{% elif official_only %}Browse AI employee templates maintained by Gobii for common workflows.{% else %}Choose a role from Gobii and the community, then customize the AI employee for your workflow.{% endif %}
+      </p>
+      {% if not user.is_authenticated %}
+        <p class="gklibf-signin">Sign in to like templates.</p>
       {% endif %}
     </div>
-  </section>
+    <div class="gklibf-stats">
+      <span class="gklibf-stat">
+        {% if selected_category or official_only %}{{ payload.totalAgents }} {% if official_only %}official templates{% else %}shared templates{% endif %}{% else %}{{ payload.libraryTotalAgents }} shared templates{% endif %}
+      </span>
+      <span class="gklibf-stat">
+        {% if official_only %}{{ payload.officialTotalLikes }}{% else %}{{ payload.libraryTotalLikes }}{% endif %} likes
+      </span>
+    </div>
+  </div>
+
+  <nav class="gklibf-pills" aria-label="Filter templates">
+    <a class="gklibf-pill{% if not official_only and not selected_category %} is-on{% endif %}" href="{% url 'pages:library' %}" rel="nofollow">
+      All<span class="n">{{ payload.libraryTotalAgents }}</span>
+    </a>
+    <a class="gklibf-pill{% if official_only %} is-on{% endif %}"
+       href="{% if official_only %}{{ request.path }}{% else %}{{ request.path }}?official=true{% endif %}" rel="nofollow"
+       aria-current="{% if official_only %}true{% else %}false{% endif %}">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="10"/>
+      </svg>
+      Official<span class="n">{{ payload.officialTotalAgents }}</span>
+    </a>
+    {% for category in payload.topCategories %}
+      <span class="gklibf-pill{% if category.name == selected_category %} is-on{% endif %}">
+        {{ category.name }}<span class="n">{{ category.count }}</span>
+      </span>
+    {% endfor %}
+  </nav>
+
+  {% if payload.agents %}
+    <div class="gklibf-grid">
+      {% for agent in payload.agents %}
+        <article class="gklibf-card">
+          <div class="gklibf-top">
+            <span class="gklibf-mono" aria-hidden="true">{% if agent.name.split|length > 1 %}{{ agent.name.split.0.0|upper }}{{ agent.name.split.1.0|upper }}{% else %}{{ agent.name|slice:":2"|upper }}{% endif %}</span>
+            <span>
+              <h2 class="gklibf-nm"><a href="{{ agent.templateUrl }}">{{ agent.name }}</a></h2>
+              {% if agent.tagline %}<p class="gklibf-tg">{{ agent.tagline }}</p>{% endif %}
+            </span>
+          </div>
+          <div class="gklibf-meta">
+            <span class="gklibf-catchip">{{ agent.category }}</span>
+            {% if agent.isOfficial %}
+              <span class="gklibf-official" title="Maintained by Gobii">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="10"/>
+                </svg>
+                Official
+              </span>
+            {% elif agent.publicProfileHandle %}
+              <span class="gklibf-handle">@{{ agent.publicProfileHandle }}</span>
+            {% endif %}
+            <span class="gklibf-likes">{{ agent.likeCount }} likes</span>
+          </div>
+          {% if agent.description and agent.description != agent.tagline %}
+            <p class="gklibf-desc">{{ agent.description|truncatechars:170 }}</p>
+          {% endif %}
+          <p class="gklibf-more"><a href="{{ agent.templateUrl }}">View {{ agent.name }} &rarr;</a></p>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="gklibf-notice">
+      <p>{% if official_only and selected_category %}No official templates found in this category.{% elif official_only %}No official templates found right now.{% elif selected_category %}No shared templates found in this category.{% else %}No shared templates found right now.{% endif %}</p>
+      <p>{% if official_only %}Clear the official filter to browse community templates too.{% elif selected_category %}Try another category.{% else %}Check back soon for newly shared templates.{% endif %}</p>
+    </div>
+  {% endif %}
 </div>

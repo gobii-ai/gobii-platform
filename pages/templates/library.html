@@ -2,6 +2,7 @@
 {% load vite_tags %}
 
 {% block title %}{{ library_page_title|default:"AI Employee Template Library: Business Roles | Gobii" }}{% endblock %}
+{% block showcase_css %}{% include "includes/_gk_showcase.html" %}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="{{ library_page_description|default:"Explore Gobii’s AI Employee Template Library for sales, research, recruiting, operations, finance, and more. Choose a role and customize its workflow." }}">

@@ -1,16 +1,44 @@
 {% load static %}
-<section class="gk-section" aria-label="Integrations" data-animate>
-  <div class="gk-sect-head" style="margin-bottom:24px">
+{% comment %}
+  Compact connector strip. The night-shift section above carries the story; this is the
+  quiet, scannable, indexable list of the tools agents work with. Deliberately subordinate:
+  no eyebrow rule, no hero type, dimmed glyphs, one glass bar.
+
+  Honesty note: this strip deliberately does NOT claim which connections are native and
+  which run through a connector or the browser, because that split differs per tool
+  (e.g. Discord is native, Slack is not). It only says the agents work with these tools.
+{% endcomment %}
+<style>
+  .gk-int { padding-top: clamp(20px, 3vw, 30px); }
+  .gk-int-strip { display: flex; flex-direction: column; align-items: center; gap: 12px;
+                  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
+                  border-radius: 16px; padding: clamp(14px, 1.8vw, 18px) clamp(16px, 2.4vw, 26px); }
+  .gk-int .gk-eyebrow { font-size: 10px; letter-spacing: 2.2px; color: #9d92c0; text-align: center; }
+  .gk-int-list { display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+                 gap: 10px clamp(14px, 2vw, 22px); }
+  .gk-int .gk-logo { font-size: 12.5px; font-weight: 500; opacity: .62; }
+  .gk-int .gk-logo:hover { opacity: .95; }
+  .gk-int .gk-logo img { height: 15px; }
+  .gk-int .gk-logo.gk-wordmark { opacity: .55; }
+  .gk-int-more { color: #8b7fb8; font-size: 12px; line-height: 1.6; text-align: center;
+                 margin: 12px auto 0; max-width: 56ch; }
+</style>
+
+<section class="gk-section gk-section-plain gk-int" aria-label="Integrations" data-animate>
+  <div class="gk-int-strip">
     <span class="gk-eyebrow">DELIVERS INTO THE TOOLS YOU ALREADY USE</span>
+    <span class="gk-int-list">
+      <span class="gk-logo"><img src="{% static 'images/integration-logos/greenhouse.svg' %}" alt=""><span>Greenhouse</span></span>
+      <span class="gk-logo gk-wordmark"><span>Lever</span></span>
+      <span class="gk-logo gk-wordmark"><span>Ashby</span></span>
+      <span class="gk-logo gk-wordmark"><span>Workable</span></span>
+      <span class="gk-logo gk-wordmark"><span>LinkedIn Recruiter</span></span>
+      <span class="gk-logo"><img src="{% static 'images/integration-logos/hubspot.svg' %}" alt=""><span>HubSpot</span></span>
+      <span class="gk-logo gk-wordmark"><span>Apollo</span></span>
+      <span class="gk-logo"><img src="{% static 'images/integration-logos/sheets-glyph.svg' %}" alt=""><span>Google Sheets</span></span>
+      <span class="gk-logo"><img src="{% static 'images/integration-logos/slack-glyph.svg' %}" alt=""><span>Slack</span></span>
+      <span class="gk-logo"><img src="{% static 'images/integration-logos/gmail.svg' %}" alt="" style="height:13px"><span>Email</span></span>
+    </span>
   </div>
-  <div class="gk-logos">
-    <span class="gk-logo"><img src="{% static 'images/integration-logos/greenhouse.svg' %}" alt=""><span>Greenhouse</span></span>
-    <span class="gk-logo gk-wordmark"><span>Lever</span></span>
-    <span class="gk-logo"><img src="{% static 'images/integration-logos/hubspot.svg' %}" alt=""><span>HubSpot</span></span>
-    <span class="gk-logo"><img src="{% static 'images/integration-logos/sheets-glyph.svg' %}" alt=""><span>Google Sheets</span></span>
-    <span class="gk-logo"><img src="{% static 'images/integration-logos/slack-glyph.svg' %}" alt=""><span>Slack</span></span>
-    <span class="gk-logo"><img src="{% static 'images/integration-logos/gmail.svg' %}" alt="" style="height:16px"><span>Email</span></span>
-    <span class="gk-logo gk-wordmark"><span>Ashby</span></span>
-    <span class="gk-logo gk-wordmark"><span>Workable</span></span>
-  </div>
+  <p class="gk-int-more">Not on the list? Your agents work in a real browser and can call APIs, so anything your team logs into is fair game.</p>
 </section>

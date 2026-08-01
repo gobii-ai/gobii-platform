@@ -1,0 +1,377 @@
+{% load static %}
+{% comment %}
+  "Always on / a teammate you message" — the hub section.
+
+  Every channel claimed here is a NATIVE Gobii agent tool, verified in the codebase:
+    SMS      api/agent/tools/sms_sender.py            (send_sms)
+    Email    api/agent/tools/email_sender.py          (send_email)
+    Discord  api/agent/tools/send_discord_message.py  (send_discord_message),
+             discord_channel_subscriptions.py (inbound channel messages wake the agent),
+             add_discord_reaction.py (the bot reacts) — see
+             api/agent/system_skills/defaults.py :: DISCORD_NATIVE_SYSTEM_SKILL
+    Web chat api/agent/tools/web_chat_sender.py       (send_chat_message)
+    Own DB   api/agent/tools/sqlite_batch.py + sqlite_state.py (per-agent SQLite, keyed by agent UUID)
+    Peer DM  api/agent/tools/peer_dm.py               (send_agent_message)
+
+  Slack is NOT native: it exists only as the query aliases "slack receive" / "slack messages"
+  on the Discord native system skill, and as connector tools (slack-post-message,
+  slack-fetch-channel-history). It therefore stays in the quiet footnote below and never
+  gets a native-looking tile.
+
+  Conversation content is illustrative and labelled as an example on the page.
+{% endcomment %}
+<style>
+  /* ---- always-on hub ---------------------------------------------------- */
+  #gk-ao .gk-ao-hd em { font-style: normal; font-weight: 400;
+    background: linear-gradient(100deg, #c4b5fd, #f0abfc);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #gk-ao .gk-ao-sub { max-width: 640px; margin: 12px auto 0; }
+  #gk-ao .gk-ao-eg { display: inline-flex; align-items: center; gap: 7px; margin: 14px 0 0;
+    font-size: 10px; font-weight: 700; letter-spacing: 1.3px; text-transform: uppercase;
+    color: #c4b5fd; background: rgba(139, 92, 246, .16);
+    border: 1px solid rgba(196, 181, 253, .26); border-radius: 999px; padding: 5px 13px; }
+
+  #gk-ao .gk-ao-hub { display: grid; grid-template-columns: 1fr minmax(190px, 270px) 1fr;
+    gap: clamp(14px, 2.2vw, 30px); align-items: center; }
+  #gk-ao .gk-ao-col { display: flex; flex-direction: column; gap: clamp(12px, 1.8vw, 20px); min-width: 0; }
+
+  #gk-ao .gk-ao-core { display: grid; place-items: center; min-height: clamp(230px, 24vw, 320px); }
+  #gk-ao .gk-ao-orb { width: clamp(104px, 12vw, 146px); aspect-ratio: 1; border-radius: 50%;
+    display: grid; place-items: center; position: relative; border: 2px solid transparent;
+    background: radial-gradient(circle at 35% 30%, #33206b, #14102c 72%) padding-box,
+                conic-gradient(from 0deg, #7c3aed, #f0abfc, #a855f7, #7c3aed) border-box;
+    box-shadow: 0 0 70px rgba(168, 85, 247, .45); }
+  #gk-ao .gk-ao-orb img { height: clamp(44px, 5.2vw, 62px); width: auto; display: block; }
+  #gk-ao .gk-ao-orb::after { content: ''; position: absolute; inset: -16px; border-radius: 50%;
+    border: 1px solid rgba(196, 181, 253, .28); }
+  #gk-ao.gk-ao-motion .gk-ao-orb::after { animation: gk-ao-ripple 2.8s ease-out infinite; }
+  @keyframes gk-ao-ripple { 0% { transform: scale(.82); opacity: 1; } 100% { transform: scale(1.55); opacity: 0; } }
+
+  #gk-ao .gk-ao-label { text-align: center; margin-top: 16px; }
+  #gk-ao .gk-ao-label b { display: block; color: #fff; font-size: clamp(14px, 1.6vw, 17px); font-weight: 600; }
+  #gk-ao .gk-ao-label i { font-style: normal; display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 5px; color: #6ee7b7; font-size: clamp(10px, 1.1vw, 11.5px);
+    letter-spacing: 1.4px; font-weight: 700; }
+  #gk-ao .gk-ao-dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; flex-shrink: 0; }
+  #gk-ao.gk-ao-motion .gk-ao-dot { animation: gk-ao-pulse 2.2s ease-out infinite; }
+  @keyframes gk-ao-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, .55); }
+    70% { box-shadow: 0 0 0 7px rgba(52, 211, 153, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); } }
+
+  #gk-ao .gk-ao-card { border-radius: 15px; border: 1px solid transparent; overflow: hidden;
+    position: relative; min-width: 0; opacity: .82;
+    background: linear-gradient(rgba(26, 17, 48, .92), rgba(26, 17, 48, .92)) padding-box,
+                linear-gradient(135deg, rgba(124, 58, 237, .35), rgba(240, 171, 252, .14)) border-box;
+    transition: opacity .5s ease, transform .5s ease, box-shadow .5s ease, background .5s ease; }
+  #gk-ao .gk-ao-card.gk-ao-on { opacity: 1; transform: translateY(-3px);
+    background: linear-gradient(rgba(28, 18, 52, .97), rgba(28, 18, 52, .97)) padding-box,
+                linear-gradient(135deg, #7c3aed, #f0abfc) border-box;
+    box-shadow: 0 22px 66px rgba(124, 58, 237, .4); }
+  #gk-ao .gk-ao-head { display: flex; align-items: center; gap: 9px; padding: 12px 14px 8px; }
+  #gk-ao .gk-ao-head img { height: 18px; width: auto; flex-shrink: 0; }
+  #gk-ao .gk-ao-head svg { height: 18px; width: 18px; flex-shrink: 0; }
+  #gk-ao .gk-ao-head h3 { margin: 0; color: #fff; font-size: 13px; font-weight: 600; letter-spacing: -.1px; }
+  #gk-ao .gk-ao-tag { margin-left: auto; font-size: 9px; font-weight: 700; letter-spacing: .8px;
+    color: #6ee7b7; background: rgba(110, 231, 183, .1); border-radius: 999px;
+    padding: 3px 8px; white-space: nowrap; }
+  #gk-ao .gk-ao-win { margin: 0 14px 14px; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 14px 40px rgba(3, 1, 12, .5); }
+  #gk-ao .gk-ao-phone { margin: 2px auto 16px; max-width: 330px; padding: 0 14px; }
+
+  /* memory strip -------------------------------------------------------- */
+  #gk-ao .gk-ao-mem { margin-top: clamp(22px, 2.6vw, 34px); border-radius: 16px; overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, .1); background: rgba(20, 14, 42, .6); }
+  #gk-ao .gk-ao-memhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 13px 16px; background: rgba(23, 17, 50, .7); }
+  #gk-ao .gk-ao-memhead > div { flex: 1 1 260px; min-width: 0; }
+  #gk-ao .gk-ao-memhead h3 { margin: 0; color: #fff; font-size: 13.5px; font-weight: 600; }
+  #gk-ao .gk-ao-memhead p { margin: 0; color: #8b7fb8; font-size: 11.5px; line-height: 1.5; }
+  #gk-ao .gk-ao-cnt { margin-left: auto; color: #6ee7b7; font-size: 11px; font-weight: 700;
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #gk-ao .gk-ao-dbscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  #gk-ao .gk-ao-dbscroll .gkw-db { min-width: 460px; }
+
+  #gk-ao .gk-ao-foot { text-align: center; color: #8b7fb8; font-size: 12.5px;
+    line-height: 1.65; margin: 22px auto 0; max-width: 720px; }
+  #gk-ao .gk-ao-foot b { color: #cfc7e8; font-weight: 600; }
+
+  /* deterministic row arrival: nothing moves until JS says so ------------ */
+  #gk-ao .gkw-row { opacity: 0; }
+  #gk-ao .gk-ao-card .gkw-row, #gk-ao .gk-ao-mem .gkw-row { animation: none; }
+  #gk-ao .gkw-live .gkw-row { animation: gkw-rowin .4s forwards; }
+  #gk-ao.gk-ao-static .gkw-row { opacity: 1 !important; transform: none !important; animation: none !important; }
+  #gk-ao.gk-ao-static .gk-ao-card { transform: none !important; box-shadow: none; }
+
+  @media (max-width: 980px) {
+    #gk-ao .gk-ao-hub { grid-template-columns: 1fr; }
+    #gk-ao .gk-ao-core { order: -1; min-height: 0; padding: 2px 0 14px; }
+  }
+  @media (max-width: 430px) {
+    #gk-ao .gkw-dcbar .cnt { display: none; }
+    #gk-ao .gk-ao-cnt { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #gk-ao .gkw-row { opacity: 1; transform: none; animation: none; }
+    #gk-ao .gk-ao-card { transition: none; }
+  }
+</style>
+<noscript><style>
+  /* no JS: render the finished, fully readable state */
+  #gk-ao .gkw-row { opacity: 1 !important; transform: none !important; animation: none !important; }
+  #gk-ao .gk-ao-card { opacity: 1; }
+</style></noscript>
+
+<section id="gk-ao" class="gk-section" aria-labelledby="gk-ao-heading" data-animate>
+  <div class="gk-sect-head">
+    <span class="gk-eyebrow">ALWAYS ON, ALWAYS THERE</span>
+    <h2 id="gk-ao-heading" class="gk-ao-hd">Not a tool you open. <em>A teammate you message.</em></h2>
+    <p class="gk-sub gk-ao-sub">Text it, email it, or talk to it in Discord &mdash; the same way you would a
+      colleague. It is awake at 3&nbsp;AM, it remembers every conversation, and it comes to you &mdash;
+      there is no dashboard you have to check.</p>
+    <p class="gk-ao-eg">Example conversations &middot; &ldquo;Scout&rdquo; is a sample agent</p>
+  </div>
+
+  <div class="gk-ao-hub">
+    <div class="gk-ao-col">
+      <article class="gk-ao-card" data-ao-card>
+        <div class="gk-ao-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <rect x="3.4" y="4" width="17.2" height="12" rx="3.2"></rect>
+            <path d="M8.6 16v3.5L12.8 16"></path>
+            <path d="M8 9.4h8M8 12.2h5" opacity=".65"></path>
+          </svg>
+          <h3>Text message</h3>
+          <span class="gk-ao-tag">NATIVE</span>
+        </div>
+        <div class="gk-ao-phone" aria-hidden="true">
+          <div class="gkw-phone"><div class="gkw-phscreen">
+            <div class="gkw-phbar">
+              <span class="gkw-fishav"><img src="{% static 'images/gobii-fish.svg' %}" alt=""></span>
+              <span><span class="gkw-who">Scout</span><br><span class="sub">Gobii &middot; always on</span></span>
+            </div>
+            <div class="gkw-thread">
+              <div class="gkw-bub me gkw-row">Any strong backend candidates overnight?</div>
+              <div class="gkw-bub them gkw-row">Three. M. Kessler is the standout &mdash; Go and Kubernetes,
+                7 years. 94% against your criteria.<small>All three are in Greenhouse now</small></div>
+              <div class="gkw-bub me gkw-row">Push the top one to the hiring manager</div>
+              <div class="gkw-bub them gkw-row">Done &mdash; sent to Dana with the screening notes.</div>
+            </div>
+          </div></div>
+        </div>
+      </article>
+    </div>
+
+    <div class="gk-ao-core">
+      <div>
+        <div class="gk-ao-orb" aria-hidden="true"><img src="{% static 'images/gobii-fish.svg' %}" alt=""></div>
+        <div class="gk-ao-label">
+          <b>Scout</b>
+          <i><span class="gk-ao-dot" aria-hidden="true"></span>ONLINE &middot; 24/7</i>
+        </div>
+      </div>
+    </div>
+
+    <div class="gk-ao-col">
+      <article class="gk-ao-card" data-ao-card>
+        <div class="gk-ao-head">
+          <img src="{% static 'images/integration-logos/discord.svg' %}" alt="">
+          <h3>Discord</h3>
+          <span class="gk-ao-tag">NATIVE BOT</span>
+        </div>
+        <div class="gk-ao-win" aria-hidden="true">
+          <div class="gkw-app gkw-dc">
+            <div class="gkw-dcbar"><span class="hash">#</span><b>recruiting</b>
+              <span class="cnt">Scout is in this channel</span></div>
+            <div class="gkw-dcmsgs">
+              <div class="gkw-dcmsg gkw-row">
+                <span class="gkw-dcav"><img src="{% static 'images/people/face-al.jpg' %}" alt=""></span>
+                <div><div class="gkw-dcname">dana <span class="ts">7:58 AM</span></div>
+                  <div class="gkw-dctext">@Scout what came in last night?</div></div>
+              </div>
+              <div class="gkw-dcmsg gkw-row">
+                <span class="gkw-dcav bot"><img src="{% static 'images/gobii-fish.svg' %}" alt=""></span>
+                <div><div class="gkw-dcname">Scout <span class="tag">APP</span><span class="ts">7:58 AM</span></div>
+                  <div class="gkw-dctext">20 candidates into Greenhouse, top match <b>M. Kessler (94%)</b>.
+                    Want me to schedule screens?</div>
+                  <span class="gkw-dcreact">&#127919; 3</span></div>
+              </div>
+              <div class="gkw-dcmsg gkw-row">
+                <span class="gkw-dcav"><img src="{% static 'images/people/face-jn.jpg' %}" alt=""></span>
+                <div><div class="gkw-dcname">marcus <span class="ts">8:01 AM</span></div>
+                  <div class="gkw-dctext">yes please, mornings only</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="gk-ao-card" data-ao-card>
+        <div class="gk-ao-head">
+          <img src="{% static 'images/integration-logos/gmail.svg' %}" alt="">
+          <h3>Email</h3>
+          <span class="gk-ao-tag">NATIVE</span>
+        </div>
+        <div class="gk-ao-win" aria-hidden="true">
+          <div class="gkw-app gkw-em">
+            <div class="gkw-embar"><img src="{% static 'images/integration-logos/gmail.svg' %}" alt="">
+              <b>Inbox</b><span class="sr">6:04 AM</span></div>
+            <div class="gkw-emsub gkw-row">Your morning brief &mdash; 20 candidates, 10 leads</div>
+            <div class="gkw-emmeta gkw-row">
+              <span class="gkw-emav"><img src="{% static 'images/gobii-fish.svg' %}" alt=""></span>
+              <span><span class="gkw-emfrom">Scout</span>
+                <span class="gkw-emto">&lt;scout@my.gobii.ai&gt; &middot; to me</span></span>
+            </div>
+            <div class="gkw-embody gkw-row">Morning &mdash; here is what landed overnight:
+              <ul>
+                <li><b>20 candidates</b> in Greenhouse, top match 94%</li>
+                <li><b>10 leads</b> in HubSpot, 3 with strong intent</li>
+                <li><b>412 rows</b> appended to candidate-pipeline</li>
+              </ul>
+              Reply to this email if you want the criteria adjusted.</div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+
+  <div class="gk-ao-mem">
+    <div class="gk-ao-memhead">
+      <div>
+        <h3>Its own memory</h3>
+        <p>Every agent gets a private database it reads and writes &mdash; no shared pool, no re-briefing.</p>
+      </div>
+      <span class="gk-ao-cnt">4 example rows</span>
+    </div>
+    <div class="gk-ao-dbscroll" aria-hidden="true">
+      <div class="gkw-app gkw-db">
+        <div class="gkw-dbbar"><b>scout.db</b><span class="pill">&#9679; PRIVATE TO THIS AGENT</span></div>
+        <div class="gkw-dbq"><span class="kw">SELECT</span> * <span class="kw">FROM</span> memory
+          <span class="kw">ORDER BY</span> learned_at <span class="kw">DESC</span>;</div>
+        <div class="gkw-dbtable">
+          <div class="h">KEY</div><div class="h">WHAT IT LEARNED</div><div class="h">SINCE</div>
+          <div class="gkw-row">maya.kessler</div>
+          <div class="gkw-row">sourced &rarr; screened &rarr; delivered</div>
+          <div class="gkw-row g">day 1</div>
+          <div class="gkw-row">northwind_robotics</div>
+          <div class="gkw-row">intent: 3 RevOps roles posted</div>
+          <div class="gkw-row g">day 4</div>
+          <div class="gkw-row">criteria_v3</div>
+          <div class="gkw-row">no agencies, Go over Java</div>
+          <div class="gkw-row g">day 9</div>
+          <div class="gkw-row">dana_prefers</div>
+          <div class="gkw-row">screens in the morning only</div>
+          <div class="gkw-row g">day 12</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="gk-ao-foot">Web chat is built in, and your agents message each other directly.
+    <b>Slack</b> and the rest of your stack plug in too.</p>
+</section>
+
+<script>
+  (function () {
+    function initAlwaysOn() {
+      var root = document.getElementById('gk-ao');
+      if (!root) return;
+      var hub = root.querySelector('.gk-ao-hub');
+      var mem = root.querySelector('.gk-ao-mem');
+      var cards = Array.prototype.slice.call(root.querySelectorAll('[data-ao-card]'));
+      if (!hub || !cards.length) return;
+
+      function motionReduced() {
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return true;
+        var perf = window.GobiiHomePerf;
+        return !!(perf && typeof perf.shouldReduceHomepageMotion === 'function' && perf.shouldReduceHomepageMotion());
+      }
+
+      /* restart .gkw-row arrivals inside `el`, staggered */
+      function stamp(el, start, step) {
+        var rows = el.querySelectorAll('.gkw-row');
+        for (var i = 0; i < rows.length; i++) {
+          rows[i].style.animation = 'none';
+          void rows[i].offsetWidth;
+          rows[i].style.animation = '';
+          rows[i].style.animationDelay = (start + i * step) + 's';
+        }
+      }
+
+      if (motionReduced()) {
+        /* finished, fully readable state: every surface lit, every row present */
+        root.classList.add('gk-ao-static');
+        cards.forEach(function (card) { card.classList.add('gkw-live', 'gk-ao-on'); });
+        if (mem) mem.classList.add('gkw-live');
+        return;
+      }
+
+      var timer = null, seeded = false, inView = false, cur = 0;
+
+      function highlight(i) {
+        cur = i;
+        cards.forEach(function (card, j) { card.classList.toggle('gk-ao-on', j === i); });
+        stamp(cards[i], 0.15, 0.34);
+      }
+
+      function start() {
+        if (timer || document.hidden) return;
+        if (!seeded) {
+          seeded = true;
+          root.classList.add('gk-ao-motion');
+          cards.forEach(function (card, j) {
+            card.classList.add('gkw-live');
+            stamp(card, 0.2 + j * 0.28, 0.34);
+          });
+          cards[0].classList.add('gk-ao-on');
+          cur = 0;
+        }
+        timer = window.setInterval(function () {
+          highlight((cur + 1) % cards.length);
+        }, 4600);
+      }
+
+      function stop() {
+        if (!timer) return;
+        window.clearInterval(timer);
+        timer = null;
+      }
+
+      if (!('IntersectionObserver' in window)) {
+        start();
+        if (mem) { mem.classList.add('gkw-live'); stamp(mem, 0.25, 0.09); }
+        return;
+      }
+
+      var hubIo = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          inView = entry.isIntersecting;
+          if (inView) { start(); } else { stop(); }
+        });
+      }, { threshold: 0.2 });
+      hubIo.observe(hub);
+
+      if (mem) {
+        var memIo = new IntersectionObserver(function (entries, observer) {
+          entries.forEach(function (entry) {
+            if (!entry.isIntersecting) return;
+            mem.classList.add('gkw-live');
+            stamp(mem, 0.25, 0.09);
+            observer.disconnect();
+          });
+        }, { threshold: 0.2 });
+        memIo.observe(mem);
+      }
+
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { stop(); } else if (inView) { start(); }
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initAlwaysOn);
+    } else {
+      initAlwaysOn();
+    }
+  })();
+</script>

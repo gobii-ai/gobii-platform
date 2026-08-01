@@ -9,6 +9,7 @@
   {% endif %}
   {% endif %}
 {% endblock %}
+{% block showcase_css %}{% if home_use_k %}{% include "includes/_gk_showcase.html" %}{% endif %}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="{{ home_meta_description }}">

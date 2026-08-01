@@ -66,6 +66,8 @@
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
   <link rel="stylesheet" href="{% static 'css/globals.css' %}">
   {% include "includes/_gk_theme.html" %}
+  {# Emulated-app + data-viz chrome. Only the pages that show proof surfaces pull it in. #}
+  {% block showcase_css %}{% endblock %}
   {% block early_head_styles %}{% endblock %}
 
   <script defer src="https://unpkg.com/lucide@0.546.0"></script>
