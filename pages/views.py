@@ -1343,15 +1343,20 @@ class HomePage(TemplateView):
             )
             context["home_use_k"] = home_use_k
             if home_use_k:
+                from billing.plan_resolver import get_active_public_plan_monthly_task_credits
+
                 context["home_dark_header"] = True
                 context["home_hero_groups"] = build_homepage_hero_groups(all_templates)
-                pro_plan = get_plan_config(PlanNames.STARTUP)
-                scale_plan = get_plan_config(PlanNames.SCALE)
+                # Same live sources as PricingView: prices refresh from StripeConfig
+                # and credits come from the active public plan, so the homepage
+                # pricing card can never disagree with /pricing/.
+                pro_plan = get_plan_config(PlanNames.STARTUP) or {}
+                scale_plan = get_plan_config(PlanNames.SCALE) or {}
                 context["home_pricing"] = {
-                    "pro_price": pro_plan["price"],
-                    "pro_credits": f"{pro_plan['monthly_task_credits']:,}",
-                    "scale_price": scale_plan["price"],
-                    "scale_credits": f"{scale_plan['monthly_task_credits']:,}",
+                    "pro_price": pro_plan.get("price", STARTUP_MONTHLY_PRICE_USD),
+                    "pro_credits": f"{get_active_public_plan_monthly_task_credits(PlanNames.STARTUP):,}",
+                    "scale_price": scale_plan.get("price", 250),
+                    "scale_credits": f"{get_active_public_plan_monthly_task_credits(PlanNames.SCALE):,}",
                 }
 
         if self.request.user.is_authenticated:
