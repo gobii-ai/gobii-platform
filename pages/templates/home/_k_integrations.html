@@ -1,44 +1,86 @@
 {% load static %}
 {% comment %}
-  Compact connector strip. The night-shift section above carries the story; this is the
-  quiet, scannable, indexable list of the tools agents work with. Deliberately subordinate:
-  no eyebrow rule, no hero type, dimmed glyphs, one glass bar.
+  "Delivers into the tools you already use" — the tile grid.
 
-  Honesty note: this strip deliberately does NOT claim which connections are native and
-  which run through a connector or the browser, because that split differs per tool
-  (e.g. Discord is native, Slack is not). It only says the agents work with these tools.
+  Every mark here is the vendor's own asset, vendored locally (no CDN, no hotlink).
+  Ashby and Workable publish no usable logo (square app icons only), so they render as
+  type; the tile already carries the name, so it reads as intentional rather than missing.
+  Apollo ships a near-black mark, so `static/images/integration-logos/apollo.svg` is its
+  reverse variant. Lever's wordmark is dark and gets `.gk-int-white`.
 {% endcomment %}
 <style>
-  .gk-int { padding-top: clamp(20px, 3vw, 30px); }
-  .gk-int-strip { display: flex; flex-direction: column; align-items: center; gap: 12px;
-                  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
-                  border-radius: 16px; padding: clamp(14px, 1.8vw, 18px) clamp(16px, 2.4vw, 26px); }
-  .gk-int .gk-eyebrow { font-size: 10px; letter-spacing: 2.2px; color: #9d92c0; text-align: center; }
-  .gk-int-list { display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
-                 gap: 10px clamp(14px, 2vw, 22px); }
-  .gk-int .gk-logo { font-size: 12.5px; font-weight: 500; opacity: .62; }
-  .gk-int .gk-logo:hover { opacity: .95; }
-  .gk-int .gk-logo img { height: 15px; }
-  .gk-int .gk-logo.gk-wordmark { opacity: .55; }
-  .gk-int-more { color: #8b7fb8; font-size: 12px; line-height: 1.6; text-align: center;
-                 margin: 12px auto 0; max-width: 56ch; }
+  .gk-int { padding-top: clamp(26px, 3.4vw, 40px); }
+  .gk-int-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+                 gap: clamp(10px, 1.4vw, 15px); }
+  .gk-int-tile { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px;
+                 padding: clamp(20px, 2.4vw, 28px) 14px; border-radius: 16px;
+                 border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.04);
+                 transition: transform .18s ease, border-color .18s ease, background .18s ease; }
+  .gk-int-tile:hover { transform: translateY(-3px); border-color: rgba(196,181,253,.4);
+                       background: rgba(255,255,255,.07); }
+  .gk-int-art { height: 44px; display: grid; place-items: center; }
+  .gk-int-art img { height: 38px; width: auto; max-width: 118px; object-fit: contain; }
+  .gk-int-white { filter: brightness(0) invert(1); }
+  .gk-int-wm { font-size: 23px; font-weight: 700; color: #fff; letter-spacing: -.5px; }
+  .gk-int-name { color: #fff; font-size: 13.5px; font-weight: 600; line-height: 1.25; }
+  .gk-int-kind { color: #8b7fb8; font-size: 10.5px; letter-spacing: 1.2px; font-weight: 600; }
+  .gk-int-more { text-align: center; color: #b7aed4; font-size: clamp(13px,1.4vw,14.5px);
+                 line-height: 1.6; margin: clamp(24px,3vw,32px) auto 0; max-width: 62ch; }
+  .gk-int-more b { color: #fff; font-weight: 600; }
+  @media (prefers-reduced-motion: reduce) { .gk-int-tile { transition: none; } }
 </style>
 
-<section class="gk-section gk-section-plain gk-int" aria-label="Integrations" data-animate>
-  <div class="gk-int-strip">
-    <span class="gk-eyebrow">DELIVERS INTO THE TOOLS YOU ALREADY USE</span>
-    <span class="gk-int-list">
-      <span class="gk-logo"><img src="{% static 'images/integration-logos/greenhouse.svg' %}" alt=""><span>Greenhouse</span></span>
-      <span class="gk-logo gk-wordmark"><span>Lever</span></span>
-      <span class="gk-logo gk-wordmark"><span>Ashby</span></span>
-      <span class="gk-logo gk-wordmark"><span>Workable</span></span>
-      <span class="gk-logo gk-wordmark"><span>LinkedIn Recruiter</span></span>
-      <span class="gk-logo"><img src="{% static 'images/integration-logos/hubspot.svg' %}" alt=""><span>HubSpot</span></span>
-      <span class="gk-logo gk-wordmark"><span>Apollo</span></span>
-      <span class="gk-logo"><img src="{% static 'images/integration-logos/sheets-glyph.svg' %}" alt=""><span>Google Sheets</span></span>
-      <span class="gk-logo"><img src="{% static 'images/integration-logos/slack-glyph.svg' %}" alt=""><span>Slack</span></span>
-      <span class="gk-logo"><img src="{% static 'images/integration-logos/gmail.svg' %}" alt="" style="height:13px"><span>Email</span></span>
-    </span>
+<section class="gk-section gk-int" aria-label="Integrations" data-animate>
+  <div class="gk-sect-head">
+    <span class="gk-eyebrow">WORKS WITH YOUR STACK</span>
+    <h2>Delivers into <span class="gk-accent">the tools you already use</span></h2>
   </div>
-  <p class="gk-int-more">Not on the list? Your agents work in a real browser and can call APIs, so anything your team logs into is fair game.</p>
+  <div class="gk-int-grid">
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><img src="{% static 'images/integration-logos/greenhouse.svg' %}" alt="" loading="lazy"></span>
+        <span class="gk-int-name">Greenhouse</span><span class="gk-int-kind">ATS</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><img src="{% static 'images/integration-logos/linkedin.svg' %}" alt="" loading="lazy"></span>
+        <span class="gk-int-name">LinkedIn Recruiter</span><span class="gk-int-kind">Sourcing</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><img src="{% static 'images/integration-logos/hubspot.svg' %}" alt="" loading="lazy"></span>
+        <span class="gk-int-name">HubSpot</span><span class="gk-int-kind">CRM</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><img src="{% static 'images/integration-logos/apollo.svg' %}" alt="" loading="lazy"></span>
+        <span class="gk-int-name">Apollo</span><span class="gk-int-kind">Outbound</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><img src="{% static 'images/integration-logos/sheets-glyph.svg' %}" alt="" loading="lazy"></span>
+        <span class="gk-int-name">Google Sheets</span><span class="gk-int-kind">Spreadsheets</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><img src="{% static 'images/integration-logos/slack-glyph.svg' %}" alt="" loading="lazy"></span>
+        <span class="gk-int-name">Slack</span><span class="gk-int-kind">Chat</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><img src="{% static 'images/integration-logos/gmail.svg' %}" alt="" loading="lazy"></span>
+        <span class="gk-int-name">Gmail</span><span class="gk-int-kind">Email</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><img src="{% static 'images/integration-logos/discord.svg' %}" alt="" loading="lazy"></span>
+        <span class="gk-int-name">Discord</span><span class="gk-int-kind">Chat</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><img class="gk-int-white" src="{% static 'images/integration-logos/lever.svg' %}" alt="" loading="lazy"></span>
+        <span class="gk-int-name">Lever</span><span class="gk-int-kind">ATS</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><span class="gk-int-wm">Ashby</span></span>
+        <span class="gk-int-kind" style="margin-top:10px">ATS</span>
+      </div>
+      <div class="gk-int-tile">
+        <span class="gk-int-art"><span class="gk-int-wm">Workable</span></span>
+        <span class="gk-int-kind" style="margin-top:10px">ATS</span>
+      </div>
+  </div>
+  <p class="gk-int-more">Not on the list? Your agents work in a real browser and can call APIs &mdash;
+    <b>anything your team logs into is fair game.</b></p>
 </section>

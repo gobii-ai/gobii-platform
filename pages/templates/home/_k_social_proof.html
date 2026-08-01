@@ -1,0 +1,52 @@
+{% load static %}
+{% comment %}
+  Social proof rail. Investor mark keeps its own colour so it stands out; customer marks
+  are normalised to white at 72% so six different brands read as one row. Heights are
+  optically balanced (wide wordmarks sit shorter than compact lockups), not uniform.
+  All assets vendored locally.
+{% endcomment %}
+<style>
+  .gk-sp { padding-top: clamp(18px, 2.4vw, 28px); }
+  .gk-sp-rail { display: flex; flex-direction: column; align-items: center; gap: clamp(16px,2.2vw,22px); }
+  .gk-sp-ocv { display: inline-flex; align-items: center; gap: 11px; padding: 8px 18px; border-radius: 999px;
+               border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); }
+  .gk-sp-ocv img { height: 22px; width: auto; }
+  .gk-sp-lab { font-size: 10.5px; letter-spacing: 2.4px; font-weight: 600; color: #8b7fb8;
+               text-transform: uppercase; }
+  .gk-sp-ocv .gk-sp-lab { letter-spacing: 1.8px; font-size: 9.5px; color: #a99cc9; }
+  .gk-sp-proof { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  /* an even grid so a wrap never strands one logo alone on a second row */
+  .gk-sp-logos { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); align-items: center;
+                 gap: clamp(16px,3vw,44px); width: 100%; max-width: 940px; }
+  .gk-sp-logo { display: grid; place-items: center; min-width: 0; }
+  .gk-sp-logo img { max-width: 100%; filter: grayscale(1) brightness(0) invert(1); opacity: .72;
+                    transition: opacity .2s ease; }
+  .gk-sp-logo:hover img { opacity: 1; }
+  @media (max-width: 900px) { .gk-sp-logos { grid-template-columns: repeat(3, minmax(0,1fr)); row-gap: 26px; } }
+  @media (max-width: 420px) { .gk-sp-logos { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  @media (prefers-reduced-motion: reduce) { .gk-sp-logo img { transition: none; } }
+</style>
+
+<section class="gk-section gk-section-plain gk-sp" aria-label="Investors and customers" data-animate>
+  <div class="gk-sp-rail">
+    <span class="gk-sp-ocv"><span class="gk-sp-lab">Backed by</span>
+      <img src="{% static 'images/customers/ocv.svg' %}" alt="Open Core Ventures" loading="lazy" decoding="async"></span>
+    <div class="gk-sp-proof">
+      <span class="gk-sp-lab">Trusted by teams at</span>
+      <div class="gk-sp-logos">
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/brex.png' %}" alt="Brex"
+        style="height:21px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/qcells.png' %}" alt="Qcells"
+        style="height:21px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/brightdata.svg' %}" alt="Bright Data"
+        style="height:20px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/lark.webp' %}" alt="Lark Health"
+        style="height:21px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/mantra.png' %}" alt="Mantra Health"
+        style="height:16px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/crisp.svg' %}" alt="Crisp"
+        style="height:22px" loading="lazy" decoding="async"></span>
+      </div>
+    </div>
+  </div>
+</section>

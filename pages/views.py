@@ -3661,12 +3661,6 @@ class AboutView(TemplateView):
     template_name = "about.html"
 
 
-class TeamView(TemplateView):
-    """Team page showcasing the people behind Gobii."""
-
-    template_name = "team.html"
-
-
 class CareersView(TemplateView):
     """Simple static Careers page."""
 

@@ -1,16 +1,30 @@
 {% extends "account/base_entrance.html" %}
 {% load i18n %}
-{% load allauth %}
+
+{% block title %}{% trans "Verify Your Email Address" %}{% endblock %}
 {% block head_title %}
     {% trans "Verify Your Email Address" %}
 {% endblock head_title %}
-{% block content %}
-  <section class="py-20">
-    <div class="max-w-7xl mx-auto px-8">
-      <h3 class="text-lg font-semibold text-slate-900 mb-2">{% trans "Verify Your Email Address" %}</h3>
-      {% element p %}
-          {% blocktrans %}We have sent an email to you for verification. Follow the link provided to finalize the signup process. If you do not see the verification email in your main inbox, check your spam folder. Please contact us if you do not receive the verification email within a few minutes.{% endblocktrans %}
-      {% endelement %}
-    </div>
-  </section>
-{% endblock content %}
+
+{% block body_inner %}
+<div class="gk-auth-center">
+  <div class="gk-auth-glyph" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="5" width="18" height="14" rx="3"></rect>
+      <path d="M4 7.5 12 13l8-5.5"></path>
+    </svg>
+  </div>
+
+  <h1 class="gk-auth-title">{% trans "Verify Your Email Address" %}</h1>
+
+  <p class="gk-auth-lede">
+    {% blocktrans %}We have sent an email to you for verification. Follow the link provided to finalize the signup process. If you do not see the verification email in your main inbox, check your spam folder. Please contact us if you do not receive the verification email within a few minutes.{% endblocktrans %}
+  </p>
+
+  <div class="gk-auth-actions">
+    <a href="{% url 'account_login' %}" class="gk-btn gk-auth-submit">
+      {% trans "Back to Sign In" %}
+    </a>
+  </div>
+</div>
+{% endblock %}

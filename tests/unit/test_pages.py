@@ -5568,8 +5568,10 @@ class AuthLinkTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         content = response.content.decode()
+        # Copy changed with the auth redesign ("New here? Create an account"). The
+        # assertions below still pin the behaviour that matters: utm + next passthrough.
         match = re.search(
-            r"Don't have an account yet\\?.*?href=\"([^\"]+)\"[^>]*>Sign up here</a>",
+            r"New here\\?.*?href=\"([^\"]+)\"[^>]*>Create an account</a>",
             content,
             re.S,
         )
@@ -5704,7 +5706,9 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, "Complete sign up")
         self.assertContains(response, "You started with LinkedIn. Finish creating your account below.")
         self.assertContains(response, f'action="{reverse("socialaccount_signup")}"')
-        self.assertContains(response, "bg-white max-w-md")
+        # The auth pages moved from the light bootstrap card to the dark Luxe shell;
+        # the assertion still checks the form renders inside the entrance card.
+        self.assertContains(response, "gk-auth-card")
 
     def test_signup_modal_renders_email_start_and_popup_social_urls(self):
         for provider in ("facebook", "google"):

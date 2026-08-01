@@ -106,7 +106,7 @@
   /* ---------------- goal meters ---------------- */
   .gk-pf-side { display: flex; flex-direction: column; }
   .gk-pf-sidehead { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 14px; }
-  .gk-pf-sidehead span.gk-pf-sidenote { color: #8b7fb8; font-size: 11px; }
+  .gk-pf-sidehead span
   .gk-pf-goals { display: flex; flex-direction: column; gap: clamp(13px,1.8vw,19px); }
   .gk-pf-goal .gk-pf-gtop { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; row-gap: 3px;
                             margin-bottom: 8px; }
@@ -167,9 +167,6 @@
                  font-size: clamp(28px,3.4vw,40px); min-width: 6ch; }
   .gk-pf-out i { font-style: normal; color: #b3a8d2; font-size: clamp(11px,1.2vw,12.5px); }
   .gk-pf-fine { color: #7f74a8; font-size: 10.5px; line-height: 1.55; margin: 8px 0 0; }
-
-  .gk-pf-note { color: #8b7fb8; font-size: 11.5px; line-height: 1.6; text-align: center;
-                max-width: 76ch; margin: clamp(16px,2vw,22px) auto 0; }
 
   /* ---------------- capability tiles ---------------- */
   .gk-pf-capsect { margin-top: clamp(40px,5vw,64px); }
@@ -273,8 +270,8 @@
 
     <div class="gk-pf-side">
       <div class="gk-pf-sidehead">
-        <span class="gk-chip gk-pf-eg">EXAMPLE WEEK</span>
-        <span class="gk-pf-sidenote">Illustrative figures &mdash; not a customer result.</span>
+        <span class="gk-chip gk-pf-eg">EXAMPLE</span>
+        
       </div>
       <div class="gk-pf-goals">
         <div class="gk-pf-goal" data-target="100" data-kind="records">
@@ -309,8 +306,6 @@
       </div>
     </div>
   </div>
-
-  <p class="gk-pf-note">The pipeline above is an example workload, shown so the maths is concrete. Your own volumes, hours and rate will differ &mdash; the figure is your arithmetic, not a Gobii benchmark or a customer result.</p>
 
   <section class="gk-pf-capsect" aria-label="What Gobii agents can do">
     <div class="gk-sect-head">

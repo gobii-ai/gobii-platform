@@ -5,7 +5,7 @@ updated: 2026-07-19
 description: "Explore 12 practical AI agent workflows for research, monitoring, content, sales, and operations, with a six-step blueprint for reliable automation and review."
 author: "The Gobii Team"
 author_type: "Organization"
-author_url: "/team/"
+author_url: "/about/"
 author_bio: "The Gobii Team builds and operates persistent browser-native AI agents, with a focus on useful automation, clear review points, and dependable long-running work."
 seo_title: "12 AI Agent Workflows for Practical Automation"
 seo_description: "Explore 12 practical AI agent workflows for research, monitoring, content, sales, and operations, with a six-step blueprint for reliable automation and review."
