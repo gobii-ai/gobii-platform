@@ -1361,5 +1361,3 @@
     {% vite_asset 'src/homepageIntegrations.tsx' %}
   {% endif %}
 {% endblock %}
-
-{% block footer %}{% if home_use_k %}{% include "home/_k_footer.html" %}{% else %}{{ block.super }}{% endif %}{% endblock %}

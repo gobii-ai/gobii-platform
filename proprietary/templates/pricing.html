@@ -70,7 +70,7 @@
         <i data-lucide="sparkles" class="h-4 w-4"></i>
         Simple Pricing
       </div>
-      <h1 class="mt-4 text-3xl sm:text-4xl lg:text-5xl font-medium text-slate-950 leading-tight">
+      <h1 class="mt-4 text-3xl sm:text-4xl lg:text-5xl font-light text-slate-950 leading-tight tracking-tight">
         Choose the plan that fits your team.
       </h1>
     </div>
@@ -162,12 +162,12 @@
   <!-- Enterprise CTA -->
   <section class="py-12">
     <div class="max-w-4xl mx-auto px-4">
-      <div class="rounded-2xl border border-slate-200 bg-white shadow-sm px-8 py-10 text-center md:text-left md:flex md:items-center md:justify-between md:gap-8">
+      <div class="rounded-2xl border border-violet-100 bg-white shadow-[0_6px_24px_rgba(109,40,217,0.06)] px-8 py-10 text-center md:text-left md:flex md:items-center md:justify-between md:gap-8">
         <div>
           <h3 class="text-2xl font-semibold text-slate-900">Let's design your deployment.</h3>
           <p class="mt-3 text-sm text-slate-500">Enterprise plans with dedicated infrastructure, SLAs, and custom governance.</p>
         </div>
-        <a href="{% url 'proprietary:prequalify' %}" class="mt-6 md:mt-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold shadow-sm hover:bg-blue-700 transition whitespace-nowrap">
+        <a href="{% url 'proprietary:prequalify' %}" class="mt-6 md:mt-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-white font-semibold transition-transform hover:-translate-y-px whitespace-nowrap" style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 6px 24px rgba(124,58,237,.35)">
           {% cta_text "cta_enterprise_request_call" fallback="Request a call" %}
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         </a>
@@ -179,11 +179,11 @@
   <!-- Comparison Table -->
   <section class="py-12">
     <div class="max-w-7xl mx-auto px-8">
-      <h2 class="text-3xl sm:text-4xl font-semibold text-slate-900 text-center mb-12">Compare plans</h2>
-      <div class="overflow-x-auto">
-        <table class="min-w-full border border-slate-200 text-xs sm:text-sm">
+      <h2 class="text-3xl sm:text-4xl font-light tracking-tight text-slate-900 text-center mb-12">Compare plans</h2>
+      <div class="overflow-x-auto rounded-2xl border border-violet-100 bg-white shadow-[0_6px_24px_rgba(109,40,217,0.06)]">
+        <table class="min-w-full text-xs sm:text-sm">
           <thead>
-            <tr>
+            <tr class="bg-violet-50 text-violet-700">
               <th class="p-2 sm:p-3 text-left font-semibold">Feature</th>
               {% for label in comparison_plan_labels %}
               <th class="p-2 sm:p-3 font-semibold">{{ label }}</th>
@@ -192,7 +192,7 @@
           </thead>
           <tbody>
             {% for row in comparison_rows %}
-            <tr class="divide-x divide-slate-200">
+            <tr class="divide-x divide-slate-100 border-t border-slate-100">
               <td class="p-2 sm:p-3 font-medium text-slate-700">{{ row.0 }}</td>
               {% for col in row|slice:"1:" %}
               <td class="p-2 sm:p-3 text-center">{{ col }}</td>
@@ -209,10 +209,10 @@
   <!-- FAQ -->
   <section class="py-12">
     <div class="max-w-4xl mx-auto px-4">
-      <h2 class="text-3xl sm:text-4xl font-semibold text-slate-900 text-center mb-12">Frequently asked questions</h2>
+      <h2 class="text-3xl sm:text-4xl font-light tracking-tight text-slate-900 text-center mb-12">Frequently asked questions</h2>
       <div class="hs-accordion-group space-y-4">
         {% for q,a in faqs %}
-        <div class="hs-accordion border border-slate-200 rounded-lg" id="faq-{{ forloop.counter }}">
+        <div class="hs-accordion border border-violet-100 bg-white rounded-xl shadow-[0_2px_10px_rgba(109,40,217,0.04)]" id="faq-{{ forloop.counter }}">
           <button class="hs-accordion-toggle w-full px-6 py-4 flex justify-between items-center text-left">
             <span class="font-medium text-slate-900">{{ q }}</span>
             <svg class="w-4 h-4 hs-accordion-active:hidden" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
@@ -245,26 +245,26 @@
             <div class="grid gap-y-4">
               <div>
                 <label for="name" class="block text-sm font-medium mb-2">Full name</label>
-                <input type="text" id="name" name="name" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Your name">
+                <input type="text" id="name" name="name" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-violet-500 focus:ring-violet-500" placeholder="Your name">
               </div>
               
               <div>
                 <label for="email" class="block text-sm font-medium mb-2">Email</label>
-                <input type="email" id="email" name="email" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="your.email@company.com">
+                <input type="email" id="email" name="email" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-violet-500 focus:ring-violet-500" placeholder="your.email@company.com">
               </div>
               
               <div>
                 <label for="company" class="block text-sm font-medium mb-2">Company</label>
-                <input type="text" id="company" name="company" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Company name">
+                <input type="text" id="company" name="company" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-violet-500 focus:ring-violet-500" placeholder="Company name">
               </div>
               
               <div>
                 <label for="message" class="block text-sm font-medium mb-2">Message (optional)</label>
-                <textarea id="message" name="message" rows="3" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Tell us about your needs"></textarea>
+                <textarea id="message" name="message" rows="3" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-violet-500 focus:ring-violet-500" placeholder="Tell us about your needs"></textarea>
               </div>
               
               <div class="mt-3">
-                <button type="button" class="w-full py-3 px-4 inline-flex justify-center items-center gap-x-2 text-sm font-semibold rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">
+                <button type="button" class="w-full py-3 px-4 inline-flex justify-center items-center gap-x-2 text-sm font-semibold rounded-lg border border-transparent text-white" style="background:linear-gradient(90deg,#7c3aed,#a855f7)">
                   Schedule demo
                 </button>
               </div>
@@ -296,7 +296,7 @@
     <p id="plan-change-body" class="mt-3 text-sm text-slate-600"></p>
     <div class="mt-6 flex flex-col sm:flex-row sm:justify-end gap-3">
       <button type="button" class="w-full sm:w-auto inline-flex justify-center items-center px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50" data-close-plan-modal>Keep current plan</button>
-      <button type="button" class="w-full sm:w-auto inline-flex justify-center items-center px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow" id="plan-change-confirm">Change plan</button>
+      <button type="button" class="w-full sm:w-auto inline-flex justify-center items-center px-4 py-2 rounded-lg text-white font-semibold shadow" style="background:linear-gradient(90deg,#7c3aed,#a855f7)" id="plan-change-confirm">Change plan</button>
     </div>
   </div>
 </div>

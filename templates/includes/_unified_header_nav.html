@@ -23,15 +23,14 @@
       </a>
 
       <!-- Desktop Nav - Floating pill style -->
-      <nav class="hidden md:flex items-center">
-        <!-- Main nav links in a colored pill -->
-        <div class="flex items-center gap-x-0.5 p-1 rounded-xl bg-indigo-800/90 shadow-lg shadow-indigo-900/20">
+      <nav class="hidden md:flex items-center gap-x-1">
+        <div class="flex items-center gap-x-1">
           {% if settings.GOBII_PROPRIETARY_MODE %}
           <!-- Solutions Dropdown -->
           <div x-data="{ open: false }" class="relative" @mouseleave="open = false">
             <button @mouseover="open = true" @click="open = !open"
-                    class="inline-flex items-center gap-x-1 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 focus:outline-none transition-all"
-                    :class="{ 'text-white bg-white/10': open }">
+                    class="inline-flex items-center gap-x-1 px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 focus:outline-none transition-colors"
+                    :class="{ 'text-slate-950': open }">
               Solutions
               <svg class="h-3 w-3 transform transition-transform duration-200" :class="{ 'rotate-180': open }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -79,43 +78,46 @@
             </div>
           </div>
 
-            <a href="{% url 'proprietary:teams' %}" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Teams</a>
-            <a href="{% url 'proprietary:pricing' %}" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Pricing</a>
-            <a href="{% url 'pages:solution' slug='engineering' %}" title="Gobii API - Build AI Agents on our Platform" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">API</a>
+            <a href="{% url 'pages:library' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">Agents</a>
+            <a href="{% url 'proprietary:pricing' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">Pricing</a>
+            <a href="{% url 'proprietary:teams' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">Teams</a>
+            <a href="{% url 'pages:solution' slug='engineering' %}" title="Gobii API - Build AI Agents on our Platform" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">API</a>
+          {% else %}
+            <a href="{% url 'pages:library' %}" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">Agents</a>
           {% endif %}
 
           {% if request.user.is_authenticated %}
-            <a href="/app/agents" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
+            <a href="/app/agents" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">
               <i data-lucide="bot" class="h-3.5 w-3.5"></i>
               My Agents
             </a>
-            <a href="{% url 'pages:library' %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
-              <i data-lucide="search" class="h-3.5 w-3.5"></i>
-              Discover
-            </a>
-          {% else %}
-            <a href="{% url 'pages:library' %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
-              <i data-lucide="search" class="h-3.5 w-3.5"></i>
-              Discover
-            </a>
-            {% with request.session.utm_querystring as utm_qs %}
-            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
-              <i data-lucide="log-in" class="h-3.5 w-3.5"></i>
-              Login
-            </a>
-            {% endwith %}
           {% endif %}
         </div>
 
-        <!-- Auth & Social section -->
-        <div class="flex items-center gap-x-3 ml-4">
+        <!-- Auth section -->
+        <div class="flex items-center gap-x-2 ml-3">
+        {% if not request.user.is_authenticated %}
+          {% with request.session.utm_querystring as utm_qs %}
+          <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
+             class="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-950 transition-colors">
+            Log in
+          </a>
+          {% url 'account_signup' as account_signup_url %}
+          <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
+             data-analytics-cta-id="nav_start_trial" data-analytics-placement="header" data-analytics-intent="signup"
+             class="inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold text-white transition-transform hover:-translate-y-px"
+             style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 4px 14px rgba(124,58,237,.3)">
+            Start free trial
+          </a>
+          {% endwith %}
+        {% endif %}
         {% if request.user.is_authenticated %}
           <!-- User Profile Dropdown (Desktop) -->
           <div x-data="{ open: false }" class="relative inline-flex">
             <button @click="open = !open"
                     @keydown.escape.window="open = false"
                     :aria-expanded="open"
-                    class="inline-flex items-center justify-center gap-x-2 rounded-full text-sm font-medium text-slate-700 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                    class="inline-flex items-center justify-center gap-x-2 rounded-full text-sm font-medium text-slate-700 hover:text-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 transition-colors">
               {% with social_account_set=request.user.socialaccount_set.all %}
                 {% if social_account_set and social_account_set.0.get_avatar_url %}
                   <img class="inline-block size-8 rounded-full object-cover ring-2 ring-white/50" src="{{ social_account_set.0.get_avatar_url }}" alt="{{ request.user.email|default:"User Profile" }}">
@@ -152,43 +154,43 @@
               <div class="py-2">
                 {% if request.user.is_staff %}
                 <div class="py-1">
-                  <a href="{% url 'admin:index' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                  <a href="{% url 'admin:index' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                     <i aria-hidden="true" data-lucide="columns-3-cog" class="h-4 w-4 text-slate-500"></i>
                     Django Admin
                   </a>
                 </div>
                 <div class="py-1">
-                  <a href="{% url 'llm-config' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                  <a href="{% url 'llm-config' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                     <i aria-hidden="true" data-lucide="settings-2" class="h-4 w-4 text-slate-500"></i>
                     LLM Config
                   </a>
                 </div>
                 <div class="py-1">
-                  <a href="{% url 'staff-platform-mcp' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                  <a href="{% url 'staff-platform-mcp' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                     <i aria-hidden="true" data-lucide="server-cog" class="h-4 w-4 text-slate-500"></i>
                     Platform MCP
                   </a>
                 </div>
                 <div class="py-1">
-                  <a href="{% url 'evals' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                  <a href="{% url 'evals' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                     <i aria-hidden="true" data-lucide="beaker" class="h-4 w-4 text-slate-500"></i>
                     Evals
                   </a>
                 </div>
                 <div class="py-1">
-                  <a href="{% url 'system-settings' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                  <a href="{% url 'system-settings' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                     <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 text-slate-500"></i>
                     System Settings
                   </a>
                 </div>
                 <div class="py-1">
-                  <a href="{% url 'console-status' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                  <a href="{% url 'console-status' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                     <i aria-hidden="true" data-lucide="activity" class="h-4 w-4 text-slate-500"></i>
                     Status
                   </a>
                 </div>
                 <div class="py-1">
-                  <a href="{% url 'staff-users' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                  <a href="{% url 'staff-users' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                     <i aria-hidden="true" data-lucide="users-round" class="h-4 w-4 text-slate-500"></i>
                     Users &amp; Orgs
                   </a>
@@ -197,12 +199,12 @@
 
                 <div class="py-1">
                   {% if request.session.context_type == 'organization' and request.session.context_id %}
-                    <a href="{% url 'organization_detail' org_id=request.session.context_id %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                    <a href="{% url 'organization_detail' org_id=request.session.context_id %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                       <i aria-hidden="true" data-lucide="building-2" class="h-4 w-4 text-slate-500"></i>
                       Organization
                     </a>
                   {% else %}
-                    <a href="{% url 'profile' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                    <a href="{% url 'profile' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                       <i aria-hidden="true" data-lucide="user-round" class="h-4 w-4 text-slate-500"></i>
                       Profile
                     </a>
@@ -213,7 +215,7 @@
                   <form method="post" action="{% url 'account_logout' %}">
                     {% csrf_token %}
                     <button type="submit"
-                            class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                            class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
                       <i aria-hidden="true" data-lucide="log-out" class="h-4 w-4 text-slate-500"></i>
                       {% translate 'Sign Out' %}
                     </button>
@@ -225,22 +227,11 @@
         {% else %}
         {% endif %}
 
-          <!-- Social Icons -->
-          <a href="https://discord.gg/yyDB8GwxtE" target="_blank" rel="noopener" aria-label="Join our Discord server" class="p-2 rounded-full text-slate-800 hover:text-[#5865F2] transition-colors">
-            <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-              <path d="M13.545 2.907a13.227 13.227 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.19 12.19 0 0 0-3.658 0 8.258 8.258 0 0 0-.412-.833.051.051 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.041.041 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032c.001.014.01.028.021.037a13.276 13.276 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019c.308-.42.582-.863.818-1.329a.05.05 0 0 0-.01-.059.051.051 0 0 0-.018-.011 8.875 8.875 0 0 1-1.248-.595.05.05 0 0 1-.02-.066.051.051 0 0 1 .015-.019c.084-.063.168-.129.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.052.052 0 0 1 .053.007c.08.066.164.132.248.195a.051.051 0 0 1-.004.085 8.254 8.254 0 0 1-1.249.594.05.05 0 0 0-.03.03.052.052 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.235 13.235 0 0 0 4.001-2.02.049.049 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.034.034 0 0 0-.02-.019Zm-8.198 7.307c-.789 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612Zm5.316 0c-.788 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612Z"/>
-            </svg>
-          </a>
-          <a href="https://x.com/gobii_ai" target="_blank" rel="noopener" aria-label="Follow us on X (Twitter)" class="p-2 rounded-full text-slate-800 hover:text-black transition-colors">
-            <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-              <path d="M12.6.75h2.454l-5.36 6.142L16 15.25h-4.937l-3.867-5.07-4.425 5.07H.316l5.733-6.57L0 .75h5.063l3.495 4.633L12.601.75Zm-.86 13.028h1.36L4.323 2.145H2.865z"/>
-            </svg>
-          </a>
         </div>
       </nav>
 
       <!-- Mobile hamburger -->
-      <button type="button" class="md:hidden flex items-center justify-center w-10 h-10 rounded-lg text-slate-700 hover:text-blue-600 hover:bg-indigo-50 transition-colors" 
+      <button type="button" class="md:hidden flex items-center justify-center w-10 h-10 rounded-lg text-slate-700 hover:text-violet-700 transition-colors" 
               x-data="{}" 
               @click="$dispatch('toggle-mobile-nav')" 
               aria-label="Toggle navigation">
@@ -292,46 +283,46 @@
         {% if settings.GOBII_PROPRIETARY_MODE %}
         <!-- Mobile Solutions -->
         <div x-data="{ expanded: false }">
-            <button @click="expanded = !expanded" class="flex w-full items-center justify-between py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <button @click="expanded = !expanded" class="flex w-full items-center justify-between py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
                 Solutions
                 <svg class="h-4 w-4 transform transition-transform" :class="{ 'rotate-180': expanded }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                 </svg>
             </button>
             <div x-show="expanded" class="pl-4 space-y-1">
-                <a href="{% url 'pages:solution' slug='recruiting' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                <a href="{% url 'pages:solution' slug='recruiting' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-violet-700 rounded-lg">
                     <i aria-hidden="true" data-lucide="users" class="h-4 w-4"></i>
                     Recruiting
                 </a>
-                <a href="{% url 'pages:solution' slug='sales' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                <a href="{% url 'pages:solution' slug='sales' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-violet-700 rounded-lg">
                     <i aria-hidden="true" data-lucide="briefcase" class="h-4 w-4"></i>
                     Sales
                 </a>
-                <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-violet-700 rounded-lg">
                     <i aria-hidden="true" data-lucide="cpu" class="h-4 w-4"></i>
                     API
                 </a>
-                <a href="{% url 'pages:solutions' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                <a href="{% url 'pages:solutions' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-violet-700 rounded-lg">
                     <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
                     All Solutions
                 </a>
             </div>
         </div>
 
-          <a href="{% url 'proprietary:teams' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Teams</a>
-          <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
-          <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors" title="Build AI Agents with the Gobii API">API</a>
-          <a href="{% url 'proprietary:support' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Support</a>
+          <a href="{% url 'proprietary:teams' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">Teams</a>
+          <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">Pricing</a>
+          <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors" title="Build AI Agents with the Gobii API">API</a>
+          <a href="{% url 'proprietary:support' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">Support</a>
         {% endif %}
         
         {% if request.user.is_authenticated %}
-          <a href="/app/agents" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+          <a href="/app/agents" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
             <i aria-hidden="true" data-lucide="bot" class="h-4 w-4"></i>
             My Agents
           </a>
-          <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
-            <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
-            Discover
+          <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
+            <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
+            Agents
           </a>
           
           <div class="mt-4 pt-4 border-t border-gray-200">
@@ -359,43 +350,43 @@
             </div>
             
             {% if request.user.is_staff %}
-            <a href="{% url 'admin:index' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <a href="{% url 'admin:index' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="columns-3-cog" class="h-4 w-4 mr-2 text-slate-500"></i>
               Django Admin
             </a>
-            <a href="{% url 'llm-config' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <a href="{% url 'llm-config' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="settings-2" class="h-4 w-4 mr-2 text-slate-500"></i>
               LLM Config
             </a>
-            <a href="{% url 'staff-platform-mcp' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <a href="{% url 'staff-platform-mcp' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="server-cog" class="h-4 w-4 mr-2 text-slate-500"></i>
               Platform MCP
             </a>
-            <a href="{% url 'evals' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <a href="{% url 'evals' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="beaker" class="h-4 w-4 mr-2 text-slate-500"></i>
               Evals
             </a>
-            <a href="{% url 'system-settings' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <a href="{% url 'system-settings' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 mr-2 text-slate-500"></i>
               System Settings
             </a>
-            <a href="{% url 'console-status' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <a href="{% url 'console-status' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="activity" class="h-4 w-4 mr-2 text-slate-500"></i>
               Status
             </a>
-            <a href="{% url 'staff-users' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <a href="{% url 'staff-users' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="users-round" class="h-4 w-4 mr-2 text-slate-500"></i>
               Users &amp; Orgs
             </a>
             {% endif %}
 
             {% if request.session.context_type == 'organization' and request.session.context_id %}
-              <a href="{% url 'organization_detail' org_id=request.session.context_id %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+              <a href="{% url 'organization_detail' org_id=request.session.context_id %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
                 <i aria-hidden="true" data-lucide="building-2" class="h-4 w-4 mr-2 text-slate-500"></i>
                 Organization
               </a>
             {% else %}
-              <a href="{% url 'profile' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+              <a href="{% url 'profile' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
                 <i aria-hidden="true" data-lucide="user-round" class="h-4 w-4 mr-2 text-slate-500"></i>
                 Profile
               </a>
@@ -403,7 +394,7 @@
             
             <form method="post" action="{% url 'account_logout' %}" class="mt-2">
               {% csrf_token %}
-              <button type="submit" class="w-full flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+              <button type="submit" class="w-full flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
                 <i aria-hidden="true" data-lucide="log-out" class="h-4 w-4 mr-2 text-slate-500"></i>
                 {% translate "Sign Out" %}
               </button>
@@ -411,34 +402,23 @@
           </div>
         {% else %}
           <div class="mt-4 pt-4 border-t border-gray-200 space-y-3">
-            <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
-              <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
-              Discover
+            <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">
+              <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
+              Agents
             </a>
             {% with request.session.utm_querystring as utm_qs %}
-            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Login</a>
-            {% if request.resolver_match.url_name != 'home' %}
-            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="block text-center bg-blue-600 text-white hover:bg-blue-700 rounded-lg py-2.5 px-3 transition-colors">
-              Get started
+            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-violet-700 hover:bg-violet-50 rounded-lg transition-colors">Login</a>
+            {% url 'account_signup' as account_signup_url %}
+            <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
+               data-analytics-cta-id="nav_start_trial" data-analytics-placement="header_mobile" data-analytics-intent="signup"
+               class="block text-center text-white font-semibold rounded-lg py-2.5 px-3"
+               style="background:linear-gradient(90deg,#7c3aed,#a855f7);box-shadow:0 4px 14px rgba(124,58,237,.3)">
+              Start free trial
             </a>
-            {% endif %}
             {% endwith %}
           </div>
         {% endif %}
         
-        <!-- Mobile Social Links -->
-        <div class="flex items-center justify-center gap-6 pt-6 pb-2">
-          <a href="https://discord.gg/yyDB8GwxtE" target="_blank" rel="noopener" aria-label="Join our Discord server" class="text-slate-700 hover:text-[#5865F2] transition-colors">
-            <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-              <path d="M13.545 2.907a13.227 13.227 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.19 12.19 0 0 0-3.658 0 8.258 8.258 0 0 0-.412-.833.051.051 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.041.041 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032c.001.014.01.028.021.037a13.276 13.276 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019c.308-.42.582-.863.818-1.329a.05.05 0 0 0-.01-.059.051.051 0 0 0-.018-.011 8.875 8.875 0 0 1-1.248-.595.05.05 0 0 1-.02-.066.051.051 0 0 1 .015-.019c.084-.063.168-.129.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.052.052 0 0 1 .053.007c.08.066.164.132.248.195a.051.051 0 0 1-.004.085 8.254 8.254 0 0 1-1.249.594.05.05 0 0 0-.03.03.052.052 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.235 13.235 0 0 0 4.001-2.02.049.049 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.034.034 0 0 0-.02-.019Zm-8.198 7.307c-.789 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612Zm5.316 0c-.788 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612Z"/>
-            </svg>
-          </a>
-          <a href="https://x.com/gobii_ai" target="_blank" rel="noopener" aria-label="Follow us on X (Twitter)" class="text-black hover:text-slate-700 transition-colors">
-            <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-              <path d="M12.6.75h2.454l-5.36 6.142L16 15.25h-4.937l-3.867-5.07-4.425 5.07H.316l5.733-6.57L0 .75h5.063l3.495 4.633L12.601.75Zm-.86 13.028h1.36L4.323 2.145H2.865z"/>
-            </svg>
-          </a>
-        </div>
       </div>
     </div>
   </div>

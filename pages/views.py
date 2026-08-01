@@ -1045,8 +1045,27 @@ def _create_checkout_session_with_customer_context(
 class HomePage(TemplateView):
     template_name = "home.html"
 
+    def _renders_legacy_home(self) -> bool:
+        # Mirrors the template-branch decision made in get_context_data: landing
+        # params and a session-saved (non-template) charter render the legacy
+        # page with the charter box; the default render is the template-first page.
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return True
+        request = self.request
+        if request.GET.get("spawn") == "1":
+            return False
+        if "dc" in request.GET or "g" in request.GET:
+            return True
+        return (
+            "agent_charter" in request.session
+            and request.session.get("agent_charter_source") != "template"
+        )
+
     def _has_direct_checkout_cta(self) -> bool:
         if not settings.GOBII_PROPRIETARY_MODE or not self.request.user.is_authenticated:
+            return False
+        # The direct-checkout upsell panel only exists on the legacy layout.
+        if not self._renders_legacy_home():
             return False
 
         account = build_account_info_context(self.request).get("account") or {}
