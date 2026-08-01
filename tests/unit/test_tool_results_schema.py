@@ -1127,21 +1127,20 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         for expected in (
-            "[SOURCE SET; exact stored arrays:",
-            "exact stored arrays: $.content.prospects(name,title,profile_url)",
-            "No fitting durable model: create one",
+            "[SOURCE SET:",
+            "$.content.prospects(name,title,profile_url)",
+            "No model: CREATE",
             "`json_extract(j.value,'$.profile_url')`",
-            "Use rows=[]",
-            "No pre-read, preview, or bound/copied rows",
-            "add no source_url/result_id/source_batch_id filter",
-            "Use one set-wise write plus decision SELECT",
+            "NEXT: one sqlite_batch rows=[]",
+            "no pre-read, copied/bound preview facts, or result_id/source_url filters",
+            "Parent: json_extract(t.result_json,'$.content.<field>')",
+            "items: json_extract(j.value,'$.<field>')",
+            "Import plus decision SELECT",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
-            "Current batch plus tool_name is exact",
-            "Store t.source_url/t.result_id provenance",
-            "Item fields/URLs come from j.value",
-            "Use all paths",
-            "final SELECT returns every known item/source URL for links",
+            "Keep t.source_url/t.result_id only as provenance",
+            "Use all shown paths",
+            "final SELECT returns all known item fields/source URLs",
         ):
             self.assertIn(expected, info.meta)
         self.assertNotIn("[SOURCE ARRAYS", info.preview_text)
@@ -1172,13 +1171,13 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         for expected in (
-            "Existing durable tables: contacts",
-            "Refresh in place",
+            "Existing tables: contacts",
+            "Upsert in place",
             "never DELETE/rebuild",
-            "preserve schema and unrelated rows",
-            "Join its scalar key directly to `json_extract(j.value,'$.provider_id')`",
-            "use JSON functions only on j.value/result_json, not model columns",
-            "Introduce every UPDATE alias in FROM/JOIN",
+            "lose unrelated rows",
+            "Join its scalar key to `json_extract(j.value,'$.provider_id')`",
+            "JSON functions only on j.value/result_json",
+            "Declare UPDATE aliases",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
         ):
             self.assertIn(expected, info.meta)
@@ -1227,8 +1226,8 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_columns={"accounts": {"account_id", "company_name"}},
         )
 
-        self.assertIn("No fitting durable model", info.meta)
-        self.assertNotIn("Existing durable tables: accounts", info.meta)
+        self.assertIn("No model: CREATE", info.meta)
+        self.assertNotIn("Existing tables: accounts", info.meta)
 
     def test_source_write_hint_uses_the_actual_array_identity(self):
         payload = {
@@ -1248,9 +1247,35 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         self.assertIn("$.content.events(release_id,service,source_url)", info.meta)
-        self.assertIn("Use the shown stable key `release_id`", info.meta)
         self.assertIn("json_extract(j.value,'$.release_id')", info.meta)
         self.assertNotIn("json_extract(j.value,'$.id')", info.meta)
+
+    def test_source_write_hint_names_parent_fields_without_exposing_values(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "vendor": "AxonFlow",
+                "source_url": "https://example.test/axonflow",
+                "plans": [{
+                    "plan_id": "enterprise",
+                    "price": 1500,
+                }],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-parent-fields",
+            payload,
+            named_model_tables=set(),
+        )
+
+        self.assertIn("Parent $.content(vendor,source_url)", info.meta)
+        self.assertIn(
+            "json_extract(t.result_json,'$.content.<field>')",
+            info.meta,
+        )
+        self.assertIn("AxonFlow", info.preview_text)
+        self.assertNotIn("AxonFlow", info.meta)
+        self.assertNotIn("https://example.test/axonflow", info.meta)
 
     def test_structured_source_sets_are_scoped_to_their_completion_batch(self):
         payload = {
@@ -1303,9 +1328,9 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertEqual(source_set_meta.count("[SOURCE SET"), 1)
         self.assertNotIn("source_batch_id=batch-current", source_set_meta)
         self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
-        self.assertIn("add no source_url/result_id/source_batch_id filter", source_set_meta)
+        self.assertIn("no pre-read, copied/bound preview facts", source_set_meta)
         self.assertIn("is_current_batch=1", source_set_meta)
-        self.assertIn("result_id is not item identity", source_set_meta)
+        self.assertIn("t.source_url/t.result_id only as provenance", source_set_meta)
 
         modeled = tool_results.prepare_tool_results_for_prompt(
             records,
@@ -1370,9 +1395,7 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         hint = info.meta.split("]\n", 1)[0] + "]\n"
-        schema_list = hint.split("exact stored arrays: ", 1)[1].split(
-            ". No fitting durable model", 1
-        )[0]
+        schema_list = hint.split("[SOURCE SET: ", 1)[1].split(". No model:", 1)[0]
         self.assertLessEqual(len(schema_list.split("; ")), tool_results.MAX_OPTIONAL_SOURCE_ARRAYS)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
 
@@ -1399,11 +1422,16 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         hint = info.meta.split("]\n", 1)[0] + "]\n"
         self.assertIn("[SOURCE SET", hint)
-        self.assertIn("$.content.events", hint)
-        self.assertIn("No fitting durable model: create one", hint)
+        self.assertIn(
+            "$.content.events(release_id,service,starts_at,owner,status,source_url,observed_at)",
+            hint,
+        )
+        self.assertIn("No model: CREATE", hint)
         self.assertIn("`json_extract(j.value,'$.release_id')` as PRIMARY KEY/UNIQUE", hint)
-        self.assertIn("Use one set-wise write plus decision SELECT", hint)
-        self.assertIn("Item fields/URLs come from j.value", hint)
+        self.assertIn("NEXT: one sqlite_batch rows=[]", hint)
+        self.assertIn("Parent: json_extract(t.result_json,'$.content.<field>')", hint)
+        self.assertIn("Import plus decision SELECT", hint)
+        self.assertIn("t.source_url/t.result_id only as provenance", hint)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
 
     def test_four_source_parallel_batch_keeps_each_brief_preview_visible(self):

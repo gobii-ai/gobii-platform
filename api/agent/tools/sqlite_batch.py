@@ -2298,7 +2298,16 @@ def _execute_sqlite_batch_inner(
 
         if had_error:
             response["retryable"] = True
-        if not had_error and not had_warning and will_continue_work is False:
+        has_result_rows = any(
+            isinstance(entry.get("result"), list) and bool(entry["result"])
+            for entry in results
+        )
+        if (
+            not had_error
+            and not had_warning
+            and will_continue_work is False
+            and (params.get("_has_user_facing_message") is True or not has_result_rows)
+        ):
             response["auto_sleep_ok"] = True
         if advisories:
             response["advisories"] = [
@@ -2392,12 +2401,13 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                 "is incomplete; deliver without reread. "
                 "Structured results use every `is_current_batch=1 AND tool_name='<exact>'` row: parent fields from "
                 "result_json, children from json_each(actual array), provenance from t.result_id/source_url, rows=[]. "
-                "Never filter result_id/URL or copy source facts into SQL. Prose: inspect the whole set once, then pass "
-                "every result_id/supported field in rows and join rows to __tool_results in one write. "
+                "Never filter result_id/URL or copy source facts into SQL. Prose: inspect the whole set once; join rows "
+                "to __tool_results once, one row/result_id. Never inspect messages/contacts for a missing outbound recipient. "
                 "Structured inbound message: first write SELECTs the latest non-outbound non-null payload from "
                 "__messages and json-extracts every field plus message_id; never pre-read, bind, or quote payload state. "
-                "Other payloads bind one complete object. Evolve normalized keyed entities/relations and provenance. "
-                "Bind messy/authored text. INSERT SELECT needs WHERE 1=1 before ON CONFLICT. No `->`, ATTACH, per-item "
+                "Use normalized keyed entities/relations with provenance. "
+                "Bind messy/authored text. No draft/superseded SQL. "
+                "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. No `->`, ATTACH, per-item "
                 "writes, historical mixing, or SELECT-all readback."
             ),
             "parameters": {
@@ -2452,8 +2462,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. True for any read that may trigger another tool (queues included); false when SELECTs answer. "
-                            "Never true only to query SQLite again."
+                            "REQUIRED. True for action-producing reads (all queue reads); false for answer SELECTs. "
+                            "Never true merely to reread SQLite."
                         ),
                     },
                 },

@@ -671,16 +671,16 @@ def planning_requests_are_bounded(requests):
     )
 
 
-def has_single_recipient_request(requests):
-    if len(requests) != 1:
-        return False
-    request = requests[0]
-    content = [str(request.question or "")]
-    for option in getattr(request, "options_json", None) or []:
-        if isinstance(option, dict):
-            content.extend((str(option.get("title") or ""), str(option.get("description") or "")))
-    request_text = " ".join(content).lower()
-    return any(term in request_text for term in ("email", "address", "recipient", "client", "contact"))
+def has_recipient_request(requests):
+    for request in requests:
+        content = [str(request.question or "")]
+        for option in getattr(request, "options_json", None) or []:
+            if isinstance(option, dict):
+                content.extend((str(option.get("title") or ""), str(option.get("description") or "")))
+        request_text = " ".join(content).lower()
+        if any(term in request_text for term in ("email", "address", "recipient", "client", "contact")):
+            return True
+    return False
 
 
 class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
@@ -4594,13 +4594,18 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_human_input")
         requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
-        if has_single_recipient_request(requests):
+        input_calls = get_tool_calls_for_run(
+            run_id,
+            after=inbound.timestamp,
+            tool_names={"request_human_input"},
+        )
+        if len(input_calls) == 1 and has_recipient_request(requests):
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_human_input",
-                observed_summary="Agent made one tracked request for the missing recipient details.",
+                observed_summary="Agent made one tracked request call covering the missing recipient details.",
             )
         else:
             self.record_task_result(
@@ -4609,8 +4614,8 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_human_input",
                 observed_summary=(
-                    "Agent did not make one recipient-focused tracked request for missing email details; "
-                    f"found {len(requests)} request(s)."
+                    "Agent did not make one recipient-focused tracked request call for missing email details; "
+                    f"found {len(input_calls)} call(s) and {len(requests)} card(s)."
                 ),
             )
 

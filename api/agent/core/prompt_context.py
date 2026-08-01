@@ -837,6 +837,7 @@ def _get_sqlite_guidance() -> str:
         "and every supporting row/URL; aggregate-only and SELECT-all are incomplete. Deliver without rereading. "
         "Structured JSON uses all `is_current_batch=1 AND tool_name='exact visible name'` rows, with no result_id/URL "
         "filter. Parent fields come from result_json, children from json_each(actual array); keep t.result_id/source_url. "
+        "Never transcribe visible preview facts into SQL. "
         "For prose, inspect once, put every supported field in one top-level row per result_id, then join rows to "
         "__tool_results. Never type sourced facts/URLs/classifications into SQL. Bound interpretations only transcribe "
         "evidence; omit unsupported fields. For structured inbound messages, INSERT SELECT directly from the latest "
@@ -847,6 +848,7 @@ def _get_sqlite_guidance() -> str:
         "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. UNION top-one needs a scalar subquery/CTE. "
         "group_concat(DISTINCT x) has no separator. Reads that may trigger another tool use will_continue_work=true; "
         "otherwise false. Ready routes use opaque auth refs only for the requested operation; no preflight.\n"
+        "Submit no draft/superseded statements; batch 1 must execute.\n"
         "LIVE SCHEMA is authoritative: use a shown table and its columns directly; do not rediscover them. "
         "For a shown durable domain table, compute task filters/grouping/ranking in the first sqlite_batch; "
         "do not pre-read rows. "
@@ -4009,7 +4011,7 @@ def _get_continuation_mode_prompt_block() -> str:
         "SQLite as the control board: preserve owners and deadlines, finish or park one bounded step, then take the "
         "highest-impact authorized commitment. Park blocked streams, continue unblocked work, and negotiate capacity/scope "
         "instead of thrashing. Recurring wakes: query owned state with `will_continue_work=true`, not `__messages`; "
-        "act from rows or sleep silently.\n\n"
+        "a queue SELECT is never terminal. Dispatch ready rows next; only an empty queue sleeps silently.\n\n"
     )
 
 
@@ -4138,11 +4140,11 @@ def _get_system_instruction(
     first_tool_guidance = (
         "## First Tool Gate (CRITICAL)\n\n"
         "First-run intake wins. Otherwise first matching action wins:\n"
-        "1. Prior-action question: answer existing evidence; create/start nothing.\n"
-        "2. Owner's lasting behavior correction: patch every affected charter rule.\n"
-        "3. Email/SMS lacks a literal address/number or unique named recipient: exactly one "
-        "request_human_input(false), then stop; generic roles are missing. Ask all missing delivery details together; "
-        "no preflight, search, chat, SQLite, or contact discovery.\n"
+        "1. Email/SMS lacks a literal address/number or unique named recipient: the first and only tool is exactly one "
+        "request_human_input(false), then stop; generic roles are missing. Ask all missing details together; do not "
+        "inspect content/status, even when implied as current.\n"
+        "2. Prior-action question: answer existing evidence; create/start nothing.\n"
+        "3. Owner's lasting behavior correction: patch every affected charter rule.\n"
         "4. Meaningful shared win/repeated failure: one bounded emotion first, then one brief reply; no kickoff.\n"
         "5. Specific action/current-batch tool available: call it directly; do not infer state from absent SQLite.\n"
         "6. Campaign/bulk review: jointly verify copy, recipient identity/qualification, fields/placeholders, and "
@@ -4298,7 +4300,6 @@ def _get_system_instruction(
         f"{delivery_instructions}"
         f"{_get_formatting_guidance()}\n\n"
 
-        "The fetch→report rhythm: fetch data, then deliver it to the user. "
         "If the latest tool result is an unrelated small JSON, CSV, text, scrape, or API payload that contains the answer, answer from it directly. "
         "Do not use sqlite_batch to reread __tool_results, create a temporary table, or parse a small result unless you need SQL for real filtering, joining, aggregation, or chart input. "
         "Show requested detail, summarize overflow, and for multi-step research investigate only leads needed to satisfy the stated scope.\n\n"
@@ -4332,10 +4333,6 @@ def _get_system_instruction(
         "Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. "
         "For deep work, use at most one initial plan update and one closeout immediately before the final delivery; "
         "never update it between evidence batches. If no plan exists, do not create one at closeout.\n\n"
-
-        "Work iteratively in small chunks. Use SQLite when persistence helps.\n\n"
-
-        "Explore your tools—you may discover capabilities that unlock better solutions. Stay adaptable. "
 
         "Be honest about limitations; if a task is too ambitious, help find a smaller useful scope. "
 

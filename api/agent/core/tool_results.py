@@ -70,7 +70,7 @@ SHORT_RESULT_ID_MIN_LEN = 6
 SHORT_RESULT_ID_MAX_LEN = 12
 MAX_OPTIONAL_SOURCE_ARRAYS = 2
 MAX_OPTIONAL_SOURCE_PATH_CHARS = 160
-MAX_OPTIONAL_SOURCE_FIELDS = 6
+MAX_OPTIONAL_SOURCE_FIELDS = 8
 MAX_OPTIONAL_SOURCE_FIELD_CHARS = 48
 MAX_OPTIONAL_SOURCE_HINT_CHARS = 900
 PROSE_INSPECTION_TOTAL_CHARS = 8_000
@@ -215,6 +215,7 @@ def _build_optional_source_write_hint(
     tool_name: str,
     analysis: ResultAnalysis | None,
     model_tables: Sequence[str] = (),
+    payload: object | None = None,
 ) -> str:
     """Give source-shape mechanics that fit both new and existing domain models."""
     schemas = _optional_source_array_schemas(analysis)
@@ -223,6 +224,24 @@ def _build_optional_source_write_hint(
 
     first_path, _first_schema, first_key = schemas[0]
     first_path = first_path.replace("'", "''")
+    parent_path = first_path.rsplit(".", 1)[0]
+    parent_value = payload
+    if parent_path != "$":
+        for segment in parent_path.removeprefix("$.").split("."):
+            if not isinstance(parent_value, dict):
+                parent_value = None
+                break
+            parent_value = parent_value.get(segment)
+    parent_fields = (
+        tuple(
+            str(key)
+            for key, value in parent_value.items()
+            if not isinstance(value, (dict, list))
+            and len(str(key)) <= MAX_OPTIONAL_SOURCE_FIELD_CHARS
+        )[:MAX_OPTIONAL_SOURCE_FIELDS]
+        if isinstance(parent_value, dict)
+        else ()
+    )
     escaped_tool_name = tool_name.replace("'", "''")
     def render_hint(schema_text: str) -> str:
         key_expr = (
@@ -233,30 +252,36 @@ def _build_optional_source_write_hint(
         if model_tables:
             table_list = ",".join(sorted(model_tables)[:4])
             model_guidance = (
-                f"Existing durable tables: {table_list}. Refresh in place; never DELETE/rebuild; preserve schema and "
-                f"unrelated rows. Join its scalar key directly to {key_expr}; use JSON functions only on j.value/result_json, "
-                "not model columns. Introduce every UPDATE alias in FROM/JOIN. "
+                f"Existing tables: {table_list}. Upsert in place; never DELETE/rebuild or lose unrelated rows. "
+                f"Join its scalar key to {key_expr}; JSON functions only on j.value/result_json. Declare UPDATE aliases. "
             )
         else:
-            stable_key_guidance = (
-                f" Use the shown stable key `{first_key}`; do not invent identity."
-                if first_key
-                else ""
-            )
             model_guidance = (
-                f"No fitting durable model: create one with {key_expr} "
-                f"as PRIMARY KEY/UNIQUE, then upsert.{stable_key_guidance} "
+                f"No model: CREATE with {key_expr} as PRIMARY KEY/UNIQUE, then upsert. "
+            )
+        if model_tables:
+            parent_guidance = ""
+        elif parent_fields:
+            parent_guidance = (
+                f"Parent {parent_path}({','.join(parent_fields)}): "
+                f"json_extract(t.result_json,'{parent_path}.<field>'); "
+                "items: json_extract(j.value,'$.<field>'). "
+            )
+        else:
+            parent_guidance = (
+                f"Parent: json_extract(t.result_json,'{parent_path}.<field>'); "
+                "items: json_extract(j.value,'$.<field>'). "
             )
         return (
-            f"[SOURCE SET; exact stored arrays: {schema_text}. "
+            f"[SOURCE SET: {schema_text}. "
             f"{model_guidance}"
-            "Use rows=[]. No pre-read, preview, or bound/copied rows. Current batch plus tool_name is exact; add no "
-            "source_url/result_id/source_batch_id filter. "
-            "Use one set-wise write plus decision SELECT: `FROM __tool_results AS t, "
+            "NEXT: one sqlite_batch rows=[]; no pre-read, copied/bound preview facts, or result_id/source_url filters. "
+            f"{parent_guidance}"
+            "Import plus decision SELECT: `FROM __tool_results AS t, "
             f"json_each(t.result_json,'{first_path}') AS j "
             f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
-            "Store t.source_url/t.result_id provenance. Item fields/URLs come from j.value; result_id is not item "
-            "identity. Use all paths; final SELECT returns every known item/source URL for links.]\n"
+            "Keep t.source_url/t.result_id only as provenance. Use all shown paths; final SELECT returns all known "
+            "item fields/source URLs.]\n"
         )
 
     hint = render_hint("; ".join(schema for _path, schema, _key in schemas))
@@ -514,6 +539,7 @@ def prepare_tool_results_for_prompt(
                 record.tool_name,
                 analysis,
                 tuple(refresh_model_tables),
+                _load_json_payload(stored_json, analysis),
             )
         preserve_raw_model_source_values = bool(
             source_write_hint_prefix and refresh_model_tables

@@ -1491,4 +1491,11 @@ def execute_search_tools(agent: PersistentAgent, params: Dict[str, Any]) -> Tool
     span.set_attribute("search.query", query)
     logger.info("Agent %s searching for tools: %s", agent.id, query)
 
-    return search_tools(agent, query)
+    result = search_tools(agent, query)
+    if result.get("status") == "success":
+        result.setdefault(
+            "next_action",
+            "Use a returned enabled/already-enabled match now. If none fits, explain the setup or limitation; "
+            "do not call search_tools again unless the task changes.",
+        )
+    return result

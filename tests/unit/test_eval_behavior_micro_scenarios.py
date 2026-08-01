@@ -62,7 +62,7 @@ from api.evals.scenarios.behavior_micro import (
     UPDATE_PLAN_POLICY_EXPECT,
     UPDATE_PLAN_POLICY_OPTIONAL,
     all_requests_have_options,
-    has_single_recipient_request,
+    has_recipient_request,
     planning_requests_are_bounded,
     get_agent_config_mutation_calls_for_run,
     get_forbidden_calls_before_end_planning,
@@ -2441,10 +2441,23 @@ class BehaviorMicroHelperTests(TestCase):
         )
         unrelated = SimpleNamespace(question="Which format do you prefer?", options_json=[])
 
-        self.assertTrue(has_single_recipient_request([focused]))
-        self.assertTrue(has_single_recipient_request([focused_option]))
-        self.assertFalse(has_single_recipient_request([focused, unrelated]))
-        self.assertFalse(has_single_recipient_request([unrelated]))
+        self.assertTrue(has_recipient_request([focused]))
+        self.assertTrue(has_recipient_request([focused_option]))
+        self.assertTrue(has_recipient_request([focused, unrelated]))
+        self.assertFalse(has_recipient_request([unrelated]))
+
+    def test_search_discovery_guard_requires_an_activated_capability(self):
+        unrelated_existing_tools = {
+            "status": "success",
+            "tools": {"enabled": [], "already_enabled": ["mcp_brightdata_search_engine"]},
+        }
+        enabled_skill = {
+            "status": "success",
+            "system_skills": {"enabled": ["webhooks"], "already_enabled": []},
+        }
+
+        self.assertFalse(ep._search_result_activated_capability(unrelated_existing_tools))
+        self.assertTrue(ep._search_result_activated_capability(enabled_skill))
 
     def test_planning_request_check_allows_one_free_text_identity_question(self):
         options = SimpleNamespace(

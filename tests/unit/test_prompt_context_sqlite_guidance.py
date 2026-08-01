@@ -128,6 +128,8 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
 
     def test_sqlite_guidance_tracks_bounded_set_coverage(self):
         guidance = prompt_context._get_sqlite_guidance()
+        self.assertIn("Never transcribe visible preview facts into SQL", guidance)
+        self.assertIn("Submit no draft/superseded statements", guidance)
 
         self.assertIn("Named tables hold truth/logic", guidance)
         self.assertIn("entities, relations, coverage, and provenance", guidance)

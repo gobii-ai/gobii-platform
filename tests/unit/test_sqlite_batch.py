@@ -786,6 +786,30 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             self.assertEqual(out.get("status"), "ok")
             self.assertTrue(out.get("auto_sleep_ok"))
 
+    def test_nonempty_action_source_does_not_auto_sleep_without_message(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "queries": "SELECT 'job-104' AS job_id",
+                    "will_continue_work": False,
+                },
+            )
+            self.assertEqual(out.get("status"), "ok")
+            self.assertNotIn("auto_sleep_ok", out)
+
+    def test_empty_action_source_can_auto_sleep(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "queries": "SELECT 1 AS job_id WHERE 0",
+                    "will_continue_work": False,
+                },
+            )
+            self.assertEqual(out.get("status"), "ok")
+            self.assertTrue(out.get("auto_sleep_ok"))
+
     def test_invalid_queries_are_rejected(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"queries": ["  "]})
@@ -819,15 +843,17 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             "historical mixing",
             "normalized keyed entities/relations",
             "SELECT-all readback",
+            "No draft/superseded SQL",
+            "Never inspect messages/contacts for a missing outbound recipient",
         ):
             self.assertIn(expected, description)
         continuation_description = (
             definition["function"]["parameters"]["properties"]["will_continue_work"]["description"]
         )
-        self.assertIn("True for any read that may trigger another tool", continuation_description)
-        self.assertIn("queues included", continuation_description)
-        self.assertIn("false when SELECTs answer", continuation_description)
-        self.assertIn("Never true only to query SQLite again", continuation_description)
+        self.assertIn("True for action-producing reads", continuation_description)
+        self.assertIn("all queue reads", continuation_description)
+        self.assertIn("false for answer SELECTs", continuation_description)
+        self.assertIn("Never true merely to reread SQLite", continuation_description)
         rows_schema = definition["function"]["parameters"]["properties"]["rows"]
         self.assertEqual(rows_schema["type"], "array")
         self.assertIn("REQUIRED and non-empty", rows_schema["description"])

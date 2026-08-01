@@ -78,3 +78,15 @@ class PlanningSystemSkillDiscoveryTests(TestCase):
         self.assertIn("manage_outbound_webhooks", available_tool_names)
         self.assertIn("send_webhook_event", available_tool_names)
         self.assertIn(WEBHOOKS_SYSTEM_SKILL_KEY, [skill.skill_key for skill in shortlisted_skills])
+
+    def test_webhook_skill_is_discoverable_for_explicit_pipedream_request(self):
+        shortlisted_skills = shortlist_system_skills(
+            "Pipedream",
+            available_tool_names={
+                "manage_inbound_webhooks",
+                "manage_outbound_webhooks",
+                "send_webhook_event",
+            },
+        )
+
+        self.assertIn(WEBHOOKS_SYSTEM_SKILL_KEY, [skill.skill_key for skill in shortlisted_skills])

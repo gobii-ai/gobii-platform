@@ -4578,6 +4578,7 @@ class MCPToolExecutorsTests(TestCase):
         result = execute_search_tools(self.agent, {"query": "test query"})
         self.assertEqual(result["status"], "success")
         self.assertIn("Enabled: mcp_tool_a", result["message"]) 
+        self.assertIn("do not call search_tools again", result["next_action"])
         mock_search.assert_called_once_with(self.agent, "test query")
 
     @patch('api.agent.tools.search_tools.search_tools')

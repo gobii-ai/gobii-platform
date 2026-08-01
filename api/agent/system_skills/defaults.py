@@ -1023,6 +1023,8 @@ WEBHOOKS_SYSTEM_SKILL = SystemSkillDefinition(
         "callback url",
         "http callback",
         "provider event trigger",
+        "pipedream",
+        "pipedream http trigger",
     ),
     discovery_triggers=(
         "webhook",
@@ -1030,6 +1032,7 @@ WEBHOOKS_SYSTEM_SKILL = SystemSkillDefinition(
         "callback url",
         "events trigger you",
         "events wake you",
+        "pipedream",
     ),
     prompt_instructions=(
         "Use native Gobii webhooks for webhook setup and delivery. An inbound webhook is a secret-bearing Gobii "
