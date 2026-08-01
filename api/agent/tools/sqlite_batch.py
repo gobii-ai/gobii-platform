@@ -2396,19 +2396,20 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Durable domain model/material SQL only; skip bounded small reports. First shot: keyed DDL, one set-wise "
+                "Durable domain model/logic; skip bounded small reports. First shot: keyed DDL, one set-wise "
                 "upsert, then one filtered/ranked decision SELECT with both answer and supporting rows/URLs; aggregate-only "
                 "is incomplete; deliver without reread. "
-                "Structured results use every `is_current_batch=1 AND tool_name='<exact>'` row: parent fields from "
-                "result_json, children from json_each(actual array), provenance from t.result_id/source_url, rows=[]. "
-                "Never filter result_id/URL or copy source facts into SQL. Prose: inspect the whole set once; join rows "
-                "to __tool_results once, one row/result_id. Never inspect messages/contacts for a missing outbound recipient. "
-                "Structured inbound message: first write SELECTs the latest non-outbound non-null payload from "
-                "__messages and json-extracts every field plus message_id; never pre-read, bind, or quote payload state. "
-                "Use normalized keyed entities/relations with provenance. "
+                "Structured: every `is_current_batch=1 AND tool_name='<exact>'` row. HTTP payload path: "
+                "`$.content`; parent fields from result_json, children from json_each(actual array), provenance from "
+                "t.result_id/source_url; rows=[]. Never filter result_id/URL or copy source facts into SQL. "
+                "Prose: inspect the whole set once; join rows to __tool_results, one row/result_id. Never inspect "
+                "messages/contacts for a missing outbound recipient. Structured inbound: first write SELECTs the latest "
+                "non-outbound non-null payload from __messages and json-extracts every field plus message_id; never "
+                "pre-read, bind, or quote payload state. Use normalized keyed entities/relations with provenance. "
                 "Bind messy/authored text. No draft/superseded SQL. "
-                "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. No `->`, ATTACH, per-item "
-                "writes, historical mixing, or SELECT-all readback."
+                "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. Rank/top via separate SELECT/scalar subquery; "
+                "no ORDER BY/LIMIT in a UNION arm. No `->`, ATTACH, per-item writes, historical "
+                "mixing, or SELECT-all readback."
             ),
             "parameters": {
                 "type": "object",

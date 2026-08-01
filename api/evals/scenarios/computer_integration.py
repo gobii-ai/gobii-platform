@@ -2,6 +2,8 @@ import hashlib
 import uuid
 from dataclasses import dataclass, field
 
+from waffle import get_waffle_flag_model
+
 from api.agent.system_skills.defaults import COMPUTER_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
@@ -19,7 +21,7 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentToolCall,
 )
-from api.services.computer_relay import set_device_presence
+from api.services.computer_relay import COMPUTER_CPP_WAFFLE_FLAG, set_device_presence
 
 
 COMPUTER_WORK_MAC_SCREENSHOT = "mcp_computer_work_mac_gobii_desktop_take_screenshot"
@@ -152,6 +154,11 @@ class ComputerIntegrationScenario(EvalScenario, ScenarioExecutionTools):
             charter="Use connected computer tools when requested and report connection blockers honestly.",
             planning_state=PersistentAgent.PlanningState.SKIPPED,
         )
+        flag, _ = get_waffle_flag_model().objects.get_or_create(
+            name=COMPUTER_CPP_WAFFLE_FLAG,
+            defaults={"everyone": False},
+        )
+        flag.users.add(agent.user)
         enable_system_skills(agent, [COMPUTER_SYSTEM_SKILL_KEY])
         for tool_name in self.case.enabled_tools:
             mark_tool_enabled_without_discovery(agent, tool_name)
