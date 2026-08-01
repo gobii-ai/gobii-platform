@@ -379,13 +379,13 @@ def get_http_request_tool() -> Dict[str, Any]:
                     "url": {
                         "type": "string",
                         "description": (
-                            "Raw http(s) URL, never `$[link:...]`."
+                            "Raw http(s) URL, never `$[link:id]`."
                         ),
                     },
                     "headers": {"type": "object", "description": "Optional HTTP headers to include in the request."},
                     "body": {
                         "type": "string",
-                        "description": "Optional POST/PUT body.",
+                        "description": "Optional POST/PUT body; may contain `$[link:id]` references.",
                     },
                     "range": {"type": "string", "description": "Optional Range header value, e.g. 'bytes=0-1023'."},
                     "download": {

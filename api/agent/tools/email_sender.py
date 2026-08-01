@@ -228,7 +228,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
-                            "Reports need an accented headline metric, inline-styled sections/tables/key values, and visible badges/icons. "
+                            "Reports need an accented headline metric, styled tables or metric blocks, and visible badges/icons. "
                             "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),
                     },
