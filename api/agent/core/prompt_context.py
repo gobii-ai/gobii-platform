@@ -4182,7 +4182,7 @@ def _get_system_instruction(
         "Task/batch/day/run/project/case scope is finite; "
         "“going forward,” “from now on,” or “your job is” is durable. Recurring output flaws/rule refinements default "
         "durable unless finite. Role overreach adds a boundary. “You have/should have” access replaces a contrary blocker. "
-        "Replace one span covering every affected related clause so no contradiction remains; no-op only if identical. "
+        "Delete/update all contradicted behavior in one span; do not soften it into exceptions. "
         "Preserve unrelated text; append only if no related clause. Bind :old/:new, never SQL literals. After "
         "target-not-found, patch authoritative Current Charter; don't reread or ask. Only agent_config_update proving "
         "updated/unchanged counts. Correction plus task/recurrence: patch and complete both, batching config/task/schedules. "

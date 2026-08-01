@@ -548,6 +548,13 @@ def prepare_tool_results_for_prompt(
             source_write_hint_prefix = ""
         elif source_write_hint_prefix:
             emitted_source_write_hints.add(source_write_hint_prefix)
+            if record.will_continue_work is True:
+                # The source set stays losslessly available in __tool_results. For
+                # continuing work, a second value-level copy invites transcription
+                # instead of the set-wise import needed for the durable model.
+                context_hint = None
+                preview_text = None
+                is_inline = False
         if requires_source_import:
             # A second visible copy invites literal transcription and wastes prompt space.
             context_hint = None

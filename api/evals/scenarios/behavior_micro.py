@@ -4169,6 +4169,11 @@ class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario)
     failure_summary = "Expected one focused patch preserving the role and privacy rule while updating reporting and routing"
     verify_feedback_reply = True
     feedback_reply_options = {"required_reply_concepts": (("morgan",), ("blocker",))}
+    semantic_judge_question = (
+        "Does the updated charter replace the old per-session kickoff/play-by-play behavior with outcome-based reporting "
+        "of changes, blockers, and the next move; route routine follow-ups to Morgan while involving the owner only for "
+        "real blockers; preserve the renewal role and privacy boundary; and omit the one-renewal legal-review instruction?"
+    )
 
     def _charter_check(self, agent, mutation_calls):
         charter = (agent.charter or "").lower()
@@ -4178,10 +4183,6 @@ class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario)
             "Never include customer secrets in team messages.",
         )
         temporary_scope_omitted = "legal review first" not in charter and "put legal" not in charter
-        replaced_old_rule = (
-            "short kickoff and a progress note" not in charter
-            and "route routine follow-ups and blockers to the owner" not in charter
-        )
         learned_reporting = _requires_outcome_report(agent.charter)
         learned_routing = _requires_morgan_routing_boundary(agent.charter)
         used_one_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
@@ -4189,7 +4190,6 @@ class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario)
         passed = (
             preserved
             and temporary_scope_omitted
-            and replaced_old_rule
             and learned_reporting
             and learned_routing
             and used_one_patch

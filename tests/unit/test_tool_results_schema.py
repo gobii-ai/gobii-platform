@@ -816,12 +816,21 @@ class PreviewByteLimitTests(SimpleTestCase):
     """Tests for preview byte limits with large external results."""
 
     @staticmethod
-    def _prepare_http_result(step_id, payload, *, recency=0, fresh=True, **kwargs):
+    def _prepare_http_result(
+        step_id,
+        payload,
+        *,
+        recency=0,
+        fresh=True,
+        will_continue_work=None,
+        **kwargs,
+    ):
         record = tool_results.ToolCallResultRecord(
             step_id=step_id,
             tool_name="http_request",
             created_at=datetime.now(timezone.utc),
             result_text=json.dumps(payload),
+            will_continue_work=will_continue_work,
         )
         params = {"recency_positions": {step_id: recency}, **kwargs}
         if fresh:
@@ -1149,6 +1158,29 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertNotIn("result_id=", info.meta)
         self.assertNotIn("json_extract(j.value,'$.id')", info.meta)
         self.assertIsNone(info.source_reconciliation_directive)
+
+    def test_continuing_source_array_hides_literal_preview_before_model_import(self):
+        payload = {
+            "status": "ok",
+            "content": {
+                "events": [{
+                    "release_id": "rel-1",
+                    "service": "Search index",
+                    "source_url": "https://example.test/releases",
+                }],
+            },
+        }
+        info, _record = self._prepare_http_result(
+            "step-continuing-source",
+            payload,
+            named_model_tables=set(),
+            will_continue_work=True,
+        )
+
+        self.assertIn("[SOURCE SET:", info.meta)
+        self.assertIn("$.content.events(release_id,service,source_url)", info.meta)
+        self.assertIsNone(info.preview_text)
+        self.assertFalse(info.is_inline)
 
     def test_generic_enrichment_array_gets_existing_model_refresh_shape(self):
         payload = {
