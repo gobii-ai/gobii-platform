@@ -3,12 +3,14 @@
   <h3>{{ worker.display_name }}</h3>
   <p class="gk-dtag">{{ worker.tagline }}</p>
   <div class="gk-dfacts">
-    <div>
-      <div class="gk-dfact-label">Cadence</div>
-      <div class="gk-dfact-chips" style="margin-top:5px">
-        <span class="gk-chip">{{ worker.schedule_description|default:worker.base_schedule }}</span>
+    {% if worker.schedule_description or worker.base_schedule %}
+      <div>
+        <div class="gk-dfact-label">Cadence</div>
+        <div class="gk-dfact-chips" style="margin-top:5px">
+          <span class="gk-chip">{{ worker.schedule_description|default:worker.base_schedule }}</span>
+        </div>
       </div>
-    </div>
+    {% endif %}
     {% if worker.event_triggers %}
       <div>
         <div class="gk-dfact-label">Event triggers</div>
@@ -36,7 +38,10 @@
       </div>
     {% endif %}
   </div>
-  <div class="gk-foot">
+  {% if show_detail_link|default:True %}
+    <a href="{{ worker.detail_url }}" class="gk-detail">{{ worker.detail_link_label }} &rarr;</a>
+  {% endif %}
+  <div class="gk-foot" style="margin-top:2px">
     <form method="post" action="{{ worker.hire_url }}"{% if lazy_csrf %} data-lazy-csrf{% endif %}>
       {% if not lazy_csrf %}{% csrf_token %}{% endif %}
       <input type="hidden" name="source_page" value="home_pretrained_workers" />
@@ -46,8 +51,5 @@
         {% if not user.is_authenticated or home_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
       </button>
     </form>
-    {% if show_detail_link|default:True %}
-      <a href="{{ worker.detail_url }}" class="gk-detail">{{ worker.detail_link_label }} &rarr;</a>
-    {% endif %}
   </div>
 </article>
