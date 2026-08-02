@@ -2897,6 +2897,52 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(finalized.result_directed_sleep)
         self.assertFalse(finalized.followup_required)
 
+    def test_nested_custom_tool_sleep_signal_cannot_abandon_live_inbound(self):
+        inbound = self._add_inbound_web_message("Please check the queue and tell me what you find.")
+        prepared = ep._PreparedToolExecution(
+            idx=1,
+            tool_name="custom_poll_helper",
+            tool_params={},
+            exec_params={},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call_poll",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason=None,
+        )
+        outcome = ep._ToolExecutionOutcome(
+            prepared=prepared,
+            result={
+                "status": "ok",
+                "result": {
+                    "message_count": 0,
+                    "next_action": "sleep",
+                },
+            },
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        token = bind_inbound_routing_scope(
+            InboundRoutingScope(agent_id=self.agent.id, message_id=inbound.id)
+        )
+        try:
+            finalized = ep._finalize_tool_batch(
+                self.agent,
+                [outcome],
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+        finally:
+            reset_inbound_routing_scope(token)
+
+        self.assertTrue(finalized.result_directed_sleep)
+        self.assertTrue(finalized.followup_required)
+
     def test_proactive_run_does_not_treat_historical_email_as_current_requester(self):
         start_web_session(self.agent, self.user)
         email_endpoint = PersistentAgentCommsEndpoint.objects.create(

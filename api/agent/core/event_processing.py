@@ -4434,7 +4434,7 @@ def _finalize_tool_batch(
         allow_auto_sleep = (
             isinstance(result, dict)
             and result.get(AUTO_SLEEP_FLAG) is True
-        ) or custom_result_requests_sleep
+        ) or (custom_result_requests_sleep and get_current_inbound_message(agent) is None)
         terminal_error = (
             tool_name == "send_chat_message"
             and isinstance(result, dict)
