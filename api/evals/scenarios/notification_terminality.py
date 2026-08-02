@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass
 from unittest.mock import patch
 
+from django.utils import timezone
+
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.core.processing_flags import bump_human_inbound_generation
 from api.evals.base import EvalScenario, ScenarioTask
@@ -13,6 +15,7 @@ from api.models import (
     CommsChannel,
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentCronTrigger,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -146,12 +149,20 @@ class NotificationTerminalityScenario(EvalScenario, ScenarioExecutionTools):
         case = self.case
         agent = PersistentAgent.objects.get(id=agent_id)
         agent.charter = (
-            "Own the engineering incident ledger. Use the configured incident workflow, preserve exact incident "
-            "identity, and notify the requested internal channels without duplicate deliveries."
+            "On each scheduled incident check, call the enabled `custom_eval_incident_workflow` exactly once and "
+            "follow its returned next action."
+            if case.result_is_terminal
+            else (
+                "Own the engineering incident ledger. Use the configured incident workflow, preserve exact incident "
+                "identity, and notify the requested internal channels without duplicate deliveries."
+            )
         )
         agent.planning_state = PersistentAgent.PlanningState.SKIPPED
         agent.save(update_fields=["charter", "planning_state", "updated_at"])
-        self._seed_prior_run(agent, pressured=not case.notifications_remain)
+        self._seed_prior_run(
+            agent,
+            pressured=not case.notifications_remain and not case.result_is_terminal,
+        )
         for tool_name in (case.custom_tool_name, *_NOTIFICATION_TOOLS):
             mark_tool_enabled_without_discovery(agent, tool_name)
         CommsAllowlistEntry.objects.get_or_create(
@@ -166,25 +177,55 @@ class NotificationTerminalityScenario(EvalScenario, ScenarioExecutionTools):
             EvalRunTask.Status.RUNNING,
             task_name="inject_incident",
         )
-        with self.wait_for_agent_idle(agent_id, timeout=120):
-            inbound = self.inject_message(
-                agent_id,
-                case.prompt,
-                trigger_processing=True,
+        if case.result_is_terminal:
+            trigger = PersistentAgentStep.objects.create(
+                agent=agent,
                 eval_run_id=run_id,
-                mock_config=self._mock_config(case),
-                eval_stop_policy=self._stop_policy(case),
+                description="Scheduled trigger: Check incident workflow [incident_poll]",
             )
+            PersistentAgentCronTrigger.objects.create(
+                step=trigger,
+                cron_expression="@every 15m",
+                schedule_key="incident_poll",
+                schedule_name="Check incident workflow",
+                schedule_instruction=(
+                    "Call the enabled `custom_eval_incident_workflow` once for INC-472 and follow its returned next "
+                    "action."
+                ),
+                scheduled_for=timezone.now(),
+                occurrence_key=f"eval-idle-{run_id}",
+            )
+            started_at = trigger.created_at
+            with self.wait_for_agent_idle(agent_id, timeout=120):
+                self.trigger_processing(
+                    agent_id,
+                    eval_run_id=run_id,
+                    mock_config=self._mock_config(case),
+                    eval_stop_policy=self._stop_policy(case),
+                )
+            source_artifacts = {"step": trigger}
+        else:
+            with self.wait_for_agent_idle(agent_id, timeout=120):
+                inbound = self.inject_message(
+                    agent_id,
+                    case.prompt,
+                    trigger_processing=True,
+                    eval_run_id=run_id,
+                    mock_config=self._mock_config(case),
+                    eval_stop_policy=self._stop_policy(case),
+                )
+            started_at = inbound.timestamp
+            source_artifacts = {"message": inbound}
         self.record_task_result(
             run_id,
             None,
             EvalRunTask.Status.PASSED,
             task_name="inject_incident",
             observed_summary="Incident request was processed through the real agent loop.",
-            artifacts={"message": inbound},
+            artifacts=source_artifacts,
         )
 
-        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        calls = get_tool_calls_for_run(run_id, after=started_at)
         workflow_calls = [call for call in calls if call.tool_name == case.custom_tool_name]
         extra_calls = [
             call
