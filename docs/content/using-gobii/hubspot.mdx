@@ -1,14 +1,14 @@
 ---
 title: "HubSpot"
-description: "Connect HubSpot's remote MCP server so a Gobii can use the CRM tools available to your account."
+description: "Connect HubSpot so a Gobii can use the CRM tools available to your account."
 sidebar_label: "HubSpot"
 ---
 
 HubSpot support lets a Gobii work with CRM data directly for sales, marketing, customer operations, and reporting workflows. Use it when you want a Gobii to find records, inspect account context, update contacts or deals, review properties, or help with CRM cleanup and handoff tasks.
 
-HubSpot connects as a workspace app through Gobii's managed OAuth client and HubSpot's remote MCP server. You authorize HubSpot, return to Gobii, and the HubSpot row shows as connected. After that, ask the Gobii for the HubSpot task you want.
+HubSpot connects as a workspace app through Gobii. You authorize HubSpot, return to Gobii, and the HubSpot row shows as connected. After that, ask the Gobii for the HubSpot task you want.
 
-The examples below focus on common CRM workflows, but HubSpot determines the available MCP tools dynamically. Availability depends on the connected user's seat, account products, permissions, and the tools authorized during the current connection. If you are not sure whether a workflow is supported, ask for the HubSpot action you want and the Gobii will inspect the available tool set or tell you what access is missing.
+The examples below focus on common CRM workflows, but the available HubSpot capabilities can vary by connection. Availability depends on the connected user's seat, account products, permissions, and authorized access. If you are not sure whether a workflow is supported, ask for the HubSpot action you want and the Gobii will inspect the available tools or tell you what access is missing.
 
 ## When To Use It
 
@@ -20,7 +20,7 @@ Use HubSpot when you want a Gobii to:
 - Inspect owners, pipelines, stages, record properties, schemas, and CRM metadata.
 - Review associations between contacts, companies, deals, and other CRM records when permissions allow.
 - Prepare CRM cleanup, enrichment, routing, reporting, lifecycle-stage, or sales handoff work.
-- Use other HubSpot MCP tools that are available to the connected account and user.
+- Use other HubSpot tools that are available to the connected account and user.
 
 If you only need general web research or a one-off summary from pasted data, HubSpot may be unnecessary. Use HubSpot when the workflow depends on live CRM records or should update your HubSpot workspace.
 
@@ -52,7 +52,7 @@ A Gobii can also show a HubSpot connection card when a workflow needs HubSpot ac
   caption="When a HubSpot workflow needs access, the Gobii can present a clickable connection card in chat."
 />
 
-After authorization, return to Gobii. HubSpot should show as connected, and the Gobii can use the remote MCP tools available to the connected account.
+After authorization, return to Gobii. HubSpot should show as connected, and the Gobii can use the HubSpot tools available to the connected account.
 
 <Screenshot
   src="/images/product/hubspot-contacts-in-chat.png"
@@ -134,13 +134,13 @@ HubSpot can contain sensitive customer, prospect, revenue, and operational data.
 Return to **Settings** -> **Integrations & MCP**, open **Add Apps**, and connect HubSpot again. Make sure the HubSpot row shows **Connected**.
 
 **The Gobii says HubSpot is not connected.**
-Confirm the workspace integration is connected, then ask the Gobii to retry the HubSpot request. If the connection expired or scopes changed, reconnect HubSpot.
+Confirm the workspace integration is connected, then ask the Gobii to retry the HubSpot request. If the connection expired or its access changed, reconnect HubSpot.
 
 **The Gobii says a tool or permission is missing.**
-Reconnect HubSpot and review the requested access. HubSpot MCP tool availability depends on the connected user's permissions, seat, account products, and the tools available when authorization occurred.
+Reconnect HubSpot and review the requested access. HubSpot tool availability depends on the connected user's permissions, seat, account products, and authorized access.
 
 **The Gobii says HubSpot requires reauthorization.**
-Return to **Settings** -> **Integrations & MCP** and reconnect HubSpot. HubSpot may require reauthorization when its available MCP tools change.
+Return to **Settings** -> **Integrations & MCP** and reconnect HubSpot. Reauthorization may be required when available capabilities or permissions change.
 
 **Search results are too broad or irrelevant.**
 Add stricter object types, owners, dates, pipeline stages, lifecycle stages, domains, property filters, or associations. Ask the Gobii to show the filters it used.
