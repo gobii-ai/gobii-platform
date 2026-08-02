@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from unittest.mock import patch
 
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
+from api.agent.core.processing_flags import bump_human_inbound_generation
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
@@ -733,6 +734,7 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
                         eval_run_id=run_id,
                     )
                 )
+                bump_human_inbound_generation(agent_id)
                 return {
                     "status": "ok",
                     "status_code": 200,
