@@ -234,6 +234,15 @@ class NotificationTerminalityScenario(EvalScenario, ScenarioExecutionTools):
             and call.tool_name not in _NOTIFICATION_TOOLS
             and call.tool_name not in {"sqlite_batch", "update_plan"}
         ]
+        if case.result_is_terminal and len(workflow_calls) == 1:
+            workflow_at = self._created_at(workflow_calls[0])
+            extra_calls = [
+                call
+                for call in extra_calls
+                if workflow_at is None
+                or self._created_at(call) is None
+                or self._created_at(call) > workflow_at
+            ]
         workflow_ok = (
             len(workflow_calls) == 1
             and self._result_ok(workflow_calls[0].result)
@@ -262,7 +271,7 @@ class NotificationTerminalityScenario(EvalScenario, ScenarioExecutionTools):
         held_steps = list(
             PersistentAgentStep.objects.filter(
                 agent_id=agent_id,
-                created_at__gte=inbound.timestamp,
+                created_at__gte=started_at,
                 description__startswith=_DEPENDENCY_HOLD_MARKER,
             )
         )
