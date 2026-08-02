@@ -141,6 +141,13 @@
              color: rgba(255,255,255,.8); opacity: .92; transition: opacity .15s; white-space: nowrap; }
   .gk-logo:hover { opacity: 1; }
   .gk-logo img { height: 19px; display: block; }
+  /* Header lockup. Sized in px because the root font-size changes at 768px, and the
+     arbitrary Tailwind values these replaced were never compiled into the frozen bundle
+     (the wordmark was silently rendering at the inherited 18px). */
+  .gk-logo-lockup { display: inline-flex; align-items: center; gap: 8px; }
+  .gk-logo-fish { height: 26px; width: auto; display: block; }
+  .gk-logo-word { font-size: 21px; font-weight: 300; letter-spacing: .2px; line-height: 1;
+                  color: #fff; transform: translateY(-2px); }
   .gk-logo.gk-wordmark { opacity: .75; }
 
   /* Avatars: real faces */

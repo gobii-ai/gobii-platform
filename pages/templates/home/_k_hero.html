@@ -33,9 +33,24 @@
   </div>
 
   <div class="gk-cta-row">
-    <a id="gk-cta" class="gk-btn" href="#hire-agents"
-       data-analytics-cta-id="home_k_hero" data-analytics-placement="hero" data-analytics-intent="browse_agents">
-      {% if home_hero_groups %}Hire the {{ home_hero_groups.0.label|lower }} agent{% else %}Browse all agents{% endif %}
+    {% if home_hero_groups %}
+    {# The primary CTA hires the featured agent for the active category — the same POST
+       the "Deploy This Employee" buttons make — rather than scrolling down the page.
+       Its action swaps with the category tabs; see _k_scripts.html. #}
+    <form method="post" action="{{ home_hero_groups.0.workers.0.hire_url }}" id="gk-cta-form" data-lazy-csrf>
+      <input type="hidden" name="source_page" value="home_hero_cta" />
+      <input type="hidden" name="trial_onboarding" value="1" />
+      <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+      <button type="submit" id="gk-cta" class="gk-btn"
+              data-analytics-cta-id="home_k_hero" data-analytics-placement="hero" data-analytics-intent="hire_agent">
+        Hire the {{ home_hero_groups.0.label|lower }} agent
+      </button>
+    </form>
+    {% endif %}
+    {# "Browse all agents" is navigation, not an action, so it stays an anchor. #}
+    <a id="gk-cta-browse" class="gk-btn" href="#hire-agents"{% if home_hero_groups %} hidden{% endif %}
+       data-analytics-cta-id="home_k_hero_browse" data-analytics-placement="hero" data-analytics-intent="browse_agents">
+      Browse all agents
     </a>
     <a class="gk-btn-quiet" href="#pricing"
        data-analytics-cta-id="home_k_hero_pricing" data-analytics-placement="hero" data-analytics-intent="view_pricing">See pricing</a>

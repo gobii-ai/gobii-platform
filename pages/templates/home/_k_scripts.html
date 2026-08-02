@@ -12,6 +12,13 @@
       "all": "Browse all agents"
     };
 
+    /* the featured agent each category's CTA hires */
+    var CTA_HIRE_URLS = {
+      {% for group in home_hero_groups %}{% if group.workers %}
+      "{{ group.key|escapejs }}": "{{ group.workers.0.hire_url|escapejs }}",
+      {% endif %}{% endfor %}
+    };
+
     var GREENHOUSE_LOGO = "{% static 'images/integration-logos/greenhouse.svg' %}";
     var HUBSPOT_LOGO = "{% static 'images/integration-logos/hubspot.svg' %}";
     var GMAIL_LOGO = "{% static 'images/integration-logos/gmail.svg' %}";
@@ -204,9 +211,23 @@
       document.querySelectorAll('.gk-row-block').forEach(function (row) {
         row.hidden = key !== 'all' && row.dataset.row !== key;
       });
-      if (cta) {
+      /* Hiring is a POST, browsing is a link — swap which control is shown rather than
+         re-pointing one element at two different kinds of destination. */
+      var ctaForm = document.getElementById('gk-cta-form');
+      var ctaBrowse = document.getElementById('gk-cta-browse');
+      var hireUrl = CTA_HIRE_URLS[key];
+      if (ctaForm && ctaBrowse) {
+        if (key !== 'all' && hireUrl) {
+          ctaForm.setAttribute('action', hireUrl);
+          ctaForm.hidden = false;
+          ctaBrowse.hidden = true;
+          if (cta) cta.textContent = CTA_LABELS[key] || CTA_LABELS.all;
+        } else {
+          ctaForm.hidden = true;
+          ctaBrowse.hidden = false;
+        }
+      } else if (cta) {
         cta.textContent = CTA_LABELS[key] || CTA_LABELS.all;
-        cta.setAttribute('href', key === 'all' ? '#hire-agents' : '#row-' + key);
       }
       renderDemo(key);
       window.requestAnimationFrame(syncHeadlineHeight);

@@ -295,9 +295,11 @@
       vertical-align: -0.125em;
     }
     
-    /* Reserve space for logo to prevent layout shift */
+    /* Reserve space for the logo to prevent layout shift. This MUST track the mark's
+       real height (.gk-logo-fish below) — when it drifted it silently floored the mark
+       at 45px and made the height utility a no-op. */
     a[href="{% url 'pages:home' %}"] img {
-      min-height: 2.5rem; /* matches h-10 */
+      min-height: 26px;
     }
 
     /* Optimized global font size for comfortable reading across all devices.
