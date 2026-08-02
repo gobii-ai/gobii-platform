@@ -516,13 +516,7 @@ class NonRetryableSourceTerminalityScenario(EvalScenario, ScenarioExecutionTools
                     },
                 },
                 eval_stop_policy={
-                    "stop_when_all_seen": [
-                        {
-                            "tool_name": "send_chat_message",
-                            "params": {"will_continue_work": False},
-                            "after_execution": True,
-                        },
-                    ],
+                    "stop_on_tool_names_after_execution": ["send_chat_message"],
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": [
                         search_tool,
@@ -867,7 +861,13 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
                     },
                 },
                 eval_stop_policy={
-                    "stop_on_tool_names_after_execution": ["send_chat_message"],
+                    "stop_when_all_seen": [
+                        {
+                            "tool_name": "send_chat_message",
+                            "params": {"will_continue_work": False},
+                            "after_execution": True,
+                        },
+                    ],
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": [
                         "http_request",
