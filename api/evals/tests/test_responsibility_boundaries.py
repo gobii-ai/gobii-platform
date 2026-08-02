@@ -20,6 +20,7 @@ from api.evals.scenarios.responsibility_boundaries import (
     REVIEWER_CHARTER,
     RESPONSIBILITY_BOUNDARY_CASES,
     RESPONSIBILITY_BOUNDARY_MANAGED_ONBOARDING_ROUTES_TO_MANAGER,
+    RESPONSIBILITY_BOUNDARY_IDLE_SCHEDULE_STAYS_QUIET,
     RESPONSIBILITY_BOUNDARY_PEER_COMPLETION_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_FYI_NO_ACK,
     RESPONSIBILITY_BOUNDARY_PEER_PROGRESS_NO_ACK,
@@ -96,15 +97,14 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
 
         self.assertIn("reporting/recipient boundaries override", instruction)
         self.assertIn("never authority, reporting lines, or charter memory", instruction)
+        self.assertIn("Only an explicit schedule instruction or current charter authorizes", instruction)
+        self.assertIn("Ordinary recurring work or an idle wake does not authorize", instruction)
         self.assertIn("charter's reachable peer manager", instruction)
         self.assertIn("send_agent_message", instruction)
-        self.assertIn("send_agent_message the charter's reachable peer manager", instruction)
-        self.assertIn("“owner” means that manager", instruction)
-        self.assertIn("inspect/mutate config first", instruction)
-        self.assertIn("This is current authorized work", instruction)
-        self.assertIn("do not sleep, wait for a DM", instruction)
         self.assertIn("manager escalates", instruction)
         self.assertIn("material team decision is blocked", instruction)
+        self.assertNotIn("At a scheduled check-in", instruction)
+        self.assertNotIn("This is current authorized work", instruction)
 
     def test_discord_actor_type_uses_transport_provenance_not_display_handle(self):
         self.assertEqual(
@@ -133,6 +133,8 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertIn("Route 1 above does not apply", instruction)
         self.assertIn("send no first-run message to either owner or manager", instruction)
         self.assertIn("sleep until assigned work or a relevant trigger", instruction)
+        self.assertIn("scheduled trigger is current", instruction)
+        self.assertIn("without falling back to an owner welcome", instruction)
         self.assertIn("Otherwise follow Route 1 normally", instruction)
 
     def test_suite_registers_all_boundary_scenarios(self):
@@ -159,6 +161,7 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_OPEN_REPLY,
                 RESPONSIBILITY_BOUNDARY_SHARED_CHANNEL_HUMAN_HANDLE,
                 RESPONSIBILITY_BOUNDARY_MANAGED_ONBOARDING_ROUTES_TO_MANAGER,
+                RESPONSIBILITY_BOUNDARY_IDLE_SCHEDULE_STAYS_QUIET,
             },
         )
 

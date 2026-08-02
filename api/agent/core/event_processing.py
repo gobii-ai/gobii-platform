@@ -2471,6 +2471,7 @@ class _FinalizedToolBatch:
     progress_message_delivery_ok: bool = False
     terminal_message_delivery_ok: bool = False
     human_input_request_ok: bool = False
+    result_directed_sleep: bool = False
 
 
 def _plan_has_unfinished_items(agent: PersistentAgent) -> bool:
@@ -2483,20 +2484,25 @@ def _plan_has_unfinished_items(agent: PersistentAgent) -> bool:
 
 
 def _latest_inbound_message_needs_reply(agent: PersistentAgent) -> bool:
-    latest_inbound = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
-        .order_by("-timestamp", "-seq")
-        .only("timestamp", "seq")
-        .first()
-    )
-    if latest_inbound is None or latest_inbound.timestamp is None:
+    current_inbound = get_current_inbound_message(agent)
+    if current_inbound is None:
         return False
 
     return not PersistentAgentMessage.objects.filter(
         owner_agent=agent,
         is_outbound=True,
-        timestamp__gt=latest_inbound.timestamp,
+        conversation_id=current_inbound.conversation_id,
+        seq__gt=current_inbound.seq,
     ).exists()
+
+
+def _custom_tool_result_requests_sleep(tool_name: str, result: Any) -> bool:
+    if not tool_name.startswith("custom_") or not isinstance(result, dict):
+        return False
+    nested_result = result.get("result")
+    if not isinstance(nested_result, dict):
+        return False
+    return str(nested_result.get("next_action") or "").strip().lower() == "sleep"
 
 
 def _should_continue_for_unanswered_inbound_after_tools(
@@ -4345,6 +4351,7 @@ def _finalize_tool_batch(
     terminal_message_delivery_ok = False
     terminal_source_error = False
     human_input_request_ok = False
+    result_directed_sleep = False
     successful_message_tools, human_input_delivery_tools = set(), set()
 
     for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
@@ -4422,7 +4429,12 @@ def _finalize_tool_batch(
         if tool_name == "request_human_input" and isinstance(result, dict):
             attach_originating_step_from_result(step, result)
 
-        allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
+        custom_result_requests_sleep = _custom_tool_result_requests_sleep(tool_name, result)
+        result_directed_sleep |= custom_result_requests_sleep
+        allow_auto_sleep = (
+            isinstance(result, dict)
+            and result.get(AUTO_SLEEP_FLAG) is True
+        ) or (custom_result_requests_sleep and get_current_inbound_message(agent) is None)
         terminal_error = (
             tool_name == "send_chat_message"
             and isinstance(result, dict)
@@ -4480,6 +4492,7 @@ def _finalize_tool_batch(
         progress_message_delivery_ok=progress_message_delivery_ok,
         terminal_message_delivery_ok=terminal_message_delivery_ok,
         human_input_request_ok=human_input_request_ok,
+        result_directed_sleep=result_directed_sleep,
     )
 
 
@@ -8108,6 +8121,15 @@ def _run_agent_loop(
                     return _finish_agent_loop(consume_human=False)
                 elif all_calls_sleep:
                     logger.info("Agent %s is sleeping.", agent.id)
+                    return _finish_agent_loop(consume_human=False)
+                elif (
+                    finalized_batch.result_directed_sleep
+                    and get_current_inbound_message(agent) is None
+                ):
+                    logger.info(
+                        "Agent %s: background custom tool requested sleep.",
+                        agent.id,
+                    )
                     return _finish_agent_loop(consume_human=False)
                 elif _should_continue_for_unanswered_inbound_after_tools(agent, finalized_batch):
                     logger.info(

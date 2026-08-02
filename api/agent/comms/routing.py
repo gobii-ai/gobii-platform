@@ -18,6 +18,7 @@ from .message_reads import is_peer_dm_message
 class InboundRoutingScope:
     agent_id: UUID
     message_id: UUID | None
+    previous_message_id: UUID | None = None
 
 
 _inbound_routing_scope: ContextVar[InboundRoutingScope | None] = ContextVar("inbound_routing_scope", default=None)
@@ -89,7 +90,11 @@ def advance_inbound_routing_scope(
     )
     if newer_message is None:
         return scope
-    return InboundRoutingScope(agent_id=agent.id, message_id=newer_message.id)
+    return InboundRoutingScope(
+        agent_id=agent.id,
+        message_id=newer_message.id,
+        previous_message_id=scope.previous_message_id or scope.message_id,
+    )
 
 
 def bind_inbound_routing_scope(scope: InboundRoutingScope) -> Token:

@@ -93,6 +93,7 @@ from api.agent.tools.tool_manager import enable_tools
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tasks.process_events import (
     AGENT_DEFAULT_PROCESSING_QUEUE,
+    _scheduled_execution_is_throttled,
     process_agent_cron_trigger_task,
     process_agent_events_task,
     _remove_orphaned_celery_beat_task,
@@ -1470,6 +1471,19 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<pacing_guidance>', content)
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
+
+    def test_creation_time_is_not_labeled_as_user_interaction(self):
+        self.agent.last_interaction_at = None
+        self.agent.save(update_fields=["last_interaction_at"])
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        self.assertIn("Time since agent creation:", user_message["content"])
+        self.assertNotIn("Time since last user interaction:", user_message["content"])
 
     def test_current_datetime_includes_user_local_time_when_timezone_saved(self):
         UserPreference.update_known_preferences(
@@ -3544,7 +3558,17 @@ class PromptContextBuilderTests(TestCase):
 
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
-            build_prompt_context(self.agent)
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        self.assertIsNotNone(system_message)
+        self.assertIn("Quality Advisories", system_message["content"])
+        self.assertIn("latest explicit human instruction and current charter", system_message["content"])
+        self.assertIn("Never mutate charter, schedule, or durable configuration solely", system_message["content"])
+        self.assertNotIn(
+            "They are high-priority operational instructions",
+            system_message["content"],
+        )
 
         suggestion.refresh_from_db()
         self.assertEqual(
@@ -4301,6 +4325,52 @@ class CronTriggerTaskTests(TestCase):
         from api.services.cron_throttle import cron_throttle_pending_footer_key
         pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
         self.assertTrue(fake_redis.get(pending_key))
+
+    @patch("api.agent.tasks.process_events.switch_is_active", return_value=True)
+    def test_cron_throttle_clears_stale_notice_when_eligibility_ends(self, _mock_switch):
+        from api.services.cron_throttle import (
+            CronThrottleDecision,
+            cron_throttle_pending_footer_key,
+        )
+        from config.redis_client import _FakeRedis
+
+        fake_redis = _FakeRedis()
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        fake_redis.set(pending_key, "1", ex=86400)
+        no_longer_eligible = CronThrottleDecision(
+            throttling_applies=False,
+            allow_execution=True,
+            stage=0,
+            base_interval_seconds=86400,
+            effective_interval_seconds=86400,
+            reason="plan_not_throttled",
+        )
+        eligible_again = CronThrottleDecision(
+            throttling_applies=True,
+            allow_execution=False,
+            stage=1,
+            base_interval_seconds=86400,
+            effective_interval_seconds=172800,
+            reason="throttled",
+        )
+
+        with (
+            patch(
+                "api.services.cron_throttle.evaluate_free_plan_cron_throttle",
+                return_value=no_longer_eligible,
+            ) as mock_evaluate,
+            patch("config.redis_client.get_redis_client", return_value=fake_redis),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
+        ):
+            throttled = _scheduled_execution_is_throttled(self.agent, "@daily")
+            self.assertFalse(throttled)
+            self.assertFalse(fake_redis.get(pending_key))
+
+            mock_evaluate.return_value = eligible_again
+            self.assertFalse(_scheduled_execution_is_throttled(self.agent, "@daily"))
+            self.assertFalse(fake_redis.get(pending_key))
+            self.assertTrue(_scheduled_execution_is_throttled(self.agent, "@daily"))
+            self.assertTrue(fake_redis.get(pending_key))
 
     @patch('redbeat.RedBeatSchedulerEntry.from_key')
     @patch('celery.current_app')
@@ -5458,12 +5528,18 @@ class EventProcessingRuntimeGuardTests(TestCase):
             channel="email",
             address="runtime-user@example.com",
         )
+        self.conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.external_endpoint.address,
+        )
 
     def _create_inbound_email_message(self, *, body: str, timestamp) -> PersistentAgentMessage:
         message = PersistentAgentMessage.objects.create(
             owner_agent=self.agent,
             from_endpoint=self.external_endpoint,
             to_endpoint=self.endpoint,
+            conversation=self.conversation,
             is_outbound=False,
             body=body,
             raw_payload={},
@@ -5947,10 +6023,11 @@ class EventProcessingRuntimeGuardTests(TestCase):
             owner_agent=self.agent,
             from_endpoint=self.endpoint,
             to_endpoint=self.external_endpoint,
+            conversation=self.conversation,
             is_outbound=True,
             body="You're welcome.",
             raw_payload={},
-            seq=f"OUT{int(now.timestamp() * 1_000_000):023d}"[:26],
+            seq=f"ZZ{int(now.timestamp() * 1_000_000):024d}"[:26],
         )
         PersistentAgentMessage.objects.filter(pk=outbound.pk).update(timestamp=now + timedelta(seconds=1))
         finalized = _FinalizedToolBatch(

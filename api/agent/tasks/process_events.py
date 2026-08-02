@@ -57,6 +57,13 @@ PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG = "_queued_queue"
 _queue_latency_histogram = None
 
 
+def _schedule_trigger_description(name: str, schedule_key: str, instruction: str) -> str:
+    description = f"Scheduled trigger: {name} [{schedule_key}]"
+    if instruction:
+        return f"{description}\nInstruction: {instruction}"
+    return description
+
+
 def _process_agent_events_queue_latency_histogram():
     global _queue_latency_histogram
     provider = metrics.get_meter_provider()
@@ -547,10 +554,12 @@ def _remove_orphaned_celery_beat_task(agent_id: str) -> None:
 
 def _scheduled_execution_is_throttled(agent, schedule_expression: str) -> bool:
     from api.services.cron_throttle import (
+        clear_pending_cron_throttle_footer,
         cron_throttle_footer_cooldown_key,
         cron_throttle_gate_key,
         cron_throttle_pending_footer_key,
         evaluate_free_plan_cron_throttle,
+        has_pending_cron_throttle_footer,
     )
     from config.redis_client import get_redis_client
     from constants.feature_flags import AGENT_CRON_THROTTLE
@@ -559,6 +568,15 @@ def _scheduled_execution_is_throttled(agent, schedule_expression: str) -> bool:
         return False
     decision = evaluate_free_plan_cron_throttle(agent, schedule_expression)
     if not decision.throttling_applies:
+        try:
+            if has_pending_cron_throttle_footer(str(agent.id)):
+                clear_pending_cron_throttle_footer(str(agent.id))
+        except redis.RedisError:
+            logger.debug(
+                "Failed clearing an obsolete cron throttle notice for agent %s",
+                agent.id,
+                exc_info=True,
+            )
         return False
 
     redis_client = get_redis_client()
@@ -797,8 +815,10 @@ def process_agent_schedule_trigger_task(
                         with transaction.atomic():
                             step = PersistentAgentStep.objects.create(
                                 agent=agent,
-                                description=(
-                                    f"Scheduled trigger: {claimed.name} [{claimed.schedule_key}]"
+                                description=_schedule_trigger_description(
+                                    claimed.name,
+                                    claimed.schedule_key,
+                                    claimed.instruction,
                                 ),
                             )
                             cron_expression = (

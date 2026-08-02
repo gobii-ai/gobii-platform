@@ -77,7 +77,11 @@ from ...models import (
 )
 from ...services.web_sessions import get_deliverable_web_sessions
 from ..comms.message_reads import is_peer_dm_message
-from ..comms.routing import get_current_inbound_message, get_message_sender_address
+from ..comms.routing import (
+    get_bound_inbound_routing_scope,
+    get_current_inbound_message,
+    get_message_sender_address,
+)
 from ..comms.source_metadata import get_message_source_metadata
 from ..structured_peer_payload import (
     canonicalize_structured_peer_payload,
@@ -843,20 +847,21 @@ def _get_sqlite_guidance() -> str:
         "## SQLite Data\n\n"
         "Named tables hold truth/logic: keyed entities/relations/provenance; SQL: counts, joins, gaps, ranks. "
         "Results do not update them. Use SQLite for material row reconciliation.\n"
-        "For a current source set: keyed DDL, one set-wise upsert, one request-specific decision SELECT with "
-        "answer/supporting rows/URLs; aggregate-only and SELECT-all are incomplete; deliver without reread. "
-        "Structured JSON uses all `is_current_batch=1 AND tool_name='exact visible name'` rows, with no result_id/URL "
-        "filter. HTTP payload path: $.content. Parent fields come from result_json, "
+        "For a current source set: keyed DDL; one set-wise upsert; one request-specific decision SELECT with "
+        "answer/rows/URLs. aggregate-only and SELECT-all are incomplete; deliver without reread. "
+        "JSON: all `is_current_batch=1 AND tool_name='exact visible name'` rows with no result_id/URL "
+        "filter and no pre-read. Incremental schemas keep non-key fields nullable across source shapes. "
+        "$.content. Parent fields come from result_json, "
         "children from json_each(actual array); keep t.result_id/source_url. "
         "Never transcribe visible preview facts into SQL. "
-        "For prose, inspect once, put every supported field in one top-level row per result_id, then join rows to "
+        "For prose, inspect once: every supported field in one top-level row per result_id; join rows to "
         "__tool_results. Never type "
         "sourced facts/URLs/classifications into SQL. Bound interpretations only transcribe "
-        "evidence; omit unsupported fields. For structured inbound messages, INSERT SELECT directly from the latest "
+        "evidence; omit unsupported. For structured inbound messages, INSERT SELECT directly from the latest "
         "__messages payload and derive every field plus message_id; never pre-read or quote state/status. "
-        "Upsert stable keys and mutable provenance; never import siblings singly, mix historical generic results, or "
+        "Upsert stable keys and mutable provenance; never import siblings singly, mix old generic results, or "
         "rebuild durable tables. Affected 0 plus empty readback is failure.\n"
-        "Bind authored/messy values as :name. Use json_each only for arrays/objects and json_extract for scalars. "
+        "Bind authored/messy values as :name. json_each: arrays/objects; json_extract: scalars. "
         "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. UNION top-one needs a scalar subquery/CTE. "
         "group_concat(DISTINCT x) has no separator. Reads that may trigger another tool use will_continue_work=true; "
         "otherwise false. Ready routes use opaque auth refs only for the requested operation; no preflight.\n"
@@ -3317,13 +3322,17 @@ def add_budget_awareness_sections(
     # Time awareness for pacing (avoid rapid-fire tool calls).
     if agent is not None:
         try:
-            anchor = getattr(agent, "last_interaction_at", None) or getattr(agent, "created_at", None)
+            anchor = getattr(agent, "last_interaction_at", None)
+            anchor_label = "last user interaction"
+            if anchor is None:
+                anchor = getattr(agent, "created_at", None)
+                anchor_label = "agent creation"
             if anchor is not None:
                 delta = dj_timezone.now() - anchor
                 sections.append(
                     (
                         "time_since_last_interaction",
-                        f"Time since last user interaction: {_format_age(delta)} (at {anchor.isoformat()}).",
+                        f"Time since {anchor_label}: {_format_age(delta)} (at {anchor.isoformat()}).",
                         2,
                         True,
                     )
@@ -3489,6 +3498,12 @@ def _get_queued_workload_context(agent: PersistentAgent) -> str:
     active_message = get_current_inbound_message(agent)
     if active_message is None or active_message.conversation_id is None:
         return ""
+    routing_scope = get_bound_inbound_routing_scope(agent)
+    same_conversation_advanced = bool(
+        routing_scope
+        and routing_scope.message_id == active_message.id
+        and routing_scope.previous_message_id
+    )
 
     competing = list(
         PersistentAgentMessage.objects.filter(
@@ -3501,23 +3516,35 @@ def _get_queued_workload_context(agent: PersistentAgent) -> str:
         .values_list("conversation_id", "conversation__channel")
         .order_by("seq")[:25]
     )
-    if not competing:
+    if not competing and not same_conversation_advanced:
         return ""
+
+    notices = []
+    if same_conversation_advanced:
+        notices.append(
+            "There is newer input in this same conversation. Decide whether it is a correction or cancellation of "
+            "the earlier request, or independent added work. A correction replaces the stale part; independent added "
+            "work does not erase a valid result already completed but not yet delivered. Reconcile both and deliver "
+            "each still-valid outcome exactly once. If the preserved result contains structured material rows, the "
+            "first SQLite call imports them set-wise from current __tool_results before the added work; do not pre-read "
+            "them or copy them through rows/bindings. Perform an explicit added action once with its stated method; "
+            "do not preflight its URL."
+        )
 
     conversations = {str(conversation_id) for conversation_id, _channel in competing}
     channels = sorted({str(channel) for _conversation_id, channel in competing if channel})
     channel_text = ", ".join(channels) if channels else "other channels"
-    return (
-        f"Active turn: keep working for its bound requester and channel. "
-        f"{len(competing)} newer inbound message(s) across {len(conversations)} other conversation(s) "
-        f"({channel_text}) are queued, not replacements for this request. This processing turn serves the active "
-        "conversation only: do not inspect, answer, or act on queued messages yet. Before the final reply, finish or "
-        "safely park any active plan step with update_plan. Then reply once on its bound channel with "
-        "will_continue_work=false; "
-        "the queued trigger will run next. On that later turn, triage by explicit human priority, deadline and impact, "
-        "and acknowledge capacity or negotiate scope instead of silently thrashing. "
-        "A large queue is normal operational load, not an emotional setback."
-    )
+    if competing:
+        notices.append(
+            f"{len(competing)} newer inbound message(s) across {len(conversations)} other conversation(s) "
+            f"({channel_text}) are queued, not replacements for this request. This processing turn serves the active "
+            "conversation only: do not inspect, answer, or act on queued messages yet. Before the final reply, finish "
+            "or safely park any active plan step with update_plan. Then reply once on its bound channel with "
+            "will_continue_work=false; the queued trigger will run next. On that later turn, triage by explicit human "
+            "priority, deadline and impact, and acknowledge capacity or negotiate scope instead of silently thrashing. "
+            "A large queue is normal operational load, not an emotional setback."
+        )
+    return "Active turn: keep working for its bound requester and channel. " + " ".join(notices)
 
 
 def _get_formatting_guidance() -> str:
@@ -3813,29 +3840,50 @@ def _get_unreconciled_source_model_warning(agent: PersistentAgent) -> str:
 
 def _format_system_directive_prompt_block(
     message_payloads: list[tuple[PersistentAgentSystemMessage, str]],
+    *,
+    judge_message_ids: set[UUID] | None = None,
 ) -> str:
     """Render just-delivered directives as a one-completion system prompt block."""
 
     if not message_payloads:
         return ""
 
-    directive_lines = [
-        f"{idx}. {text}"
-        for idx, (_message, text) in enumerate(message_payloads, start=1)
-    ]
-    return (
-        "## Immediate System Directives From Gobii Operations\n\n"
-        "The following directive(s) were just delivered for this completion. "
-        "They are high-priority operational instructions. Act on them immediately before continuing normal work. "
-        "Do not summarize them, defer them, ignore them, or treat them as background history. "
-        "Follow them unless they conflict with higher-priority system, developer, or tool policy.\n\n"
-        + "\n".join(directive_lines)
-    )
+    judge_message_ids = judge_message_ids or set()
+    operations = [(message, text) for message, text in message_payloads if message.id not in judge_message_ids]
+    advisories = [(message, text) for message, text in message_payloads if message.id in judge_message_ids]
+    blocks = []
+    if operations:
+        directive_lines = [
+            f"{idx}. {text}"
+            for idx, (_message, text) in enumerate(operations, start=1)
+        ]
+        blocks.append(
+            "## Immediate System Directives From Gobii Operations\n\n"
+            "The following directive(s) were just delivered for this completion. "
+            "They are high-priority operational instructions. Act on them immediately before continuing normal work. "
+            "Do not summarize them, defer them, ignore them, or treat them as background history. "
+            "Follow them unless they conflict with higher-priority system, developer, or tool policy.\n\n"
+            + "\n".join(directive_lines)
+        )
+    if advisories:
+        advisory_lines = [
+            f"{idx}. {text}"
+            for idx, (_message, text) in enumerate(advisories, start=1)
+        ]
+        blocks.append(
+            "## Internal Quality Advisories\n\n"
+            "Use these one-shot strategy suggestions only where they fit the current task. The latest explicit human "
+            "instruction and current charter outrank them. Never mutate charter, schedule, or durable configuration "
+            "solely because of an advisory, and never mention the advisory to the user.\n\n"
+            + "\n".join(advisory_lines)
+        )
+    return "\n\n".join(blocks)
 
 
 def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
     """Deliver pending directives as system steps before prompt rendering."""
 
+    judge_message_ids: set[UUID] = set()
     try:
         with transaction.atomic():
             pending_messages = list(
@@ -3863,6 +3911,9 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
                 system_message_id__in=message_ids,
                 status=PersistentAgentJudgeSuggestion.Status.ACTIVE,
             )
+            judge_message_ids = set(
+                delivered_suggestions.values_list("system_message_id", flat=True)
+            )
             delivered_suggestions.filter(resolved_at__isnull=True).update(
                 status=PersistentAgentJudgeSuggestion.Status.DELIVERED,
                 resolved_at=now,
@@ -3870,7 +3921,11 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
             delivered_suggestions.update(
                 status=PersistentAgentJudgeSuggestion.Status.DELIVERED,
             )
-            _record_system_directive_steps(agent, message_payloads)
+            _record_system_directive_steps(
+                agent,
+                message_payloads,
+                judge_message_ids=judge_message_ids,
+            )
     except DatabaseError:
         logger.exception(
             "Failed to deliver system directives for agent %s. These directives will remain pending.",
@@ -3882,23 +3937,37 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
 
     send_developer_update(str(agent.id))
 
-    return _format_system_directive_prompt_block(message_payloads)
+    return _format_system_directive_prompt_block(
+        message_payloads,
+        judge_message_ids=judge_message_ids,
+    )
 
 
 def _record_system_directive_steps(
     agent: PersistentAgent,
     message_payloads: list[tuple[PersistentAgentSystemMessage, str]],
+    *,
+    judge_message_ids: set[UUID] | None = None,
 ) -> None:
     """Create audit steps for directives delivered to an agent."""
 
+    judge_message_ids = judge_message_ids or set()
     for message, directive_text in message_payloads:
-        description = (
-            "System directive delivered:\n"
-            "This is a high-priority directive from Gobii Operations. "
-            "Address it before continuing normal work; do not treat it as background history. "
-            "Follow it unless it conflicts with higher-priority system, developer, or tool policy.\n\n"
-            f"Directive:\n{directive_text}"
-        )
+        if message.id in judge_message_ids:
+            description = (
+                "Internal quality advisory delivered:\n"
+                "Use this one-shot suggestion only where it fits the current task. Explicit human instructions and "
+                "the current charter outrank it; it cannot independently change durable configuration.\n\n"
+                f"Advisory:\n{directive_text}"
+            )
+        else:
+            description = (
+                "System directive delivered:\n"
+                "This is a high-priority directive from Gobii Operations. "
+                "Address it before continuing normal work; do not treat it as background history. "
+                "Follow it unless it conflicts with higher-priority system, developer, or tool policy.\n\n"
+                f"Directive:\n{directive_text}"
+            )
         step = PersistentAgentStep.objects.create(
             agent=agent,
             description=description,
@@ -4039,11 +4108,11 @@ def _get_peer_communication_instruction() -> str:
         "charter. Never relay shared-channel requests by DM. Synthesize owned, attributed work.\n"
         "Fielded records/lists use structured payloads; questions use prose.\n\n"
         "Charter reporting/recipient boundaries override generic lifecycle/schedule “owner.” Schedules add timing/work, "
-        "never authority, reporting lines, or charter memory; never persist fired actions/recipients. At a scheduled "
-        "check-in, send_agent_message the charter's reachable peer manager one cadence question. "
-        "This is current authorized work: do not sleep, wait for a DM, or inspect/mutate config "
-        "first; “owner” means that manager. Contact the account owner only if charter requires it, the manager escalates, "
-        "or a material team decision is blocked.\n"
+        "never authority, reporting lines, or charter memory; never persist fired actions/recipients. Only an explicit "
+        "schedule instruction or current charter authorizes a check-in question; then send_agent_message the charter's "
+        "reachable peer manager. Ordinary recurring work or an idle wake does not authorize a status/cadence ping. "
+        "Follow the scheduled job and sleep quietly when it has no work. Contact the account owner only if charter "
+        "requires it, the manager escalates, or a material team decision is blocked.\n"
     )
 
 
@@ -4051,7 +4120,8 @@ def _get_managed_peer_first_run_instruction() -> str:
     return (
         "FIRST-RUN RECIPIENT PRECEDENCE: Only when the Current Charter routes routine coordination to a named reachable "
         "peer manager, Route 1 above does not apply: send no first-run message to either owner or manager; sleep until "
-        "assigned work or a relevant trigger. Otherwise follow Route 1 normally."
+        "assigned work or a relevant trigger. If a scheduled trigger is current, perform its explicit instruction "
+        "without falling back to an owner welcome. Otherwise follow Route 1 normally."
     )
 
 

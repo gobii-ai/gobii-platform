@@ -165,6 +165,8 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
             "is_current_batch=1 AND tool_name='exact visible name'",
             guidance,
         )
+        self.assertIn("with no result_id/URL filter and no pre-read", guidance)
+        self.assertIn("keep non-key fields nullable", guidance)
         self.assertIn("Parent fields come from result_json", guidance)
         self.assertIn("children from json_each(actual array)", guidance)
         self.assertIn("every supported field in one top-level row per result_id", guidance)
