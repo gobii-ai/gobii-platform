@@ -399,6 +399,10 @@
 
 <script>
   (function () {
+    /* Deferred to DOMContentLoaded on purpose: window.GobiiHomePerf is defined further
+       down the page, so running at parse time made the perf guard read `undefined` and
+       every phone got the animated cinema instead of the static timeline. */
+    function initNight() {
     var sec = document.getElementById('gk-night');
     if (!sec) return;
 
@@ -609,5 +613,12 @@
       if (document.hidden) stop();
       else if (inView && booted) start();
     });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initNight);
+    } else {
+      initNight();
+    }
   })();
 </script>
