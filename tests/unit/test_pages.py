@@ -3084,6 +3084,7 @@ class ComparisonPageTests(TestCase):
     lindy_comparison_slug = "lindy-vs-gobii"
     juicebox_comparison_slug = "juicebox-vs-gobii"
     linkedin_recruiter_comparison_slug = "linkedin-recruiter-vs-gobii"
+    seekout_comparison_slug = "seekout-vs-gobii"
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_comparisons_page_renders_with_metadata_and_published_links(self):
@@ -3241,6 +3242,10 @@ class ComparisonPageTests(TestCase):
             linkedin_recruiter_card.get_text(" ", strip=True),
         )
         self.assertIn("Published", linkedin_recruiter_card.get_text(" ", strip=True))
+        seekout_card = soup.find("article", {"id": "seekout"})
+        self.assertIsNotNone(seekout_card)
+        self.assertIn("SeekOut vs Gobii", seekout_card.get_text(" ", strip=True))
+        self.assertIn("Published", seekout_card.get_text(" ", strip=True))
         self.assertIsNotNone(
             soup.find(
                 "a",
@@ -3278,6 +3283,17 @@ class ComparisonPageTests(TestCase):
                     "href": reverse(
                         "proprietary:comparison_detail",
                         kwargs={"slug": self.linkedin_recruiter_comparison_slug},
+                    )
+                },
+            )
+        )
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {
+                    "href": reverse(
+                        "proprietary:comparison_detail",
+                        kwargs={"slug": self.seekout_comparison_slug},
                     )
                 },
             )
@@ -3981,6 +3997,165 @@ class ComparisonPageTests(TestCase):
         self.assertIsNotNone(main.find("a", {"href": reverse("proprietary:editorial_policy")}))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_seekout_comparison_page_renders_with_fair_positioning_and_sources(self):
+        response = self.client.get(
+            reverse(
+                "proprietary:comparison_detail",
+                kwargs={"slug": self.seekout_comparison_slug},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        comparison = page_views.get_comparison(self.seekout_comparison_slug)
+        expected_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
+
+        self.assertEqual(soup.title.get_text(strip=True), comparison["seo_title"])
+        self.assertEqual(
+            soup.find("meta", {"name": "description"}).get("content"),
+            comparison["seo_description"],
+        )
+        self.assertEqual(soup.find("link", {"rel": "canonical"}).get("href"), expected_url)
+        self.assertEqual(
+            soup.find("meta", {"property": "og:image:alt"}).get("content"),
+            "Gobii and SeekOut AI agent platform comparison",
+        )
+
+        json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
+        self.assertEqual(len(json_ld_scripts), 3)
+        structured_data = json.loads(json_ld_scripts[0].string)
+        self.assertEqual(structured_data["@type"], "WebPage")
+        self.assertEqual(structured_data["@id"], f"{expected_url}#webpage")
+        self.assertEqual(structured_data["datePublished"], "2026-08-02")
+        self.assertEqual(structured_data["dateModified"], "2026-08-02")
+        self.assertEqual(
+            [item["name"] for item in structured_data["about"]],
+            ["Gobii", "SeekOut"],
+        )
+        self.assertEqual(
+            structured_data["about"][1]["applicationCategory"],
+            "AI recruiting and talent intelligence platform",
+        )
+        self.assertEqual(structured_data["about"][1]["operatingSystem"], "Web")
+        self.assertEqual(
+            structured_data["about"][1]["sameAs"],
+            list(comparison["competitor_same_as"]),
+        )
+        self.assertEqual(structured_data["about"][1]["url"], "https://www.seekout.com/")
+
+        breadcrumb_data = json.loads(json_ld_scripts[1].string)
+        self.assertEqual(
+            [item["name"] for item in breadcrumb_data["itemListElement"]],
+            ["Home", "Comparisons", "SeekOut vs Gobii"],
+        )
+        faq_data = json.loads(json_ld_scripts[2].string)
+        self.assertEqual(faq_data["@type"], "FAQPage")
+        self.assertEqual(faq_data["@id"], f"{expected_url}#faq")
+        self.assertEqual(
+            [item["name"] for item in faq_data["mainEntity"]],
+            [item["question"] for item in comparison["faq_items"]],
+        )
+        self.assertEqual(
+            [item["acceptedAnswer"]["text"] for item in faq_data["mainEntity"]],
+            [item["answer"] for item in comparison["faq_items"]],
+        )
+
+        self.assertEqual(len(soup.find_all("h1")), 1)
+        content = soup.get_text(" ", strip=True)
+        self.assertIn(
+            "SeekOut vs Gobii: talent intelligence platform or configurable AI workforce?",
+            content,
+        )
+        self.assertIn(
+            "SeekOut is a recruiting platform with AI agents. Gobii is an AI employee platform that can recruit.",
+            content,
+        )
+        self.assertIn("Choose SeekOut if", content)
+        self.assertIn("Choose Gobii if", content)
+        self.assertIn("Use both if", content)
+        self.assertIn("How this comparison was researched.", content)
+        self.assertIn(
+            "We did not use an authenticated SeekOut workspace, customer interviews, "
+            "or a controlled head-to-head benchmark.",
+            content,
+        )
+        self.assertIn("“SeekOut” is a product family, not one feature set.", content)
+        self.assertIn("Published August 2, 2026", content)
+        self.assertIn(
+            "Gobii publishes this comparison and has a commercial interest in the outcome",
+            content,
+        )
+        self.assertIn(
+            "Use SeekOut as the talent intelligence layer. Use Gobii as the custom operating layer.",
+            content,
+        )
+        self.assertIn(
+            "Choose SeekOut when talent data is core. Choose Gobii when custom workflow is core.",
+            content,
+        )
+        self.assertIn("Last reviewed August 2, 2026 by Gobii editorial team.", content)
+        self.assertNotContains(response, "https://js.stripe.com")
+        self.assertNotContains(response, "js/account_auth_forms.js")
+        self.assertNotContains(response, "js/cta_signup_modal.js")
+
+        main = soup.find("main")
+        self.assertIsNotNone(main)
+        self.assertGreaterEqual(len(main.get_text(" ", strip=True).split()), 1500)
+        jump_navigation = main.find("nav", {"aria-label": "On this page"})
+        self.assertIsNotNone(jump_navigation)
+        self.assertEqual(
+            [link.get("href") for link in jump_navigation.find_all("a")],
+            [
+                "#methodology",
+                "#product-family",
+                "#feature-comparison",
+                "#seekout-wins",
+                "#gobii-wins",
+                "#combined-workflow",
+                "#pricing",
+                "#faq",
+            ],
+        )
+        for section_id in (
+            "methodology",
+            "product-family",
+            "feature-comparison",
+            "seekout-wins",
+            "gobii-wins",
+            "combined-workflow",
+            "pricing",
+            "faq",
+        ):
+            self.assertIsNotNone(main.find("section", {"id": section_id}))
+        self.assertIsNotNone(main.find("h3", string="SeekOut’s strongest reasons to buy"))
+        self.assertIsNotNone(main.find("h3", string="Current published starting points"))
+        self.assertIsNotNone(main.find("h2", string="How this comparison was researched."))
+        self.assertIn("Table sources:", content)
+        for source_url in (
+            "https://www.seekout.com/pricing/",
+            "https://www.seekout.com/solutions/mcp/",
+            "https://www.seekout.com/solutions/sam/",
+            "https://www.seekout.com/solutions/spot/",
+            "https://www.seekout.com/responsible-ai/",
+            "https://www.seekout.com/security/",
+            "https://support.seekout.com/en/articles/11878023-what-is-talent-rediscovery",
+            "https://support.seekout.com/en/articles/11878232-how-is-seekout-s-github-search-different",
+            "https://support.seekout.com/en/articles/13853182-sam-ai-screening-in-seekout",
+            "https://support.seekout.com/en/articles/15649778-seekout-chrome-extension",
+            "https://docs.gobii.ai/",
+            "https://github.com/gobii-ai/gobii-platform",
+        ):
+            self.assertIsNotNone(main.find("a", {"href": source_url}))
+        self.assertIsNotNone(main.find("a", {"href": reverse("pages:ai_employees")}))
+        self.assertIsNotNone(main.find("a", {"href": reverse("proprietary:pricing")}))
+        self.assertIsNotNone(main.find("a", {"href": reverse("proprietary:teams")}))
+        self.assertIsNotNone(main.find("a", {"href": reverse("proprietary:editorial_policy")}))
+        self.assertEqual(
+            [heading.get_text(" ", strip=True) for heading in main.select("#faq h3")],
+            [item["question"] for item in comparison["faq_items"]],
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_footer_includes_comparisons_hub_link_in_proprietary_mode(self):
         response = self.client.get(reverse("proprietary:comparisons"))
 
@@ -4037,6 +4212,17 @@ class ComparisonPageTests(TestCase):
             linkedin_recruiter_link.get_text(strip=True),
             "LinkedIn Recruiter vs Gobii",
         )
+        seekout_link = footer.find(
+            "a",
+            {
+                "href": reverse(
+                    "proprietary:comparison_detail",
+                    kwargs={"slug": self.seekout_comparison_slug},
+                )
+            },
+        )
+        self.assertIsNotNone(seekout_link)
+        self.assertEqual(seekout_link.get_text(strip=True), "SeekOut vs Gobii")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_comparison_pages_and_footer_column_are_absent_in_community_mode(self):
@@ -4069,6 +4255,13 @@ class ComparisonPageTests(TestCase):
             )
         )
         self.assertEqual(linkedin_recruiter_detail_response.status_code, 404)
+        seekout_detail_response = self.client.get(
+            reverse(
+                "proprietary:comparison_detail",
+                kwargs={"slug": self.seekout_comparison_slug},
+            )
+        )
+        self.assertEqual(seekout_detail_response.status_code, 404)
 
         home_response = self.client.get(reverse("pages:home"))
         self.assertEqual(home_response.status_code, 200)
@@ -4099,6 +4292,10 @@ class ComparisonPageTests(TestCase):
             f"<loc>http://example.com/comparisons/{self.linkedin_recruiter_comparison_slug}/</loc>",
             content,
         )
+        self.assertIn(
+            f"<loc>http://example.com/comparisons/{self.seekout_comparison_slug}/</loc>",
+            content,
+        )
         self.assertNotIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -4115,6 +4312,10 @@ class ComparisonPageTests(TestCase):
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.juicebox_comparison_slug}/</loc>", content)
         self.assertNotIn(
             f"<loc>http://example.com/comparisons/{self.linkedin_recruiter_comparison_slug}/</loc>",
+            content,
+        )
+        self.assertNotIn(
+            f"<loc>http://example.com/comparisons/{self.seekout_comparison_slug}/</loc>",
             content,
         )
 

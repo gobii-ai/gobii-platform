@@ -1,0 +1,528 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ comparison_seo_title }}{% endblock %}
+
+{% block canonical_link %}
+<link rel="canonical" href="{{ canonical_url }}">
+{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="{{ comparison_seo_description }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ comparison_seo_title }}">
+<meta property="og:description" content="{{ comparison_seo_description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="Gobii">
+<meta property="og:image" content="{{ comparison_social_image_url }}">
+<meta property="og:image:alt" content="{{ comparison_social_image_alt }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ comparison_seo_title }}">
+<meta name="twitter:description" content="{{ comparison_seo_description }}">
+<meta name="twitter:image" content="{{ comparison_social_image_url }}">
+<meta name="twitter:image:alt" content="{{ comparison_social_image_alt }}">
+<script type="application/ld+json">{{ comparison_structured_data_json }}</script>
+<script type="application/ld+json">{{ comparison_breadcrumb_json }}</script>
+{% if comparison_faq_json %}<script type="application/ld+json">{{ comparison_faq_json }}</script>{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="gk-luxe">
+  <style>
+    /* comparison detail (SeekOut) — page-scoped layout */
+    .cmpd-hero { max-width: 1100px; margin: 0 auto; padding: 64px 24px 0; position: relative; }
+    .cmpd-crumbs { font-size: 12.5px; margin: 0 0 14px; }
+    .cmpd-crumbs a { color: #c4b5fd; text-decoration: none; }
+    .cmpd-crumbs a:hover { color: #fff; }
+    .cmpd-hero h1 { margin-top: 12px; max-width: 30ch; }
+    .cmpd-hero .cmpd-sub { margin-top: 14px; max-width: 74ch; }
+    .cmpd-hero .cmpd-sub a { color: #ddd6fe; text-decoration: underline; text-decoration-color: rgba(196,181,253,.4); text-underline-offset: 3px; }
+    .cmpd-hero .cmpd-sub a:hover { color: #fff; }
+    .cmpd-byline { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 18px 0 0;
+                    color: #9f93c5; font-size: 12px; line-height: 1.55; }
+    .cmpd-byline a { color: #c4b5fd; text-decoration: none; }
+    .cmpd-byline a:hover { color: #fff; }
+    .cmpd-ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+    .cmpd-jump { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-top: 30px;
+                 padding: 16px 18px; border: 1px solid rgba(196,181,253,.18); border-radius: 14px;
+                 background: rgba(76,29,149,.12); }
+    .cmpd-jump-label { color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .cmpd-jump-links { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+    .cmpd-jump a { color: #c4b5fd; font-size: 12.5px; font-weight: 600; text-decoration: none; }
+    .cmpd-jump a:hover { color: #fff; }
+    .cmpd-anchor { scroll-margin-top: 112px; }
+    .cmpd-split { display: grid; gap: 28px; margin-top: 6px; }
+    @media (min-width: 1024px) {
+      .cmpd-split { grid-template-columns: .9fr 1.1fr; align-items: start; }
+      .cmpd-split-wide { grid-template-columns: 1fr .8fr; }
+    }
+    .cmpd-h2 { margin-top: 12px; }
+    .cmpd-prose p { color: #b7aed4; font-size: 14.5px; line-height: 1.72; margin: 0; }
+    .cmpd-prose p + p { margin-top: 14px; }
+    .cmpd-prose a { color: #c4b5fd; text-decoration: underline; text-decoration-color: rgba(196,181,253,.35); text-underline-offset: 3px; }
+    .cmpd-prose a:hover { color: #fff; }
+    .cmpd-cite { white-space: nowrap; font-size: .86em; font-weight: 650; }
+    .cmpd-inline-link { color: #c4b5fd; text-decoration: underline; text-decoration-color: rgba(196,181,253,.35); text-underline-offset: 3px; }
+    .cmpd-inline-link:hover { color: #fff; }
+    .cmpd-grid2, .cmpd-grid3, .cmpd-grid4 { display: grid; gap: 16px; margin-top: 26px; }
+    @media (min-width: 850px) { .cmpd-grid2 { grid-template-columns: 1fr 1fr; } }
+    @media (min-width: 980px) { .cmpd-grid3 { grid-template-columns: repeat(3, 1fr); } }
+    @media (min-width: 980px) { .cmpd-grid4 { grid-template-columns: repeat(4, 1fr); } }
+    .cmpd-card { padding: 24px; }
+    .cmpd-cardhead { display: flex; align-items: center; gap: 12px; }
+    .cmpd-ichip { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center;
+                  border-radius: 10px; color: #fff; flex-shrink: 0;
+                  background: linear-gradient(120deg, #7c3aed, #a855f7); }
+    .cmpd-card h2, .cmpd-card h3 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
+    .cmpd-card p { color: #b7aed4; font-size: 13.5px; line-height: 1.67; margin: 14px 0 0; }
+    .cmpd-card p a { color: #c4b5fd; text-decoration: underline; text-decoration-color: rgba(196,181,253,.35); text-underline-offset: 3px; }
+    .cmpd-card p a:hover { color: #fff; }
+    .cmpd-tablewrap { margin-top: 26px; }
+    .cmpd-tablewrap thead th + th, .cmpd-tablewrap tbody td + td { text-align: left; color: #d5cdec; }
+    .cmpd-tablewrap tbody th { padding: 12px 18px; color: #fff; font-weight: 600; font-size: 13px;
+                               text-align: left; border-top: 1px solid rgba(255,255,255,.07);
+                               vertical-align: top; min-width: 175px; }
+    .cmpd-tablewrap tbody td { vertical-align: top; min-width: 230px; }
+    .cmpd-tablewrap tbody td:last-child { min-width: 145px; color: #fff; font-weight: 600; }
+    .cmpd-win { color: #6ee7b7; }
+    .cmpd-band { text-align: left; }
+    .cmpd-band h2 { text-align: left; margin-top: 12px; }
+    .cmpd-band .cmpd-prose p { color: #c4b5fd; margin: 0; }
+    .cmpd-band .cmpd-prose p + p { margin-top: 14px; }
+    .cmpd-checks { list-style: none; padding: 0; color: #d5cdec; font-size: 13.5px; line-height: 1.65; }
+    .cmpd-check-ic { color: #34d399; flex-shrink: 0; }
+    .cmpd-aside { padding: 26px; }
+    .cmpd-aside h2, .cmpd-aside h3 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
+    .cmpd-aside p { color: #b7aed4; font-size: 13px; line-height: 1.65; margin: 14px 0 0; }
+    .cmpd-links { display: flex; flex-direction: column; gap: 12px; margin-top: 20px;
+                  font-size: 13px; font-weight: 600; }
+    .cmpd-links a { display: inline-flex; align-items: center; color: #c4b5fd; text-decoration: none; }
+    .cmpd-links a:hover { color: #fff; }
+    .cmpd-note { color: #8f83b2; font-size: 12px; line-height: 1.65; margin-top: 14px; }
+    .cmpd-source-caption { color: #8f83b2; font-size: 11.5px; line-height: 1.65; margin: 12px 2px 0; }
+    .cmpd-source-caption a { color: #b8a9e5; text-decoration: underline; text-decoration-color: rgba(184,169,229,.35); text-underline-offset: 3px; }
+    .cmpd-source-caption a:hover { color: #fff; }
+  </style>
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+<main id="main-content">
+  <section class="cmpd-hero">
+    <p class="cmpd-crumbs">
+      <a href="{% url 'proprietary:comparisons' %}" class="inline-flex items-center">
+        <i aria-hidden="true" data-lucide="arrow-left" class="mr-2 size-4"></i>
+        Comparisons
+      </a>
+    </p>
+    <p class="gk-eyebrow">SeekOut vs Gobii</p>
+    <h1 class="gk-display">
+      SeekOut vs Gobii: talent intelligence platform or <span class="gk-accent">configurable AI workforce?</span>
+    </h1>
+    <p class="gk-sub cmpd-sub">
+      SeekOut combines a one-billion-plus candidate index with recruiter search, contact enrichment, outreach, ATS rediscovery, and AI screening. Gobii deploys <a href="{% url 'pages:ai_employees' %}">persistent AI employees</a> that research across permitted sources, operate your systems, maintain trackers, create deliverables, and own recurring workflows.
+    </p>
+    <p class="cmpd-byline">
+      <span>Published {{ comparison.published_display|default:comparison.last_reviewed_display }}</span>
+      <span aria-hidden="true">·</span>
+      <span>Last reviewed {{ comparison.last_reviewed_display }}</span>
+      <span aria-hidden="true">·</span>
+      <a href="{% url 'proprietary:editorial_policy' %}">Gobii publishes this comparison and has a commercial interest in the outcome</a>
+    </p>
+    <div class="cmpd-ctas">
+      <a href="{% url 'pages:solution' slug='recruiting' %}" class="gk-btn">
+        See Gobii for Recruiting
+        <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
+      </a>
+      <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-sourcing-agent' %}" class="gk-btn-quiet">
+        Inspect the Sourcing Agent
+      </a>
+    </div>
+    <nav class="cmpd-jump" aria-label="On this page">
+      <span class="cmpd-jump-label">On this page</span>
+      <span class="cmpd-jump-links">
+        <a href="#methodology">Methodology</a>
+        <a href="#product-family">SeekOut products</a>
+        <a href="#feature-comparison">Feature comparison</a>
+        <a href="#seekout-wins">Where SeekOut wins</a>
+        <a href="#gobii-wins">Where Gobii wins</a>
+        <a href="#combined-workflow">Combined workflow</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQs</a>
+      </span>
+    </nav>
+  </section>
+
+  <section id="methodology" class="gk-section cmpd-anchor">
+    <div class="gk-band cmpd-band">
+      <p class="gk-eyebrow">Research methodology</p>
+      <h2 class="gk-h2">How this comparison was researched.</h2>
+      <div class="cmpd-prose" style="margin-top:18px;max-width:88ch">
+        <p>
+          We reviewed public materials for <a href="https://www.seekout.com/pricing/" target="_blank" rel="noopener">SeekOut Recruit</a>, <a href="https://www.seekout.com/solutions/mcp/" target="_blank" rel="noopener">MCP</a>, <a href="https://www.seekout.com/solutions/sam/" target="_blank" rel="noopener">Sam</a>, and <a href="https://www.seekout.com/solutions/spot/" target="_blank" rel="noopener">Spot</a>, plus Gobii’s <a href="https://docs.gobii.ai/" target="_blank" rel="noopener">documentation</a>, pricing, source code, and recruiting template. Sources were checked on August 2, 2026. We prioritized first-party documentation, labeled vendor-reported statistics, and separated documented capabilities from performance claims.
+        </p>
+        <p>
+          We did not use an authenticated SeekOut workspace, customer interviews, or a controlled head-to-head benchmark. Recommendations describe product fit based on public evidence; they do not promise hiring outcomes. See our <a href="{% url 'proprietary:editorial_policy' %}">editorial policy</a> for our review standards and corrections process.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-split">
+      <div>
+        <p class="gk-eyebrow">Executive summary</p>
+        <h2 class="gk-h2 cmpd-h2">SeekOut is a recruiting platform with AI agents. Gobii is an AI employee platform that can recruit.</h2>
+      </div>
+      <div class="cmpd-prose">
+        <p>
+          <strong class="text-white">The shortest useful answer:</strong> choose SeekOut when the candidate graph is the advantage. Choose Gobii when your process is the advantage. SeekOut packages talent data, recruiter search, enrichment, campaigns, rediscovery, and screening. Gobii assigns persistent AI employees to custom work across recruiting systems and the rest of the business.
+        </p>
+        <p>
+          SeekOut is stronger when recruiters need a large, structured talent pool on day one. It reports more than one billion public profiles, including 40 million-plus GitHub profiles, 97 million-plus academic and expert profiles, and 3.7 million-plus security-cleared profiles <a class="cmpd-cite" href="https://www.seekout.com/solutions/mcp/" target="_blank" rel="noopener">(SeekOut dataset overview)</a>.
+        </p>
+        <p>
+          Gobii is stronger when the assignment is not standardized. It can research approved portfolios, publications, directories, licensing systems, and customer databases. It can then apply a custom rubric, maintain the ATS or tracker, prepare submissions, and return on schedule. Separate employees can own sourcing, research, review, operations, and reporting.
+        </p>
+        <p>
+          The products can also be complementary: SeekOut supplies talent intelligence, while Gobii handles the custom operating work around it. We do not claim a verified native SeekOut–Gobii integration. Any handoff should use customer-approved data, systems, and licensing terms.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div>
+      <p class="gk-eyebrow">The 30-second decision</p>
+      <h2 class="gk-h2 cmpd-h2">Choose the product that solves the expensive bottleneck.</h2>
+    </div>
+    <div class="cmpd-grid3">
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip"><i aria-hidden="true" data-lucide="database" class="size-5"></i></span>
+          <h3>Choose SeekOut if...</h3>
+        </div>
+        <p>
+          You need built-in candidate data, structured technical or specialty-talent pools, recruiter-native search, contact enrichment, ATS rediscovery, market insights, native campaigns, inbound applicant evaluation, or packaged AI screening. SeekOut is the more complete recruiting product out of the box.
+        </p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip"><i aria-hidden="true" data-lucide="users" class="size-5"></i></span>
+          <h3>Choose Gobii if...</h3>
+        </div>
+        <p>
+          You already have useful data sources and need AI employees to operate the process around them: niche research, custom qualification, browser-based systems, files, spreadsheets, reports, recurring schedules, approvals, and work that crosses recruiting, operations, sales, or research.
+        </p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip"><i aria-hidden="true" data-lucide="combine" class="size-5"></i></span>
+          <h3>Use both if...</h3>
+        </div>
+        <p>
+          SeekOut produces a strong candidate pool, but recruiters still spend substantial time validating external evidence, applying client-specific rules, moving data among systems, packaging submissions, and reporting. Use SeekOut for talent intelligence and Gobii for the custom operating work around it.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section id="product-family" class="gk-section cmpd-anchor">
+    <div class="gk-band cmpd-band">
+      <p class="gk-eyebrow">A crucial product distinction</p>
+      <h2 class="gk-h2">“SeekOut” is a product family, not one feature set.</h2>
+      <div class="cmpd-prose" style="margin-top:18px;max-width:88ch">
+        <p>
+          This page primarily compares <strong class="text-white">SeekOut Recruit</strong> with Gobii. Recruit covers search, talent insights, enrichment, campaigns, exports, and—on higher packages—rediscovery and screening. <strong class="text-white">SeekOut MCP</strong> brings recruiting actions into compatible AI assistants. <strong class="text-white">Sam</strong> evaluates inbound applicants and runs structured AI interviews. <strong class="text-white">Spot</strong> combines SeekOut’s AI with human recruiters to deliver interview-ready candidates <a class="cmpd-cite" href="https://www.seekout.com/pricing/" target="_blank" rel="noopener">(SeekOut plan comparison)</a>.
+        </p>
+        <p>
+          Spot is not a like-for-like software purchase. It competes with agencies, contract recruiters, and internal recruiting capacity. Gobii supplies software and AI employees; it does not publicly offer a managed service in which human recruiters run the search and deliver a slate.
+        </p>
+      </div>
+      <div class="cmpd-grid4">
+        <article class="gk-card-edge cmpd-card"><h3>Recruit</h3><p>Talent search, enrichment, outreach, insights, exports, ATS rediscovery, and full-funnel packages.</p></article>
+        <article class="gk-card-edge cmpd-card"><h3>MCP</h3><p>Fourteen built-in recruiting workflows available through compatible AI assistants.</p></article>
+        <article class="gk-card-edge cmpd-card"><h3>Sam</h3><p>Inbound applicant evaluation and structured, candidate-facing AI screening interviews.</p></article>
+        <article class="gk-card-edge cmpd-card"><h3>Spot</h3><p>A managed recruiting service combining SeekOut technology with experienced human recruiters.</p></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="feature-comparison" class="gk-section cmpd-anchor">
+    <div>
+      <p class="gk-eyebrow">At a glance</p>
+      <h2 class="gk-h2 cmpd-h2">Specialized recruiting intelligence vs a configurable AI workforce.</h2>
+    </div>
+    <div class="gk-tablewrap cmpd-tablewrap">
+      <table style="min-width:1240px">
+        <thead>
+          <tr>
+            <th scope="col">Recruiting dimension</th>
+            <th scope="col">SeekOut</th>
+            <th scope="col">Gobii</th>
+            <th scope="col">Practical edge</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Core product</th><td>Purpose-built recruiting intelligence, sourcing, screening, and services platform</td><td>Persistent AI employee platform for recruiting and broader business work</td><td>Depends on the need</td></tr>
+          <tr><th scope="row">Included candidate data</th><td>Vendor-reported index of <a class="cmpd-inline-link" href="https://www.seekout.com/solutions/mcp/" target="_blank" rel="noopener">1B+ candidate profiles</a></td><td>No equivalent built-in proprietary candidate graph is publicly advertised</td><td>SeekOut</td></tr>
+          <tr><th scope="row">Technical talent</th><td><a class="cmpd-inline-link" href="https://support.seekout.com/en/articles/11878232-how-is-seekout-s-github-search-different" target="_blank" rel="noopener">40M+ GitHub profiles</a> with contribution, repository, and language data</td><td>Custom research across permitted GitHub, portfolio, publication, and project sources</td><td>SeekOut at indexed scale; Gobii for bespoke evidence</td></tr>
+          <tr><th scope="row">Specialty talent</th><td><a class="cmpd-inline-link" href="https://www.seekout.com/solutions/mcp/" target="_blank" rel="noopener">Academic, expert, healthcare, and cleared-talent datasets</a> with structured fields</td><td>Can use customer-provided, licensed, public, or connected specialty sources</td><td>SeekOut</td></tr>
+          <tr><th scope="row">Recruiter search</th><td><a class="cmpd-inline-link" href="https://www.seekout.com/pricing/" target="_blank" rel="noopener">Boolean, AI search, 30+ filters, and Power Filters</a>, plus Workspaces and pipelines</td><td>Natural-language assignments, employee charters, and custom output requirements</td><td>SeekOut for hands-on sourcing</td></tr>
+          <tr><th scope="row">Talent-market intelligence</th><td>Structured market counts, competitor maps, pool comparisons, and diversity insights</td><td>Custom market research, source review, and tailored reports</td><td>SeekOut for standardized recruiting analytics</td></tr>
+          <tr><th scope="row">Contact enrichment</th><td>Included monthly contact credits, depending on plan</td><td>Requires an approved provider, source, or customer workflow</td><td>SeekOut</td></tr>
+          <tr><th scope="row">Recruiting outreach</th><td>Email integration, send-on-behalf, and AI multistep campaigns</td><td>Configurable email, SMS, approvals, follow-ups, and connected systems</td><td>SeekOut for turnkey campaigns; Gobii for custom channels</td></tr>
+          <tr><th scope="row">ATS rediscovery</th><td><a class="cmpd-inline-link" href="https://support.seekout.com/en/articles/11878023-what-is-talent-rediscovery" target="_blank" rel="noopener">Unified external and ATS search</a> with profile refresh and silver-medalist workflows on integration plans</td><td>Can operate approved ATS workflows but does not include a comparable identity graph</td><td>SeekOut</td></tr>
+          <tr><th scope="row">Inbound evaluation</th><td>Sam ranks and explains applicants against job-specific requirements</td><td>Can review supplied resumes, files, forms, and data using a custom rubric</td><td>SeekOut for packaged high-volume use</td></tr>
+          <tr><th scope="row">AI screening interviews</th><td><a class="cmpd-inline-link" href="https://support.seekout.com/en/articles/13853182-sam-ai-screening-in-seekout" target="_blank" rel="noopener">Structured interviews, summaries, competency scores, transcripts, and ATS sync</a></td><td>No equivalent public turnkey candidate-interview product</td><td>SeekOut</td></tr>
+          <tr><th scope="row">General browser execution</th><td><a class="cmpd-inline-link" href="https://support.seekout.com/en/articles/15649778-seekout-chrome-extension" target="_blank" rel="noopener">Recruiting integrations and a sourcing extension</a>, not a general browser-agent platform</td><td>Core execution across permitted websites and browser-only tools</td><td><span class="cmpd-win">Gobii</span></td></tr>
+          <tr><th scope="row">Custom process</th><td>Recruiting-specific workflows and configurable role rubrics</td><td>Client-specific research, scoring, exceptions, systems, approvals, and deliverable formats</td><td><span class="cmpd-win">Gobii</span></td></tr>
+          <tr><th scope="row">Files and deliverables</th><td>Profiles, exports, scorecards, campaigns, and screening records</td><td>Arbitrary PDFs, reports, charts, trackers, briefings, and client submissions</td><td><span class="cmpd-win">Gobii</span> for flexibility</td></tr>
+          <tr><th scope="row">Multiple AI roles</th><td>Multiple recruiting workflows and AI capabilities</td><td><a class="cmpd-inline-link" href="https://docs.gobii.ai/using-gobii/files-and-workspaces" target="_blank" rel="noopener">Separate persistent employees</a> for sourcing, research, review, operations, and reporting</td><td><span class="cmpd-win">Gobii</span></td></tr>
+          <tr><th scope="row">Managed recruiting</th><td>Spot supplies AI plus expert human recruiters</td><td>No equivalent standard managed-recruiter service is publicly offered</td><td>SeekOut</td></tr>
+          <tr><th scope="row">Deployment</th><td>Hosted SaaS and service platform</td><td>Gobii Cloud, dedicated enterprise infrastructure, or <a class="cmpd-inline-link" href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener">MIT-licensed self-hosting</a></td><td><span class="cmpd-win">Gobii</span> for deployment control</td></tr>
+          <tr><th scope="row">Use beyond recruiting</th><td>Recruiting and talent intelligence</td><td>Recruiting, sales, operations, research, support, marketing, and other functions</td><td><span class="cmpd-win">Gobii</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cmpd-source-caption">
+      Table sources: <a href="https://www.seekout.com/pricing/" target="_blank" rel="noopener">SeekOut plans and features</a>,
+      <a href="https://www.seekout.com/solutions/mcp/" target="_blank" rel="noopener">SeekOut MCP and talent datasets</a>,
+      <a href="https://www.seekout.com/solutions/sam/" target="_blank" rel="noopener">SeekOut Sam</a>,
+      <a href="https://www.seekout.com/solutions/spot/" target="_blank" rel="noopener">SeekOut Spot</a>,
+      <a href="https://docs.gobii.ai/" target="_blank" rel="noopener">Gobii documentation</a>, and
+      <a href="{% url 'proprietary:pricing' %}">Gobii pricing</a>. Reviewed August 2, 2026.
+    </p>
+  </section>
+
+  <section id="seekout-wins" class="gk-section cmpd-anchor">
+    <div class="cmpd-split cmpd-split-wide">
+      <div>
+        <p class="gk-eyebrow">Where SeekOut wins</p>
+        <h2 class="gk-h2 cmpd-h2">SeekOut gives recruiters structured talent assets on day one.</h2>
+        <div class="cmpd-prose" style="margin-top:22px">
+          <p>
+            SeekOut’s clearest advantage is included talent data. Recruit Core combines unlimited search across a one-billion-plus profile index with AI search, 30-plus filters, 500 monthly contact credits, 1,000 monthly exports, email integration, and multistep campaigns. Recruiters can move from search to outreach without assembling a separate data stack <a class="cmpd-cite" href="https://www.seekout.com/pricing/" target="_blank" rel="noopener">(SeekOut pricing and features)</a>.
+          </p>
+          <p>
+            Its specialty datasets are also difficult to reproduce candidate by candidate. SeekOut publishes 40 million-plus GitHub profiles, 97 million-plus academic and expert profiles, and 3.7 million-plus cleared-talent profiles. Healthcare search adds specialty, credential, affiliation, and NPI-related fields <a class="cmpd-cite" href="https://www.seekout.com/solutions/mcp/" target="_blank" rel="noopener">(SeekOut dataset overview)</a>.
+          </p>
+          <p>
+            Higher packages add ATS rediscovery and inbound screening. Sourcing + Integration unifies external and ATS search. Full Recruiting Funnel adds job-specific evaluation and Sam screening interviews with summaries, competency scores, transcripts, and ATS records <a class="cmpd-cite" href="https://support.seekout.com/en/articles/13853182-sam-ai-screening-in-seekout" target="_blank" rel="noopener">(SeekOut Sam screening guide)</a>. SeekOut says recruiters remain responsible for advancement and employment decisions <a class="cmpd-cite" href="https://www.seekout.com/responsible-ai/" target="_blank" rel="noopener">(SeekOut responsible-AI policy)</a>.
+          </p>
+          <p>
+            SeekOut Spot supplies recruiting capacity, not just software. It fits buyers who want human recruiters and AI to run sourcing, engagement, screening, and slate delivery. Gobii does not claim an equivalent managed service <a class="cmpd-cite" href="https://www.seekout.com/solutions/spot/" target="_blank" rel="noopener">(SeekOut Spot)</a>.
+          </p>
+        </div>
+      </div>
+      <aside class="gk-card-glass cmpd-aside">
+        <h3>SeekOut’s strongest reasons to buy</h3>
+        <ul class="cmpd-checks space-y-3 mt-5">
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Immediate access to a large candidate index</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Technical and specialty-talent datasets</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Recruiter-native search, filters, and insights</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Included enrichment and recruiting campaigns</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>ATS rediscovery and packaged AI screening</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Optional managed recruiting through Spot</span></li>
+        </ul>
+        <div class="cmpd-links">
+          <a href="https://www.seekout.com/pricing/" target="_blank" rel="noopener">SeekOut plans and feature matrix <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="https://www.seekout.com/solutions/sam/" target="_blank" rel="noopener">SeekOut Sam <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="https://www.seekout.com/solutions/spot/" target="_blank" rel="noopener">SeekOut Spot <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="gobii-wins" class="gk-section cmpd-anchor">
+    <div class="cmpd-split">
+      <div>
+        <p class="gk-eyebrow">Where Gobii wins</p>
+        <h2 class="gk-h2 cmpd-h2">Your recruiting process is more than a candidate database.</h2>
+      </div>
+      <div class="cmpd-prose">
+        <p>
+          SeekOut standardizes recruiting work. Many teams, however, compete on the process around the search: their niche sources, evidence rules, exception handling, systems, candidate submissions, and client reporting.
+        </p>
+        <p>
+          Gobii assigns that process to <a class="cmpd-inline-link" href="https://docs.gobii.ai/" target="_blank" rel="noopener">persistent AI employees</a>. Each employee can have its own charter, tools, files, schedule, and approval boundaries. One can source candidates, another can inspect technical evidence, and a third can audit the shortlist. Operations and reporting employees can maintain systems and prepare recurring briefs.
+        </p>
+        <p>
+          Browser execution is another dividing line. SeekOut’s extension supports recruiting-oriented enrichment, saving, contact retrieval, and export <a class="cmpd-cite" href="https://support.seekout.com/en/articles/15649778-seekout-chrome-extension" target="_blank" rel="noopener">(SeekOut extension guide)</a>. Gobii can operate permitted browser-only systems more broadly. That matters for association sites, licensing portals, specialist databases, legacy applications, and internal tools.
+        </p>
+        <p>
+          Gobii can also create custom scorecards, evidence-linked dossiers, submission packets, spreadsheets, hiring-manager memos, and market reports. These formats become part of the employee’s job instead of exports a recruiter must rework. <a class="cmpd-inline-link" href="{% url 'proprietary:teams' %}">Gobii for Teams</a> adds shared agents, credentials, integrations, roles, and pooled capacity.
+        </p>
+        <p>
+          The same platform can support sales, operations, research, and customer work when hiring demand slows. Gobii’s MIT-licensed core can also be self-hosted when source inspection, model choice, or network control matters <a class="cmpd-cite" href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener">(Gobii source repository)</a>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="combined-workflow" class="gk-section cmpd-anchor">
+    <div>
+      <p class="gk-eyebrow">A stronger combined workflow</p>
+      <h2 class="gk-h2 cmpd-h2">Use SeekOut as the talent intelligence layer. Use Gobii as the custom operating layer.</h2>
+    </div>
+    <div class="cmpd-grid2">
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead"><span class="cmpd-ichip"><i aria-hidden="true" data-lucide="search" class="size-5"></i></span><h3>1. Build the candidate pool</h3></div>
+        <p>Use SeekOut’s native search, specialized talent datasets, recruiter filters, talent insights, ATS rediscovery where licensed, and contact enrichment to create an initial pool. A recruiter reviews the search strategy and selects which records can enter the next stage.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead"><span class="cmpd-ichip"><i aria-hidden="true" data-lucide="scan-search" class="size-5"></i></span><h3>2. Deepen permitted research</h3></div>
+        <p>Through an approved handoff, Gobii investigates sources outside the standard record: portfolios, public writing, conference appearances, company bios, directories, licensing portals, or customer-supplied databases. It records evidence and flags unknowns instead of inventing certainty.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead"><span class="cmpd-ichip"><i aria-hidden="true" data-lucide="clipboard-check" class="size-5"></i></span><h3>3. Apply your process</h3></div>
+        <p>Gobii evaluates each candidate using hard requirements, preferences, exclusions, evidence standards, and client-specific rules. It can route ambiguous cases to a recruiter, generate follow-up questions, and create the exact scorecard or submission the team requires.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead"><span class="cmpd-ichip"><i aria-hidden="true" data-lucide="repeat-2" class="size-5"></i></span><h3>4. Complete recurring operations</h3></div>
+        <p>SeekOut can run native recruiting campaigns and Sam screening when purchased. Gobii can maintain an approved ATS or tracker, organize files, prepare hiring-manager briefings, notify the team, generate recurring funnel reports, and begin the next sourcing cycle on schedule.</p>
+      </article>
+    </div>
+    <div class="cmpd-prose" style="margin-top:22px;max-width:88ch">
+      <p>
+        SeekOut publishes an MCP server, and Gobii can use MCP tools. Deeper interoperability is plausible, but it is not a verified public integration. Any direct connection would need validation for authentication, licensing, supported actions, data handling, and reliability. For now, the products should be described as working alongside one another through approved workflows.
+      </p>
+    </div>
+  </section>
+
+  <section id="pricing" class="gk-section cmpd-anchor">
+    <div class="cmpd-split cmpd-split-wide">
+      <div>
+        <p class="gk-eyebrow">Pricing reality</p>
+        <h2 class="gk-h2 cmpd-h2">A lower platform price does not include SeekOut’s talent graph.</h2>
+        <div class="cmpd-prose" style="margin-top:22px">
+          <p>
+            SeekOut Recruit Core starts at $149 per month when paid annually, or $179 month to month. It includes unlimited search, one billion-plus profiles, 500 monthly contact credits, 1,000 monthly exports, email integration, campaigns, and talent-pool insights. SeekOut lists three included seats and a 14-day trial without a credit card. Higher Recruit packages and Spot use custom pricing <a class="cmpd-cite" href="https://www.seekout.com/pricing/" target="_blank" rel="noopener">(SeekOut pricing)</a>.
+          </p>
+          <p>
+            <a class="cmpd-inline-link" href="{% url 'proprietary:pricing' %}">Gobii Pro</a> is $50 per month for 1,000 tasks and unlimited always-on agents. Scale is $250 per month for 10,000 tasks. Team is $50 per seat with pooled tasks, shared agents, integrations, credentials, roles, and billing. Enterprise adds dedicated infrastructure, SLAs, and custom governance. The MIT-licensed core can be self-hosted.
+          </p>
+          <p>
+            The prices buy different assets. SeekOut bundles recruiting data and workflow. Gobii supplies AI execution and workflow infrastructure, so customers may still need an ATS, contact provider, or licensed candidate source. Compare the total cost of producing an engaged candidate and completing the surrounding work—not the subscription alone.
+          </p>
+        </div>
+      </div>
+      <aside class="gk-card-glass cmpd-aside">
+        <h3>Current published starting points</h3>
+        <ul class="cmpd-checks space-y-3 mt-5">
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="badge-dollar-sign" class="cmpd-check-ic size-4 mt-0.5"></i><span>SeekOut Recruit Core: $149/month annually</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="badge-dollar-sign" class="cmpd-check-ic size-4 mt-0.5"></i><span>Recruit Core monthly: $179/month</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="badge-dollar-sign" class="cmpd-check-ic size-4 mt-0.5"></i><span>Higher Recruit packages and Spot: custom</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="badge-dollar-sign" class="cmpd-check-ic size-4 mt-0.5"></i><span>Gobii Pro: $50/month with 1,000 tasks</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="badge-dollar-sign" class="cmpd-check-ic size-4 mt-0.5"></i><span>Gobii Scale: $250/month with 10,000 tasks</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="code-xml" class="cmpd-check-ic size-4 mt-0.5"></i><span>Gobii self-hosted: open source and MIT licensed</span></li>
+        </ul>
+        <div class="cmpd-links">
+          <a href="https://www.seekout.com/pricing/" target="_blank" rel="noopener">SeekOut pricing <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="{% url 'proprietary:pricing' %}">Gobii pricing <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i></a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener">Gobii open-source repository <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+        </div>
+        <p class="cmpd-note">Prices, credits, packaging, and service terms reflect vendor-published information reviewed August 2, 2026 and can change. Confirm current terms with each vendor.</p>
+      </aside>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="gk-band cmpd-band">
+      <p class="gk-eyebrow">Human judgment stays central</p>
+      <h2 class="gk-h2">Use AI to expand evidence and capacity—not to make unsupervised hiring decisions.</h2>
+      <div class="cmpd-prose" style="margin-top:18px;max-width:88ch">
+        <p>
+          SeekOut says its AI supports rather than replaces recruiter judgment. Sam produces rankings, explanations, interview records, and competency scores, but recruiters remain responsible for advancement and employment decisions <a class="cmpd-cite" href="https://www.seekout.com/responsible-ai/" target="_blank" rel="noopener">(SeekOut responsible-AI policy)</a>. SeekOut publishes separate <a class="cmpd-inline-link" href="https://www.seekout.com/security/" target="_blank" rel="noopener">security and compliance information</a>.
+        </p>
+        <p>
+          Gobii workflows should use the same principle. Give each employee narrow access, require approval for sensitive actions, preserve evidence links, and route uncertain cases to a person. Recruiters should review outputs for accuracy, privacy, accessibility, bias, and job relevance. Neither product removes the employer’s duty to run a lawful, fair hiring process.
+        </p>
+      </div>
+      <div class="cmpd-links" style="max-width:88ch">
+        <a href="https://www.seekout.com/responsible-ai/" target="_blank" rel="noopener">Read SeekOut’s responsible AI materials <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+        <a href="https://docs.gobii.ai/using-gobii/approvals-and-requests" target="_blank" rel="noopener">Read about Gobii approvals and requests <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="gk-section cmpd-anchor">
+    <div>
+      <p class="gk-eyebrow">Frequently asked questions</p>
+      <h2 class="gk-h2 cmpd-h2">Common SeekOut vs Gobii buying questions.</h2>
+    </div>
+    <div class="cmpd-grid2">
+      <article class="gk-card-edge cmpd-card">
+        <h3>Is Gobii an alternative to SeekOut?</h3>
+        <p>Gobii is an alternative when the main need is custom research and recurring recruiting operations, not a replacement for SeekOut’s built-in candidate index. SeekOut is stronger for recruiter-native search, specialty talent data, contact enrichment, ATS rediscovery, and packaged screening.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Does Gobii include a candidate database?</h3>
+        <p>No equivalent proprietary candidate graph is included with Gobii. Gobii works with permitted public, licensed, uploaded, and connected sources. <a href="https://www.seekout.com/solutions/mcp/" target="_blank" rel="noopener">SeekOut reports</a> more than one billion candidate profiles.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Can Gobii work with SeekOut?</h3>
+        <p>The products can be used alongside one another through customer-approved handoffs and systems, but Gobii does not claim a verified native SeekOut integration. SeekOut can supply the candidate pool while Gobii handles custom research, qualification, deliverables, and recurring operations.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>What is the difference between SeekOut Recruit and SeekOut Spot?</h3>
+        <p><a href="https://www.seekout.com/pricing/" target="_blank" rel="noopener">Recruit</a> is software for sourcing, engaging, rediscovering, and screening talent. <a href="https://www.seekout.com/solutions/spot/" target="_blank" rel="noopener">Spot</a> combines SeekOut’s AI with human recruiters. Compare Recruit when you need software and Spot when you want delivered recruiting capacity.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Does SeekOut conduct AI screening interviews?</h3>
+        <p>Yes. <a href="https://support.seekout.com/en/articles/13853182-sam-ai-screening-in-seekout" target="_blank" rel="noopener">SeekOut Sam</a> supports structured AI interviews with summaries, competency scores, transcripts, and ATS synchronization. SeekOut states that recruiters retain hiring authority.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Which is better for technical recruiting?</h3>
+        <p>SeekOut is usually stronger when indexed technical talent data and hands-on search are the priority, including its <a href="https://support.seekout.com/en/articles/11878232-how-is-seekout-s-github-search-different" target="_blank" rel="noopener">GitHub dataset</a>. Gobii is stronger for bespoke portfolio research, client-specific evidence rules, custom reports, and cross-system work.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Which is better for a recruiting agency?</h3>
+        <p>SeekOut is stronger when the agency needs a standardized sourcing, enrichment, and outreach stack or wants managed capacity through Spot. Gobii is compelling when the agency’s advantage is a client-specific qualification process, niche research, custom candidate submissions, multi-stage quality control, and recurring reporting.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Can either platform be self-hosted?</h3>
+        <p><a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener">Gobii’s core platform</a> is MIT-licensed and can be self-hosted. SeekOut is a hosted recruiting platform and does not publicly offer a self-hosted edition.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-split cmpd-split-wide">
+      <div>
+        <p class="gk-eyebrow">Bottom line</p>
+        <h2 class="gk-h2 cmpd-h2">Choose SeekOut when talent data is core. Choose Gobii when custom workflow is core.</h2>
+        <div class="cmpd-prose" style="margin-top:22px">
+          <p>
+            Choose SeekOut for immediate candidate data, specialist talent pools, recruiter search, enrichment, rediscovery, screening, or a managed recruiting service. Gobii does not reproduce those purpose-built assets.
+          </p>
+          <p>
+            Choose Gobii for niche research, custom evaluation, browser-based systems, specialized employee roles, recurring operations, or self-hosting. Explore <a class="cmpd-inline-link" href="{% url 'pages:solution' slug='recruiting' %}">Gobii for Recruiting</a> or inspect the <a class="cmpd-inline-link" href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-sourcing-agent' %}">Candidate Sourcing AI Employee</a>.
+          </p>
+          <p>
+            If both needs matter, use SeekOut for talent intelligence and Gobii for the process around it.
+          </p>
+        </div>
+        <div class="cmpd-ctas">
+          <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-sourcing-agent' %}" class="gk-btn">View the Candidate Sourcing Employee <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i></a>
+          <a href="{% url 'proprietary:pricing' %}" class="gk-btn-quiet">Compare Gobii Plans</a>
+        </div>
+      </div>
+      <aside class="gk-card-glass cmpd-aside">
+        <h3>Continue comparing recruiting platforms</h3>
+        <p>SeekOut is one of several recruiting products that can work alongside a configurable AI workforce. Compare the underlying data asset, workflow boundary, pricing model, and role of human judgment.</p>
+        <div class="cmpd-links">
+          <a href="{% url 'proprietary:comparison_detail' slug='linkedin-recruiter-vs-gobii' %}">LinkedIn Recruiter vs Gobii <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i></a>
+          <a href="{% url 'proprietary:comparison_detail' slug='juicebox-vs-gobii' %}">Juicebox vs Gobii <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i></a>
+          <a href="{% url 'proprietary:comparisons' %}">Browse all comparisons <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i></a>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="gk-section" style="padding-top:0">
+    <p class="cmpd-note">
+      Last reviewed {{ comparison.last_reviewed_display }} by {{ comparison.reviewed_by }}. SeekOut names and trademarks belong to their respective owner. Gobii is not affiliated with or endorsed by SeekOut. Features, pricing, packaging, and policies can change; confirm current details before purchasing.
+    </p>
+  </section>
+</main>
+</div>
+{% endblock %}

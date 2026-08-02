@@ -273,6 +273,117 @@ COMPARISON_CATALOG = (
         "reviewed_by": "Gobii editorial team",
         "source_reviewed": "August 2026",
     },
+    {
+        "slug": "seekout-vs-gobii",
+        "competitor_name": "SeekOut",
+        "title": "SeekOut vs Gobii",
+        "template_name": "comparisons/detail_seekout.html",
+        "seo_title": "SeekOut vs Gobii: AI Recruiting Platform Comparison",
+        "seo_description": (
+            "Compare SeekOut and Gobii for candidate sourcing, talent data, AI screening, "
+            "outreach, ATS workflows, custom research, pricing, and automation."
+        ),
+        "summary": (
+            "A recruiting-first comparison of SeekOut's built-in talent intelligence and "
+            "screening products with Gobii's configurable AI workforce for custom recruiting work."
+        ),
+        "status": COMPARISON_STATUS_PUBLISHED,
+        "target_keywords": (
+            "SeekOut vs Gobii",
+            "Gobii vs SeekOut",
+            "SeekOut alternative",
+            "AI recruiting platform comparison",
+        ),
+        "competitor_url": "https://www.seekout.com/",
+        "competitor_application_category": "AI recruiting and talent intelligence platform",
+        "competitor_operating_system": "Web",
+        "competitor_same_as": (
+            "https://www.seekout.com/solutions/mcp/",
+            "https://www.seekout.com/solutions/sam/",
+            "https://www.seekout.com/solutions/spot/",
+        ),
+        "competitor_schema_description": (
+            "AI recruiting platform for talent search, contact enrichment, outreach, "
+            "ATS rediscovery, applicant screening, and managed recruiting services."
+        ),
+        "faq_items": (
+            {
+                "question": "Is Gobii an alternative to SeekOut?",
+                "answer": (
+                    "Gobii is an alternative when the main need is custom research and recurring "
+                    "recruiting operations, not a replacement for SeekOut's built-in candidate "
+                    "index. SeekOut is stronger for recruiter-native search, specialty talent data, "
+                    "contact enrichment, ATS rediscovery, and packaged screening."
+                ),
+            },
+            {
+                "question": "Does Gobii include a candidate database?",
+                "answer": (
+                    "No equivalent proprietary candidate graph is included with Gobii. Gobii works "
+                    "with permitted public, licensed, uploaded, and connected sources. SeekOut says "
+                    "its Recruit plans search more than one billion candidate profiles."
+                ),
+            },
+            {
+                "question": "Can Gobii work with SeekOut?",
+                "answer": (
+                    "The products can be used alongside one another through customer-approved "
+                    "handoffs and systems, but Gobii does not claim a verified native SeekOut "
+                    "integration. SeekOut can supply the candidate pool while Gobii handles custom "
+                    "research, qualification, deliverables, and recurring operations."
+                ),
+            },
+            {
+                "question": "What is the difference between SeekOut Recruit and SeekOut Spot?",
+                "answer": (
+                    "SeekOut Recruit is software for sourcing, engaging, rediscovering, and screening "
+                    "talent. SeekOut Spot is a separate managed service that combines SeekOut's AI "
+                    "with expert human recruiters to deliver interview-ready candidates."
+                ),
+            },
+            {
+                "question": "Does SeekOut conduct AI screening interviews?",
+                "answer": (
+                    "Yes. SeekOut Sam supports inbound applicant evaluation and structured AI "
+                    "screening interviews with summaries, competency scoring, transcripts, and ATS "
+                    "synchronization. SeekOut states that recruiters retain hiring authority."
+                ),
+            },
+            {
+                "question": "Which is better for technical recruiting?",
+                "answer": (
+                    "SeekOut is usually stronger when indexed technical talent data and hands-on "
+                    "recruiter search are the priority, including its GitHub developer dataset. "
+                    "Gobii is stronger when the process requires bespoke portfolio research, a "
+                    "client-specific evidence rubric, custom reports, or work across other systems."
+                ),
+            },
+            {
+                "question": "Which is better for a recruiting agency?",
+                "answer": (
+                    "SeekOut is stronger when the agency needs a standardized sourcing, enrichment, "
+                    "and outreach stack or wants managed capacity through Spot. Gobii is compelling "
+                    "when the agency's advantage is a client-specific qualification process, niche "
+                    "research, custom candidate submissions, multi-stage quality control, and "
+                    "recurring reporting."
+                ),
+            },
+            {
+                "question": "Can either platform be self-hosted?",
+                "answer": (
+                    "Gobii's core platform is MIT-licensed and can be self-hosted. SeekOut is a "
+                    "hosted recruiting SaaS and services platform and does not publicly offer a "
+                    "self-hosted edition."
+                ),
+            },
+        ),
+        "published_date": "2026-08-02",
+        "published_display": "August 2, 2026",
+        "last_reviewed_date": "2026-08-02",
+        "last_reviewed_display": "August 2, 2026",
+        "reviewed_by": "Gobii editorial team",
+        "source_reviewed": "August 2026",
+    },
 )
 
 
