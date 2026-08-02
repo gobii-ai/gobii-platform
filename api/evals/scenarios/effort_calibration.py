@@ -6,7 +6,9 @@ from typing import Iterable
 from django.db.models import Sum
 
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
+from api.agent.tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from api.agent.tools.sqlite_query_quality import summarize_sqlite_tool_result_calls
+from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.evals.base import EvalScenario, ScenarioTask
@@ -345,6 +347,20 @@ def _sqlite_call_persists_resume_state(call: PersistentAgentToolCall) -> bool:
     return "patch_text(" in sql or any(
         keyword in sql for keyword in ("insert", "update", "replace", "create table")
     )
+
+
+def _sqlite_call_mutates_charter(call: PersistentAgentToolCall) -> bool:
+    if call.tool_name != "sqlite_batch":
+        return False
+    for statement in split_sql_statements(sqlite_batch_sql(call)):
+        normalized = statement.casefold()
+        if (
+            "__agent_config" in normalized
+            and "charter" in normalized
+            and re.search(r"\b(?:insert|replace|update)\b", normalized)
+        ):
+            return True
+    return False
 
 
 def _human_input_requests_for_run(run_id: str, *, after=None):
@@ -784,6 +800,39 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             EvalRunTask.Status.FAILED,
             task_name=task_name,
             observed_summary=f"Unexpected __agent_config mutation count: {len(mutations)}.",
+            artifacts={"step": mutations[0].step},
+        )
+        return False
+
+    def _record_no_charter_mutation(
+        self,
+        run_id: str,
+        *,
+        after,
+        task_name: str,
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        mutations = [
+            call
+            for call in _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"})
+            if _sqlite_call_mutates_charter(call)
+        ]
+        if not mutations:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary="Finite resume state stayed out of the durable charter.",
+            )
+            return True
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary=f"Unexpected charter mutation count: {len(mutations)}.",
             artifacts={"step": mutations[0].step},
         )
         return False
@@ -2108,18 +2157,47 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
         ScenarioTask(name="verify_future_work_preserved", assertion_type="manual"),
         ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
         ScenarioTask(name="verify_no_overwork_tools", assertion_type="manual"),
+        ScenarioTask(name="verify_no_charter_churn", assertion_type="manual"),
         ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
     ]
+
+    @staticmethod
+    def _seed_candidate_queue(agent_id: str) -> None:
+        with agent_sqlite_db(str(agent_id)) as db_path:
+            connection = open_guarded_sqlite_connection(db_path)
+            try:
+                connection.executescript(
+                    """
+                    CREATE TABLE candidate_batches (
+                        batch_key TEXT PRIMARY KEY,
+                        status TEXT NOT NULL,
+                        target_count INTEGER NOT NULL,
+                        verified_count INTEGER NOT NULL,
+                        remaining_work INTEGER NOT NULL,
+                        next_cursor TEXT NOT NULL
+                    );
+                    INSERT INTO candidate_batches (
+                        batch_key,
+                        status,
+                        target_count,
+                        verified_count,
+                        remaining_work,
+                        next_cursor
+                    ) VALUES ('captive-wi-01', 'queued', 15, 0, 15, 'candidate-offset-0');
+                    """
+                )
+                connection.commit()
+            finally:
+                clear_guarded_connection(connection)
+                connection.close()
 
     def run(self, run_id: str, agent_id: str) -> None:
         self._ready_agent(
             agent_id,
-            charter=(
-                "Source qualified insurance candidates and report verified candidates with source limitations. "
-                "Preserve unfinished candidate verification work when the full target cannot be completed in one pass."
-            ),
+            charter="Source qualified insurance candidates and report verified candidates with source limitations.",
             schedule=None,
         )
+        self._seed_candidate_queue(agent_id)
         self._seed_recent_high_burn(agent_id)
         self._enable_eval_synthetic_tools(agent_id, ["eval_verify_candidate_batch"])
         mock_config = {
@@ -2227,6 +2305,11 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
             forbidden_tool_names=(EFFORT_OVERWORK_TOOL_NAMES - {"search_tools"})
             | ARTIFACT_TOOL_NAMES
             | RESEARCH_TOOL_NAMES,
+        )
+        self._record_no_charter_mutation(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_charter_churn",
         )
         self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=6)
 
