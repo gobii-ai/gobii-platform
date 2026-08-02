@@ -735,9 +735,18 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
                 },
             }
 
+        from api.agent.core import event_processing
+
+        original_execute_enabled_tool = event_processing.execute_enabled_tool
+
+        def execute_enabled_tool_with_interrupt(executing_agent, tool_name, params, **kwargs):
+            if tool_name == "http_request":
+                return complete_source_then_interrupt(executing_agent, params)
+            return original_execute_enabled_tool(executing_agent, tool_name, params, **kwargs)
+
         with self.wait_for_agent_idle(agent_id, timeout=120), patch(
-            "api.agent.core.event_processing.execute_http_request",
-            side_effect=complete_source_then_interrupt,
+            "api.agent.core.event_processing.execute_enabled_tool",
+            side_effect=execute_enabled_tool_with_interrupt,
         ):
             self.trigger_processing(
                 agent_id,
