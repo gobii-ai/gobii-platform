@@ -797,10 +797,11 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
         follow_ups = []
         source_attempts = 0
 
-        def complete_source_then_interrupt(_agent, _params):
+        def complete_source_then_interrupt(_agent, params):
             nonlocal source_attempts
-            source_attempts += 1
-            if source_attempts == 1:
+            method = str((params or {}).get("method") or "GET").upper()
+            if source_attempts == 0:
+                source_attempts = 1
                 follow_ups.append(
                     self.inject_message(
                         agent_id,
@@ -825,6 +826,15 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
                         ]
                     },
                 }
+            if method != "POST":
+                return {
+                    "status": "error",
+                    "status_code": 405,
+                    "message": "This action endpoint requires the explicit POST from the request; GET is not accepted.",
+                    "retryable": False,
+                    "terminal_error": True,
+                }
+            source_attempts += 1
             return {
                 "status": "ok",
                 "status_code": 200,

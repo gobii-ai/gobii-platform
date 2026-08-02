@@ -2828,6 +2828,7 @@ class ImpliedSendTests(TestCase):
             self.assertIn("correction or cancellation", same_conversation_workload)
             self.assertIn("imports them set-wise from current __tool_results", same_conversation_workload)
             self.assertIn("do not pre-read them", same_conversation_workload)
+            self.assertIn("once with its stated method", same_conversation_workload)
         finally:
             reset_inbound_routing_scope(token)
 

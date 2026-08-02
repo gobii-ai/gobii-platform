@@ -3527,7 +3527,8 @@ def _get_queued_workload_context(agent: PersistentAgent) -> str:
             "work does not erase a valid result already completed but not yet delivered. Reconcile both and deliver "
             "each still-valid outcome exactly once. If the preserved result contains structured material rows, the "
             "first SQLite call imports them set-wise from current __tool_results before the added work; do not pre-read "
-            "them or copy them through rows/bindings."
+            "them or copy them through rows/bindings. Perform an explicit added action once with its stated method; "
+            "do not preflight its URL."
         )
 
     conversations = {str(conversation_id) for conversation_id, _channel in competing}
