@@ -516,7 +516,13 @@ class NonRetryableSourceTerminalityScenario(EvalScenario, ScenarioExecutionTools
                     },
                 },
                 eval_stop_policy={
-                    "stop_on_tool_names_after_execution": ["send_chat_message"],
+                    "stop_when_all_seen": [
+                        {
+                            "tool_name": "send_chat_message",
+                            "params": {"will_continue_work": False},
+                            "after_execution": True,
+                        },
+                    ],
                     "stop_on_unexpected_relevant_tool": True,
                     "allowed_tool_names": [
                         search_tool,
@@ -886,8 +892,19 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
         calls = get_tool_calls_for_run(run_id, after=first.timestamp)
         source_calls = [call for call in calls if call.tool_name == "http_request"]
         replies = [call for call in calls if call.tool_name == "send_chat_message"]
-        reply = str((replies[0].tool_params or {}).get("body") or "") if len(replies) == 1 else ""
-        exact_shape = len(follow_ups) == 1 and len(source_calls) == 2 and len(replies) == 1
+        progress_replies = [
+            call for call in replies if (call.tool_params or {}).get("will_continue_work") is True
+        ]
+        final_replies = [
+            call for call in replies if (call.tool_params or {}).get("will_continue_work") is not True
+        ]
+        reply = str((final_replies[0].tool_params or {}).get("body") or "") if len(final_replies) == 1 else ""
+        exact_shape = (
+            len(follow_ups) == 1
+            and len(source_calls) == 2
+            and len(final_replies) == 1
+            and len(progress_replies) <= 1
+        )
         if not exact_shape:
             self.record_task_result(
                 run_id,
@@ -895,8 +912,9 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_reconciled_delivery",
                 observed_summary=(
-                    f"Expected two source/action calls, one follow-up, and one final reply; saw "
-                    f"source={len(source_calls)}, follow_up={len(follow_ups)}, reply={len(replies)}."
+                    f"Expected two source/action calls, one follow-up, at most one progress update, and one final "
+                    f"reply; saw source={len(source_calls)}, follow_up={len(follow_ups)}, "
+                    f"progress={len(progress_replies)}, final={len(final_replies)}."
                 ),
                 artifacts={"tool_calls": calls},
             )
@@ -925,7 +943,7 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
             EvalRunTask.Status.PASSED if choice == "Reconciles both exactly once" else EvalRunTask.Status.FAILED,
             task_name="verify_reconciled_delivery",
             observed_summary=f"{choice}: {reasoning}",
-            artifacts={"step": replies[0].step, "reply": reply},
+            artifacts={"step": final_replies[0].step, "reply": reply},
         )
 
 
