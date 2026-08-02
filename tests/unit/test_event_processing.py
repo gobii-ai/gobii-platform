@@ -5528,12 +5528,18 @@ class EventProcessingRuntimeGuardTests(TestCase):
             channel="email",
             address="runtime-user@example.com",
         )
+        self.conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.external_endpoint.address,
+        )
 
     def _create_inbound_email_message(self, *, body: str, timestamp) -> PersistentAgentMessage:
         message = PersistentAgentMessage.objects.create(
             owner_agent=self.agent,
             from_endpoint=self.external_endpoint,
             to_endpoint=self.endpoint,
+            conversation=self.conversation,
             is_outbound=False,
             body=body,
             raw_payload={},
@@ -6017,10 +6023,11 @@ class EventProcessingRuntimeGuardTests(TestCase):
             owner_agent=self.agent,
             from_endpoint=self.endpoint,
             to_endpoint=self.external_endpoint,
+            conversation=self.conversation,
             is_outbound=True,
             body="You're welcome.",
             raw_payload={},
-            seq=f"OUT{int(now.timestamp() * 1_000_000):023d}"[:26],
+            seq=f"ZZ{int(now.timestamp() * 1_000_000):024d}"[:26],
         )
         PersistentAgentMessage.objects.filter(pk=outbound.pk).update(timestamp=now + timedelta(seconds=1))
         finalized = _FinalizedToolBatch(
