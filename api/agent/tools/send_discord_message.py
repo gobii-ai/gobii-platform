@@ -12,7 +12,11 @@ from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTIO
 from api.agent.tools.agent_variables import substitute_variables_with_filespace
 from api.agent.core.link_references import handle_link_reference_errors
 from api.models import PersistentAgent
-from api.services.discord_bot import DiscordBotIntegrationError, send_channel_message
+from api.services.discord_bot import (
+    DiscordBotIntegrationError,
+    resolve_active_subscription,
+    send_channel_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +37,18 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                 "properties": {
                     "channel_id": {
                         "type": "string",
-                        "description": "Subscribed Discord channel ID.",
+                        "description": "Optional subscribed Discord channel ID.",
+                    },
+                    "channel_name": {
+                        "type": "string",
+                        "description": (
+                            "Exact subscribed channel name when channel_id is unavailable. "
+                            "A leading # and letter case are ignored; ambiguous names are rejected."
+                        ),
+                    },
+                    "guild_id": {
+                        "type": "string",
+                        "description": "Optional connected Discord guild ID to disambiguate channel_name.",
                     },
                     "message": {
                         "type": "string",
@@ -58,7 +73,7 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                         "description": "REQUIRED. true = you'll take another action, false = you're done.",
                     },
                 },
-                "required": ["channel_id", "will_continue_work"],
+                "required": ["will_continue_work"],
             },
         },
     }
@@ -67,10 +82,20 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
 @handle_link_reference_errors
 def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     channel_id = str(params.get("channel_id") or "").strip()
+    channel_name = str(params.get("channel_name") or "").strip()
+    guild_id = str(params.get("guild_id") or "").strip()
     body = str(params.get("message") or "").strip()
     attachment_paths = params.get("attachments")
-    if not channel_id:
-        return {"status": "error", "message": "channel_id is required."}
+    try:
+        subscription = resolve_active_subscription(
+            agent,
+            channel_id=channel_id,
+            channel_name=channel_name,
+            guild_id=guild_id,
+        )
+    except DiscordBotIntegrationError as exc:
+        return {"status": "error", "message": str(exc)}
+    channel_id = subscription.channel_id
     body = substitute_variables_with_filespace(body, agent)
     if content_error := markdown_only_error(body, surface="Discord"):
         return content_error
@@ -92,6 +117,8 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
             "message_id": str(message.id),
             "discord_message_id": str((message.raw_payload or {}).get("discord_message_id") or ""),
             "channel_id": channel_id,
+            "channel_name": subscription.channel_name,
+            "guild_id": subscription.guild.guild_id,
             "attachment_count": len(resolved_attachments),
         }
         if params.get("will_continue_work") is False:

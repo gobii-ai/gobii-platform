@@ -19,8 +19,11 @@ from api.agent.system_skills.registry import get_system_skill_definition
 from api.agent.core.prompt_context import _format_discord_reply_context, _get_system_instruction, build_prompt_context
 from api.agent.files.attachment_helpers import ResolvedAttachment
 from api.agent.tools.add_discord_reaction import execute_add_discord_reaction
-from api.agent.tools.discord_channel_subscriptions import execute_discord_channel_subscriptions
-from api.agent.tools.send_discord_message import execute_send_discord_message
+from api.agent.tools.discord_channel_subscriptions import (
+    execute_discord_channel_subscriptions,
+    get_discord_channel_subscriptions_tool,
+)
+from api.agent.tools.send_discord_message import execute_send_discord_message, get_send_discord_message_tool
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.models import (
     BrowserUseAgent,
@@ -533,6 +536,42 @@ class NativeDiscordBotTests(TestCase):
             ).count(),
             2,
         )
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.get")
+    def test_subscription_tool_ensures_exact_channel_name_within_claimed_guild(self, get_mock):
+        get_mock.return_value = _response(
+            [
+                {"id": "10", "name": "general", "type": 0},
+                {"id": "11", "name": "releases", "type": 0},
+            ]
+        )
+        guild = self._guild()
+
+        result = execute_discord_channel_subscriptions(
+            self.agent,
+            {
+                "action": "ensure",
+                "guild_id": guild.guild_id,
+                "channel_name": "#Releases",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["subscription"]["channel_id"], "11")
+        self.assertEqual(result["subscription"]["channel_name"], "releases")
+        self.assertTrue(result["auto_sleep_ok"])
+
+    @tag("batch_agent_webhooks")
+    def test_discord_tool_contracts_accept_human_channel_names(self):
+        subscription_parameters = get_discord_channel_subscriptions_tool()["function"]["parameters"]
+        send_parameters = get_send_discord_message_tool()["function"]["parameters"]
+
+        self.assertIn("channel_name", subscription_parameters["properties"])
+        self.assertNotIn("channel_id", subscription_parameters["required"])
+        self.assertIn("channel_name", send_parameters["properties"])
+        self.assertNotIn("channel_id", send_parameters["required"])
 
     @tag("batch_agent_webhooks")
     def test_claimed_guild_queryset_is_lockable_without_distinct(self):
@@ -1726,6 +1765,69 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(send_call.kwargs["files"][0][1][2], "text/plain")
         self.assertNotIn("json", send_call.kwargs)
         broadcast_mock.assert_called_once_with(str(message.id))
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tools.send_discord_message.resolve_filespace_attachments", return_value=[])
+    @patch("api.agent.tools.send_discord_message.send_channel_message")
+    def test_send_message_tool_resolves_unique_subscribed_channel_name(self, send_mock, _resolve_mock):
+        guild = self._guild(name="Support")
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="releases",
+        )
+        send_mock.return_value = SimpleNamespace(
+            id="message-1",
+            raw_payload={"discord_message_id": "discord-message-1"},
+        )
+
+        result = execute_send_discord_message(
+            self.agent,
+            {
+                "channel_name": "#Releases",
+                "message": "Shipped.",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["channel_id"], "10")
+        self.assertEqual(result["channel_name"], "releases")
+        send_mock.assert_called_once_with(
+            self.agent,
+            channel_id="10",
+            body="Shipped.",
+            attachments=[],
+        )
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tools.send_discord_message.resolve_filespace_attachments", return_value=[])
+    @patch("api.agent.tools.send_discord_message.send_channel_message")
+    def test_send_message_tool_rejects_ambiguous_channel_name(self, send_mock, _resolve_mock):
+        first_guild = self._guild(guild_id="100", name="Support")
+        second_guild = self._guild(guild_id="200", name="Engineering")
+        for guild, channel_id in ((first_guild, "10"), (second_guild, "20")):
+            PersistentAgentDiscordChannelSubscription.objects.create(
+                agent=self.agent,
+                guild=guild,
+                channel_id=channel_id,
+                channel_name="updates",
+            )
+
+        result = execute_send_discord_message(
+            self.agent,
+            {
+                "channel_name": "updates",
+                "message": "Shipped.",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("matches more than one subscribed channel", result["message"])
+        self.assertIn("guild_id", result["message"])
+        send_mock.assert_not_called()
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)

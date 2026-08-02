@@ -75,7 +75,11 @@ from api.evals.scenarios.behavior_micro import (
     explicit_stop_is_bounded_to_plan_closeout,
     tool_call_is_plan_activity,
 )
-from api.evals.scenarios.effort_calibration import _hierarchical_report_shape
+from api.evals.scenarios.effort_calibration import (
+    _hierarchical_report_shape,
+    _sqlite_call_mutates_charter,
+    _sqlite_call_persists_resume_state,
+)
 from api.evals.scenarios.github_credential_retention import (
     GITHUB_APP_ENV_KEYS,
     GITHUB_APP_ENV_SECRET_FIXTURES,
@@ -776,6 +780,40 @@ class BehaviorMicroHelperTests(TestCase):
             initiated_by=self.user,
             status=EvalRun.Status.RUNNING,
         )
+
+    def test_partial_resume_eval_distinguishes_domain_state_from_charter_churn(self):
+        domain_resume = SimpleNamespace(
+            tool_name="sqlite_batch",
+            status="complete",
+            tool_params={
+                "sql": (
+                    "CREATE TABLE candidate_progress(next_cursor TEXT, remaining_work INTEGER); "
+                    "INSERT INTO candidate_progress(next_cursor, remaining_work) VALUES (:cursor, :remaining);"
+                )
+            },
+        )
+        resume_timer = SimpleNamespace(
+            tool_name="sqlite_batch",
+            status="complete",
+            tool_params={
+                "sql": (
+                    "INSERT INTO __agent_schedules(schedule_key, kind, run_at, instruction) "
+                    "VALUES ('resume', 'once', :run_at, :instruction);"
+                )
+            },
+        )
+        charter_progress = SimpleNamespace(
+            tool_name="sqlite_batch",
+            status="complete",
+            tool_params={
+                "sql": "UPDATE __agent_config SET charter=patch_text(charter, :old, :new) WHERE id=1;"
+            },
+        )
+
+        self.assertTrue(_sqlite_call_persists_resume_state(domain_resume))
+        self.assertFalse(_sqlite_call_mutates_charter(domain_resume))
+        self.assertFalse(_sqlite_call_mutates_charter(resume_timer))
+        self.assertTrue(_sqlite_call_mutates_charter(charter_progress))
 
     def _tool_definition_names(self, agent):
         with patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False):

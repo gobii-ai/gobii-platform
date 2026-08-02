@@ -48,11 +48,14 @@ def get_discord_channel_subscriptions_tool() -> Dict[str, Any]:
                     },
                     "channel_id": {
                         "type": "string",
-                        "description": "Discord channel ID from discover_channels.",
+                        "description": "Optional Discord channel ID from discover_channels.",
                     },
                     "channel_name": {
                         "type": "string",
-                        "description": "Optional human-readable channel name when ensuring a subscription.",
+                        "description": (
+                            "Exact human-readable channel name for ensure when channel_id is unavailable. "
+                            "guild_id is still required; a leading # and letter case are ignored."
+                        ),
                     },
                     "query": {
                         "type": "string",
@@ -117,13 +120,16 @@ def execute_discord_channel_subscriptions(agent: PersistentAgent, params: Dict[s
         if action == "ensure":
             guild_id = str(params.get("guild_id") or "").strip()
             channel_id = str(params.get("channel_id") or "").strip()
-            if not guild_id or not channel_id:
-                return {"status": "error", "message": "guild_id and channel_id are required for ensure."}
+            channel_name = str(params.get("channel_name") or "").strip()
+            if not guild_id:
+                return {"status": "error", "message": "guild_id is required for ensure."}
+            if not channel_id and not channel_name:
+                return {"status": "error", "message": "channel_id or channel_name is required for ensure."}
             result = ensure_subscription(
                 agent,
                 guild_id=guild_id,
                 channel_id=channel_id,
-                channel_name=str(params.get("channel_name") or "").strip(),
+                channel_name=channel_name,
             )
             return _result_with_sleep({"status": "success", **result}, params)
 

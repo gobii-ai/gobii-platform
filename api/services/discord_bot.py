@@ -670,6 +670,29 @@ def _validate_text_channel_in_guild(*, guild_id: str, channel_id: str) -> Mappin
     raise DiscordBotIntegrationError("Discord channel was not found in the selected server.")
 
 
+def _normalized_channel_name(value: str) -> str:
+    return value.strip().lstrip("#").strip().casefold()
+
+
+def _resolve_text_channel_in_guild(*, guild_id: str, channel_name: str) -> Mapping[str, Any]:
+    normalized_name = _normalized_channel_name(channel_name)
+    if not normalized_name:
+        raise DiscordBotIntegrationError("channel_id or channel_name is required.")
+    matches = [
+        channel
+        for channel in _fetch_bot_channels(guild_id)
+        if channel.get("type") in DISCORD_TEXT_CHANNEL_TYPES
+        and _normalized_channel_name(str(channel.get("name") or "")) == normalized_name
+    ]
+    if not matches:
+        raise DiscordBotIntegrationError("Discord channel name was not found in the selected server.")
+    if len(matches) > 1:
+        raise DiscordBotIntegrationError(
+            "Discord channel name matches more than one text channel in the selected server; use channel_id."
+        )
+    return matches[0]
+
+
 def _validate_subscription_channel(subscription: PersistentAgentDiscordChannelSubscription) -> Mapping[str, Any]:
     return _validate_text_channel_in_guild(
         guild_id=subscription.guild.guild_id,
@@ -755,16 +778,62 @@ def list_subscriptions(agent: PersistentAgent) -> list[dict[str, str]]:
     return [serialize_subscription(subscription) for subscription in subscriptions]
 
 
+def resolve_active_subscription(
+    agent: PersistentAgent,
+    *,
+    channel_id: str = "",
+    channel_name: str = "",
+    guild_id: str = "",
+) -> PersistentAgentDiscordChannelSubscription:
+    requested_id = channel_id.strip()
+    requested_name = _normalized_channel_name(channel_name)
+    subscriptions = list(
+        PersistentAgentDiscordChannelSubscription.objects.select_related("guild")
+        .filter(
+            agent=agent,
+            status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+        )
+        .order_by("guild__name", "channel_name", "channel_id")
+    )
+    if guild_id.strip():
+        subscriptions = [
+            subscription for subscription in subscriptions if subscription.guild.guild_id == guild_id.strip()
+        ]
+    if requested_id:
+        subscriptions = [
+            subscription for subscription in subscriptions if subscription.channel_id == requested_id
+        ]
+    if requested_name:
+        subscriptions = [
+            subscription
+            for subscription in subscriptions
+            if _normalized_channel_name(subscription.channel_name) == requested_name
+        ]
+    if not requested_id and not requested_name:
+        raise DiscordBotIntegrationError("channel_id or channel_name is required.")
+    if not subscriptions:
+        raise DiscordBotIntegrationError("No active native Discord subscription matched that channel.")
+    if len(subscriptions) > 1:
+        raise DiscordBotIntegrationError(
+            "That channel name matches more than one subscribed channel; provide guild_id or channel_id."
+        )
+    return subscriptions[0]
+
+
 def ensure_subscription(
     agent: PersistentAgent,
     *,
     guild_id: str,
-    channel_id: str,
+    channel_id: str = "",
     channel_name: str = "",
 ) -> dict[str, Any]:
     channel_id = channel_id.strip()
     guild = _claimed_guild_queryset(agent).get(guild_id=guild_id, is_active=True)
-    discord_channel = _validate_text_channel_in_guild(guild_id=guild.guild_id, channel_id=channel_id)
+    if channel_id:
+        discord_channel = _validate_text_channel_in_guild(guild_id=guild.guild_id, channel_id=channel_id)
+    else:
+        discord_channel = _resolve_text_channel_in_guild(guild_id=guild.guild_id, channel_name=channel_name)
+        channel_id = str(discord_channel.get("id") or "").strip()
     canonical_channel_name = str(discord_channel.get("name") or channel_name or channel_id).strip()
 
     with transaction.atomic():
