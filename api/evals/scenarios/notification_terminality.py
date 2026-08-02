@@ -245,6 +245,7 @@ class NotificationTerminalityScenario(EvalScenario, ScenarioExecutionTools):
         ]
         if case.result_is_terminal and len(workflow_calls) == 1:
             workflow_at = self._created_at(workflow_calls[0])
+            workflow_completion_id = self._completion_id(workflow_calls[0])
             extra_calls = [
                 call
                 for call in extra_calls
@@ -252,10 +253,24 @@ class NotificationTerminalityScenario(EvalScenario, ScenarioExecutionTools):
                 or self._created_at(call) is None
                 or self._created_at(call) > workflow_at
             ]
+            followup_steps = (
+                list(
+                    PersistentAgentStep.objects.filter(
+                        agent_id=agent_id,
+                        created_at__gt=workflow_at,
+                        completion_id__isnull=False,
+                    ).exclude(completion_id=workflow_completion_id)
+                )
+                if workflow_at is not None
+                else []
+            )
+        else:
+            followup_steps = []
         workflow_ok = (
             len(workflow_calls) == 1
             and self._result_ok(workflow_calls[0].result)
             and (not case.result_is_terminal or not extra_calls)
+            and (not case.result_is_terminal or not followup_steps)
         )
         self.record_task_result(
             run_id,
@@ -267,10 +282,14 @@ class NotificationTerminalityScenario(EvalScenario, ScenarioExecutionTools):
                 if workflow_ok
                 else (
                     f"Expected one successful terminal {case.custom_tool_name} call with no follow-up tool; "
-                    f"found workflow={len(workflow_calls)}, extras={[call.tool_name for call in extra_calls]}."
+                    f"found workflow={len(workflow_calls)}, extras={[call.tool_name for call in extra_calls]}, "
+                    f"followup_completions={len(followup_steps)}."
                 )
             ),
-            artifacts={"tool_calls": [*workflow_calls, *extra_calls]},
+            artifacts={
+                "tool_calls": [*workflow_calls, *extra_calls],
+                "followup_steps": followup_steps,
+            },
         )
 
         notification_calls = {
