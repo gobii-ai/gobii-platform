@@ -360,6 +360,7 @@ class CompactedSourceAttributionScenario(EvalScenario, ScenarioExecutionTools):
     tags = ("agent_behavior", "multi_channel", "compaction", "source_attribution", "llm_judge", "real_harness")
     tasks = [
         ScenarioTask(name="inject_compacted_history", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_bounded_retrieval", assertion_type="tool_call"),
         ScenarioTask(name="verify_source_attribution", assertion_type="llm_judge"),
     ]
 
@@ -464,6 +465,26 @@ class CompactedSourceAttributionScenario(EvalScenario, ScenarioExecutionTools):
             .first()
         )
         body = outbound.body if outbound else ""
+        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        bounded_retrieval = (
+            len(sqlite_calls) <= 1
+            and all(call.status == PersistentAgentToolCall.Status.COMPLETE for call in sqlite_calls)
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if bounded_retrieval else EvalRunTask.Status.FAILED,
+            task_name="verify_bounded_retrieval",
+            expected_summary=(
+                "The agent should answer from compacted context or one targeted message query, without dumping history "
+                "and chasing truncated preview identifiers."
+            ),
+            observed_summary=(
+                f"sqlite_calls={len(sqlite_calls)}, statuses={[call.status for call in sqlite_calls]}."
+            ),
+            artifacts={"tool_calls": sqlite_calls},
+        )
         choice, reasoning = self.llm_judge(
             question=(
                 "Does the reply correctly attribute the invoice-reconciliation blocker statement to Nadia in the "
@@ -498,6 +519,7 @@ class AdvisoryAfterDeliveryPressureScenario(EvalScenario, ScenarioExecutionTools
     tasks = [
         ScenarioTask(name="inject_candidate_handoff", assertion_type="agent_processing"),
         ScenarioTask(name="verify_candidate_retrieval", assertion_type="tool_call"),
+        ScenarioTask(name="verify_recovery_free_execution", assertion_type="tool_call"),
         ScenarioTask(name="verify_complete_delivery", assertion_type="persisted_state"),
         ScenarioTask(name="verify_advisory_deferred", assertion_type="persisted_state"),
     ]
@@ -607,6 +629,38 @@ class AdvisoryAfterDeliveryPressureScenario(EvalScenario, ScenarioExecutionTools
             expected_summary="The bounded verified batch should be retrieved exactly once.",
             observed_summary=f"successful_verifier_calls={sum(call.status == PersistentAgentToolCall.Status.COMPLETE for call in verifier_calls)}, total={len(verifier_calls)}.",
             artifacts={"tool_calls": verifier_calls},
+        )
+
+        delivery_calls = [call for call in calls if call.tool_name == "send_chat_message"]
+        rejected_calls = [
+            call for call in calls if call.status == PersistentAgentToolCall.Status.ERROR
+        ]
+        recovery_free_execution = (
+            bool(delivery_calls)
+            and not rejected_calls
+            and delivery_calls[-1].status == PersistentAgentToolCall.Status.COMPLETE
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if recovery_free_execution else EvalRunTask.Status.FAILED,
+            task_name="verify_recovery_free_execution",
+            expected_summary=(
+                "The verified result should be retrieved and delivered without a deterministic tool error or recovery turn."
+            ),
+            observed_summary=(
+                "Retrieval and delivery completed without a rejected tool call."
+                if recovery_free_execution
+                else (
+                    f"delivery_calls={len(delivery_calls)}, "
+                    f"rejected_calls={len(rejected_calls)}, "
+                    f"rejected_tools={[call.tool_name for call in rejected_calls]}."
+                )
+            ),
+            artifacts={
+                "tool_calls": calls,
+                "rejected_tool_calls": rejected_calls,
+            },
         )
 
         outbound = list(

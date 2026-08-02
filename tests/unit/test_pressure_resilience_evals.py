@@ -36,6 +36,7 @@ class PressureResilienceEvalRegistrationTests(SimpleTestCase):
             [
                 "inject_candidate_handoff",
                 "verify_candidate_retrieval",
+                "verify_recovery_free_execution",
                 "verify_complete_delivery",
                 "verify_advisory_deferred",
             ],
@@ -47,6 +48,7 @@ class PressureResilienceEvalRegistrationTests(SimpleTestCase):
             [task.name for task in attribution.tasks],
             [
                 "inject_compacted_history",
+                "verify_bounded_retrieval",
                 "verify_source_attribution",
             ],
         )

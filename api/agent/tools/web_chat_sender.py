@@ -300,7 +300,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                         "description": (
                             "No dash punctuation/pre-work status for short work. Owner report with 4+ items: "
                             "include `Covered N/N` and one requested-field "
-                            "Markdown table; link exact entity names only with provided tokens. Keep other chat/outreach light. "
+                            "Markdown table; link entity names via adjacent handles or exact raw URLs. Keep other chat/outreach light. "
                             "Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
                         ),
                     },

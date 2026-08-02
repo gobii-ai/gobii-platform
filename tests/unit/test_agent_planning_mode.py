@@ -169,7 +169,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("create/start nothing", prompt)
         self.assertIn("exact API endpoint + http_request", prompt)
         self.assertIn("execute it next without pre-reading or copying its source", prompt)
-        self.assertIn("Short action or current-batch continuation", prompt)
+        self.assertIn("Named enabled tool: call it directly, never search", prompt)
+        self.assertIn("Use SQLite for multi-step/reusable rows; otherwise direct tools", prompt)
         self.assertIn("Meaningful shared win/repeated failure", prompt)
         self.assertIn("Campaign/bulk review", prompt)
         self.assertIn("before patching, check copy", prompt)
@@ -193,6 +194,28 @@ class PersistentAgentPlanningModeTests(TestCase):
             "pre-work status for short/finite work",
             send_chat["function"]["parameters"]["properties"]["body"]["description"],
         )
+
+    def test_implied_send_system_prefix_is_stable_across_requesters(self):
+        first = _get_system_instruction(
+            self.agent,
+            is_first_run=False,
+            implied_send_context={
+                "display_name": "Owner One",
+                "tool_example": 'send_chat_message(to_address="web://user/1", body="...")',
+            },
+        )
+        second = _get_system_instruction(
+            self.agent,
+            is_first_run=False,
+            implied_send_context={
+                "display_name": "Owner Two",
+                "tool_example": 'send_chat_message(to_address="web://user/2", body="...")',
+            },
+        )
+
+        self.assertEqual(first, second)
+        self.assertIn("Implied Send → latest web chat requester", first)
+        self.assertNotIn("web://user/", first)
 
     def test_first_run_prompt_asks_only_when_role_boundaries_materially_change_work(self):
         prompt = _get_first_run_welcome_message_instruction(

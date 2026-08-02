@@ -166,17 +166,13 @@ CONTACT_PROMPT_INLINE_LIMIT = 25
 CONTACT_PROMPT_SAMPLE_LIMIT = 10
 LINK_REFERENCE_PROMPT_NOTE = (
     "## Link References (CRITICAL)\n\n"
-    "Sources may pair `raw URL [link_ref: $[link:L…]]`: the raw URL is evidence; its adjacent token is a stable "
-    "link handle. Keep pairs attached. Final Markdown is exactly `[item]($[link:LEXACT])`; HTML uses "
-    "`<a href=\"$[link:LEXACT]\">item</a>`. URL tools get the adjacent raw URL, never the annotated pair. "
-    "A handle used as a destination must be the whole destination. Never "
-    "encode, edit, reassign, combine, guess, or invent it; never put it inside `[]` or search text. "
-    "SQLite source rows derive raw URLs from __tool_results; for an unavoidable agent-authored URL value, pass the "
-    "exact handle through a named binding, never SQL text. Items without a token stay plain; source/feed tokens link only themselves. A report "
-    "is unfinished while a token-backed entity name is plain: `Atlas URL [link_ref: $[link:L1]]` becomes "
-    "`[Atlas]($[link:L1])`. Table form is `| [Atlas]($[link:L1]) | requested facts |`: use each item destination once "
-    "on its name and omit a separate Link/Source column. Outreach links only if useful/requested. Cite beside the supported "
-    "claim; a source name alone is not a citation. Before sending, each linked item token must occur exactly once in the body."
+    "Use one supplied destination: adjacent `raw URL [link_ref: $[link:L…]]` becomes "
+    "`[item]($[link:LEXACT])`; otherwise an exact supplied raw URL stays `[item](https://example.com)`. Never put a URL "
+    "after `$[link:`. URL tools use the raw URL. Never alter, invent, reassign, or put handles in `[]`/search text. "
+    "SQLite source URLs derive from __tool_results; bind authored handles, never SQL literals. Source/feed tokens link "
+    "only themselves. Link token-backed entity names: `Atlas URL [link_ref: $[link:L1]]` becomes "
+    "`[Atlas]($[link:L1])`. For 3+ comparable items, use one table; link names once and omit Link/Source columns. "
+    "Outreach links only if useful/requested. Cite beside claims, not with source names alone. Use each token once."
 )
 SQLITE_EFFICIENCY_WARNING = (
     "SQLite efficiency warning: you've been handling __tool_results one result_id at a time. "
@@ -859,6 +855,8 @@ def _get_sqlite_guidance() -> str:
         "sourced facts/URLs/classifications into SQL. Bound interpretations only transcribe "
         "evidence; omit unsupported. For structured inbound messages, INSERT SELECT directly from the latest "
         "__messages payload and derive every field plus message_id; never pre-read or quote state/status. "
+        "For message fact lookup, select every needed field and filter __messages by the requested fact/channel/time "
+        "in the first query; use returned rows with context, never dump history or requery their IDs. "
         "Upsert stable keys and mutable provenance; never import siblings singly, mix old generic results, or "
         "rebuild durable tables. Affected 0 plus empty readback is failure.\n"
         "Bind authored/messy values as :name. json_each: arrays/objects; json_extract: scalars. "
@@ -3539,7 +3537,7 @@ def _get_queued_workload_context(agent: PersistentAgent) -> str:
             f"{len(competing)} newer inbound message(s) across {len(conversations)} other conversation(s) "
             f"({channel_text}) are queued, not replacements for this request. This processing turn serves the active "
             "conversation only: do not inspect, answer, or act on queued messages yet. Before the final reply, finish "
-            "or safely park any active plan step with update_plan. Then reply once on its bound channel with "
+            "the active delivery step and leave unrelated steps in todo. Then reply once on its bound channel with "
             "will_continue_work=false; the queued trigger will run next. On that later turn, triage by explicit human "
             "priority, deadline and impact, and acknowledge capacity or negotiate scope instead of silently thrashing. "
             "A large queue is normal operational load, not an emotional setback."
@@ -4089,8 +4087,8 @@ def _get_continuation_mode_prompt_block() -> str:
         "take the smallest concrete next action and follow tool retry/setup guidance. When structured result_meta gives "
         "an import shape, execute it next without pre-reading or copying its source. Reconcile fresh completion/outcome "
         "events into canonical state before counts/queues. Under load, use the plan and "
-        "SQLite as the control board: preserve owners and deadlines, finish or park one bounded step, then take the "
-        "highest-impact authorized commitment. Park blocked streams, continue unblocked work, and negotiate capacity/scope "
+        "SQLite as the control board: preserve owners and deadlines, finish one bounded step, then take the "
+        "highest-impact authorized commitment. Leave blocked streams in todo, continue unblocked work, and negotiate capacity/scope "
         "instead of thrashing. Recurring wakes: query owned state with `will_continue_work=true`, not `__messages`; "
         "a queue SELECT is never terminal. Dispatch ready rows next; only an empty queue sleeps silently.\n\n"
     )
@@ -4150,10 +4148,10 @@ def _get_system_instruction(
     continuation_mode_block = "" if is_first_run else _get_continuation_mode_prompt_block()
 
     if implied_send_active:
-        display_name = implied_send_context.get("display_name") if implied_send_context else "active web chat user"
-        tool_example = implied_send_context.get("tool_example") if implied_send_context else "send_chat_message(...)"
+        # Keep this prefix cacheable; user context owns requester identity and omitted to_address targets it.
+        tool_example = 'send_chat_message(body="...", will_continue_work=...)'
         delivery_context = (
-            f"## Implied Send → {display_name}\n\n"
+            "## Implied Send → latest web chat requester\n\n"
             "Text is user-facing: use only for questions, blockers, config changes, findings, finals, or deep-work updates. "
             "First-assignment choices use request_human_input only. "
             f"With any tool call, leave response content empty; use explicit `{tool_example}` for a message that must "
@@ -4199,7 +4197,8 @@ def _get_system_instruction(
         "tool results, or its own plan cleanup. Set false after delivery/config; future schedules, queued conversations, "
         "and their plan items do not keep this turn open.\n"
         f"{text_only_guidance}"
-        "Before final delivery, finish/park its plan. Never send a complete answer with true for cleanup: update_plan "
+        "Before final delivery, mark its delivery step done and leave unrelated steps in todo. Never send a "
+        "complete answer with true for cleanup: update_plan "
         "first, then send once with false.\n\n"
         "Recurring or truly multi-phase work may need charter/schedule updates; one-off work usually needs neither.\n"
     )
@@ -4232,7 +4231,8 @@ def _get_system_instruction(
         "5. Campaign/bulk review: before patching, check copy, each placeholder vs fields, every recipient's "
         "identity/qualification, schedule, and named zone. Keep ledger through receipts; name unresolved gaps. "
         "Patch safe independent fields; fixed offset != named zone; retryable=false ends that field.\n"
-        "6. Short action or current-batch continuation: material rows via SQLite; otherwise direct tool.\n"
+        "6. Named enabled tool: call it directly, never search. Deliver/use a successful current result next; do not "
+        "repeat or stage small reply-only results. Use SQLite for multi-step/reusable rows; otherwise direct tools.\n"
         "7. New substantial multi-round work: one brief same-channel kickoff(true) as the entire response; work next turn, "
         "with no prior plan/research/SQLite.\n\n"
     )
