@@ -956,6 +956,20 @@ class PublicTemplateRouteTests(TestCase):
             response.context["template_heading"],
             f"{template.display_name} AI Employee",
         )
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(
+            soup.body["data-analytics-cta-tracking-enabled"],
+            "true",
+        )
+        create_form = soup.find(
+            "form",
+            action="/library/finance/stripe-fraud-dispute-monitor/hire/",
+        )
+        self.assertIsNotNone(create_form)
+        self.assertEqual(
+            create_form.find("input", attrs={"name": "source_page"})["value"],
+            "public_template_detail",
+        )
 
     @tag("batch_public_templates")
     def test_public_template_detail_can_omit_ai_agent_template_from_title(self):
@@ -1748,8 +1762,19 @@ class LibraryViewTests(TestCase):
         self.assertContains(response, public_template.display_name)
         self.assertContains(response, curated_template.display_name)
         self.assertNotContains(response, "Private Library Template")
+        self.assertContains(
+            response,
+            'data-analytics-cta-tracking-enabled="true"',
+        )
         soup = BeautifulSoup(response.content, "html.parser")
         self.assertEqual(len(soup.find_all("h1")), 1)
+        custom_agent_link = soup.find(
+            "a",
+            {"data-analytics-cta-id": "library_custom_agent"},
+        )
+        self.assertIsNotNone(custom_agent_link)
+        self.assertEqual(custom_agent_link["href"], "/?spawn=1")
+        self.assertEqual(custom_agent_link["rel"], ["nofollow"])
         for script in soup.find_all("script", {"type": "application/ld+json"}):
             json.loads(script.string)
 

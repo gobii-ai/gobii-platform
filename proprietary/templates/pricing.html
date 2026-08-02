@@ -61,169 +61,198 @@
   {% endif %}
 {% endblock %}
 {% block content %}
-<div class="relative overflow-hidden bg-[linear-gradient(115deg,#ffffff_0%,#faf8ff_38%,#ffffff_68%,#f3edff_100%)]" id="pricing-page" data-current-plan="{{ current_plan_id|default:'' }}" data-current-plan-paid="{{ current_plan_is_paid|yesno:'true,false' }}">
+<div class="gk-luxe relative overflow-hidden" id="pricing-page" data-current-plan="{{ current_plan_id|default:'' }}" data-current-plan-paid="{{ current_plan_is_paid|yesno:'true,false' }}">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+  <style>
+    #pricing-page { padding-bottom: 84px; }
+    .pricing-hero { position: relative; text-align: center; padding: 68px 22px 0; }
+    .pricing-hero .gk-display { margin-top: 12px; }
+    .pricing-grid-wrap { position: relative; max-width: 1120px; margin: 44px auto 0; padding: 0 24px; }
+    .pricing-card { position: relative; padding: 30px 28px; display: flex; flex-direction: column; text-align: left; }
+    .pricing-name { font-size: 14px; font-weight: 600; color: #c4b5fd; margin: 0; }
+    .pricing-desc { color: #8b7fb8; font-size: 12.5px; margin-top: 3px; min-height: 1.25rem; }
+    .pricing-amount { display: flex; align-items: baseline; gap: 4px; margin-top: 18px; color: #fff;
+                      font-variant-numeric: tabular-nums; }
+    .pricing-prefix { font-size: 20px; font-weight: 400; line-height: 1; }
+    .pricing-figure { font-size: 42px; font-weight: 300; letter-spacing: -1.5px; line-height: 1; }
+    .pricing-price-label { font-size: 28px; font-weight: 300; letter-spacing: -.5px; line-height: 1.1; }
+    .pricing-model { color: #8b7fb8; font-size: 12.5px; line-height: 1.55; margin-top: 10px; min-height: 2.4em; }
+    .pricing-features { list-style: none; padding: 0; margin: 18px 0 22px; flex: 1; display: grid;
+                        align-content: start; gap: 8px; font-size: 13px; line-height: 1.5; color: #d5cdec; }
+    .pricing-features .font-semibold { color: #fff; }
+    .pricing-features i, .pricing-features svg { color: #a78bfa; }
+    .pricing-card .plan-cta { width: 100%; }
+    .pricing-cta-disabled { margin-top: auto; display: inline-flex; min-height: 48px; width: 100%;
+        align-items: center; justify-content: center; border-radius: 12px;
+        border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04); color: #8b7fb8;
+        font-size: 14px; font-weight: 600; cursor: not-allowed; user-select: none; }
+    .pricing-trial-note { margin-top: 12px; text-align: center; font-size: 12px; color: #8b7fb8; }
+    .pricing-grid-note { margin-top: 28px; text-align: center; font-size: 12px; color: #8b7fb8; }
+    .pricing-row2 { max-width: 1120px; margin: 20px auto 0; padding: 0 24px; display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .pricing-mini { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+                    padding: 20px 24px; flex-wrap: wrap; }
+    .pricing-mini h2, .pricing-mini h3 { font-size: 15px; font-weight: 600; color: #fff; margin: 0; }
+    .pricing-mini p { color: #8b7fb8; font-size: 12.5px; margin-top: 3px; max-width: 46ch; }
+    .pricing-mini .gk-eyebrow { font-size: 10px; letter-spacing: 1.8px; margin-bottom: 2px; }
+    .pricing-mini .gk-btn-quiet { padding: 9px 18px; font-size: 12.5px; border-radius: 9px; white-space: nowrap; }
+    .pricing-center { text-align: center; }
+    .pricing-tablewrap { max-width: 1000px; margin: 26px auto 0; }
+    .pricing-tablewrap table { min-width: 560px; }
+    .pricing-faq { max-width: 760px; margin: 26px auto 0; display: flex; flex-direction: column; gap: 10px; }
+  </style>
+
   <!-- ========================================================= -->
   <!-- Pricing Hero -->
-  <section class="relative pt-12 pb-5 sm:pt-14 sm:pb-6">
-    <div class="max-w-4xl mx-auto px-6 text-center">
-      <div class="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-violet-600">
-        <i data-lucide="sparkles" class="h-4 w-4"></i>
-        Simple Pricing
-      </div>
-      <h1 class="mt-4 text-3xl sm:text-4xl lg:text-5xl font-medium text-slate-950 leading-tight">
-        Choose the plan that fits your team.
-      </h1>
+  <section class="pricing-hero">
+    <div class="gk-eyebrow inline-flex items-center gap-2">
+      <i data-lucide="sparkles" class="h-4 w-4"></i>
+      Simple Pricing
     </div>
+    <h1 class="gk-display">
+      Choose the plan that fits your team.
+    </h1>
   </section>
 
   <!-- ========================================================= -->
   <!-- Pricing Cards -->
-  <section id="pricing" class="relative pt-5 pb-8 sm:pt-6 sm:pb-10">
-    <div class="max-w-7xl mx-auto px-5 sm:px-8">
-      <!-- Cards -->
-      <div class="mx-auto grid gap-5 sm:grid-cols-2 {% if pricing_grid_has_free_oss_plan %}xl:grid-cols-4{% else %}lg:grid-cols-3{% endif %}">
-        {% comment %} Card component {% endcomment %}
-        {% for plan in pricing_plans %}
-        <div class="relative flex min-h-[34rem] flex-col rounded-lg border bg-white/95 p-7 text-center {% if plan.highlight %}border-violet-300 shadow-[0_20px_60px_rgba(124,58,237,0.16)]{% else %}border-violet-100 shadow-[0_18px_48px_rgba(15,23,42,0.08)]{% endif %}">
-          {% if plan.badge %}
-          <div class="mb-6 flex justify-center">
-            <span class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold {% if plan.highlight %}bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-[0_8px_20px_rgba(124,58,237,0.28)]{% else %}bg-violet-50 text-violet-700{% endif %}">
-              {% if plan.highlight %}<i data-lucide="sparkles" class="h-3 w-3"></i>{% endif %}
-              {{ plan.badge }}
-            </span>
-          </div>
-          {% endif %}
-          
-          <h3 class="text-2xl font-semibold text-slate-950">{{ plan.name }}</h3>
-          <p class="mt-2 min-h-[1.5rem] text-sm text-slate-600">{{ plan.desc }}</p>
-          
-          <div class="mt-7 mb-3 flex items-start justify-center text-slate-950">
-            {% if plan.price_amount is not None %}
-            <span class="mt-1.5 text-xl font-semibold leading-none">{{ plan.price_prefix }}</span>
-            <span class="text-5xl font-semibold leading-none tracking-normal">{{ plan.price_amount }}</span>
-            {% else %}
-            <span class="text-3xl font-semibold leading-none tracking-normal">{{ plan.price_label }}</span>
-            {% endif %}
-          </div>
-          
-	          <p class="mx-auto mb-8 min-h-[2.5rem] max-w-[18rem] text-sm leading-6 text-slate-500">{{ plan.pricing_model }}</p>
-	          
-	          <ul class="mb-8 flex-1 space-y-3 text-left text-sm leading-6 text-slate-700">
-              {% if plan.tasks %}
-	            <li class="flex gap-3">
-                <i data-lucide="circle-check" class="mt-1 h-4 w-4 shrink-0 text-violet-600"></i>
-                <span><span class="font-semibold">{{ plan.tasks }}</span> tasks included</span>
-              </li>
-              {% endif %}
-	            {% for feature in plan.features %}
-	            <li class="flex gap-3">
-                <i data-lucide="circle-check" class="mt-1 h-4 w-4 shrink-0 text-violet-600"></i>
-                <span>{{ feature }}</span>
-              </li>
-	            {% endfor %}
-	          </ul>
-          {% if plan.disabled or plan.cta_disabled or plan.current_plan %}
-            <span class="mt-auto inline-flex min-h-12 items-center justify-center rounded-lg border border-violet-100 bg-white px-5 py-3 text-sm font-semibold text-slate-500 cursor-not-allowed select-none">{{ plan.cta }}</span>
+  <section id="pricing" class="pricing-grid-wrap">
+    <div class="mx-auto grid gap-5 sm:grid-cols-2 {% if pricing_grid_has_free_oss_plan %}xl:grid-cols-4{% else %}lg:grid-cols-3{% endif %}">
+      {% comment %} Card component {% endcomment %}
+      {% for plan in pricing_plans %}
+      <div class="pricing-card {% if plan.highlight %}gk-card-pop{% else %}gk-card-glass{% endif %}">
+        {% if plan.badge %}
+        <span class="gk-badge-float">{{ plan.badge }}</span>
+        {% endif %}
+
+        <h3 class="pricing-name">{{ plan.name }}</h3>
+        <p class="pricing-desc">{{ plan.desc }}</p>
+
+        <div class="pricing-amount">
+          {% if plan.price_amount is not None %}
+          <span class="pricing-prefix">{{ plan.price_prefix }}</span>
+          <span class="pricing-figure">{{ plan.price_amount }}</span>
           {% else %}
-            <a href="{{ plan.cta_url }}" 
-              data-plan-code="{{ plan.code }}"
-              data-plan-name="{{ plan.name }}"
-              {% if not plan.external %}
-              data-cta-signup-modal="pricing-plan"
-              {% endif %}
-              data-analytics-cta-id="{% if plan.analytics_cta_id %}{{ plan.analytics_cta_id }}{% else %}pricing_{{ plan.code|lower }}_plan{% endif %}"
-              data-analytics-placement="pricing_grid"
-              data-analytics-intent="{{ plan.analytics_intent|default:'select_plan' }}"
-              data-analytics-label="{{ plan.cta }}"
-              {% if plan.external %}target="_blank" rel="noopener noreferrer"{% endif %}
-              class="plan-cta mt-auto inline-flex min-h-12 items-center justify-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold transition
-              {% if plan.cta_variant == 'primary' %}
-              bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 text-white shadow-[0_12px_28px_rgba(124,58,237,0.25)] hover:from-violet-700 hover:via-indigo-700 hover:to-purple-700
-              {% else %}
-              border border-slate-300 bg-white text-slate-900 hover:border-violet-400 hover:text-violet-700
-              {% endif %}">
-              {% if plan.cta_icon %}<i data-lucide="{{ plan.cta_icon }}" class="h-4 w-4"></i>{% endif %}
-              {{ plan.cta }}
-            </a>
-          {% endif %}
-          {% if plan.trial_cancel_text %}
-            <p class="mt-3 text-center text-xs text-slate-500">{{ plan.trial_cancel_text }}</p>
+          <span class="pricing-price-label">{{ plan.price_label }}</span>
           {% endif %}
         </div>
-        {% endfor %}
+
+        <p class="pricing-model">{{ plan.pricing_model }}</p>
+
+        <ul class="pricing-features">
+            {% if plan.tasks %}
+          <li class="flex gap-3">
+              <i data-lucide="circle-check" class="mt-1 h-4 w-4 shrink-0"></i>
+              <span><span class="font-semibold">{{ plan.tasks }}</span> tasks included</span>
+            </li>
+            {% endif %}
+          {% for feature in plan.features %}
+          <li class="flex gap-3">
+              <i data-lucide="circle-check" class="mt-1 h-4 w-4 shrink-0"></i>
+              <span>{{ feature }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if plan.disabled or plan.cta_disabled or plan.current_plan %}
+          <span class="pricing-cta-disabled">{{ plan.cta }}</span>
+        {% else %}
+          <a href="{{ plan.cta_url }}"
+            data-plan-code="{{ plan.code }}"
+            data-plan-name="{{ plan.name }}"
+            {% if not plan.external %}
+            data-cta-signup-modal="pricing-plan"
+            {% endif %}
+            data-analytics-cta-id="{% if plan.analytics_cta_id %}{{ plan.analytics_cta_id }}{% else %}pricing_{{ plan.code|lower }}_plan{% endif %}"
+            data-analytics-placement="pricing_grid"
+            data-analytics-intent="{{ plan.analytics_intent|default:'select_plan' }}"
+            data-analytics-label="{{ plan.cta }}"
+            {% if plan.external %}target="_blank" rel="noopener noreferrer"{% endif %}
+            class="plan-cta mt-auto {% if plan.cta_variant == 'primary' %}gk-btn{% else %}gk-btn-quiet{% endif %}">
+            {% if plan.cta_icon %}<i data-lucide="{{ plan.cta_icon }}" class="h-4 w-4"></i>{% endif %}
+            {{ plan.cta }}
+          </a>
+        {% endif %}
+        {% if plan.trial_cancel_text %}
+          <p class="pricing-trial-note">{{ plan.trial_cancel_text }}</p>
+        {% endif %}
       </div>
-      {% if trial_note %}
-      <p class="mt-7 text-center text-xs text-slate-500">{{ trial_note }}</p>
-      {% endif %}
+      {% endfor %}
     </div>
+    {% if trial_note %}
+    <p class="pricing-grid-note">{{ trial_note }}</p>
+    {% endif %}
   </section>
 
   <!-- ========================================================= -->
-  <!-- Enterprise CTA -->
-  <section class="py-12">
-    <div class="max-w-4xl mx-auto px-4">
-      <div class="rounded-2xl border border-slate-200 bg-white shadow-sm px-8 py-10 text-center md:text-left md:flex md:items-center md:justify-between md:gap-8">
-        <div>
-          <h3 class="text-2xl font-semibold text-slate-900">Let's design your deployment.</h3>
-          <p class="mt-3 text-sm text-slate-500">Enterprise plans with dedicated infrastructure, SLAs, and custom governance.</p>
-        </div>
-        <a href="{% url 'proprietary:prequalify' %}" class="mt-6 md:mt-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold shadow-sm hover:bg-blue-700 transition whitespace-nowrap">
-          {% cta_text "cta_enterprise_request_call" fallback="Request a call" %}
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-        </a>
+  <!-- Enterprise CTA + Self-host / open source minis -->
+  <section class="pricing-row2">
+    <div class="gk-glassrow pricing-mini">
+      <div>
+        <h3>Let's design your deployment.</h3>
+        <p>Enterprise plans with dedicated infrastructure, SLAs, and custom governance.</p>
       </div>
+      <a href="{% url 'proprietary:prequalify' %}" class="gk-btn gk-btn-sm">
+        {% cta_text "cta_enterprise_request_call" fallback="Request a call" %}
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </a>
+    </div>
+    <div class="gk-glassrow pricing-mini">
+      <div>
+        <p class="gk-eyebrow">Open source</p>
+        <h2>Prefer to run Gobii yourself?</h2>
+        <p>Gobii's core is MIT-licensed. Self-host on your own infrastructure, bring your own AI models, and run always-on agents with browser automation.</p>
+      </div>
+      <a href="https://github.com/gobii-ai/gobii-platform"
+         target="_blank" rel="noopener noreferrer"
+         data-analytics-cta-id="pricing_free_oss_plan"
+         data-analytics-placement="pricing_self_host"
+         data-analytics-intent="view_open_source"
+         class="gk-btn-quiet">
+        <i data-lucide="github" class="h-4 w-4"></i>
+        View on GitHub
+      </a>
     </div>
   </section>
 
   <!-- ========================================================= -->
   <!-- Comparison Table -->
-  <section class="py-12">
-    <div class="max-w-7xl mx-auto px-8">
-      <h2 class="text-3xl sm:text-4xl font-semibold text-slate-900 text-center mb-12">Compare plans</h2>
-      <div class="overflow-x-auto">
-        <table class="min-w-full border border-slate-200 text-xs sm:text-sm">
-          <thead>
-            <tr>
-              <th class="p-2 sm:p-3 text-left font-semibold">Feature</th>
-              {% for label in comparison_plan_labels %}
-              <th class="p-2 sm:p-3 font-semibold">{{ label }}</th>
-              {% endfor %}
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in comparison_rows %}
-            <tr class="divide-x divide-slate-200">
-              <td class="p-2 sm:p-3 font-medium text-slate-700">{{ row.0 }}</td>
-              {% for col in row|slice:"1:" %}
-              <td class="p-2 sm:p-3 text-center">{{ col }}</td>
-              {% endfor %}
-            </tr>
+  <section class="gk-section">
+    <h2 class="gk-h2 pricing-center">Compare plans</h2>
+    <div class="gk-tablewrap pricing-tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            {% for label in comparison_plan_labels %}
+            <th>{{ label }}</th>
             {% endfor %}
-          </tbody>
-        </table>
-      </div>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in comparison_rows %}
+          <tr>
+            <td>{{ row.0 }}</td>
+            {% for col in row|slice:"1:" %}
+            <td>{{ col }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </section>
 
   <!-- ========================================================= -->
   <!-- FAQ -->
-  <section class="py-12">
-    <div class="max-w-4xl mx-auto px-4">
-      <h2 class="text-3xl sm:text-4xl font-semibold text-slate-900 text-center mb-12">Frequently asked questions</h2>
-      <div class="hs-accordion-group space-y-4">
-        {% for q,a in faqs %}
-        <div class="hs-accordion border border-slate-200 rounded-lg" id="faq-{{ forloop.counter }}">
-          <button class="hs-accordion-toggle w-full px-6 py-4 flex justify-between items-center text-left">
-            <span class="font-medium text-slate-900">{{ q }}</span>
-            <svg class="w-4 h-4 hs-accordion-active:hidden" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-            <svg class="w-4 h-4 hidden hs-accordion-active:block" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
-          </button>
-          <div class="hs-accordion-content hidden px-6 pb-4">
-            <p class="text-slate-600">{{ a }}</p>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
+  <section class="gk-section">
+    <h2 class="gk-h2 pricing-center">Frequently asked questions</h2>
+    <div class="gk-faq pricing-faq">
+      {% for q,a in faqs %}
+      <details id="faq-{{ forloop.counter }}">
+        <summary>{{ q }}</summary>
+        <p>{{ a }}</p>
+      </details>
+      {% endfor %}
     </div>
   </section>
 
@@ -231,45 +260,45 @@
   <!-- Enterprise Demo Modal -->
   <div id="demo-modal" class="hs-overlay hidden w-full h-full fixed top-0 start-0 z-[80] overflow-x-hidden overflow-y-auto">
     <div class="hs-overlay-open:mt-7 hs-overlay-open:opacity-100 hs-overlay-open:duration-500 mt-0 opacity-0 ease-out transition-all sm:max-w-lg sm:w-full m-3 sm:mx-auto">
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm">
+      <div class="rounded-xl" style="background:#1e1337;border:1px solid rgba(255,255,255,.12);box-shadow:0 30px 80px rgba(5,2,16,.6)">
         <div class="p-6">
           <div class="flex justify-between items-center mb-5">
-            <h3 class="text-xl font-semibold text-slate-900">Schedule Enterprise Demo</h3>
-            <button type="button" class="flex justify-center items-center w-7 h-7 text-sm font-semibold rounded-full border border-transparent text-slate-800 hover:bg-slate-100" data-hs-overlay="#demo-modal">
+            <h3 class="text-xl font-semibold text-white">Schedule Enterprise Demo</h3>
+            <button type="button" class="flex justify-center items-center w-7 h-7 text-sm font-semibold rounded-full border border-transparent" style="color:#b7aed4" data-hs-overlay="#demo-modal">
               <span class="sr-only">Close</span>
               <svg class="flex-shrink-0 w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
             </button>
           </div>
-          
+
           <form>
             <div class="grid gap-y-4">
               <div>
-                <label for="name" class="block text-sm font-medium mb-2">Full name</label>
-                <input type="text" id="name" name="name" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Your name">
+                <label for="name" class="gk-label">Full name</label>
+                <input type="text" id="name" name="name" class="gk-input" placeholder="Your name">
               </div>
-              
+
               <div>
-                <label for="email" class="block text-sm font-medium mb-2">Email</label>
-                <input type="email" id="email" name="email" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="your.email@company.com">
+                <label for="email" class="gk-label">Email</label>
+                <input type="email" id="email" name="email" class="gk-input" placeholder="your.email@company.com">
               </div>
-              
+
               <div>
-                <label for="company" class="block text-sm font-medium mb-2">Company</label>
-                <input type="text" id="company" name="company" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Company name">
+                <label for="company" class="gk-label">Company</label>
+                <input type="text" id="company" name="company" class="gk-input" placeholder="Company name">
               </div>
-              
+
               <div>
-                <label for="message" class="block text-sm font-medium mb-2">Message (optional)</label>
-                <textarea id="message" name="message" rows="3" class="py-3 px-4 block w-full border-gray-200 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Tell us about your needs"></textarea>
+                <label for="message" class="gk-label">Message (optional)</label>
+                <textarea id="message" name="message" rows="3" class="gk-input" placeholder="Tell us about your needs"></textarea>
               </div>
-              
+
               <div class="mt-3">
-                <button type="button" class="w-full py-3 px-4 inline-flex justify-center items-center gap-x-2 text-sm font-semibold rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">
+                <button type="button" class="gk-btn w-full">
                   Schedule demo
                 </button>
               </div>
-              
-              <div class="text-center text-xs text-slate-500">
+
+              <div class="text-center text-xs" style="color:#8b7fb8">
                 <p>This form is currently for demo purposes only.</p>
               </div>
             </div>
@@ -283,20 +312,20 @@
 <!-- Plan change confirmation modal -->
 <div id="plan-change-modal" class="hs-overlay hidden fixed inset-0 z-[90] flex items-center justify-center">
   <div class="absolute inset-0 bg-slate-900/60"></div>
-  <div class="relative max-w-lg w-[92%] sm:w-full bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 animate-[fadeIn_120ms_ease-out]">
+  <div class="relative max-w-lg w-[92%] sm:w-full rounded-2xl p-6 animate-[fadeIn_120ms_ease-out]" style="background:#1e1337;border:1px solid rgba(255,255,255,.14);box-shadow:0 30px 80px rgba(5,2,16,.6);color:#ece9f6">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <p class="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Confirm change</p>
-        <h3 id="plan-change-title" class="mt-1 text-xl font-semibold text-slate-900"></h3>
+        <p class="text-xs font-semibold uppercase tracking-[0.08em]" style="color:#8b7fb8">Confirm change</p>
+        <h3 id="plan-change-title" class="mt-1 text-xl font-semibold text-white"></h3>
       </div>
-      <button type="button" class="text-slate-500 hover:text-slate-800" data-close-plan-modal>
+      <button type="button" style="color:#8b7fb8" data-close-plan-modal>
         <svg class="w-5 h-5" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </div>
-    <p id="plan-change-body" class="mt-3 text-sm text-slate-600"></p>
+    <p id="plan-change-body" class="mt-3 text-sm" style="color:#b7aed4"></p>
     <div class="mt-6 flex flex-col sm:flex-row sm:justify-end gap-3">
-      <button type="button" class="w-full sm:w-auto inline-flex justify-center items-center px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50" data-close-plan-modal>Keep current plan</button>
-      <button type="button" class="w-full sm:w-auto inline-flex justify-center items-center px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow" id="plan-change-confirm">Change plan</button>
+      <button type="button" class="gk-btn-quiet w-full sm:w-auto" data-close-plan-modal>Keep current plan</button>
+      <button type="button" class="gk-btn w-full sm:w-auto" id="plan-change-confirm">Change plan</button>
     </div>
   </div>
 </div>
@@ -361,4 +390,4 @@
     });
   })();
 </script>
-{% endblock %} 
+{% endblock %}

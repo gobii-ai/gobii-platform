@@ -2,6 +2,7 @@
 {% load vite_tags %}
 
 {% block title %}{{ library_page_title|default:"AI Employee Template Library: Business Roles | Gobii" }}{% endblock %}
+{% block showcase_css %}{% include "includes/_gk_showcase.html" %}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="{{ library_page_description|default:"Explore Gobii’s AI Employee Template Library for sales, research, recruiting, operations, finance, and more. Choose a role and customize its workflow." }}">
@@ -79,8 +80,9 @@
 {% endblock %}
 
 {% block content %}
-<div class="bg-gradient-to-b from-white via-indigo-50/40 to-white">
-  <section class="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+<div class="gk-luxe">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+  <section class="relative mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
     {{ library_initial_payload|json_script:"library-initial-payload" }}
     <div
       id="gobii-frontend-root"
@@ -93,6 +95,13 @@
       data-library-initial-official-only="{{ library_initial_official_only|yesno:'true,false' }}"
     >
       {% include "library/_fallback.html" with payload=library_initial_payload selected_category=library_initial_category official_only=library_initial_official_only %}
+    </div>
+    <div class="relative z-10 mt-8 text-center">
+      <a class="gk-btn-quiet" href="{% url 'pages:home' %}?spawn=1" rel="nofollow"
+         data-analytics-cta-id="library_custom_agent" data-analytics-placement="library_footer"
+         data-analytics-intent="create_custom_agent">
+        Build a custom agent from your own prompt
+      </a>
     </div>
   </section>
 </div>

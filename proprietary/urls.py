@@ -1,4 +1,5 @@
 from django.urls import path
+from django.views.generic import RedirectView
 
 from pages.views import (
     AboutView,
@@ -10,7 +11,6 @@ from pages.views import (
     PrivacyPolicyView,
     ScaleCheckoutView,
     StartupCheckoutView,
-    TeamView,
     TermsOfServiceView,
 )
 
@@ -40,7 +40,9 @@ urlpatterns = [
     path("comparisons/", ComparisonsIndexView.as_view(), name="comparisons"),
     path("comparisons/<slug:slug>/", ComparisonDetailView.as_view(), name="comparison_detail"),
     path("about/", AboutView.as_view(), name="about"),
-    path("team/", TeamView.as_view(), name="team"),
+    # The team page was retired; keep the URL alive so existing inbound links and
+    # blog author references resolve instead of 404ing.
+    path("team/", RedirectView.as_view(pattern_name="proprietary:about", permanent=True), name="team"),
     path("careers/", CareersView.as_view(), name="careers"),
     path("tos/", TermsOfServiceView.as_view(), name="tos"),
     path("privacy/", PrivacyPolicyView.as_view(), name="privacy"),

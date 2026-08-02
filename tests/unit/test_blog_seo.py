@@ -659,7 +659,7 @@ class BlogSeoTests(TestCase):
         self.assertContains(response, "/blog/how-we-sandbox-ai-agents-in-production/")
         self.assertContains(response, "/blog/best-ai-employees/")
         self.assertContains(response, "/blog/hire-ai-employees/")
-        self.assertContains(response, "bg-white py-12")
+        self.assertContains(response, "Start here")
         self.assertNotContains(response, "bg-sky-950")
         self.assertNotContains(response, "text-cyan-50")
         self.assertNotContains(response, "bg-[#")

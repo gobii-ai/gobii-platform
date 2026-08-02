@@ -1,0 +1,52 @@
+{% load static %}
+<section id="hire-agents" class="gk-section gk-rows scroll-mt-24" aria-label="Agents for hire">
+  {% for group in home_hero_groups %}
+    <div class="gk-row-block" data-row="{{ group.key }}" id="row-{{ group.key }}" data-animate>
+      <div class="gk-row-title">
+        <h2>{{ group.label }}</h2>
+        <a href="{% url 'pages:library' %}">See all agents &rarr;</a>
+      </div>
+      <div class="gk-row-grid">
+        {% for worker in group.workers %}
+          <article class="gk-card-edge gk-card">
+            <h3>{{ worker.display_name }}</h3>
+            <p class="gk-outcome">{{ worker.tagline }}</p>
+            <div class="gk-meta">
+              {% if worker.schedule_description %}
+                <span class="gk-chip">{{ worker.schedule_description }}</span>
+              {% endif %}
+              {% for tool in worker.display_default_tools|slice:":2" %}
+                <span class="gk-chip">{{ tool }}</span>
+              {% endfor %}
+            </div>
+            <div class="gk-foot">
+              <form method="post" action="{{ worker.hire_url }}" data-lazy-csrf>
+                <input type="hidden" name="source_page" value="home_pretrained_workers" />
+                <input type="hidden" name="trial_onboarding" value="1" />
+                <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+                <button type="submit" class="gk-btn gk-btn-sm">
+                  {% if not user.is_authenticated or home_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
+                </button>
+              </form>
+              <a class="gk-detail" href="{{ worker.detail_url }}">{{ worker.detail_link_label }} &rarr;</a>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+  <div class="gk-browse-all" data-animate>
+    <a class="gk-btn-quiet" href="{% url 'pages:library' %}"
+       data-analytics-cta-id="home_k_browse_all" data-analytics-placement="template_rows" data-analytics-intent="browse_agents">
+      Browse the full agent library
+    </a>
+    <nav class="gk-solution-links" aria-label="Explore AI agent solutions">
+      <a href="{% url 'pages:solution_recruiting_candidate_sourcing' %}">
+        How AI candidate sourcing works <span aria-hidden="true">→</span>
+      </a>
+      <a href="{% url 'pages:solution_sales_ai_sales_agent' %}">
+        How AI sales agents work <span aria-hidden="true">→</span>
+      </a>
+    </nav>
+  </div>
+</section>

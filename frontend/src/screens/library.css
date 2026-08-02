@@ -1,0 +1,813 @@
+/* ==========================================================================
+   Agent Library — "Gobii Luxe" dark agent store.
+   Ported from the human-approved L4 design. All classes are prefixed .gklib-
+   so nothing here can collide with the frozen Tailwind bundle or the global
+   .gk-* / .gkw-* / .gkv-* theme includes (which this screen also consumes).
+   ========================================================================== */
+
+.gklib {
+  position: relative;
+  z-index: 1;
+  color: #ece9f6;
+  padding-bottom: clamp(28px, 4vw, 56px);
+}
+
+.gklib-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.gklib :where(p, h1, h2, ul, li) {
+  margin: 0;
+}
+
+.gklib :focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.gklib-head {
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(14px, 2.4vw, 28px);
+  flex-wrap: wrap;
+  margin-bottom: clamp(14px, 2vw, 22px);
+}
+
+.gklib-headmain {
+  flex: 1 1 260px;
+  min-width: min(100%, 240px);
+}
+
+.gklib-h1 {
+  font-weight: 300;
+  letter-spacing: -1.2px;
+  color: #fff;
+  font-size: clamp(26px, 3.6vw, 44px);
+  line-height: 1.12;
+  margin: 9px 0 8px;
+  text-wrap: balance;
+}
+
+.gklib-lead {
+  color: #b7aed4;
+  font-size: clamp(13px, 1.35vw, 15px);
+  line-height: 1.6;
+  max-width: 56ch;
+  text-wrap: pretty;
+}
+
+.gklib-signin {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: #c4b5fd;
+}
+
+.gklib-signin a {
+  color: #e9dcff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gklib-headside {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  flex: 1 1 260px;
+  min-width: min(100%, 240px);
+  max-width: 440px;
+}
+
+/* search ---------------------------------------------------------------- */
+
+.gklib-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(10, 6, 22, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 13px;
+  padding: 9px 13px;
+  color: #fff;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.gklib-search:focus-within {
+  border-color: rgba(196, 181, 253, 0.55);
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.16);
+}
+
+.gklib-search svg {
+  flex-shrink: 0;
+  color: #8b7fb8;
+}
+
+.gklib-search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  padding: 4px 0;
+  min-height: 26px;
+}
+
+.gklib-search input::placeholder {
+  color: #6d6394;
+}
+
+.gklib-search input::-webkit-search-cancel-button {
+  filter: invert(1) opacity(0.4);
+}
+
+.gklib-kbd {
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  color: #8b7fb8;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 5px;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px), (pointer: coarse) {
+  /* the "/" shortcut is a desktop keyboard affordance only */
+  .gklib-kbd {
+    display: none;
+  }
+}
+
+/* stat row -------------------------------------------------------------- */
+
+.gklib-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gklib-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #cfc7e8;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 6px 13px;
+}
+
+.gklib-stat svg {
+  color: #a78bfa;
+}
+
+.gklib-stat.is-busy {
+  color: #c4b5fd;
+  border-color: rgba(196, 181, 253, 0.35);
+}
+
+/* ----------------------------------------------------------------- pills */
+
+.gklib-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: clamp(14px, 2.2vw, 22px);
+}
+
+.gklib-pill {
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.2;
+  color: #d5cdec;
+  border-radius: 999px;
+  padding: 9px 15px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  background: linear-gradient(rgba(20, 13, 38, 0.9), rgba(20, 13, 38, 0.9)) padding-box,
+    linear-gradient(120deg, rgba(196, 181, 253, 0.35), rgba(255, 255, 255, 0.06)) border-box;
+  transition: color 0.18s, box-shadow 0.18s;
+}
+
+.gklib-pill:hover {
+  color: #fff;
+}
+
+.gklib-pill.is-on {
+  color: #fff;
+  background: linear-gradient(rgba(139, 92, 246, 0.32), rgba(139, 92, 246, 0.32)) padding-box,
+    linear-gradient(120deg, #c4b5fd, #f0abfc) border-box;
+  box-shadow: 0 6px 20px rgba(168, 85, 247, 0.35);
+}
+
+.gklib-pill .gklib-n {
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.gklib-pill svg {
+  flex-shrink: 0;
+}
+
+.gklib-pill-official.is-on {
+  background: linear-gradient(rgba(16, 130, 96, 0.3), rgba(16, 130, 96, 0.3)) padding-box,
+    linear-gradient(120deg, #6ee7b7, #34d399) border-box;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.28);
+}
+
+/* ----------------------------------------------------------------- split */
+
+.gklib-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.38fr) minmax(300px, 0.62fr);
+  gap: clamp(16px, 2.4vw, 30px);
+  align-items: start;
+}
+
+.gklib-main {
+  min-width: 0;
+}
+
+.gklib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 224px), 1fr));
+  gap: clamp(11px, 1.5vw, 15px);
+  align-items: stretch;
+}
+
+@media (max-width: 1080px) {
+  .gklib-split {
+    grid-template-columns: 1fr;
+  }
+
+  .gklib-spot {
+    position: static;
+    order: -1;
+  }
+
+  .gklib-spotinner {
+    max-width: 560px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+/* ----------------------------------------------------------------- cards */
+
+.gklib-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.035);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.gklib-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(196, 181, 253, 0.42);
+  box-shadow: 0 20px 54px rgba(109, 40, 217, 0.34);
+}
+
+.gklib-card.is-spot {
+  border-color: transparent;
+  background: linear-gradient(rgba(30, 20, 56, 0.97), rgba(30, 20, 56, 0.97)) padding-box,
+    linear-gradient(135deg, #7c3aed, #f0abfc) border-box;
+  box-shadow: 0 20px 56px rgba(124, 58, 237, 0.4);
+  transform: translateY(-3px);
+}
+
+.gklib-card:focus-within {
+  border-color: rgba(196, 181, 253, 0.6);
+}
+
+.gklib-cardlink {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: 16px;
+  text-decoration: none;
+}
+
+/* the card clips its corners, so pull the focus ring inside it */
+.gklib-cardlink:focus-visible {
+  outline-offset: -3px;
+}
+
+.gklib-cardbody {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  pointer-events: none;
+}
+
+.gklib-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 15px 15px 11px;
+}
+
+.gklib-mono {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #fff;
+  /* the solid category colour arrives as inline background-color; this sheen
+     only lightens the top-left, so the darkest point of the tile is always the
+     validated palette hue (>= 3:1 against the Luxe dark surface). */
+  background-image: linear-gradient(140deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+h2.gklib-nm {
+  display: block;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.gklib-tg {
+  color: #a99cc9;
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.gklib-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 15px 13px;
+  margin-top: auto;
+}
+
+.gklib-catchip {
+  font-size: 10px;
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: #e9dcff;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  /* the category label is the non-colour carrier of identity, so it is never
+     clipped — the meta row wraps instead */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gklib-official {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #34d399;
+  white-space: nowrap;
+}
+
+.gklib-handle {
+  font-size: 10.5px;
+  color: #8b7fb8;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gklib-like {
+  margin: -9px 0 -9px auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  font-size: 11px;
+  color: #8b7fb8;
+  font-variant-numeric: tabular-nums;
+  background: none;
+  border: 0;
+  font-family: inherit;
+  /* transparent padding gives the control a >= 40px touch target without
+     changing how dense the meta row looks */
+  padding: 9px 4px;
+  min-height: 40px;
+  border-radius: 8px;
+}
+
+button.gklib-like {
+  pointer-events: auto;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+button.gklib-like:hover:not(:disabled) {
+  color: #f0abfc;
+}
+
+button.gklib-like:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.gklib-like.is-liked {
+  color: #f0abfc;
+}
+
+.gklib-like svg {
+  flex-shrink: 0;
+}
+
+/* the output strip — what this agent actually hands you --------------- */
+
+.gklib-out {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(6, 3, 16, 0.42);
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.gklib-card.is-spot .gklib-out {
+  background: rgba(6, 3, 16, 0.55);
+}
+
+.gklib-olab {
+  font-size: 8.5px;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  color: #6d6394;
+  margin-bottom: 1px;
+}
+
+.gklib-orow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  color: #cfc7e8;
+  min-width: 0;
+}
+
+.gklib-osq {
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(196, 181, 253, 0.16);
+  color: #d5cdec;
+}
+
+.gklib-osq.is-out {
+  background: rgba(52, 211, 153, 0.16);
+  color: #6ee7b7;
+}
+
+.gklib-otext {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* no-strip state: the agent's own description fills the same well so the
+   card silhouette stays identical whether or not delivery data exists. */
+.gklib-desc {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(6, 3, 16, 0.42);
+  padding: 9px 11px;
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: #a99cc9;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------- spotlight */
+
+.gklib-spot {
+  position: sticky;
+  top: 22px;
+  border-radius: 20px;
+  padding: clamp(15px, 1.9vw, 21px);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.04);
+  min-width: 0;
+}
+
+.gklib-slab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 9.5px;
+  letter-spacing: 1.6px;
+  font-weight: 700;
+  color: #8b7fb8;
+  flex-wrap: wrap;
+}
+
+.gklib-livedot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #34d399;
+  animation: gklib-pulse 1.8s infinite;
+  flex-shrink: 0;
+}
+
+@keyframes gklib-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gklib-livedot {
+    animation: none;
+  }
+}
+
+.gklib-exchip {
+  margin-left: auto;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.2);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.gklib-stop {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 13px 0 10px;
+}
+
+.gklib-stop .gklib-mono {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  font-size: 13.5px;
+}
+
+.gklib-stoptitle {
+  color: #fff;
+  font-size: clamp(15.5px, 1.8vw, 19px);
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  margin: 0;
+  line-height: 1.25;
+}
+
+.gklib-ssub {
+  color: #a99cc9;
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin-top: 4px;
+}
+
+.gklib-swin {
+  border-radius: 11px;
+  overflow: hidden;
+  margin: 14px 0 13px;
+  box-shadow: 0 22px 60px rgba(3, 1, 12, 0.64);
+}
+
+.gklib-cta {
+  display: block;
+  text-align: center;
+  color: #fff;
+  font-weight: 550;
+  font-size: 13px;
+  padding: 11px 18px;
+  border-radius: 11px;
+  border: 2px solid transparent;
+  text-decoration: none;
+  background: linear-gradient(180deg, #3b2270, #2a1854) padding-box,
+    conic-gradient(from 40deg, #7c3aed, #f0abfc, #a855f7, #7c3aed) border-box;
+}
+
+.gklib-cta:hover {
+  color: #fff;
+  box-shadow: 0 10px 30px rgba(168, 85, 247, 0.35);
+}
+
+.gklib-dots {
+  display: flex;
+  gap: 5px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.gklib-dots button {
+  width: 28px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.gklib-dots button::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transition: background 0.3s, width 0.3s;
+}
+
+.gklib-dots button.is-on::before {
+  background: #c4b5fd;
+  width: 18px;
+  border-radius: 999px;
+}
+
+/* keep the demo chrome readable in the narrow sticky column */
+.gklib-swin .gkw-gs-menu span:nth-child(n + 6),
+.gklib-swin .gkw-hide {
+  display: none;
+}
+
+/* ------------------------------------------- loading / empty / error ---- */
+
+.gklib-skel {
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 15px;
+  min-height: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gklib-skelline {
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(196, 181, 253, 0.14), rgba(255, 255, 255, 0.05));
+  background-size: 200% 100%;
+  animation: gklib-shimmer 1.6s linear infinite;
+  height: 10px;
+}
+
+.gklib-skelline.tile {
+  height: 38px;
+  width: 38px;
+  border-radius: 11px;
+  flex-shrink: 0;
+}
+
+@keyframes gklib-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gklib-skelline {
+    animation: none;
+  }
+}
+
+.gklib-notice {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.045);
+  padding: clamp(22px, 4vw, 34px);
+  text-align: center;
+}
+
+.gklib-noticehead {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.gklib-notice p {
+  color: #a99cc9;
+  font-size: 13px;
+  margin: 7px 0 0;
+  line-height: 1.6;
+}
+
+.gklib-notice-error {
+  border-color: rgba(251, 113, 133, 0.4);
+  background: rgba(159, 18, 57, 0.14);
+  text-align: left;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.gklib-notice-error svg {
+  color: #fda4af;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.gklib-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #ece9f6;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font: inherit;
+  font-weight: 500;
+  font-size: 13px;
+  padding: 10px 20px;
+  min-height: 40px;
+  border-radius: 11px;
+  transition: background 0.14s, border-color 0.14s;
+}
+
+.gklib-quiet:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.gklib-more {
+  display: flex;
+  justify-content: center;
+  padding-top: clamp(14px, 2vw, 20px);
+}
+
+.gklib-more .gklib-quiet {
+  margin-top: 0;
+}
+
+.gklib-spin {
+  animation: gklib-spin 0.9s linear infinite;
+}
+
+@keyframes gklib-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gklib-spin {
+    animation-duration: 2.4s;
+  }
+
+  .gklib-card,
+  .gklib-card.is-spot {
+    transition: none;
+    transform: none;
+  }
+}

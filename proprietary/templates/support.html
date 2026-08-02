@@ -7,57 +7,77 @@
 {% endblock %}
 {% block content %}
 
-<div class="max-w-4xl mx-auto px-4 py-10 sm:px-6 lg:px-8">
-  <div class="text-center mb-10">
-    <h1 class="text-3xl font-semibold text-gray-900 sm:text-4xl">Support</h1>
-    <p class="mt-4 text-lg text-gray-600">We're here to help you with any questions or issues you may have.</p>
-  </div>
+<div class="gk-luxe">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+  <style>
+    .support-hero { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; padding: 72px 24px 0; text-align: center; }
+    .support-hero .gk-sub { margin-top: 14px; }
+    .support-wrap { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 48px 16px 96px; }
+    .support-card-title { font-size: 17px; font-weight: 600; color: #fff; }
+    .support-card-sub { color: #b7aed4; font-size: 13.5px; line-height: 1.6; }
+    #form-response { color: #b7aed4; font-size: 13px; }
+    #form-response [role="alert"] { border-radius: 11px; padding: 12px 14px; margin-top: 4px; font-size: 13px; }
+    #form-response .bg-green-100 { background: rgba(52,211,153,.12) !important; border: 1px solid rgba(52,211,153,.6); color: #6ee7b7 !important; }
+    #form-response .bg-red-100 { background: rgba(244,114,182,.1) !important; border: 1px solid rgba(244,114,182,.65); color: #f9a8d4 !important; }
+    .support-discord-icon { color: #a78bfa; }
+    .support-faq-title { font-weight: 300; font-size: clamp(21px, 2.2vw, 26px); letter-spacing: -.5px; color: #fff; text-align: center; margin: 0 0 16px; }
+    .support-faq .hs-accordion { border-color: rgba(255,255,255,.08); }
+    .support-faq .hs-accordion-toggle { color: #fff; font-size: 14px; }
+    .support-faq .hs-accordion-toggle:hover { color: #c4b5fd; }
+    .support-faq .hs-accordion-toggle svg { color: #a78bfa; }
+    .support-faq .hs-accordion-content p { color: #b7aed4; font-size: 13.5px; line-height: 1.65; }
+  </style>
 
-  <div class="mb-10">
-    <div class="grid md:grid-cols-2 gap-6">
-      <!-- Discord Card -->
-      <div class="gobii-card-base">
-        <div class="p-6">
-          <div class="flex items-center">
-            <div class="flex-shrink-0">
-              <svg class="h-8 w-8 text-purple-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
-              </svg>
+  <section class="support-hero">
+    <h1 class="gk-display">Support</h1>
+    <p class="gk-sub">We're here to help you with any questions or issues you may have.</p>
+  </section>
+
+  <div class="support-wrap">
+    <div class="mb-10">
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- Discord Card -->
+        <div class="gk-card-glass">
+          <div class="p-6">
+            <div class="flex items-center">
+              <div class="flex-shrink-0">
+                <svg class="h-8 w-8 support-discord-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
+                </svg>
+              </div>
+              <div class="ml-4">
+                <p class="support-card-title">Discord Community</p>
+                <p class="support-card-sub">Join our Discord community where you'll find Gobii staff ready to help.</p>
+              </div>
             </div>
-            <div class="ml-4">
-              <p class="text-lg font-medium text-gray-900">Discord Community</p>
-              <p class="text-gray-600">Join our Discord community where you'll find Gobii staff ready to help.</p>
-            </div>
+            {% if settings.PUBLIC_DISCORD_URL %}
+              <a href="{{ settings.PUBLIC_DISCORD_URL }}" class="gk-btn w-full mt-4">
+                Join Discord
+              </a>
+            {% endif %}
           </div>
-          {% if settings.PUBLIC_DISCORD_URL %}
-            <a href="{{ settings.PUBLIC_DISCORD_URL }}" class="mt-4 inline-flex items-center justify-center w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
-              Join Discord
-            </a>
-          {% endif %}
         </div>
-      </div>
 
-      <!-- Email/Form Card -->
-      <div class="gobii-card-base">
-        <div class="p-6">
-          <h3 class="text-lg font-medium text-gray-900 mb-4">Send us a message</h3>
+        <!-- Email/Form Card -->
+        <div class="gk-form">
+          <h3 class="support-card-title mb-4">Send us a message</h3>
           <form class="space-y-4" hx-post="{% url 'proprietary:support' %}" hx-swap="innerHTML" hx-target="#form-response">
             {% csrf_token %}
             <div>
               <label for="name" class="sr-only">Name</label>
-              <input type="text" id="name" name="name" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Name" required>
+              <input type="text" id="name" name="name" class="gk-input" placeholder="Name" required>
             </div>
             <div>
               <label for="email" class="sr-only">Email</label>
-              <input type="email" id="email" name="email" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Email" required>
+              <input type="email" id="email" name="email" class="gk-input" placeholder="Email" required>
             </div>
             <div>
               <label for="subject" class="sr-only">Subject</label>
-              <input type="text" id="subject" name="subject" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Subject" required>
+              <input type="text" id="subject" name="subject" class="gk-input" placeholder="Subject" required>
             </div>
             <div>
               <label for="message" class="sr-only">Message</label>
-              <textarea id="message" name="message" rows="4" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Message" required></textarea>
+              <textarea id="message" name="message" rows="4" class="gk-input" placeholder="Message" required></textarea>
             </div>
             {% if settings.TURNSTILE_ENABLED and support_form %}
             <div class="flex justify-center">
@@ -65,7 +85,7 @@
             </div>
             {% endif %}
             <div>
-              <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+              <button type="submit" class="gk-btn w-full">
                 Send Message
               </button>
             </div>
@@ -74,48 +94,48 @@
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="gobii-card-base">
-    <div class="p-6">
-      <h2 class="text-2xl font-semibold text-gray-800 mb-4 text-center">Frequently Asked Questions</h2>
+    <div class="gk-card-glass support-faq">
+      <div class="p-6">
+        <h2 class="support-faq-title">Frequently Asked Questions</h2>
 
-      <div class="hs-accordion-group">
-        <div class="hs-accordion border-b border-gray-200 py-3" id="faq-1">
-          <button class="hs-accordion-toggle group inline-flex items-center justify-between gap-x-3 w-full text-left text-gray-800 transition hover:text-gray-500">
-            <span class="font-medium">How do I get started with Gobii?</span>
-            <svg class="hs-accordion-active:hidden block w-4 h-4 text-gray-600 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            <svg class="hs-accordion-active:block hidden w-4 h-4 text-gray-600 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
-          </button>
-          <div id="faq-1-collapse" class="hs-accordion-content hidden w-full overflow-hidden transition-[height] duration-300">
-            <div class="pb-4 pt-2">
-              <p class="text-gray-600">You can get started by signing up for an account and exploring our documentation. Our quickstart guide will help you set up your first project.</p>
+        <div class="hs-accordion-group">
+          <div class="hs-accordion border-b py-3" id="faq-1">
+            <button class="hs-accordion-toggle group inline-flex items-center justify-between gap-x-3 w-full text-left transition">
+              <span class="font-medium">How do I get started with Gobii?</span>
+              <svg class="hs-accordion-active:hidden block w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              <svg class="hs-accordion-active:block hidden w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+            </button>
+            <div id="faq-1-collapse" class="hs-accordion-content hidden w-full overflow-hidden transition-[height] duration-300">
+              <div class="pb-4 pt-2">
+                <p>You can get started by signing up for an account and exploring our documentation. Our quickstart guide will help you set up your first project.</p>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="hs-accordion border-b border-gray-200 py-3" id="faq-2">
-          <button class="hs-accordion-toggle group inline-flex items-center justify-between gap-x-3 w-full text-left text-gray-800 transition hover:text-gray-500">
-            <span class="font-medium">What payment methods do you accept?</span>
-            <svg class="hs-accordion-active:hidden block w-4 h-4 text-gray-600 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            <svg class="hs-accordion-active:block hidden w-4 h-4 text-gray-600 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
-          </button>
-          <div id="faq-2-collapse" class="hs-accordion-content hidden w-full overflow-hidden transition-[height] duration-300">
-            <div class="pb-4 pt-2">
-              <p class="text-gray-600">We accept major credit cards including Visa, Mastercard, and American Express. We also support payment through PayPal.</p>
+          <div class="hs-accordion border-b py-3" id="faq-2">
+            <button class="hs-accordion-toggle group inline-flex items-center justify-between gap-x-3 w-full text-left transition">
+              <span class="font-medium">What payment methods do you accept?</span>
+              <svg class="hs-accordion-active:hidden block w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              <svg class="hs-accordion-active:block hidden w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+            </button>
+            <div id="faq-2-collapse" class="hs-accordion-content hidden w-full overflow-hidden transition-[height] duration-300">
+              <div class="pb-4 pt-2">
+                <p>We accept major credit cards including Visa, Mastercard, and American Express. We also support payment through PayPal.</p>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="hs-accordion py-3" id="faq-3">
-          <button class="hs-accordion-toggle group inline-flex items-center justify-between gap-x-3 w-full text-left text-gray-800 transition hover:text-gray-500">
-            <span class="font-medium">How can I cancel my subscription?</span>
-            <svg class="hs-accordion-active:hidden block w-4 h-4 text-gray-600 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            <svg class="hs-accordion-active:block hidden w-4 h-4 text-gray-600 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
-          </button>
-          <div id="faq-3-collapse" class="hs-accordion-content hidden w-full overflow-hidden transition-[height] duration-300">
-            <div class="pb-4 pt-2">
-              <p class="text-gray-600">You can cancel your subscription at any time from your account settings. Navigate to the Billing section and click on "Cancel Subscription". Your access will continue until the end of your current billing period.</p>
+          <div class="hs-accordion py-3" id="faq-3">
+            <button class="hs-accordion-toggle group inline-flex items-center justify-between gap-x-3 w-full text-left transition">
+              <span class="font-medium">How can I cancel my subscription?</span>
+              <svg class="hs-accordion-active:hidden block w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              <svg class="hs-accordion-active:block hidden w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+            </button>
+            <div id="faq-3-collapse" class="hs-accordion-content hidden w-full overflow-hidden transition-[height] duration-300">
+              <div class="pb-4 pt-2">
+                <p>You can cancel your subscription at any time from your account settings. Navigate to the Billing section and click on "Cancel Subscription". Your access will continue until the end of your current billing period.</p>
+              </div>
             </div>
           </div>
         </div>

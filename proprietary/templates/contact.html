@@ -7,55 +7,72 @@
 {% endblock %}
 {% block content %}
 
-<div class="max-w-4xl mx-auto px-4 py-10 sm:px-6 lg:px-8">
-  <div class="text-center mb-10">
-    <h1 class="text-3xl font-semibold text-gray-900 sm:text-4xl">Contact</h1>
-    <p class="mt-4 text-lg text-gray-600">We'd love to hear from you. Reach out and our team will follow up.</p>
-  </div>
+<div class="gk-luxe">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+  <style>
+    .contact-hero { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; padding: 72px 24px 0; text-align: center; }
+    .contact-hero .gk-sub { margin-top: 14px; }
+    .contact-wrap { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 48px 16px 96px; }
+    .contact-callout { text-align: left; padding: 32px; }
+    .contact-callout h3 { font-weight: 400; font-size: clamp(20px, 2.2vw, 26px); letter-spacing: -.4px; color: #fff; margin: 0; }
+    .contact-callout p { color: #d8ccf6; font-size: 14.5px; line-height: 1.65; margin: 12px 0 0; }
+    .contact-card-title { font-size: 17px; font-weight: 600; color: #fff; }
+    .contact-card-sub { color: #b7aed4; font-size: 13.5px; line-height: 1.6; }
+    .contact-card-sub a { color: #c4b5fd; font-weight: 500; }
+    .contact-card-sub a:hover { color: #fff; }
+    .contact-discord-icon { color: #a78bfa; }
+    #form-response { color: #b7aed4; font-size: 13px; }
+    #form-response [role="alert"] { border-radius: 11px; padding: 12px 14px; margin-top: 4px; font-size: 13px; }
+    #form-response .bg-green-100 { background: rgba(52,211,153,.12) !important; border: 1px solid rgba(52,211,153,.6); color: #6ee7b7 !important; }
+    #form-response .bg-red-100 { background: rgba(244,114,182,.1) !important; border: 1px solid rgba(244,114,182,.65); color: #f9a8d4 !important; }
+  </style>
 
-  <div class="mb-10">
-    <div class="gobii-card-base overflow-hidden mb-6">
-      <div class="bg-gradient-to-r from-violet-700 via-purple-600 to-purple-500 p-6 sm:p-8">
-        <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-          <div class="max-w-2xl">
-            <span class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-white">
-              Need help?
-            </span>
-            <h3 class="mt-4 text-2xl font-semibold text-white sm:text-3xl">
-              Support requests move faster through our dedicated support page.
-            </h3>
-            <p class="mt-3 text-base leading-7 text-purple-50">
-              If you need help with your account, billing, or a product issue, use
-              <a href="{% url 'proprietary:support' %}" class="font-semibold text-white underline decoration-white/60 underline-offset-4 hover:decoration-white">Support</a>
-              so your message lands in the right queue right away.
-            </p>
-          </div>
-          <div class="shrink-0">
-            <a href="{% url 'proprietary:support' %}" class="inline-flex w-full items-center justify-center rounded-md bg-white px-5 py-3 text-sm font-semibold text-purple-700 transition hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-purple-700 sm:w-auto">
-              Go to Support
-            </a>
-          </div>
+  <section class="contact-hero">
+    <h1 class="gk-display">Contact</h1>
+    <p class="gk-sub">We'd love to hear from you. Reach out and our team will follow up.</p>
+  </section>
+
+  <div class="contact-wrap">
+    <div class="gk-band contact-callout mb-6">
+      <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+        <div class="max-w-2xl">
+          <span class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-white">
+            Need help?
+          </span>
+          <h3 class="mt-4">
+            Support requests move faster through our dedicated support page.
+          </h3>
+          <p>
+            If you need help with your account, billing, or a product issue, use
+            <a href="{% url 'proprietary:support' %}" class="font-semibold text-white underline decoration-white/60 underline-offset-4 hover:decoration-white">Support</a>
+            so your message lands in the right queue right away.
+          </p>
+        </div>
+        <div class="shrink-0">
+          <a href="{% url 'proprietary:support' %}" class="gk-btn-quiet w-full sm:w-auto">
+            Go to Support
+          </a>
         </div>
       </div>
     </div>
 
     <div class="grid md:grid-cols-2 gap-6">
       <!-- Discord Card -->
-      <div class="gobii-card-base">
+      <div class="gk-card-glass">
         <div class="p-6">
           <div class="flex items-center">
             <div class="flex-shrink-0">
-              <svg class="h-8 w-8 text-purple-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg class="h-8 w-8 contact-discord-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
               </svg>
             </div>
             <div class="ml-4">
-              <p class="text-lg font-medium text-gray-900">Discord Community</p>
-              <p class="text-gray-600">Join our Discord community where you'll find Gobii staff ready to help.</p>
+              <p class="contact-card-title">Discord Community</p>
+              <p class="contact-card-sub">Join our Discord community where you'll find Gobii staff ready to help.</p>
             </div>
           </div>
           {% if settings.PUBLIC_DISCORD_URL %}
-            <a href="{{ settings.PUBLIC_DISCORD_URL }}" class="mt-4 inline-flex items-center justify-center w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
+            <a href="{{ settings.PUBLIC_DISCORD_URL }}" class="gk-btn w-full mt-4">
               Join Discord
             </a>
           {% endif %}
@@ -63,44 +80,42 @@
       </div>
 
       <!-- Email/Form Card -->
-      <div class="gobii-card-base">
-        <div class="p-6">
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Send a general inquiry</h3>
-          <p class="mb-4 text-sm text-gray-600">
-            Use this form for partnerships, press, or general questions. For product or account help, head to
-            <a href="{% url 'proprietary:support' %}" class="font-medium text-blue-600 hover:text-blue-700">Support</a>.
-          </p>
-          <form class="space-y-4" hx-post="{% url 'proprietary:contact' %}" hx-swap="innerHTML" hx-target="#form-response">
-            {% csrf_token %}
-            <div>
-              <label for="name" class="sr-only">Name</label>
-              <input type="text" id="name" name="name" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Name" required>
-            </div>
-            <div>
-              <label for="email" class="sr-only">Email</label>
-              <input type="email" id="email" name="email" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Email" required>
-            </div>
-            <div>
-              <label for="subject" class="sr-only">Subject</label>
-              <input type="text" id="subject" name="subject" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Subject" required>
-            </div>
-            <div>
-              <label for="message" class="sr-only">Message</label>
-              <textarea id="message" name="message" rows="4" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Message" required></textarea>
-            </div>
-            {% if settings.TURNSTILE_ENABLED and support_form %}
-            <div class="flex justify-center">
-              {{ support_form.turnstile }}
-            </div>
-            {% endif %}
-            <div>
-              <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                Send Message
-              </button>
-            </div>
-            <div id="form-response"></div>
-          </form>
-        </div>
+      <div class="gk-form">
+        <h3 class="contact-card-title mb-2">Send a general inquiry</h3>
+        <p class="contact-card-sub mb-4">
+          Use this form for partnerships, press, or general questions. For product or account help, head to
+          <a href="{% url 'proprietary:support' %}">Support</a>.
+        </p>
+        <form class="space-y-4" hx-post="{% url 'proprietary:contact' %}" hx-swap="innerHTML" hx-target="#form-response">
+          {% csrf_token %}
+          <div>
+            <label for="name" class="sr-only">Name</label>
+            <input type="text" id="name" name="name" class="gk-input" placeholder="Name" required>
+          </div>
+          <div>
+            <label for="email" class="sr-only">Email</label>
+            <input type="email" id="email" name="email" class="gk-input" placeholder="Email" required>
+          </div>
+          <div>
+            <label for="subject" class="sr-only">Subject</label>
+            <input type="text" id="subject" name="subject" class="gk-input" placeholder="Subject" required>
+          </div>
+          <div>
+            <label for="message" class="sr-only">Message</label>
+            <textarea id="message" name="message" rows="4" class="gk-input" placeholder="Message" required></textarea>
+          </div>
+          {% if settings.TURNSTILE_ENABLED and support_form %}
+          <div class="flex justify-center">
+            {{ support_form.turnstile }}
+          </div>
+          {% endif %}
+          <div>
+            <button type="submit" class="gk-btn w-full">
+              Send Message
+            </button>
+          </div>
+          <div id="form-response"></div>
+        </form>
       </div>
     </div>
   </div>

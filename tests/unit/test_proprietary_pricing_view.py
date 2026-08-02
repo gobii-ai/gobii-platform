@@ -226,7 +226,7 @@ class PricingPageCtaCopyTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
-    def test_pricing_page_renders_free_oss_plan(
+    def test_pricing_page_presents_self_hosting_as_section_not_plan(
         self,
         mock_get_stripe_settings,
     ):
@@ -241,43 +241,25 @@ class PricingPageCtaCopyTests(TestCase):
         plans = response.context["pricing_plans"]
         self.assertEqual(
             [plan["code"] for plan in plans],
-            ["free_oss", PlanNames.STARTUP, PlanNames.SCALE, PlanNames.ORG_TEAM],
+            [PlanNames.STARTUP, PlanNames.SCALE, PlanNames.ORG_TEAM],
         )
-        self.assertTrue(response.context["pricing_grid_has_free_oss_plan"])
+        self.assertFalse(response.context["pricing_grid_has_free_oss_plan"])
 
-        free_plan = plans[0]
-        self.assertEqual(free_plan["name"], "Free")
-        self.assertEqual(free_plan["desc"], "Self-Hosted Agents")
-        self.assertEqual(free_plan["price_label"], "$0")
-        self.assertEqual(free_plan["price_amount"], 0)
-        self.assertIsNone(free_plan["tasks"])
-        self.assertEqual(free_plan["pricing_model"], "Self-hosted, open source")
-        self.assertIn("Run on your own computer or server", free_plan["features"])
-        self.assertIn("Bring your own AI models", free_plan["features"])
-        self.assertEqual(free_plan["cta"], "View on GitHub")
-        self.assertEqual(free_plan["cta_url"], "https://github.com/gobii-ai/gobii-platform")
-        self.assertEqual(free_plan["cta_icon"], "github")
-        self.assertEqual(free_plan["cta_variant"], "outline")
-        self.assertTrue(free_plan["external"])
-        self.assertFalse(free_plan["signup_modal"])
-        self.assertEqual(free_plan["analytics_cta_id"], "pricing_free_oss_plan")
-        self.assertEqual(free_plan["analytics_intent"], "view_open_source")
-
-        self.assertEqual(plans[1]["cta_url"], reverse("proprietary:startup_checkout"))
-        self.assertEqual(plans[2]["cta_url"], reverse("proprietary:scale_checkout"))
-        self.assertEqual(plans[3]["cta_url"], "/app/team")
+        self.assertEqual(plans[0]["cta_url"], reverse("proprietary:startup_checkout"))
+        self.assertEqual(plans[1]["cta_url"], reverse("proprietary:scale_checkout"))
+        self.assertEqual(plans[2]["cta_url"], "/app/team")
 
         content = response.content.decode()
+        # Self-hosting renders as its own open-source section, not a "$0" plan card.
+        self.assertNotIn('data-plan-code="free_oss"', content)
         analytics_pos = content.index('data-analytics-cta-id="pricing_free_oss_plan"')
         anchor_start = content.rfind("<a ", 0, analytics_pos)
         anchor_end = content.index("</a>", analytics_pos)
-        free_anchor = content[anchor_start:anchor_end]
-        self.assertIn('href="https://github.com/gobii-ai/gobii-platform"', free_anchor)
-        self.assertIn('target="_blank"', free_anchor)
-        self.assertIn('rel="noopener noreferrer"', free_anchor)
-        self.assertIn('data-analytics-intent="view_open_source"', free_anchor)
-        self.assertNotIn("data-cta-signup-modal", free_anchor)
-        self.assertNotContains(response, "None tasks included")
+        oss_anchor = content[anchor_start:anchor_end]
+        self.assertIn('href="https://github.com/gobii-ai/gobii-platform"', oss_anchor)
+        self.assertIn('target="_blank"', oss_anchor)
+        self.assertIn("Prefer to run Gobii yourself?", content)
+        self.assertNotIn("Self-Hosted Agents", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")

@@ -1,0 +1,97 @@
+{% load static %}
+<div class="gk-hero">
+  <div class="gk-cats" id="gk-cats">
+    {% for group in home_hero_groups %}
+      <button type="button" class="gk-pill gk-cat" data-k="{{ group.key }}" data-active="{% if forloop.first %}true{% else %}false{% endif %}"
+              data-analytics-cta-id="home_k_category_{{ group.key }}" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">{{ group.label }}</button>
+    {% endfor %}
+    <button type="button" class="gk-pill gk-cat" data-k="all" data-active="{% if not home_hero_groups %}true{% else %}false{% endif %}"
+            data-analytics-cta-id="home_k_category_all" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">All agents</button>
+  </div>
+
+  <div class="gk-hswap" id="gk-hswap">
+    {% for group in home_hero_groups %}
+      {% if group.key == "recruiting" %}
+        <div class="gk-hgroup{% if forloop.first %} gk-live{% endif %}" data-g="recruiting">
+          {% if forloop.first %}<h1 class="gk-h1">{% else %}<p class="gk-h1">{% endif %}<span class="gk-accent">20 qualified candidates</span>, delivered to your ATS every&nbsp;week.{% if forloop.first %}</h1>{% else %}</p>{% endif %}
+          <p class="gk-sub">Hire a Gobii that already knows the job. It sources, screens, and enriches &mdash; then delivers straight to Greenhouse or your ATS, until the role is&nbsp;filled.</p>
+        </div>
+      {% elif group.key == "sales" %}
+        <div class="gk-hgroup{% if forloop.first %} gk-live{% endif %}" data-g="sales">
+          {% if forloop.first %}<h1 class="gk-h1">{% else %}<p class="gk-h1">{% endif %}<span class="gk-accent">10 qualified leads</span>, delivered to your inbox every&nbsp;morning.{% if forloop.first %}</h1>{% else %}</p>{% endif %}
+          <p class="gk-sub">Every lead arrives with the intent signal that makes it worth your time &mdash; waiting in your inbox or CRM before you sit&nbsp;down.</p>
+        </div>
+      {% elif group.key == "research" %}
+        <div class="gk-hgroup{% if forloop.first %} gk-live{% endif %}" data-g="research">
+          {% if forloop.first %}<h1 class="gk-h1">{% else %}<p class="gk-h1">{% endif %}Your market, <span class="gk-accent">summarized on your desk</span> every&nbsp;Monday.{% if forloop.first %}</h1>{% else %}</p>{% endif %}
+          <p class="gk-sub">Funding rounds, launches, pricing moves, and people changes &mdash; watched all week, distilled into one&nbsp;briefing.</p>
+        </div>
+      {% endif %}
+    {% endfor %}
+    <div class="gk-hgroup{% if not home_hero_groups %} gk-live{% endif %}" data-g="all">
+      {% if not home_hero_groups %}<h1 class="gk-h1">{% else %}<p class="gk-h1">{% endif %}Hire an agent.<br><span class="gk-accent">Get results</span>, every&nbsp;week.{% if not home_hero_groups %}</h1>{% else %}</p>{% endif %}
+      <p class="gk-sub">Gobii agents do the recurring work and deliver the output where you already live &mdash; your ATS, CRM, inbox, or&nbsp;spreadsheet.</p>
+    </div>
+  </div>
+
+  <div class="gk-cta-row">
+{% comment %}
+  The primary CTA hires the featured agent for the active category — the same POST the
+  "Deploy This Employee" buttons make — rather than scrolling the page. Its action swaps
+  with the category tabs; see _k_scripts.html. When there are no categories at all it
+  falls back to browsing, which is the only case where scrolling is the right behaviour.
+{% endcomment %}
+    {% if home_hero_groups %}
+    <form method="post" action="{{ home_hero_groups.0.featured_worker.hire_url }}" id="gk-cta-form" data-lazy-csrf
+          data-analytics-cta-id="home_k_hero" data-analytics-placement="hero" data-analytics-intent="hire_agent">
+      <input type="hidden" name="source_page" value="home_hero_cta" />
+      <input type="hidden" name="trial_onboarding" value="1" />
+      <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+      <button type="submit" id="gk-cta" class="gk-btn">
+        Hire the {{ home_hero_groups.0.label|lower }} agent
+      </button>
+    </form>
+    {% else %}
+    <a id="gk-cta-browse" class="gk-btn" href="#hire-agents"
+       data-analytics-cta-id="home_k_hero_browse" data-analytics-placement="hero" data-analytics-intent="browse_agents">
+      Browse all agents
+    </a>
+    {% endif %}
+    <a class="gk-btn-quiet" href="#pricing"
+       data-analytics-cta-id="home_k_hero_pricing" data-analytics-placement="hero" data-analytics-intent="view_pricing">See pricing</a>
+  </div>
+  <div class="gk-trust">
+    <span><b>7-day</b> free trial</span>
+    <span><b>Open source</b> (MIT)</span>
+  </div>
+</div>
+
+<div class="gk-demo">
+  <div class="gk-demo-window" id="gk-demo" aria-label="Product demo: a Gobii agent working through a scheduled run">
+    <div class="gk-demo-bar">
+      <span class="gk-dot" style="background:#fca5a5"></span>
+      <span class="gk-dot" style="background:#fcd34d"></span>
+      <span class="gk-dot" style="background:#86efac"></span>
+      <span class="gk-url" id="gk-demo-url">Scout &middot; Weekly Candidate Pipeline &middot; Monday 8:00 AM</span>
+      <span class="gk-livebadge"><span class="gk-livedot"></span>DEMO</span>
+      <div class="gk-demo-progress" id="gk-demo-progress" style="width:100%"></div>
+    </div>
+    <div class="gk-demo-body">
+      <div class="gk-demo-steps" id="gk-demo-steps">
+        <h4>SCOUT IS WORKING</h4>
+        <div class="gk-astep gk-on gk-done"><span class="gk-aicon">🔍</span><div><div class="gk-alabel">Searching LinkedIn</div><div class="gk-adetail">&ldquo;Senior Backend Engineer &middot; remote US&rdquo;</div></div><span class="gk-astate"><span class="gk-ring"></span><span class="gk-check">✓</span></span></div>
+        <div class="gk-astep gk-on gk-done"><span class="gk-aicon">🌐</span><div><div class="gk-alabel">Searching the web</div><div class="gk-adetail">412 profiles found across 4 sources</div></div><span class="gk-astate"><span class="gk-ring"></span><span class="gk-check">✓</span></span></div>
+        <div class="gk-astep gk-on gk-done"><span class="gk-aicon">🧠</span><div><div class="gk-alabel">Screening against your criteria</div><div class="gk-adetail">Go &middot; Kubernetes &middot; 5+ years &middot; not current clients</div></div><span class="gk-astate"><span class="gk-ring"></span><span class="gk-check">✓</span></span></div>
+        <div class="gk-astep gk-on gk-done"><span class="gk-aicon">✨</span><div><div class="gk-alabel">Enriching the best matches</div><div class="gk-adetail">verified email &middot; GitHub &middot; current role</div></div><span class="gk-astate"><span class="gk-ring"></span><span class="gk-check">✓</span></span></div>
+        <div class="gk-astep gk-on gk-done"><span class="gk-aicon">📤</span><div><div class="gk-alabel">Delivering to Greenhouse</div><div class="gk-adetail">20 candidates, with screening notes</div></div><span class="gk-astate"><span class="gk-ring"></span><span class="gk-check">✓</span></span></div>
+      </div>
+      <div class="gk-demo-out" id="gk-demo-out">
+        <h4><img src="{% static 'images/integration-logos/greenhouse.svg' %}" alt="">IN YOUR ATS THIS MORNING</h4>
+        <div class="gk-cand gk-on"><span class="gk-face"><img src="{% static 'images/people/face-mk.jpg' %}" alt=""></span><div><div class="gk-who">M. Kessler</div><div class="gk-note">Go, K8s, 7 yrs &middot; ex-Plaid</div></div><span class="gk-fit">94% fit</span></div>
+        <div class="gk-cand gk-on"><span class="gk-face"><img src="{% static 'images/people/face-rs.jpg' %}" alt=""></span><div><div class="gk-who">R. Santos</div><div class="gk-note">distributed systems &middot; Stripe</div></div><span class="gk-fit">91% fit</span></div>
+        <div class="gk-cand gk-on"><span class="gk-face"><img src="{% static 'images/people/face-al.jpg' %}" alt=""></span><div><div class="gk-who">A. Liu</div><div class="gk-note">platform lead &middot; Brex</div></div><span class="gk-fit">89% fit</span></div>
+        <div class="gk-cand gk-on"><span class="gk-avatar">+17</span><div><div class="gk-who">17 more this week</div><div class="gk-note">full list waiting in Greenhouse</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>

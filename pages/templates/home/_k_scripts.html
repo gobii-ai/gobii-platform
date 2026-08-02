@@ -1,0 +1,262 @@
+{% load static %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var cats = document.getElementById('gk-cats');
+    var hswap = document.getElementById('gk-hswap');
+    if (!cats || !hswap) return;
+
+    var CTA_LABELS = {
+      {% for group in home_hero_groups %}
+      "{{ group.key|escapejs }}": "Hire the {{ group.label|lower|escapejs }} agent",
+      {% endfor %}
+      "all": "Browse all agents"
+    };
+
+    /* the featured agent each category's CTA hires */
+    var CTA_HIRE_URLS = {
+      {% for group in home_hero_groups %}{% if group.featured_worker %}
+      "{{ group.key|escapejs }}": "{{ group.featured_worker.hire_url|escapejs }}",
+      {% endif %}{% endfor %}
+    };
+
+    var GREENHOUSE_LOGO = "{% static 'images/integration-logos/greenhouse.svg' %}";
+    var HUBSPOT_LOGO = "{% static 'images/integration-logos/hubspot.svg' %}";
+    var GMAIL_LOGO = "{% static 'images/integration-logos/gmail.svg' %}";
+
+    var DEMOS = {
+      recruiting: {
+        bar: 'Scout · Weekly Candidate Pipeline · Monday 8:00 AM',
+        worker: 'SCOUT IS WORKING',
+        outHeader: [GREENHOUSE_LOGO, 'IN YOUR ATS THIS MORNING'],
+        steps: [
+          ['🔍', 'Searching LinkedIn', '“Senior Backend Engineer · remote US”'],
+          ['🌐', 'Searching the web', '412 profiles found across 4 sources'],
+          ['🧠', 'Screening against your criteria', 'Go · Kubernetes · 5+ years · not current clients'],
+          ['✨', 'Enriching the best matches', 'verified email · GitHub · current role'],
+          ['📤', 'Delivering to Greenhouse', '20 candidates, with screening notes']
+        ],
+        out: [
+          ['MK', 'M. Kessler', 'Go, K8s, 7 yrs · ex-Plaid', '94% fit', "{% static 'images/people/face-mk.jpg' %}"],
+          ['RS', 'R. Santos', 'distributed systems · Stripe', '91% fit', "{% static 'images/people/face-rs.jpg' %}"],
+          ['AL', 'A. Liu', 'platform lead · Brex', '89% fit', "{% static 'images/people/face-al.jpg' %}"],
+          ['+17', '17 more this week', 'full list waiting in Greenhouse', '']
+        ]
+      },
+      sales: {
+        bar: 'Piper · Morning Lead List · Today 6:00 AM',
+        worker: 'PIPER IS WORKING',
+        outHeader: [HUBSPOT_LOGO, 'IN YOUR INBOX THIS MORNING'],
+        steps: [
+          ['📡', 'Watching intent signals', 'hiring posts · tech changes · funding news'],
+          ['🌐', 'Searching the web', '188 companies matched your ICP'],
+          ['🧠', 'Qualifying against your criteria', 'US · 20-200 seats · owns the problem you solve'],
+          ['✨', 'Enriching contacts', 'decision maker · verified email · context'],
+          ['📤', 'Delivering your morning list', '10 leads, each with its intent signal']
+        ],
+        out: [
+          ['NW', 'Northwind Robotics', 'just posted 3 RevOps roles', 'strong intent'],
+          ['AC', 'Acme Cloud', 'new VP Sales started Monday', 'warm'],
+          ['BL', 'Blue Harbor Labs', 'raised Series A last week', 'warm'],
+          ['+7', '7 more this morning', 'full list in your inbox', '']
+        ]
+      },
+      research: {
+        bar: 'Sage · Industry Monitor · Monday 7:00 AM',
+        worker: 'SAGE IS WORKING',
+        outHeader: [GMAIL_LOGO, 'ON YOUR DESK THIS MORNING'],
+        steps: [
+          ['📰', 'Reading the week', '1,240 articles, filings, and posts scanned'],
+          ['📡', 'Tracking competitors', 'pricing pages · job boards · releases'],
+          ['🧠', 'Separating signal from noise', 'what changed, and why it matters to you'],
+          ['✍️', 'Writing your briefing', 'one page, sourced, skimmable'],
+          ['📤', 'Delivering to your inbox', 'before your Monday planning']
+        ],
+        out: [
+          ['⚡', 'Competitor X raised prices 12%', 'their enterprise tier, quietly', 'pricing'],
+          ['👥', 'Rival hired a Head of AI', 'their third AI hire this quarter', 'people'],
+          ['🚀', 'New entrant launched', 'overlaps your mid-market segment', 'launch'],
+          ['+5', '5 more findings', 'in your Monday briefing', '']
+        ]
+      }
+    };
+    DEMOS.all = DEMOS.recruiting;
+
+    var cta = document.getElementById('gk-cta');
+    var demoUrl = document.getElementById('gk-demo-url');
+    var demoSteps = document.getElementById('gk-demo-steps');
+    var demoOut = document.getElementById('gk-demo-out');
+    var demoProgress = document.getElementById('gk-demo-progress');
+    var hasDemo = demoUrl && demoSteps && demoOut && demoProgress;
+    var demoGen = 0;
+
+    var motionReduced = function () {
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return true;
+      var perf = window.GobiiHomePerf;
+      return !!(perf && typeof perf.shouldReduceHomepageMotion === 'function' && perf.shouldReduceHomepageMotion());
+    };
+
+    var syncHeadlineHeight = function () {
+      var live = hswap.querySelector('.gk-hgroup.gk-live');
+      if (live) hswap.style.height = live.offsetHeight + 'px';
+    };
+
+    function renderDemo(key) {
+      if (!hasDemo) return;
+      var demo = DEMOS[key] || DEMOS.recruiting;
+      demoUrl.textContent = demo.bar;
+      var stepsHtml = '<h4></h4>';
+      demoSteps.innerHTML = stepsHtml;
+      demoSteps.firstChild.textContent = demo.worker;
+      demo.steps.forEach(function (step) {
+        var row = document.createElement('div');
+        row.className = 'gk-astep';
+        var icon = document.createElement('span');
+        icon.className = 'gk-aicon';
+        icon.textContent = step[0];
+        var text = document.createElement('div');
+        var label = document.createElement('div');
+        label.className = 'gk-alabel';
+        label.textContent = step[1];
+        var detail = document.createElement('div');
+        detail.className = 'gk-adetail';
+        detail.textContent = step[2];
+        text.appendChild(label);
+        text.appendChild(detail);
+        var state = document.createElement('span');
+        state.className = 'gk-astate';
+        state.innerHTML = '<span class="gk-ring"></span><span class="gk-check">✓</span>';
+        row.appendChild(icon);
+        row.appendChild(text);
+        row.appendChild(state);
+        demoSteps.appendChild(row);
+      });
+      var header = document.createElement('h4');
+      var headerImg = document.createElement('img');
+      headerImg.src = demo.outHeader[0];
+      headerImg.alt = '';
+      header.appendChild(headerImg);
+      header.appendChild(document.createTextNode(demo.outHeader[1]));
+      demoOut.innerHTML = '';
+      demoOut.appendChild(header);
+      demo.out.forEach(function (item) {
+        var row = document.createElement('div');
+        row.className = 'gk-cand';
+        var avatar = document.createElement('span');
+        if (item[4]) {
+          /* real people get real photos (.gk-face); companies/findings keep text avatars */
+          avatar.className = 'gk-face';
+          var photo = document.createElement('img');
+          photo.src = item[4];
+          photo.alt = '';
+          avatar.appendChild(photo);
+        } else {
+          avatar.className = 'gk-avatar';
+          avatar.textContent = item[0];
+        }
+        var text = document.createElement('div');
+        var who = document.createElement('div');
+        who.className = 'gk-who';
+        who.textContent = item[1];
+        var note = document.createElement('div');
+        note.className = 'gk-note';
+        note.textContent = item[2];
+        text.appendChild(who);
+        text.appendChild(note);
+        row.appendChild(avatar);
+        row.appendChild(text);
+        if (item[3]) {
+          var fit = document.createElement('span');
+          fit.className = 'gk-fit';
+          fit.textContent = item[3];
+          row.appendChild(fit);
+        }
+        demoOut.appendChild(row);
+      });
+      runDemo();
+    }
+
+    function runDemo() {
+      var gen = ++demoGen;
+      var steps = Array.prototype.slice.call(demoSteps.querySelectorAll('.gk-astep'));
+      var cands = Array.prototype.slice.call(demoOut.querySelectorAll('.gk-cand'));
+      if (motionReduced()) {
+        steps.forEach(function (el) { el.classList.add('gk-on', 'gk-done'); });
+        cands.forEach(function (el) { el.classList.add('gk-on'); });
+        demoProgress.style.width = '100%';
+        return;
+      }
+      steps.forEach(function (el) { el.classList.remove('gk-on', 'gk-active', 'gk-done'); });
+      cands.forEach(function (el) { el.classList.remove('gk-on'); });
+      var STEP_MS = 700;
+      demoProgress.style.width = '0%';
+      var at = function (ms, fn) { window.setTimeout(function () { if (gen === demoGen) fn(); }, ms); };
+      steps.forEach(function (el, i) {
+        at(250 + i * STEP_MS, function () { el.classList.add('gk-on', 'gk-active'); demoProgress.style.width = (18 * (i + 1)) + '%'; });
+        at(250 + (i + 1) * STEP_MS - 160, function () { el.classList.remove('gk-active'); el.classList.add('gk-done'); });
+      });
+      var base = 250 + steps.length * STEP_MS;
+      cands.forEach(function (el, i) {
+        at(base + i * 380, function () { el.classList.add('gk-on'); demoProgress.style.width = (90 + 2.5 * (i + 1)) + '%'; });
+      });
+      at(base + cands.length * 380 + 2600, runDemo);
+    }
+
+    function applyKey(key) {
+      hswap.querySelectorAll('.gk-hgroup').forEach(function (group) {
+        group.classList.toggle('gk-live', group.dataset.g === key);
+      });
+      cats.querySelectorAll('.gk-cat').forEach(function (pill) {
+        pill.dataset.active = pill.dataset.k === key ? 'true' : 'false';
+      });
+      document.querySelectorAll('.gk-row-block').forEach(function (row) {
+        row.hidden = key !== 'all' && row.dataset.row !== key;
+      });
+      /* One button. For a category it submits the hire POST for that category's featured
+         agent; for "all" there is no featured agent, so it browses instead. */
+      var ctaForm = document.getElementById('gk-cta-form');
+      var hireUrl = CTA_HIRE_URLS[key];
+      if (cta) cta.textContent = CTA_LABELS[key] || CTA_LABELS.all;
+      if (ctaForm) {
+        if (key !== 'all' && hireUrl) {
+          ctaForm.setAttribute('action', hireUrl);
+          ctaForm.dataset.browse = '';
+        } else {
+          ctaForm.dataset.browse = 'true';
+        }
+      }
+
+      renderDemo(key);
+      window.requestAnimationFrame(syncHeadlineHeight);
+    }
+
+    var ctaFormEl = document.getElementById('gk-cta-form');
+    if (ctaFormEl) {
+      ctaFormEl.addEventListener('submit', function (event) {
+        if (ctaFormEl.dataset.browse !== 'true') return;
+        event.preventDefault();
+        var target = document.getElementById('hire-agents');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+
+    cats.addEventListener('click', function (event) {
+      var pill = event.target.closest('.gk-cat');
+      if (pill && pill.dataset.k) applyKey(pill.dataset.k);
+    });
+    window.addEventListener('resize', syncHeadlineHeight, { passive: true });
+
+    var initialPill = cats.querySelector('.gk-cat[data-active="true"]');
+    var initialKey = initialPill ? initialPill.dataset.k : 'all';
+    document.querySelectorAll('.gk-row-block').forEach(function (row) {
+      row.hidden = initialKey !== 'all' && row.dataset.row !== initialKey;
+    });
+    syncHeadlineHeight();
+
+    var startDemo = function () { renderDemo(initialKey); };
+    if (window.GobiiHomePerf && typeof window.GobiiHomePerf.runWhenIdle === 'function') {
+      window.GobiiHomePerf.runWhenIdle(startDemo, 1800);
+    } else {
+      startDemo();
+    }
+  });
+</script>

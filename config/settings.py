@@ -786,9 +786,10 @@ TURNSTILE_SECRET = env(
     "TURNSTILE_SECRET", default="1x0000000000000000000000000000000AA"
 )
 
-# Cloudflare Turnstile widget defaults (light theme, normal size)
+# Cloudflare Turnstile widget defaults. The auth pages sit on the dark Luxe canvas,
+# so the widget renders dark to match rather than punching a white brick through the card.
 TURNSTILE_DEFAULT_CONFIG = {
-    "theme": "light",
+    "theme": "dark",
     "size": "normal",
 }
 

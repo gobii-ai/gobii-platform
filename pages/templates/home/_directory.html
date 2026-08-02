@@ -1,0 +1,55 @@
+{% if settings.GOBII_PROPRIETARY_MODE %}
+<!-- Employee Directory Section -->
+<section id="ai-employees" class="gk-block scroll-mt-24" aria-labelledby="ai-employees-heading">
+  <div class="gk-dir-head" data-animate>
+    <span class="gk-eyebrow">AGENT DIRECTORY</span>
+    <h2 id="ai-employees-heading">Deploy an AI Employee</h2>
+    <p>Put a proven AI employee to work in minutes &mdash; built for research, ops &amp; intelligence.</p>
+    {% if homepage_pretrained_selected_category or homepage_pretrained_search_term %}
+      <p class="text-xs text-slate-400 mt-2">
+        Filters:
+        {% if homepage_pretrained_selected_category %}{{ homepage_pretrained_selected_category }}{% endif %}
+        {% if homepage_pretrained_selected_category and homepage_pretrained_search_term %}, {% endif %}
+        {% if homepage_pretrained_search_term %}"{{ homepage_pretrained_search_term }}"{% endif %}
+        &middot; <a class="gk-detail" href="{% url 'pages:home' %}#ai-employees">Reset filters</a>
+      </p>
+    {% endif %}
+  </div>
+
+  <form method="get" action="{% url 'pages:home' %}#ai-employees" class="gk-dir-filter" data-animate>
+    <div class="gk-dir-field gk-grow">
+      <label for="homepage-directory-search">Search</label>
+      <input id="homepage-directory-search" name="pretrained_search" type="search" value="{{ homepage_pretrained_search_term }}" placeholder="Search skills, focus areas, workflows..." />
+    </div>
+    <div class="gk-dir-field gk-cat-field">
+      <label for="homepage-directory-category">Category</label>
+      <select id="homepage-directory-category" name="pretrained_category">
+        <option value="">All categories</option>
+        {% for category in homepage_pretrained_categories %}
+          <option value="{{ category }}" {% if homepage_pretrained_selected_category == category %}selected{% endif %}>{{ category }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% for key, value in request.GET.items %}
+      {% if key != 'pretrained_search' and key != 'pretrained_category' %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}" />
+      {% endif %}
+    {% endfor %}
+    <button type="submit" class="gk-btn gk-btn-sm">Search</button>
+  </form>
+
+  {% if homepage_pretrained_workers %}
+    <div class="gk-dir-grid">
+      {% for worker in homepage_pretrained_workers %}
+        {% include "ai_employees/_card.html" with worker=worker lazy_csrf=True %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="gk-dempty">
+      <h3>No AI employees match those filters yet.</h3>
+      <p>Reset your filters to explore the full directory or reach out to support for a tailored playbook.</p>
+      <a href="{% url 'pages:home' %}#ai-employees" class="gk-btn gk-btn-sm">Clear filters</a>
+    </div>
+  {% endif %}
+</section>
+{% endif %}

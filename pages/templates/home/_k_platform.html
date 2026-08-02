@@ -1,0 +1,456 @@
+{% load static %}
+{% comment %}
+  Homepage "platform / what is Gobii" section — port of the human-approved F3
+  ("your numbers") showcase design.
+
+  Structure: the SEO-critical "What is Gobii?" h2 + definition, then the pipeline
+  vessel (fills with an EXAMPLE workload as it scrolls into view), three goal
+  meters, a "what that is worth to you" ROI slider driven by the visitor's own
+  hourly rate, then the capability grid under "Everything an employee needs.
+  Built in."
+
+  Honesty: every figure in the vessel / meters is an illustrative example week and
+  is labelled as such in the UI. The ROI figure is the visitor's own arithmetic.
+  Capability tiles only claim what the product actually does today.
+
+  Motion: gated on IntersectionObserver; renders the finished state under
+  prefers-reduced-motion. Phones animate; only a genuine OS preference opts out.
+  Only opacity/transform animate, plus the vessel's own (text-free) fill height,
+  so the section never changes height.
+{% endcomment %}
+<style>
+  /* ===== k homepage — platform section. All rules scoped to .gk-pf. ===== */
+  .gk-pf .gk-pf-def { max-width: 62ch; margin: 14px auto 0; }
+
+  .gk-pf-math .gk-pf-stage { margin-top: clamp(20px,2.6vw,28px); }
+  .gk-pf-stage { display: grid; grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr);
+                 gap: clamp(18px, 3vw, 40px); align-items: stretch; margin-top: clamp(18px,2.4vw,26px); }
+  @media (max-width: 900px) { .gk-pf-stage { grid-template-columns: 1fr; } }
+
+  /* ---------------- the vessel ---------------- */
+  .gk-pf-vessel { --gk-pf-headh: 62px; position: relative; border-radius: 22px; overflow: hidden;
+                  min-height: clamp(340px, 40vw, 470px); border: 1px solid rgba(255,255,255,.11);
+                  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015)); }
+  .gk-pf-vhead { position: absolute; top: 0; left: 0; right: 0; z-index: 4; padding: clamp(13px,1.7vw,17px);
+                 display: flex; align-items: center; gap: 9px; flex-wrap: wrap; row-gap: 5px;
+                 background: linear-gradient(180deg, rgba(16,10,32,.95) 0%, rgba(16,10,32,.82) 58%,
+                                             rgba(16,10,32,0) 100%); }
+  .gk-pf-vhead b { color: #fff; font-size: clamp(12px,1.3vw,13.5px); font-weight: 600; }
+  .gk-pf-pulse { width: 7px; height: 7px; border-radius: 50%; background: #34d399; flex-shrink: 0;
+                 animation: gk-pf-pl 1.8s infinite; }
+  @keyframes gk-pf-pl { 50% { opacity: .28; } }
+  .gk-pf-eg { font-size: 9.5px; font-weight: 700; letter-spacing: 1px; padding: 3px 9px; }
+  .gk-pf-cnt { margin-left: auto; font-variant-numeric: tabular-nums; color: #fff; font-weight: 600;
+               font-size: clamp(12px,1.3vw,14px); white-space: nowrap; }
+  .gk-pf-cnt small { color: #9d92c0; font-weight: 400; font-size: 10.5px; }
+  .gk-pf-cnt .gk-pf-n { display: inline-block; min-width: 3ch; text-align: right; }
+
+  .gk-pf-liquid { position: absolute; left: 0; right: 0; bottom: 0; height: 0; z-index: 1;
+                  background: linear-gradient(180deg, rgba(139,92,246,.42) 0%, rgba(109,40,217,.30) 55%,
+                                                      rgba(76,29,149,.24) 100%); }
+  .gk-pf-surf { position: absolute; left: 0; right: 0; top: -11px; height: 12px; overflow: hidden; }
+  .gk-pf-surf svg { position: absolute; top: 0; left: 0; width: 200%; height: 100%; }
+  .gk-pf-surf .gk-pf-w1 { fill: rgba(167,139,250,.55); animation: gk-pf-drift 7s linear infinite; }
+  .gk-pf-surf .gk-pf-w2 { fill: rgba(196,181,253,.32); animation: gk-pf-drift 11s linear infinite reverse; }
+  @keyframes gk-pf-drift { to { transform: translateX(-50%); } }
+  .gk-pf-meniscus { position: absolute; left: 0; right: 0; top: -1px; height: 2px;
+                    background: linear-gradient(90deg, rgba(196,181,253,0), #c4b5fd 22%, #f0abfc 78%,
+                                                rgba(240,171,252,0));
+                    box-shadow: 0 0 20px rgba(240,171,252,.75); }
+  .gk-pf-bubbles { position: absolute; inset: 0; overflow: hidden; }
+  .gk-pf-bubbles i { position: absolute; bottom: -8px; border-radius: 50%; background: rgba(224,213,255,.34);
+                     animation: gk-pf-rise linear infinite; }
+  @keyframes gk-pf-rise { 0% { transform: translateY(0) scale(.7); opacity: 0; }
+                          12% { opacity: .8; } 100% { transform: translateY(-320px) scale(1.1); opacity: 0; } }
+
+  .gk-pf-marks { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+  .gk-pf-mk { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(255,255,255,.2);
+              transition: border-color .45s; }
+  .gk-pf-mk .gk-pf-cap { position: absolute; right: 9px; top: -9px; display: inline-flex; align-items: center;
+                         gap: 5px; font-size: 9px; font-weight: 700; letter-spacing: .9px; color: #b3a8d2;
+                         background: #1c1338; border: 1px solid rgba(255,255,255,.14); border-radius: 999px;
+                         padding: 3px 9px; white-space: nowrap;
+                         transition: color .45s, background .45s, border-color .45s, box-shadow .45s; }
+  .gk-pf-mk.gk-pf-met .gk-pf-cap { color: #04231a; background: #34d399; border-color: #34d399;
+                                   box-shadow: 0 0 20px rgba(52,211,153,.55); }
+  .gk-pf-mk.gk-pf-met { border-top-color: rgba(52,211,153,.5); }
+  .gk-pf-mk .gk-pf-tick { display: none; }
+  .gk-pf-mk.gk-pf-met .gk-pf-tick { display: inline; }
+
+  .gk-pf-chips { position: absolute; inset: auto 0 0 0; z-index: 2; padding: clamp(11px,1.5vw,15px);
+                 padding-right: calc(clamp(11px,1.5vw,15px) + 116px);
+                 display: flex; flex-direction: column-reverse; gap: 6px;
+                 max-height: calc(100% - var(--gk-pf-headh)); overflow: hidden;
+                 /* the oldest row fades out of the feed instead of being cut in half */
+                 -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 34px);
+                 mask-image: linear-gradient(180deg, transparent 0, #000 34px); }
+  .gk-pf-rchip { display: flex; align-items: center; gap: 8px; background: rgba(11,7,26,.82);
+                 -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+                 border: 1px solid rgba(255,255,255,.13); border-radius: 11px; padding: 7px 10px;
+                 font-size: 11.5px; color: #ece9f6; max-width: 460px;
+                 opacity: 0; transform: translateY(16px) scale(.97);
+                 transition: opacity .45s ease, transform .5s cubic-bezier(.2,.9,.3,1.25); }
+  .gk-pf-rchip.gk-pf-in { opacity: 1; transform: none; }
+  .gk-pf-rchip .gk-pf-face { width: 21px; height: 21px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
+  .gk-pf-rchip .gk-pf-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .gk-pf-rchip .gk-pf-tool { width: 21px; height: 21px; border-radius: 6px; background: #fff; display: grid;
+                             place-items: center; flex-shrink: 0; }
+  .gk-pf-rchip .gk-pf-tool img { height: 13px; }
+  .gk-pf-rchip .gk-pf-nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gk-pf-rchip .gk-pf-ts { color: #7f74a8; font-size: 9.5px; font-variant-numeric: tabular-nums; margin-left: 2px; }
+  .gk-pf-rchip .gk-pf-tag { margin-left: auto; font-size: 9.5px; font-weight: 700; color: #6ee7b7;
+                            white-space: nowrap; }
+
+  /* ---------------- goal meters ---------------- */
+  .gk-pf-side { display: flex; flex-direction: column; }
+  .gk-pf-sidehead { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 14px; }
+  .gk-pf-sidehead span
+  .gk-pf-goals { display: flex; flex-direction: column; gap: clamp(13px,1.8vw,19px); }
+  .gk-pf-goal .gk-pf-gtop { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; row-gap: 3px;
+                            margin-bottom: 8px; }
+  .gk-pf-goal .gk-pf-gtop b { color: #fff; font-size: clamp(12.5px,1.35vw,14.5px); font-weight: 600; }
+  .gk-pf-goal .gk-pf-now { margin-left: auto; color: #fff; font-weight: 300; font-variant-numeric: tabular-nums;
+                           letter-spacing: -.6px; font-size: clamp(17px,2vw,23px); white-space: nowrap; }
+  .gk-pf-goal .gk-pf-now small { color: #9d92c0; font-size: 11px; font-weight: 500; letter-spacing: 0; }
+  .gk-pf-goal .gk-pf-gv { display: inline-block; min-width: 4ch; text-align: right; }
+  .gk-pf-goal .gk-pf-track { position: relative; height: 10px; border-radius: 999px;
+                             background: rgba(255,255,255,.075); overflow: hidden; }
+  .gk-pf-goal .gk-pf-track i { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 999px;
+                               background: linear-gradient(90deg,#7c3aed,#a78bfa); }
+  .gk-pf-goal.gk-pf-good .gk-pf-track i { background: linear-gradient(90deg,#0d9f74,#34d399); }
+  .gk-pf-goal .gk-pf-ticklab { display: flex; justify-content: space-between; gap: 10px; margin-top: 7px;
+                               font-size: 10.5px; color: #9d92c0; }
+  .gk-pf-goal .gk-pf-ticklab b { color: #cfc7e8; font-weight: 600; text-align: right; }
+  .gk-pf-goalmet { display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px; font-weight: 700;
+                   color: #04231a; background: #34d399; border-radius: 999px; padding: 2px 8px; opacity: 0;
+                   transform: scale(.85); transition: opacity .4s, transform .4s; }
+  .gk-pf-goal.gk-pf-hit .gk-pf-goalmet { opacity: 1; transform: none; }
+
+  /* ---------------- ROI panel ---------------- */
+  .gk-pf-roi { margin-top: clamp(14px,1.8vw,20px); border-radius: 16px; padding: clamp(15px,1.9vw,20px);
+               border: 1px solid transparent;
+               background: linear-gradient(rgba(24,16,46,.92),rgba(24,16,46,.92)) padding-box,
+                           linear-gradient(135deg,rgba(124,58,237,.5),rgba(240,171,252,.2)) border-box; }
+  .gk-pf-roi .gk-pf-rtop { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .gk-pf-roi .gk-pf-rtop b { color: #fff; font-size: clamp(12.5px,1.35vw,14.5px); font-weight: 600; }
+  .gk-pf-roi .gk-pf-rtop span { color: #8b7fb8; font-size: 11px; margin-left: auto; }
+  .gk-pf-rate { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 11px; }
+  .gk-pf-rate label { grid-area: 1 / 1; color: #b3a8d2; font-size: 11.5px; }
+  .gk-pf-ratev { grid-area: 1 / 2; color: #fff; font-variant-numeric: tabular-nums; font-weight: 600;
+                 font-size: 13px; text-align: right; min-width: 7ch; }
+  .gk-pf-rate input[type=range] { grid-area: 2 / 1 / 3 / -1; -webkit-appearance: none; appearance: none; width: 100%;
+                                  height: 40px; margin: 0; background: transparent; cursor: pointer; }
+  .gk-pf-rate input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 999px;
+                                  background: rgba(255,255,255,.16); }
+  .gk-pf-rate input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px;
+                                  margin-top: -8px; border-radius: 50%; border: 2px solid #16102b;
+                                  background: linear-gradient(140deg,#c4b5fd,#f0abfc);
+                                  box-shadow: 0 3px 12px rgba(168,85,247,.6); }
+  .gk-pf-rate input[type=range]::-moz-range-track { height: 4px; border-radius: 999px;
+                                  background: rgba(255,255,255,.16); }
+  .gk-pf-rate input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%;
+                                  border: 2px solid #16102b; background: linear-gradient(140deg,#c4b5fd,#f0abfc);
+                                  box-shadow: 0 3px 12px rgba(168,85,247,.6); }
+  .gk-pf-rate input[type=range]:focus { outline: none; }
+  .gk-pf-rate input[type=range]:focus-visible { outline: 2px solid #c4b5fd; outline-offset: -6px;
+                                  border-radius: 12px; }
+  @media (min-width: 520px) {
+    .gk-pf-rate { grid-template-columns: auto minmax(0,1fr) auto; }
+    .gk-pf-rate input[type=range] { grid-area: 1 / 2 / 2 / 3; }
+    .gk-pf-ratev { grid-area: 1 / 3; }
+  }
+  .gk-pf-out { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+               padding-top: 13px; border-top: 1px solid rgba(255,255,255,.1); }
+  .gk-pf-out b { color: #fff; font-weight: 250; letter-spacing: -1.6px; font-variant-numeric: tabular-nums;
+                 font-size: clamp(28px,3.4vw,40px); min-width: 6ch; }
+  .gk-pf-out i { font-style: normal; color: #b3a8d2; font-size: clamp(11px,1.2vw,12.5px); }
+  .gk-pf-fine { color: #7f74a8; font-size: 10.5px; line-height: 1.55; margin: 8px 0 0; }
+
+  /* ---------------- capability tiles ---------------- */
+  .gk-pf-capsect { margin-top: var(--gk-sect-gap); }
+  .gk-pf-capsect .gk-sect-head { margin-bottom: clamp(18px,2.2vw,26px); }
+  .gk-pf-caps { display: grid; grid-template-columns: 1fr; gap: clamp(9px,1.2vw,13px); }
+  @media (min-width: 520px) { .gk-pf-caps { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  @media (min-width: 940px) { .gk-pf-caps { grid-template-columns: repeat(4, minmax(0,1fr)); } }
+  .gk-pf-cap2 { display: flex; gap: 11px; align-items: flex-start; padding: clamp(12px,1.5vw,15px);
+                border-radius: 13px; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.03); }
+  .gk-pf-cap2 .gk-pf-ic { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+                          font-size: 14px; line-height: 1; flex-shrink: 0; background: rgba(139,92,246,.15);
+                          border: 1px solid rgba(196,181,253,.2); }
+  .gk-pf-cap2 h3 { display: block; margin: 0; color: #fff; font-size: 12.5px; font-weight: 600; line-height: 1.35; }
+  .gk-pf-cap2 h3 + i, .gk-pf-cap2 i { font-style: normal; display: block; color: #a99cc9; font-size: 11px; line-height: 1.45;
+                  margin-top: 3px; }
+
+  /* two-column stage before the section hits its max width: the vessel is at its
+     narrowest, so the timestamps yield to the record names. */
+  @media (min-width: 901px) and (max-width: 1099px) {
+    .gk-pf-rchip .gk-pf-ts { display: none; }
+  }
+  @media (max-width: 620px) {
+    /* phones: the feed gets the full width. Target lines stay as guides and the
+       "MET" state is carried by the goal meters below — no duplicate pills. */
+    .gk-pf-chips { padding-right: clamp(11px,1.5vw,15px); }
+    .gk-pf-mk .gk-pf-cap { display: none; }
+    .gk-pf-rchip .gk-pf-ts { display: none; }
+    .gk-pf-rchip { font-size: 11px; padding: 6px 9px; gap: 7px; }
+    .gk-pf-rchip .gk-pf-tag { font-size: 9px; }
+    .gk-pf-vessel { --gk-pf-headh: 76px; }
+    /* narrow: title + counter share the first line, the EXAMPLE badge sits under them */
+    .gk-pf-vhead .gk-pf-cnt { order: 2; }
+    .gk-pf-vhead .gk-pf-eg { order: 3; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .gk-pf-surf .gk-pf-w1, .gk-pf-surf .gk-pf-w2, .gk-pf-bubbles i, .gk-pf-pulse { animation: none !important; }
+    .gk-pf-rchip, .gk-pf-goalmet, .gk-pf-mk, .gk-pf-mk .gk-pf-cap { transition: none !important; }
+  }
+  .gk-pf-caps4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+                 gap: 12px; margin-top: clamp(20px,2.6vw,30px); }
+  .gk-pf-cap4 { display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; border-radius: 14px;
+                border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); }
+  .gk-pf-ic4 { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+               font-size: 16px; flex: none; background: rgba(139,92,246,.16);
+               border: 1px solid rgba(196,181,253,.22); }
+  .gk-pf-cap4 b { display: block; color: #fff; font-size: 13.5px; font-weight: 600; }
+  .gk-pf-cap4 i { font-style: normal; display: block; color: #a99cc9; font-size: 11.5px;
+                  margin-top: 3px; line-height: 1.5; }
+  .gk-pf-def { color: #8b7fb8; font-size: 14px; line-height: 1.65; text-align: center;
+               max-width: 78ch; margin: clamp(20px,2.6vw,28px) auto 0; }
+</style>
+
+<section id="what-is-gobii" class="gk-section gk-pf" aria-labelledby="what-is-gobii-heading" data-animate>
+  <div class="gk-sect-head">
+    {% comment %}
+      "What is Gobii?" is a query people type and this section ranks on it, so it stays
+      visible and indexable as the eyebrow while the h2 does the selling.
+    {% endcomment %}
+    <span class="gk-eyebrow gk-eyebrow-caps">What is Gobii?</span>
+    <h2 id="what-is-gobii-heading">Always-on virtual employees that <span class="gk-accent">actually do the work</span></h2>
+  </div>
+
+  <div class="gk-pf-caps4">
+    <div class="gk-pf-cap4"><span class="gk-pf-ic4" aria-hidden="true">&#127760;</span>
+      <div><b>Browser automation</b><i>logs in and clicks, on the live web</i></div></div>
+    <div class="gk-pf-cap4"><span class="gk-pf-ic4" aria-hidden="true">&#128269;</span>
+      <div><b>Web research</b><i>reads the open web, not a stale index</i></div></div>
+    <div class="gk-pf-cap4"><span class="gk-pf-ic4" aria-hidden="true">&#128451;</span>
+      <div><b>Data collection</b><i>structured records, not screenshots</i></div></div>
+    <div class="gk-pf-cap4"><span class="gk-pf-ic4" aria-hidden="true">&#9881;</span>
+      <div><b>Workflow execution</b><i>it finishes the job, not just the search</i></div></div>
+  </div>
+
+  <p class="gk-pf-def">Gobii is an AI agent platform that gives businesses always-on virtual employees capable of browser automation, web research, data collection, and workflow execution.</p>
+</section>
+
+{% comment %}
+  The ROI stage is its own beat. It previously hung off the definition as a caption,
+  which read as one section trying to be two.
+{% endcomment %}
+<section class="gk-section gk-pf gk-pf-math" aria-labelledby="gk-pf-math-heading" data-animate>
+  <div class="gk-sect-head">
+    <span class="gk-eyebrow gk-eyebrow-caps">The math</span>
+    <h2 id="gk-pf-math-heading">Put a number on <span class="gk-accent">the work it takes off your desk</span></h2>
+  </div>
+
+  <div class="gk-pf-stage" id="gk-pf-stage">
+    <div class="gk-pf-vessel" id="gk-pf-vessel">
+      <div class="gk-pf-vhead">
+        <span class="gk-pf-pulse" aria-hidden="true"></span>
+        <b>Your pipeline</b>
+        <span class="gk-chip gk-pf-eg">EXAMPLE</span>
+        <span class="gk-pf-cnt"><span class="gk-pf-n" id="gk-pf-count">0</span> <small>/ 420 records this week</small></span>
+      </div>
+      <div class="gk-pf-liquid" id="gk-pf-liquid" aria-hidden="true">
+        <div class="gk-pf-surf">
+          <svg viewBox="0 0 200 12" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+            <path class="gk-pf-w1" d="M0 6 Q 12.5 0 25 6 T 50 6 T 75 6 T 100 6 T 125 6 T 150 6 T 175 6 T 200 6 V12 H0 Z"/>
+            <path class="gk-pf-w2" d="M0 7 Q 16 2 32 7 T 64 7 T 96 7 T 128 7 T 160 7 T 192 7 T 224 7 V12 H0 Z"/>
+          </svg>
+        </div>
+        <div class="gk-pf-meniscus"></div>
+        <div class="gk-pf-bubbles">
+          <i style="left:27%;width:3px;height:6px;animation-duration:6.7s;animation-delay:0.5s"></i>
+          <i style="left:8%;width:5px;height:3px;animation-duration:5.5s;animation-delay:3.2s"></i>
+          <i style="left:30%;width:4px;height:3px;animation-duration:5.7s;animation-delay:5.7s"></i>
+          <i style="left:8%;width:5px;height:5px;animation-duration:5.4s;animation-delay:1.9s"></i>
+          <i style="left:61%;width:5px;height:3px;animation-duration:8.3s;animation-delay:2.0s"></i>
+          <i style="left:40%;width:4px;height:4px;animation-duration:5.6s;animation-delay:1.7s"></i>
+          <i style="left:89%;width:5px;height:3px;animation-duration:8.6s;animation-delay:3.4s"></i>
+          <i style="left:84%;width:4px;height:6px;animation-duration:6.4s;animation-delay:1.7s"></i>
+          <i style="left:46%;width:4px;height:5px;animation-duration:5.7s;animation-delay:4.8s"></i>
+          <i style="left:13%;width:6px;height:5px;animation-duration:6.8s;animation-delay:3.9s"></i>
+          <i style="left:68%;width:4px;height:4px;animation-duration:4.8s;animation-delay:5.5s"></i>
+          <i style="left:62%;width:6px;height:5px;animation-duration:5.3s;animation-delay:2.6s"></i>
+          <i style="left:58%;width:4px;height:5px;animation-duration:5.0s;animation-delay:0.4s"></i>
+          <i style="left:26%;width:4px;height:3px;animation-duration:6.0s;animation-delay:1.1s"></i>
+        </div>
+      </div>
+      <div class="gk-pf-marks" aria-hidden="true">
+        <div class="gk-pf-mk" data-at="38" style="bottom:38%">
+          <span class="gk-pf-cap"><span class="gk-pf-tick">✓</span> WEEKLY TARGET</span>
+        </div>
+        <div class="gk-pf-mk" data-at="72" style="bottom:72%">
+          <span class="gk-pf-cap"><span class="gk-pf-tick">✓</span> RECORD WEEK</span>
+        </div>
+      </div>
+      <div class="gk-pf-chips">
+        <div class="gk-pf-rchip"><span class="gk-pf-face"><img src="{% static 'images/people/face-mk.jpg' %}" alt="" width="21" height="21" loading="lazy" decoding="async"></span><span class="gk-pf-nm">M. Kessler</span><span class="gk-pf-ts">5:31 AM</span><span class="gk-pf-tag">94% fit</span></div>
+        <div class="gk-pf-rchip"><span class="gk-pf-face"><img src="{% static 'images/people/face-rs.jpg' %}" alt="" width="21" height="21" loading="lazy" decoding="async"></span><span class="gk-pf-nm">R. Santos</span><span class="gk-pf-ts">5:33 AM</span><span class="gk-pf-tag">91% fit</span></div>
+        <div class="gk-pf-rchip"><span class="gk-pf-face"><img src="{% static 'images/people/face-al.jpg' %}" alt="" width="21" height="21" loading="lazy" decoding="async"></span><span class="gk-pf-nm">A. Liu</span><span class="gk-pf-ts">5:36 AM</span><span class="gk-pf-tag">89% fit</span></div>
+        <div class="gk-pf-rchip"><span class="gk-pf-tool"><img src="{% static 'images/integration-logos/hubspot.svg' %}" alt="" loading="lazy" decoding="async"></span><span class="gk-pf-nm">Northwind Robotics</span><span class="gk-pf-ts">6:02 AM</span><span class="gk-pf-tag">strong intent</span></div>
+        <div class="gk-pf-rchip"><span class="gk-pf-face"><img src="{% static 'images/people/face-jn.jpg' %}" alt="" width="21" height="21" loading="lazy" decoding="async"></span><span class="gk-pf-nm">J. Achebe</span><span class="gk-pf-ts">6:11 AM</span><span class="gk-pf-tag">87% fit</span></div>
+        <div class="gk-pf-rchip"><span class="gk-pf-tool"><img src="{% static 'images/integration-logos/hubspot.svg' %}" alt="" loading="lazy" decoding="async"></span><span class="gk-pf-nm">Acme Cloud</span><span class="gk-pf-ts">6:19 AM</span><span class="gk-pf-tag">warm</span></div>
+        <div class="gk-pf-rchip"><span class="gk-pf-tool"><img src="{% static 'images/integration-logos/sheets-glyph.svg' %}" alt="" loading="lazy" decoding="async"></span><span class="gk-pf-nm">412 rows appended</span><span class="gk-pf-ts">7:02 AM</span><span class="gk-pf-tag">pipeline sheet</span></div>
+      </div>
+    </div>
+
+    <div class="gk-pf-side">
+      <div class="gk-pf-sidehead">
+        <span class="gk-chip gk-pf-eg">EXAMPLE</span>
+
+      </div>
+      <div class="gk-pf-goals">
+        <div class="gk-pf-goal" data-target="100" data-kind="records">
+          <div class="gk-pf-gtop"><b>Weekly target</b><span class="gk-pf-goalmet">✓ MET</span>
+            <span class="gk-pf-now"><span class="gk-pf-gv">0</span><small> / 420 records</small></span></div>
+          <div class="gk-pf-track" aria-hidden="true"><i></i></div>
+          <div class="gk-pf-ticklab"><span>Mon</span><b class="gk-pf-when">in progress</b></div>
+        </div>
+        <div class="gk-pf-goal" data-target="86" data-kind="hours">
+          <div class="gk-pf-gtop"><b>Manual hours replaced</b><span class="gk-pf-goalmet">✓ MET</span>
+            <span class="gk-pf-now"><span class="gk-pf-gv">0</span><small> hrs of desk work</small></span></div>
+          <div class="gk-pf-track" aria-hidden="true"><i></i></div>
+          <div class="gk-pf-ticklab"><span>vs a full-time desk</span><b class="gk-pf-pct">0%</b></div>
+        </div>
+        <div class="gk-pf-goal gk-pf-good" data-target="94" data-kind="auto">
+          <div class="gk-pf-gtop"><b>Finished without a human</b><span class="gk-pf-goalmet">✓ MET</span>
+            <span class="gk-pf-now"><span class="gk-pf-gv">0</span><small>%</small></span></div>
+          <div class="gk-pf-track" aria-hidden="true"><i></i></div>
+          <div class="gk-pf-ticklab"><span>no logins, no nudges</span><b>0 interruptions</b></div>
+        </div>
+      </div>
+
+      <div class="gk-pf-roi">
+        <div class="gk-pf-rtop"><b>What that is worth to you</b><span>your numbers, not ours</span></div>
+        <div class="gk-pf-rate">
+          <label for="gk-pf-rate">Loaded hourly cost</label>
+          <input id="gk-pf-rate" type="range" min="20" max="150" step="5" value="45" aria-valuetext="$45 per hour">
+          <span class="gk-pf-ratev" id="gk-pf-ratev">$45/hr</span>
+        </div>
+        <div class="gk-pf-out"><b id="gk-pf-roiv">$0</b><i>of desk work handled, per week</i></div>
+        <p class="gk-pf-fine">= <span id="gk-pf-roihrs">0</span> hours reclaimed &times; your rate. Move the slider to use your own.</p>
+      </div>
+    </div>
+  </div>
+
+  <section class="gk-pf-capsect" aria-label="What Gobii agents can do">
+    <div class="gk-sect-head">
+      <h2 id="gk-pf-caps-heading">Everything an employee needs. Built&nbsp;in.</h2>
+      <p class="gk-sect-sub">Every capability below is in the product today &mdash; on Gobii Cloud, or self-hosted from the open-source (MIT) build.</p>
+    </div>
+    <div class="gk-pf-caps">
+      <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">🗄️</span><div><h3>Its own database</h3><i>a private SQLite it reads, writes and remembers with</i></div></div>
+      <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">⏰</span><div><h3>Runs on a schedule &mdash; or on an event</h3><i>every morning at 6, or the second a webhook fires</i></div></div>
+      <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">💬</span><div><h3>Reachable anywhere</h3><i>its own email address and phone number, plus Discord and web chat</i></div></div>
+      <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">📄</span><div><h3>Makes real artifacts</h3><i>CSVs, PDFs, charts and images &mdash; attached and delivered</i></div></div>
+      <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">🔐</span><div><h3>Handles credentials safely</h3><i>encrypted secrets, per-agent sandboxing, audit trails &mdash; and it asks before it acts</i></div></div>
+      <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">👥</span><div><h3>Works with other agents</h3><i>hand off, delegate, and pull a human in when it matters</i></div></div>
+    </div>
+  </section>
+</section>
+
+<script>
+  (function () {
+    var start = function () {
+      var vessel = document.getElementById('gk-pf-vessel');
+      var liquid = document.getElementById('gk-pf-liquid');
+      var count = document.getElementById('gk-pf-count');
+      var rate = document.getElementById('gk-pf-rate');
+      var ratev = document.getElementById('gk-pf-ratev');
+      var roiv = document.getElementById('gk-pf-roiv');
+      var roihrs = document.getElementById('gk-pf-roihrs');
+      if (!vessel || !liquid || !count || !rate || !ratev || !roiv || !roihrs) return;
+
+      var RECORDS = 420, HOURS = 31, AUTO = 94, DESK_PCT = 86, EASE_TO = 0.92, FILL_MAX = 88, DUR = 5200;
+      var chips = Array.prototype.slice.call(vessel.querySelectorAll('.gk-pf-rchip'));
+      var marks = Array.prototype.slice.call(vessel.querySelectorAll('.gk-pf-mk'));
+      var goals = Array.prototype.slice.call(document.querySelectorAll('.gk-pf-goal'));
+      var when = document.querySelector('.gk-pf-when');
+      var pctLabel = document.querySelector('.gk-pf-pct');
+      var curP = 0;
+
+      var ratio = function (p) { return Math.min(p / EASE_TO, 1); };
+
+      function paint(p) {
+        p = Math.max(0, Math.min(1, p));
+        var r = ratio(p);
+        var fill = p * FILL_MAX;
+        liquid.style.height = fill + '%';
+        count.textContent = Math.round(p * RECORDS).toLocaleString();
+        var reveal = Math.round(p * chips.length);
+        chips.forEach(function (c, i) { c.classList.toggle('gk-pf-in', i < reveal); });
+        marks.forEach(function (m) { m.classList.toggle('gk-pf-met', fill >= +m.dataset.at); });
+        goals.forEach(function (g) {
+          var target = +g.dataset.target;
+          var width = r * target;
+          g.querySelector('.gk-pf-track i').style.width = width + '%';
+          var value = g.querySelector('.gk-pf-gv');
+          if (g.dataset.kind === 'records') value.textContent = Math.round(r * RECORDS).toLocaleString();
+          if (g.dataset.kind === 'hours') { var hv = r * HOURS; value.textContent = (Math.abs(hv - Math.round(hv)) < 0.05 ? Math.round(hv) : hv.toFixed(1)); }
+          if (g.dataset.kind === 'auto') value.textContent = Math.round(r * AUTO);
+          g.classList.toggle('gk-pf-hit', width >= target - 0.5);
+        });
+        if (when) when.textContent = p >= EASE_TO ? 'met by Thursday' : 'in progress';
+        if (pctLabel) pctLabel.textContent = Math.round(r * DESK_PCT) + '%';
+      }
+
+      function paintRoi() {
+        var hrs = ratio(curP) * HOURS;
+        roihrs.textContent = (Math.abs(hrs - Math.round(hrs)) < 0.05 ? Math.round(hrs) : hrs.toFixed(1));
+        roiv.textContent = '$' + Math.round(hrs * +rate.value).toLocaleString();
+        ratev.textContent = '$' + rate.value + '/hr';
+        rate.setAttribute('aria-valuetext', '$' + rate.value + ' per hour');
+      }
+      rate.addEventListener('input', paintRoi);
+
+      var perf = window.GobiiHomePerf;
+      var reduced = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
+                    false; /* see note above: phones animate too */
+
+      if (reduced || typeof window.IntersectionObserver !== 'function' ||
+          typeof window.requestAnimationFrame !== 'function') {
+        curP = 1; paint(1); paintRoi();
+        return;
+      }
+
+      paint(0); paintRoi();
+
+      var running = false;
+      function run() {
+        if (running) return;
+        running = true;
+        var t0 = null;
+        function step(ts) {
+          if (t0 === null) t0 = ts;
+          var e = Math.min((ts - t0) / DUR, 1);
+          curP = 1 - Math.pow(1 - e, 2.2);
+          paint(curP); paintRoi();
+          if (e < 1) window.requestAnimationFrame(step); else running = false;
+        }
+        window.requestAnimationFrame(step);
+      }
+
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) { io.disconnect(); run(); }
+        });
+      }, { threshold: 0.35 });
+      io.observe(vessel);
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', start);
+    } else {
+      start();
+    }
+  })();
+</script>

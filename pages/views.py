@@ -237,7 +237,71 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "trello": "images/integrations/pipedream/trello.svg",
 }
 HOMEPAGE_META_TITLE_SUFFIX = "AI Employees for Teams With Real Work to Do"
+# Category labels are free text and drift between deployments ("People" in code
+# fallbacks, "Recruiting" in production rows), so each hero pill matches a set of
+# labels case-insensitively. Templates in no group still appear in the directory.
+HOMEPAGE_HERO_GROUP_DEFS = (
+    (
+        "recruiting",
+        "Recruiting",
+        {"people", "recruiting", "recruitment", "hr & recruiting", "talent"},
+    ),
+    (
+        "sales",
+        "Sales",
+        {"revenue", "sales", "sales-outreach", "lead generation", "lead-generation"},
+    ),
+    (
+        "research",
+        "Research",
+        {"research", "external intel", "market research", "market-research", "market intelligence"},
+    ),
+)
+HOMEPAGE_HERO_ROW_SIZE = 3
+HOMEPAGE_HERO_FEATURED_TEMPLATE_CODES = {
+    "recruiting": (
+        "ai-agent-for-candidate-sourcing",
+        "talent-scout",
+    ),
+    "sales": (
+        "b2b-lead-research-agent",
+        "lead-hunter",
+    ),
+    "research": (
+        "competitor-intelligence-analyst",
+    ),
+}
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
+
+
+def build_homepage_hero_groups(templates: list[dict]) -> list[dict]:
+    groups = []
+    for key, label, category_labels in HOMEPAGE_HERO_GROUP_DEFS:
+        workers = [
+            SimpleNamespace(**template)
+            for template in templates
+            if (template.get("category") or "").strip().lower() in category_labels
+        ]
+        if workers:
+            featured_codes = HOMEPAGE_HERO_FEATURED_TEMPLATE_CODES.get(key, ())
+            featured_worker = next(
+                (
+                    worker
+                    for featured_code in featured_codes
+                    for worker in workers
+                    if worker.code == featured_code
+                ),
+                workers[0],
+            )
+            groups.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "workers": workers[:HOMEPAGE_HERO_ROW_SIZE],
+                    "featured_worker": featured_worker,
+                }
+            )
+    return groups
 
 
 def _with_homepage_inline_integration_icon(app: dict) -> dict:
@@ -1011,8 +1075,28 @@ def _create_checkout_session_with_customer_context(
 class HomePage(TemplateView):
     template_name = "home.html"
 
+    def _renders_legacy_home(self) -> bool:
+        # Mirrors the template-branch decision made in get_context_data: landing
+        # params, explicit custom creation, and a session-saved (non-template)
+        # charter render the legacy page with the charter box; the default render
+        # is the template-first page.
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return True
+        request = self.request
+        if request.GET.get("spawn") == "1":
+            return True
+        if "dc" in request.GET or "g" in request.GET:
+            return True
+        return (
+            "agent_charter" in request.session
+            and request.session.get("agent_charter_source") != "template"
+        )
+
     def _has_direct_checkout_cta(self) -> bool:
         if not settings.GOBII_PROPRIETARY_MODE or not self.request.user.is_authenticated:
+            return False
+        # The direct-checkout upsell panel only exists on the legacy layout.
+        if not self._renders_legacy_home():
             return False
 
         account = build_account_info_context(self.request).get("account") or {}
@@ -1047,6 +1131,7 @@ class HomePage(TemplateView):
         context["home_social_image_url"] = _public_site_absolute_url(
             static(HOMEPAGE_SOCIAL_IMAGE_PATH)
         )
+        context["home_custom_agent_creation"] = self.request.GET.get("spawn") == "1"
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 
@@ -1279,6 +1364,34 @@ class HomePage(TemplateView):
                 }
             )
 
+            # The template-first hero replaces the charter-box hero on the default
+            # render only. Explicit custom creation, landing renders (?g=/?dc=),
+            # and a session-saved charter keep the legacy hero so the relevant
+            # instructions remain above the fold.
+            home_use_k = not (
+                context["home_custom_agent_creation"]
+                or context.get("landing_hero_text")
+                or context.get("default_charter")
+                or context.get("agent_charter_saved")
+            )
+            context["home_use_k"] = home_use_k
+            if home_use_k:
+                from billing.plan_resolver import get_active_public_plan_monthly_task_credits
+
+                context["home_dark_header"] = True
+                context["home_hero_groups"] = build_homepage_hero_groups(all_templates)
+                # Same live sources as PricingView: prices refresh from StripeConfig
+                # and credits come from the active public plan, so the homepage
+                # pricing card can never disagree with /pricing/.
+                pro_plan = get_plan_config(PlanNames.STARTUP) or {}
+                scale_plan = get_plan_config(PlanNames.SCALE) or {}
+                context["home_pricing"] = {
+                    "pro_price": pro_plan.get("price", STARTUP_MONTHLY_PRICE_USD),
+                    "pro_credits": f"{get_active_public_plan_monthly_task_credits(PlanNames.STARTUP):,}",
+                    "scale_price": scale_plan.get("price", 250),
+                    "scale_credits": f"{get_active_public_plan_monthly_task_credits(PlanNames.SCALE):,}",
+                }
+
         if self.request.user.is_authenticated:
             recent_agents_qs = PersistentAgent.objects.non_eval().alive().filter(user_id=self.request.user.id)
             total_agents = recent_agents_qs.count()
@@ -1324,10 +1437,11 @@ class HomePage(TemplateView):
             context['recent_agents_remaining'] = max(fallback_total - len(recent_agents), 0)
             context['recent_agents_total'] = fallback_total
 
-        if (
-            settings.GOBII_PROPRIETARY_MODE
+        context["home_search_indexable"] = (
+            not context["home_custom_agent_creation"]
             and (not context.get("default_charter") or context.get("agent_charter_saved"))
-        ):
+        )
+        if settings.GOBII_PROPRIETARY_MODE and context["home_search_indexable"]:
             context["home_structured_data_json"] = html_safe_json_dumps(
                 build_homepage_structured_data(
                     brand_name=home_brand_name,
@@ -3581,12 +3695,6 @@ class AboutView(TemplateView):
     template_name = "about.html"
 
 
-class TeamView(TemplateView):
-    """Team page showcasing the people behind Gobii."""
-
-    template_name = "team.html"
-
-
 class CareersView(TemplateView):
     """Simple static Careers page."""
 
@@ -4327,7 +4435,6 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 'proprietary:privacy',
                 'proprietary:editorial_policy',
                 'proprietary:about',
-                'proprietary:team',
                 'proprietary:careers',
                 'proprietary:blog_index',
                 'proprietary:comparisons',

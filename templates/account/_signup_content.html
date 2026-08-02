@@ -1,6 +1,8 @@
 {% load i18n form_extras socialaccount social_extras %}
 {% configured_social_auth_providers as social_providers %}
+{% if auth_modal %}{% include "includes/_gk_auth.html" %}{% endif %}
 <div
+  class="gk-auth{% if auth_modal %} gk-auth-modal{% endif %}"
   data-account-auth-root
   data-auth-mode="{% if auth_modal %}modal{% else %}page{% endif %}"
   data-auth-tab="signup"
@@ -12,7 +14,7 @@
   data-popup-complete-url="{% if auth_modal %}{{ auth_popup_complete_url }}{% endif %}"
 >
   {% if auth_modal %}
-    <div class="mb-4 flex items-center justify-between gap-4">
+    <div class="gk-auth-modal-head">
       {% if auth_email_locked %}
       <button
         type="button"
@@ -21,9 +23,9 @@
         data-analytics-cta-id="auth_modal_signup_back"
         data-analytics-placement="auth_modal_signup"
         data-analytics-intent="back_to_start"
-        class="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
+        class="gk-auth-back"
       >
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
         </svg>
         {% trans "Back" %}
@@ -33,33 +35,31 @@
       {% endif %}
       <button
         type="button"
-        class="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full text-slate-500 transition hover:bg-blue-50 hover:text-slate-900"
+        class="gk-auth-close"
         data-cta-signup-modal-close
         aria-label="{% trans 'Close sign up dialog' %}"
       >
-        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6 6 18M6 6l12 12"></path>
         </svg>
       </button>
     </div>
-    <div class="mb-6">
-      <h2 class="text-2xl font-bold text-gray-900">{% trans "Create your account" %}</h2>
-      <p class="mt-2 text-sm text-slate-600">{% trans "Create your account to continue." %}</p>
+    <div class="gk-auth-head">
+      <h2 class="gk-auth-title gk-auth-title-left">{% trans "Create your account" %}</h2>
+      <p class="gk-auth-lede gk-auth-lede-left">{% trans "Create your account to continue." %}</p>
     </div>
   {% else %}
-    <div class="text-center">
-      <h1 class="text-center text-2xl font-bold text-gray-900">{% trans "Sign up" %}</h1>
-      <p class="mt-2 text-sm text-slate-600">
-        {% trans "Already have an account?" %}
-        {% with request.session.utm_querystring as utm_qs %}
-        {% if utm_qs or redirect_field_value %}
-        <a href="{% url 'account_login' %}?{% if utm_qs %}{{ utm_qs }}{% endif %}{% if utm_qs and redirect_field_value %}&{% endif %}{% if redirect_field_value %}{{ redirect_field_name }}={{ redirect_field_value|urlencode }}{% endif %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
-        {% else %}
-        <a href="{% url 'account_login' %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
-        {% endif %}
-        {% endwith %}
-      </p>
-    </div>
+    <h1 class="gk-auth-title">{% trans "Sign up" %}</h1>
+    <p class="gk-auth-alt">
+      {% trans "Already have an account?" %}
+      {% with request.session.utm_querystring as utm_qs %}
+      {% if utm_qs or redirect_field_value %}
+      <a href="{% url 'account_login' %}?{% if utm_qs %}{{ utm_qs }}{% endif %}{% if utm_qs and redirect_field_value %}&{% endif %}{% if redirect_field_value %}{{ redirect_field_name }}={{ redirect_field_value|urlencode }}{% endif %}">{% trans "Sign in" %}</a>
+      {% else %}
+      <a href="{% url 'account_login' %}">{% trans "Sign in" %}</a>
+      {% endif %}
+      {% endwith %}
+    </p>
   {% endif %}
 
   {% if account_allow_social_signup and not auth_modal %}
@@ -72,7 +72,7 @@
   <form
     method="post"
     action="{% if auth_modal %}{{ auth_modal_signup_url }}{% else %}{% url 'account_signup' %}{% endif %}"
-    class="space-y-4"
+    class="gk-auth-form"
     data-password-signup-form
     {% if auth_modal %}data-analytics-cta-id="auth_modal_signup_submit" data-analytics-placement="auth_modal_signup" data-analytics-intent="sign_up"{% endif %}
     {% if auth_modal %}data-auth-modal-form{% endif %}
@@ -87,36 +87,52 @@
     {% if redirect_field_value %}
       <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
     {% endif %}
-    {{ form.non_field_errors }}
+    {% if form.non_field_errors %}
+    <div class="gk-auth-alert" role="alert">
+      <ul>
+        {% for error in form.non_field_errors %}
+          <li>{{ error }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
 
     {% for field in form.visible_fields %}
       {% if field.name != 'turnstile' %}
-        <div>
-          <label for="{{ field.id_for_label }}" class="block text-sm mb-1">{{ field.label }}</label>
+        <div class="gk-auth-field">
+          <label for="{{ field.id_for_label }}" class="gk-auth-label">{{ field.label }}</label>
           <input id="{{ field.id_for_label }}" name="{{ field.name }}" type="{{ field.field.widget.input_type }}" required
                  value="{% if auth_modal and auth_email_locked and field.name == 'email' %}{{ auth_prefilled_email }}{% else %}{{ field.value|default_if_none:'' }}{% endif %}"
                  {% if field.name == 'email' %}autocomplete="email"{% endif %}
                  {% if field.name == 'password1' or field.name == 'password2' %}autocomplete="new-password"{% endif %}
                  {% if auth_modal and auth_email_locked and field.name == 'email' %}readonly{% endif %}
-                 class="block w-full rounded-lg border border-gray-200 px-4 py-2.5 focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                 {% if field.errors %}aria-invalid="true" aria-describedby="{{ field.id_for_label }}-error"{% endif %}
+                 class="gk-auth-input{% if field.errors %} gk-auth-input-err{% endif %}"
                  {% if field.field.widget.attrs.placeholder %}placeholder="{{ field.field.widget.attrs.placeholder }}"{% endif %}>
           {% if field.errors %}
-            <p class="mt-1 text-sm text-red-600" id="{{ field.id_for_label }}-error">{{ field.errors|striptags }}</p>
+            <p class="gk-auth-err" id="{{ field.id_for_label }}-error" role="alert">{{ field.errors|striptags }}</p>
           {% endif %}
         </div>
       {% endif %}
     {% endfor %}
 
     {% if settings.TURNSTILE_ENABLED and form.turnstile %}
-      <div class="mt-4 flex justify-center">
-        {{ form.turnstile }}
+      <div class="gk-auth-turnstile">
+        <div class="gk-auth-turnstile-frame">{{ form.turnstile }}</div>
+        {% if form.turnstile.errors %}
+          <div role="alert">
+            {% for error in form.turnstile.errors %}
+              <p class="gk-auth-err">{{ error }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
       </div>
     {% endif %}
 
     <button
       type="submit"
       {% if auth_modal %}data-auth-modal-submit aria-busy="false"{% endif %}
-      class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+      class="gk-btn gk-auth-submit"
     >
       {% if auth_modal %}
         <span class="inline-flex items-center justify-center gap-2">
@@ -133,16 +149,16 @@
       {% endif %}
     </button>
     {% if settings.GOBII_PROPRIETARY_MODE %}
-    <p class="mt-4 text-xs text-gray-500 text-center">
+    <p class="gk-auth-legal">
       By creating an account, you agree to our
-      <a href="{% url 'proprietary:tos' %}" class="text-blue-600 hover:underline">Terms of Service</a>
+      <a href="{% url 'proprietary:tos' %}">Terms of Service</a>
       and
-      <a href="{% url 'proprietary:privacy' %}" class="text-blue-600 hover:underline">Privacy Policy</a>.
+      <a href="{% url 'proprietary:privacy' %}">Privacy Policy</a>.
     </p>
     {% endif %}
   </form>
   {% else %}
-  <p class="mt-6 text-center text-sm text-slate-600">
+  <p class="gk-auth-lede">
     {% trans "Password signup is currently unavailable." %}
   </p>
   {% endif %}

@@ -1,0 +1,186 @@
+{% comment %}
+  Gobii showcase kit — shared chrome for the marketing "proof" surfaces.
+
+  Two namespaces, both safe to use anywhere:
+    .gkw-*  emulated third-party app windows (Greenhouse, HubSpot, Apollo,
+            LinkedIn Recruiter, Google Sheets, Discord, iMessage, Gmail, agent DB)
+
+  Sections that need charts or category colours use the validated categorical set
+  #9061f9 / #0d9f74 / #c2410c / #2563eb — it passes all six checks of the dataviz
+  validator against the Luxe dark surface (#16102b), worst adjacent CVD deltaE 10.9,
+  normal-vision deltaE 28.0. Do not substitute hues without re-running it.
+
+  Rows animate via .gkw-row; sections re-trigger them by clearing inline
+  animation. Everything degrades to a static, fully-populated state under
+  prefers-reduced-motion.
+{% endcomment %}
+<style>
+.gkw-app { background: #fff; overflow: hidden; font-family: Arial, Helvetica, sans-serif; text-align: left; }
+  .gkw-row { opacity: 0; transform: translateY(5px); }
+  @keyframes gkw-rowin { to { opacity: 1; transform: none; } }
+  .gkw-face { width: 24px; height: 24px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
+  .gkw-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .gkw-gs-title { display: flex; align-items: center; gap: 8px; padding: 7px 12px 2px; }
+  .gkw-gs-title img { height: 20px; }
+  .gkw-gs-title b { font-size: 13px; color: #202124; font-weight: 500; }
+  .gkw-gs-title span { color: #5f6368; font-size: 11px; }
+  .gkw-gs-menu { display: flex; gap: 13px; padding: 2px 12px 6px 40px; font-size: 11px; color: #202124; }
+  .gkw-gs-fx { display: flex; align-items: center; gap: 8px; border-top: 1px solid #e1e3e6; border-bottom: 1px solid #e1e3e6;
+          padding: 4px 12px; font-size: 11px; color: #5f6368; }
+  .gkw-gs-fx .cell { border: 1px solid #e1e3e6; border-radius: 3px; padding: 1px 8px; color: #202124; min-width: 44px; text-align: center; }
+  .gkw-gs-fx i { font-family: Georgia, serif; }
+  .gkw-gs-grid { display: grid; grid-template-columns: 32px 1.3fr 1.3fr 1.1fr .55fr; font-size: 11px; color: #202124; }
+  .gkw-gs-grid > div { border-right: 1px solid #e1e3e6; border-bottom: 1px solid #e1e3e6; padding: 5px 7px;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gkw-gs-h { background: #f8f9fa; color: #5f6368; text-align: center; font-size: 10px; }
+  .gkw-gs-r { background: #f8f9fa; color: #5f6368; text-align: center; font-size: 10px; }
+  .gkw-gs-b { font-weight: 700; }
+  .gkw-gs-new > div { animation: gsland 1.2s; }
+  @keyframes gsland { 0% { background: #e8f0fe; } 100% { background: transparent; } }
+  .gkw-gs-active { outline: 2px solid #1a73e8; outline-offset: -2px; }
+  .gkw-gh-nav { display: flex; align-items: center; gap: 16px; padding: 8px 14px; border-bottom: 1px solid #e5e7eb; }
+  .gkw-gh-nav img { height: 18px; }
+  .gkw-gh-nav span { font-size: 11.5px; color: #4b5563; }
+  .gkw-gh-nav .on { color: #17805e; font-weight: 700; box-shadow: 0 2px 0 #24a47f; padding-bottom: 2px; }
+  .gkw-gh-job { display: flex; align-items: center; gap: 10px; padding: 9px 14px 0; }
+  .gkw-gh-job b { font-size: 13px; color: #111827; }
+  .gkw-gh-job span { font-size: 10px; color: #6b7280; background: #f3f4f6; border-radius: 3px; padding: 2px 6px; }
+  .gkw-gh-stages { display: flex; gap: 6px; padding: 8px 14px; flex-wrap: wrap; }
+  .gkw-gh-stage { font-size: 10px; color: #4b5563; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 4px; padding: 4px 9px; }
+  .gkw-gh-stage.on { background: #e7f6f0; border-color: #24a47f; color: #17805e; font-weight: 700; }
+  .gkw-gh-row { display: flex; align-items: center; gap: 9px; padding: 7px 14px; border-top: 1px solid #f3f4f6; }
+  .gkw-gh-row .gkw-nm { font-size: 12px; font-weight: 700; color: #111827; }
+  .gkw-gh-row .gkw-dt { font-size: 10px; color: #6b7280; }
+  .gkw-gh-tag { font-size: 9px; color: #17805e; background: #e7f6f0; border-radius: 3px; padding: 2px 6px; font-weight: 700; }
+  .gkw-gh-new { margin-left: auto; font-size: 9px; font-weight: 700; color: #fff; background: #24a47f; border-radius: 3px; padding: 2px 6px; }
+  .gkw-hs-nav { display: flex; align-items: center; gap: 14px; padding: 8px 14px; background: #33475b; }
+  .gkw-hs-nav img { height: 16px; filter: brightness(0) invert(1); }
+  .gkw-hs-nav span { font-size: 11px; color: #cbd6e2; }
+  .gkw-hs-nav .on { color: #fff; font-weight: 700; }
+  .gkw-hs-sub { display: flex; align-items: center; padding: 9px 14px 6px; }
+  .gkw-hs-sub b { font-size: 13px; color: #33475b; }
+  .gkw-hs-btn { margin-left: auto; font-size: 10px; font-weight: 700; color: #fff; background: #ff7a59; border-radius: 3px; padding: 4px 10px; }
+  .gkw-hs-th { display: grid; grid-template-columns: 24px 1.3fr 1fr .8fr; font-size: 9.5px; color: #516f90;
+          padding: 5px 14px; border-bottom: 2px solid #e5eaf0; font-weight: 700; letter-spacing: .4px; }
+  .gkw-hs-row { display: grid; grid-template-columns: 24px 1.3fr 1fr .8fr; align-items: center; font-size: 11.5px;
+           padding: 7px 14px; border-bottom: 1px solid #eef2f6; }
+  .gkw-hs-row .lnk { color: #0091ae; font-weight: 700; }
+  .gkw-hs-row .co { color: #33475b; }
+  .gkw-hs-chip { font-size: 9px; font-weight: 700; color: #33475b; background: #e5f5f8; border-radius: 3px; padding: 2px 7px; width: fit-content; }
+  .gkw-hs-cb { width: 11px; height: 11px; border: 1px solid #99acc2; border-radius: 2px; }
+  .gkw-ap-nav { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid #e5e7eb; }
+  .gkw-ap-logo { font-weight: 800; font-size: 13px; color: #111; letter-spacing: -.3px; }
+  .gkw-ap-logo::after { content: ''; display: inline-block; width: 6px; height: 6px; background: #ffc107; border-radius: 50%; margin-left: 3px; }
+  .gkw-ap-nav span { font-size: 11px; color: #4b5563; }
+  .gkw-ap-nav .on { color: #146ef5; font-weight: 700; box-shadow: 0 2px 0 #146ef5; padding-bottom: 2px; }
+  .gkw-ap-sub { display: flex; align-items: center; gap: 8px; padding: 9px 14px 6px; }
+  .gkw-ap-sub b { font-size: 13px; color: #111827; }
+  .gkw-ap-sub span { font-size: 10px; color: #6b7280; }
+  .gkw-ap-row { display: flex; align-items: center; gap: 9px; padding: 7px 14px; border-top: 1px solid #f3f4f6; }
+  .gkw-ap-av { width: 24px; height: 24px; border-radius: 50%; background: #eef2ff; color: #4338ca; display: grid;
+          place-items: center; font-size: 9px; font-weight: 700; flex-shrink: 0; }
+  .gkw-ap-row .gkw-nm { font-size: 12px; font-weight: 700; color: #111827; }
+  .gkw-ap-row .gkw-dt { font-size: 10px; color: #6b7280; }
+  .gkw-ap-step { margin-left: auto; display: flex; align-items: center; gap: 5px; }
+  .gkw-ap-dots { display: flex; gap: 3px; }
+  .gkw-ap-dot { width: 6px; height: 6px; border-radius: 50%; background: #e5e7eb; }
+  .gkw-ap-dot.on { background: #146ef5; }
+  .gkw-ap-sched { font-size: 9px; font-weight: 700; color: #146ef5; background: #e8f0fe; border-radius: 3px; padding: 2px 6px; }
+  .gkw-in { width: 20px; height: 20px; background: #0a66c2; border-radius: 4px; color: #fff; font-weight: 800;
+            display: inline-grid; place-items: center; font-size: 11px; font-family: Arial, sans-serif; flex-shrink: 0; }
+  .gkw-li-nav { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #1d2226; }
+  .gkw-li-nav .rec { color: #fff; font-size: 12px; font-weight: 700; letter-spacing: -.2px; }
+  .gkw-li-nav span.t { font-size: 11px; color: #b0b7bd; }
+  .gkw-li-nav span.t.on { color: #fff; font-weight: 700; box-shadow: 0 2px 0 #fff; padding-bottom: 2px; }
+  .gkw-li-sub { display: flex; align-items: center; gap: 8px; padding: 9px 14px 6px; }
+  .gkw-li-sub b { font-size: 13px; color: #111827; }
+  .gkw-li-sub span { font-size: 10px; color: #6b7280; }
+  .gkw-li-row { display: flex; align-items: center; gap: 9px; padding: 7px 14px; border-top: 1px solid #f3f4f6; }
+  .gkw-li-row .gkw-nm { font-size: 12px; font-weight: 700; color: #111827; }
+  .gkw-li-row .gkw-dt { font-size: 10px; color: #6b7280; }
+  .gkw-li-save { margin-left: auto; font-size: 10px; font-weight: 700; color: #0a66c2; border: 1.5px solid #0a66c2;
+           border-radius: 999px; padding: 3px 11px; white-space: nowrap; }
+  .gkw-li-saved { margin-left: auto; font-size: 10px; font-weight: 700; color: #fff; background: #0a66c2;
+            border-radius: 999px; padding: 4px 11px; white-space: nowrap; }
+
+/* ---------- phone / SMS ---------- */
+  .gkw-phone { border-radius: 30px; padding: 9px; background: linear-gradient(160deg,#2b2440,#161029);
+         box-shadow: 0 30px 80px rgba(3,1,12,.7), inset 0 0 0 1px rgba(255,255,255,.09); }
+  .gkw-phscreen { background: #fff; border-radius: 23px; overflow: hidden; font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; }
+  .gkw-phbar { display: flex; align-items: center; gap: 8px; padding: 9px 13px 8px; border-bottom: .5px solid #d9d9de;
+         background: #f7f7f8; }
+  .gkw-phbar .gkw-who { font-size: 12.5px; font-weight: 600; color: #111; }
+  .gkw-phbar .sub { font-size: 9.5px; color: #8a8a8e; }
+  .gkw-phbar .gkw-fishav { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(140deg,#7c3aed,#f0abfc);
+                 display: grid; place-items: center; }
+  .gkw-phbar .gkw-fishav img { height: 15px; }
+  .gkw-thread { padding: 12px 12px 14px; display: flex; flex-direction: column; gap: 7px; background: #fff; }
+  .gkw-bub { max-width: 82%; padding: 8px 12px; border-radius: 17px; font-size: 12.5px; line-height: 1.4; }
+  .gkw-bub.me { align-self: flex-end; background: #007aff; color: #fff; border-bottom-right-radius: 5px; }
+  .gkw-bub.them { align-self: flex-start; background: #e9e9eb; color: #111; border-bottom-left-radius: 5px; }
+  .gkw-bub small { display: block; font-size: 10px; opacity: .72; margin-top: 3px; }
+  /* ---------- discord ---------- */
+  .gkw-dc { background: #313338; font-family: 'gg sans', Arial, sans-serif; }
+  .gkw-dcbar { display: flex; align-items: center; gap: 8px; padding: 9px 13px; background: #2b2d31;
+         border-bottom: 1px solid #1f2023; }
+  .gkw-dcbar .hash { color: #949ba4; font-size: 15px; font-weight: 700; }
+  .gkw-dcbar b { color: #f2f3f5; font-size: 12.5px; }
+  .gkw-dcbar .cnt { margin-left: auto; font-size: 10px; color: #949ba4; }
+  .gkw-dcmsgs { padding: 10px 13px 13px; display: flex; flex-direction: column; gap: 11px; }
+  .gkw-dcmsg { display: flex; gap: 9px; }
+  .gkw-dcav { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; overflow: hidden; }
+  .gkw-dcav img { width: 100%; height: 100%; object-fit: cover; }
+  .gkw-dcav.bot { background: linear-gradient(140deg,#7c3aed,#f0abfc); display: grid; place-items: center; }
+  .gkw-dcav.bot img { width: auto; height: 16px; object-fit: contain; }
+  .gkw-dcname { font-size: 12.5px; font-weight: 600; color: #f2f3f5; display: flex; align-items: center; gap: 6px; }
+  .gkw-dcname .tag { font-size: 8.5px; font-weight: 700; color: #fff; background: #5865f2; border-radius: 3px; padding: 1px 4px;
+               letter-spacing: .3px; }
+  .gkw-dcname .ts { font-size: 9.5px; color: #949ba4; font-weight: 400; }
+  .gkw-dctext { font-size: 12.5px; color: #dbdee1; line-height: 1.45; margin-top: 2px; }
+  .gkw-dcreact { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; background: #2b2d31;
+           border: 1px solid #3f4147; border-radius: 8px; padding: 2px 7px; font-size: 10.5px; color: #b5bac1; }
+  /* ---------- email ---------- */
+  .gkw-em { background: #fff; font-family: Arial, Helvetica, sans-serif; }
+  .gkw-embar { display: flex; align-items: center; gap: 9px; padding: 9px 13px; border-bottom: 1px solid #e8eaed; }
+  .gkw-embar img { height: 17px; }
+  .gkw-embar b { font-size: 11.5px; color: #202124; }
+  .gkw-embar .sr { margin-left: auto; font-size: 10px; color: #5f6368; }
+  .gkw-emsub { padding: 11px 14px 4px; font-size: 14px; color: #202124; font-weight: 400; }
+  .gkw-emmeta { display: flex; align-items: center; gap: 8px; padding: 2px 14px 10px; }
+  .gkw-emav { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(140deg,#7c3aed,#f0abfc);
+        display: grid; place-items: center; flex-shrink: 0; }
+  .gkw-emav img { height: 15px; }
+  .gkw-emfrom { font-size: 11.5px; color: #202124; font-weight: 700; }
+  .gkw-emto { font-size: 10px; color: #5f6368; }
+  .gkw-embody { padding: 0 14px 14px; font-size: 12px; color: #202124; line-height: 1.6; }
+  .gkw-embody ul { margin: 8px 0 0 16px; padding: 0; }
+  .gkw-embody li { margin-bottom: 4px; }
+  /* ---------- agent DB ---------- */
+  .gkw-db { background: #0e0b1c; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .gkw-dbbar { display: flex; align-items: center; gap: 8px; padding: 9px 13px; background: #171132;
+         border-bottom: 1px solid rgba(255,255,255,.08); }
+  .gkw-dbbar b { font-size: 11.5px; color: #e9e4fb; font-family: 'InterVariable', Inter, sans-serif; font-weight: 600; }
+  .gkw-dbbar .pill { margin-left: auto; font-size: 9px; color: #6ee7b7; background: rgba(110,231,183,.12);
+               border-radius: 999px; padding: 2px 8px; font-family: 'InterVariable', Inter, sans-serif; font-weight: 700; }
+  .gkw-dbq { padding: 9px 13px; font-size: 11px; color: #c4b5fd; border-bottom: 1px solid rgba(255,255,255,.07); }
+  .gkw-dbq .kw { color: #f0abfc; }
+  .gkw-dbtable { display: grid; grid-template-columns: 1.1fr 1.5fr .8fr; font-size: 10.5px; }
+  .gkw-dbtable > div { padding: 6px 13px; border-bottom: 1px solid rgba(255,255,255,.05); color: #cfc7e8;
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gkw-dbtable .h { color: #7a6ea8; font-size: 9px; letter-spacing: .8px; background: rgba(255,255,255,.03); }
+  .gkw-dbtable .g { color: #6ee7b7; }
+
+
+
+
+  /* ---- chart primitives: thin marks, recessive axes, direct labels ---- */
+  /* magnitude meter: single hue, 4px rounded data-end anchored to the track */
+
+  /* Rows arrive only when a section asks. The gate is the .gkw-live ancestor:
+     without it a row stays invisible forever, so never render a window that
+     cannot receive .gkw-live. Re-trigger by clearing the inline animation. */
+  .gkw-live .gkw-row { animation: gkw-rowin .4s forwards; }
+  @media (prefers-reduced-motion: reduce) {
+    .gkw-row { opacity: 1 !important; transform: none !important; animation: none !important; }
+  }
+</style>

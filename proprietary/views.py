@@ -548,43 +548,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             },
         ]
 
-        pricing_plans.insert(
-            0,
-            {
-                "code": "free_oss",
-                "name": _("Free"),
-                "price": 0,
-                "price_label": "$0",
-                "price_prefix": "$",
-                "price_amount": 0,
-                "desc": _("Self-Hosted Agents"),
-                "tasks": None,
-                "pricing_model": _("Self-hosted, open source"),
-                "highlight": False,
-                "badge": _("Open source"),
-                "disabled": False,
-                "cta_disabled": False,
-                "current_plan": False,
-                "trial_cancel_text": None,
-                "features": [
-                    _("Run on your own computer or server"),
-                    _("Bring your own AI models"),
-                    _("Always-on agents with browser automation"),
-                    _("Open source and MIT licensed"),
-                ],
-                "cta": _("View on GitHub"),
-                "cta_url": "https://github.com/gobii-ai/gobii-platform",
-                "cta_icon": "github",
-                "cta_variant": "outline",
-                "external": True,
-                "signup_modal": False,
-                "analytics_cta_id": "pricing_free_oss_plan",
-                "analytics_intent": "view_open_source",
-            },
-        )
-
         context["pricing_plans"] = pricing_plans
-        context["pricing_grid_has_free_oss_plan"] = True
+        # Self-hosting is presented as its own open-source section at the bottom
+        # of the page, not as a "Free" plan column in the grid.
+        context["pricing_grid_has_free_oss_plan"] = False
         context["team_offer"] = team_offer
 
         # Plan limits pulled from plan configuration to keep the table in sync

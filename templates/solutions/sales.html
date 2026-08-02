@@ -8,315 +8,313 @@
 {{ block.super }}
 {% include "solutions/_seo_meta.html" %}
 <style>
-  .sales-panel {
-    position: relative;
-    overflow: hidden;
-    isolation: isolate;
-  }
-
-  .sales-panel::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(circle at 20% 25%, rgba(99, 102, 241, 0.14) 0%, rgba(99, 102, 241, 0) 55%),
-      radial-gradient(circle at 75% 35%, rgba(79, 70, 229, 0.10) 0%, rgba(79, 70, 229, 0) 60%),
-      radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.08) 0%, rgba(129, 140, 248, 0) 70%);
-    opacity: 0.8;
-    filter: blur(40px);
-    pointer-events: none;
-    z-index: 2;
-  }
-
-  .sales-panel::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
-    pointer-events: none;
-    z-index: 3;
-    mix-blend-mode: lighten;
-  }
-
-  .sales-gradient-bg {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.28) 0%, rgba(129, 140, 248, 0.32) 40%, rgba(79, 70, 229, 0.22) 100%);
-    -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
-    mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
-  }
-
-  .sales-content {
-    position: relative;
-    z-index: 10;
-    min-height: inherit;
-  }
-
-  .sales-content::after {
-    content: "";
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 20;
-    height: 10rem;
-    pointer-events: none;
-    background: linear-gradient(to top, #fff 0%, rgba(255, 255, 255, 0.8) 50%, rgba(255, 255, 255, 0) 100%);
-  }
-
-  /* Hero image as atmospheric background element */
-  .hero-image-bg {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
-    pointer-events: none;
-    overflow: hidden;
-  }
-
-  .hero-image-bg img {
-    position: absolute;
-    right: -5%;
-    top: 0;
-    width: 80%;
-    height: 100%;
-    object-fit: cover;
-    object-position: 100% 50%;
-    opacity: 1;
-    -webkit-mask-image:
-      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
-      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
-    -webkit-mask-composite: source-in;
-    mask-image:
-      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
-      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
-    mask-composite: intersect;
-  }
-
-  @media (max-width: 1023px) {
-    .hero-image-bg img {
-      right: -10%;
-      width: 110%;
-      object-position: 100% 50%;
-      opacity: 0.45;
-      -webkit-mask-image:
-        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
-        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
-      mask-image:
-        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
-        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
-    }
-
-    .sales-panel::after {
-      background: linear-gradient(90deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.6) 40%, rgba(255, 255, 255, 0.3) 70%, transparent 100%),
-                  linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.6) 100%);
-    }
-  }
-
-  .agent-card {
-    transition: all 0.2s ease;
-  }
-
-  .agent-card:hover {
-    transform: translateY(-2px);
-    border-color: rgba(99, 102, 241, 0.26);
-    box-shadow: 0 24px 48px -28px rgba(99, 102, 241, 0.35);
-  }
+  /* sales — page-scoped layout on the Gobii Luxe theme */
+  .sal-hero { max-width: 1100px; margin: 0 auto; padding: 64px 24px 0; position: relative;
+    display: grid; grid-template-columns: 1.05fr .95fr; gap: 44px; align-items: center; }
+  @media (max-width: 900px) { .sal-hero { grid-template-columns: 1fr; } }
+  .sal-hero::before { content: ''; position: absolute; width: min(46vw, 640px); height: 360px;
+    border-radius: 50%; filter: blur(100px); opacity: .32; pointer-events: none; top: -40px; right: 4%;
+    background: radial-gradient(closest-side, rgba(168,85,247,.5), transparent); }
+  .sal-hero > * { position: relative; }
+  .sal-crumbs { font-size: 12.5px; color: #8b7fb8; margin-bottom: 14px; }
+  .sal-crumbs a { color: #c4b5fd; text-decoration: none; }
+  .sal-hero h1 { margin-top: 12px; }
+  .sal-hero .gk-sub { margin-top: 14px; max-width: 50ch; }
+  .sal-ctas { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+  .sal-crawl p { color: #b7aed4 !important; }
+  .sal-crawl a { color: #c4b5fd !important; text-decoration-color: rgba(196,181,253,.5) !important; }
+  .sal-crawl a:hover { color: #fff !important; }
+  .sal-note { color: #b7aed4; font-size: 13.5px; margin-top: 18px; max-width: 52ch; }
+  .sal-note a { color: #c4b5fd; text-decoration: underline; text-underline-offset: 4px; }
+  .sal-note a:hover { color: #fff; }
+  .sal-stats { display: inline-flex; flex-wrap: wrap; gap: 20px 34px; margin-top: 24px; padding: 16px 24px; }
+  .sal-stat b { display: block; font-size: 24px; font-weight: 300; color: #fff; }
+  .sal-stat span { font-size: 11px; color: #8b7fb8; }
+  /* white proof windows (the only light surfaces on the page) */
+  .sal-proof { position: relative; background: linear-gradient(180deg,#fff,#fbfaff); border-radius: 16px;
+    overflow: hidden; color: #111827; border: 1px solid rgba(233,228,246,.9);
+    box-shadow: 0 34px 90px rgba(5,2,18,.6), 0 0 70px rgba(168,85,247,.12); }
+  .sal-pbar { display: flex; align-items: center; gap: 6px; background: #f6f4fc; padding: 10px 14px;
+    border-bottom: 1px solid #ece7f8; }
+  .sal-pdot { width: 9px; height: 9px; border-radius: 50%; }
+  .sal-purl { flex: 1; text-align: center; color: #8b7fb8; font-size: 11.5px; font-weight: 500; }
+  .sal-pbody { padding: 14px 16px; }
+  .sal-prow { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #f0ecfa;
+    border-radius: 11px; padding: 9px 11px; margin-bottom: 8px; opacity: 0; transform: translateY(7px);
+    transition: opacity .45s, transform .45s cubic-bezier(.2,.8,.3,1); }
+  .sal-prow.on { opacity: 1; transform: none; }
+  .sal-pwho { font-size: 12.5px; font-weight: 500; }
+  .sal-pnote { font-size: 10.5px; color: #9ca3af; }
+  .sal-pfit { margin-left: auto; color: #6d28d9; background: #f3eefb; border-radius: 999px; padding: 2px 8px;
+    font-size: 10px; font-weight: 600; white-space: nowrap; }
+  .sal-pfoot { text-align: center; color: #8b7fb8; font-size: 11px; padding: 4px 0 12px; }
+  @media (prefers-reduced-motion: reduce) { .sal-prow { opacity: 1; transform: none; transition: none; } }
+  /* section helpers */
+  .sal-lede { color: #b7aed4; font-size: 15px; line-height: 1.65; margin-top: 12px; }
+  .sal-feature { padding: 30px; margin-top: 30px; }
+  .sal-feature-grid { display: grid; gap: 32px; align-items: center; }
+  @media (min-width: 1024px) { .sal-feature-grid { grid-template-columns: 1.1fr .9fr; } }
+  .sal-pill-live { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600;
+    letter-spacing: 1.2px; text-transform: uppercase; color: #e9dcff; background: rgba(139,92,246,.18);
+    border-radius: 999px; padding: 5px 12px; }
+  .sal-pill-live::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #a855f7;
+    animation: sal-pulse 2s ease-in-out infinite; }
+  @keyframes sal-pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .sal-pill-live::before { animation: none; } }
+  .sal-check { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #d5cdec; }
+  .sal-check svg { color: #a78bfa; flex-shrink: 0; }
+  .sal-cluster { position: relative; display: flex; align-items: center; justify-content: center; padding: 40px 0; }
+  .sal-cluster-main { width: 108px; height: 108px; border-radius: 24px; display: flex; align-items: center;
+    justify-content: center; transform: rotate(3deg); background: linear-gradient(120deg,#7c3aed,#a855f7);
+    box-shadow: 0 24px 60px rgba(124,58,237,.45); }
+  .sal-cluster-badge { position: absolute; width: 46px; height: 46px; border-radius: 13px; display: flex;
+    align-items: center; justify-content: center; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.14); backdrop-filter: blur(6px); color: #c4b5fd; }
+  .sal-agents { display: grid; gap: 15px; margin-top: 22px; }
+  @media (min-width: 768px) { .sal-agents { grid-template-columns: 1fr 1fr; } }
+  .sal-agent { padding: 24px; display: flex; flex-direction: column; }
+  .sal-agent-ic { width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center;
+    justify-content: center; background: linear-gradient(120deg,#7c3aed,#a855f7); color: #fff;
+    box-shadow: 0 10px 26px rgba(124,58,237,.4); margin-bottom: 16px; }
+  .sal-agent h3 { font-size: 17px; font-weight: 600; color: #fff; margin: 0 0 8px; }
+  .sal-agent .sal-body { color: #a99cc9; font-size: 13.5px; line-height: 1.6; margin: 0 0 14px; }
+  .sal-agent ul { list-style: none; margin: 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .sal-link { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 550;
+    color: #c4b5fd; background: none; border: 0; padding: 0; cursor: pointer; }
+  .sal-link:hover { color: #fff; }
+  /* visual step cards */
+  .sal-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-top: 26px; }
+  .sal-stepc { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.1); border-radius: 16px;
+    padding: 22px; display: flex; flex-direction: column; transition: border-color .35s, box-shadow .35s, transform .35s; }
+  .sal-stepc.hot { border-color: rgba(196,181,253,.45); box-shadow: 0 14px 44px rgba(109,40,217,.3);
+    transform: translateY(-3px); }
+  @media (prefers-reduced-motion: reduce) { .sal-stepc, .sal-stepc.hot { transition: none; transform: none; box-shadow: none; } }
+  .sal-sviz { background: rgba(10,6,22,.5); border: 1px solid rgba(255,255,255,.08); border-radius: 12px;
+    padding: 12px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 7px; min-height: 104px;
+    justify-content: center; }
+  .sal-mini { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #d5cdec;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); border-radius: 9px; padding: 7px 10px; }
+  .sal-ck { color: #a78bfa; font-weight: 700; }
+  .sal-stepn { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(120deg,#7c3aed,#a855f7);
+    color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+  .sal-stepc h3 { font-size: 14.5px; font-weight: 600; color: #fff; margin: 0; }
+  .sal-stepc p { color: #a99cc9; font-size: 12.5px; line-height: 1.6; margin: 6px 0 0; }
+  .sal-chip-live { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 11.5px;
+    font-weight: 550; color: #e9dcff; background: rgba(139,92,246,.18); border-radius: 999px; padding: 4px 11px; }
+  .sal-chip-live::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #a855f7; }
+  .sal-lead-wrap { max-width: 480px; margin: 44px auto 0; }
+  .sal-lead-note { font-size: 12.5px; color: #9ca3af; margin-top: 4px; }
+  .sal-lead-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  .sal-lead-stat { background: #f8f6fd; border: 1px solid #f0ecfa; border-radius: 10px; padding: 10px;
+    text-align: center; }
+  .sal-lead-stat b { display: block; font-size: 20px; font-weight: 300; color: #6d28d9; }
+  .sal-lead-stat span { font-size: 10.5px; color: #8b7fb8; }
+  .sal-cap { margin-top: 14px; text-align: center; font-size: 13px; color: #8b7fb8; }
+  /* benefits + testimonial */
+  .sal-2col { display: grid; gap: 40px; align-items: center; margin-top: 26px; }
+  @media (min-width: 1024px) { .sal-2col { grid-template-columns: 1fr 1fr; gap: 60px; } }
+  .sal-benefit { display: flex; gap: 18px; padding: 14px 0; }
+  .sal-benefit-ic { flex-shrink: 0; width: 44px; height: 44px; border-radius: 13px; display: flex;
+    align-items: center; justify-content: center; background: linear-gradient(120deg,#7c3aed,#a855f7);
+    color: #fff; box-shadow: 0 10px 26px rgba(124,58,237,.4); }
+  .sal-benefit h3 { font-size: 15.5px; font-weight: 600; color: #fff; margin: 0 0 4px; }
+  .sal-benefit p { color: #a99cc9; font-size: 13.5px; line-height: 1.65; margin: 0; }
+  .sal-quote { padding: 34px; }
+  .sal-quote blockquote p { font-size: 17px; color: #ece9f6; line-height: 1.7; margin: 0; }
+  .sal-quote footer { margin-top: 24px; display: flex; align-items: center; gap: 14px; }
+  .sal-quote-av { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; color: #fff; font-weight: 600; font-size: 14px;
+    background: linear-gradient(120deg,#7c3aed,#a855f7); box-shadow: 0 8px 22px rgba(124,58,237,.4); }
+  /* FAQ layout */
+  .sal-faq-grid { display: grid; gap: 40px; align-items: start; margin-top: 26px; }
+  @media (min-width: 1024px) { .sal-faq-grid { grid-template-columns: .9fr 1.1fr; gap: 56px; }
+    .sal-faq-sticky { position: sticky; top: 96px; } }
+  .sal-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 26px; }
+  .sal-tile { padding: 13px 16px; font-size: 13px; color: #d5cdec; }
+  .sal-tile span { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px;
+    text-transform: uppercase; color: #8b7fb8; margin-bottom: 3px; }
+  .sal-strip { display: grid; gap: 10px; margin-top: 22px; }
+  @media (min-width: 768px) { .sal-strip { grid-template-columns: repeat(4, 1fr); } }
+  .sal-strip-cell { padding: 16px 18px; }
+  .sal-strip-cell .sal-strip-h { display: flex; align-items: center; gap: 8px; font-size: 13px;
+    font-weight: 600; color: #fff; }
+  .sal-strip-cell .sal-strip-h i { color: #a78bfa; }
+  .sal-strip-cell p { margin: 8px 0 0; font-size: 12.5px; line-height: 1.6; color: #a99cc9; }
+  /* closer band */
+  .sal-band-wrap { max-width: 1100px; margin: 80px auto 0; padding: 0 24px 8px; }
+  .sal-band-ctas { display: flex; flex-direction: column; gap: 12px; justify-content: center; align-items: center; }
+  @media (min-width: 640px) { .sal-band-ctas { flex-direction: row; } }
+  .sal-trust { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+    gap: 12px 30px; font-size: 13px; color: #c4b5fd; }
+  .sal-trust svg { color: #f0abfc; }
 </style>
 {% endblock %}
 
 {% block content %}
-<!-- Hero Section -->
-<div class="relative sales-panel -mt-16 min-h-[600px] lg:min-h-[700px]">
-  <div class="sales-gradient-bg" aria-hidden="true"></div>
+<div class="gk-luxe">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
 
-  <!-- Hero image as atmospheric background -->
-  <div class="hero-image-bg" aria-hidden="true">
-    <img
-      src="{% static 'images/solutions/sales-hero.jpg' %}"
-      srcset="{% static 'images/solutions/sales-hero-640.jpg' %} 640w,
-              {% static 'images/solutions/sales-hero-960.jpg' %} 960w,
-              {% static 'images/solutions/sales-hero-1280.jpg' %} 1280w,
-              {% static 'images/solutions/sales-hero-1920.jpg' %} 1920w,
-              {% static 'images/solutions/sales-hero.jpg' %} 2816w"
-      sizes="(max-width: 1023px) 110vw, 80vw"
-      alt=""
-      width="2816"
-      height="1536"
-      loading="eager"
-      fetchpriority="high"
-      decoding="async"
-    >
-  </div>
+  <!-- Hero Section -->
+  <section class="sal-hero">
+    <div>
+      <nav class="sal-crumbs" aria-label="Breadcrumb">
+        <a href="{% url 'pages:solutions' %}">Solutions</a>
+        <span aria-hidden="true">/</span>
+        <span>Sales</span>
+      </nav>
+      <p class="gk-eyebrow">Sales</p>
+      <h1 class="gk-display">
+        AI sales agents for
+        <span class="gk-accent">outbound lead generation</span>
+      </h1>
 
-  <!-- Grid pattern overlay -->
-  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[4]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
+      <p class="gk-sub">
+        Deploy AI agents that find prospects, research accounts, and book meetings around the clock.
+      </p>
 
-  <section class="relative sales-content">
-    <div class="relative max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
-
-      <!-- Hero Content -->
-      <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
-        <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
-          AI sales agents for
-          <span class="font-normal bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">outbound lead generation</span>
-        </h1>
-
-        <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
-          Deploy AI agents that find prospects, research accounts, and book meetings around the clock.
-        </p>
-
-        <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
-            {% csrf_token %}
-            <input type="hidden" name="source_page" value="sales_hero" />
-            <input type="hidden" name="trial_onboarding" value="1" />
-            <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-            <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
-              {% if not user.is_authenticated or solution_spawn_requires_trial %}
-                {% cta_text "cta_sales_launch_btn_unauth" fallback="Start Free Trial" %}
-              {% else %}
-                {% cta_text "cta_sales_launch_btn_auth" fallback="Deploy AI Employee" %}
-              {% endif %}
-              <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-              </svg>
-            </button>
-          </form>
-          <a href="#how-it-works" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200" data-analytics-cta-id="sales_hero_how_it_works" data-analytics-placement="hero" data-analytics-intent="view_how_it_works">
-            See how it works
-          </a>
-        </div>
+      <div class="sal-ctas">
+        <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="sales_hero" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="gk-btn w-full sm:w-auto">
+            {% if not user.is_authenticated or solution_spawn_requires_trial %}
+              {% cta_text "cta_sales_launch_btn_unauth" fallback="Start Free Trial" %}
+            {% else %}
+              {% cta_text "cta_sales_launch_btn_auth" fallback="Deploy AI Employee" %}
+            {% endif %}
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </form>
+        <a href="#how-it-works" class="gk-btn-quiet w-full sm:w-auto" data-analytics-cta-id="sales_hero_how_it_works" data-analytics-placement="hero" data-analytics-intent="view_how_it_works">
+          See how it works
+        </a>
+      </div>
+      <div class="sal-crawl">
         {% include "solutions/_crawlable_related_link.html" %}
-        <p class="mt-5 text-sm text-gray-700">
-          Evaluating the category first?
-          <a href="{% url 'pages:solution_sales_ai_sales_agent' %}" class="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-4 transition-colors hover:text-indigo-800 hover:decoration-indigo-500">
-            Read the AI sales agent guide
-          </a>
-          for supervised prospecting, enrichment, and seller-reviewed handoffs.
-        </p>
+      </div>
+      <p class="sal-note">
+        Evaluating the category first?
+        <a href="{% url 'pages:solution_sales_ai_sales_agent' %}">
+          Read the AI sales agent guide
+        </a>
+        for supervised prospecting, enrichment, and seller-reviewed handoffs.
+      </p>
 
-        <!-- Inline stats -->
-        <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">
-          <div>
-            <div class="text-3xl font-light text-gray-900">5x</div>
-            <p class="text-sm text-gray-800 mt-1">More meetings</p>
-          </div>
-          <div>
-            <div class="text-3xl font-light text-gray-900">70%</div>
-            <p class="text-sm text-gray-800 mt-1">Less prospecting time</p>
-          </div>
-          <div>
-            <div class="text-3xl font-light text-gray-900">24/7</div>
-            <p class="text-sm text-gray-800 mt-1">Always on</p>
-          </div>
+      <!-- Inline stats -->
+      <div class="gk-glassrow sal-stats">
+        <div class="sal-stat">
+          <b>5x</b>
+          <span>More meetings</span>
+        </div>
+        <div class="sal-stat">
+          <b>70%</b>
+          <span>Less prospecting time</span>
+        </div>
+        <div class="sal-stat">
+          <b>24/7</b>
+          <span>Always on</span>
         </div>
       </div>
     </div>
-  </section>
-</div>
 
-<!-- Agents Section -->
-<section class="relative bg-white pb-12">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="text-center pt-4 pb-24">
-      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+    <!-- Product proof: example lead batch window -->
+    <div class="sal-proof" aria-hidden="true">
+      <div class="sal-pbar">
+        <span class="sal-pdot" style="background:#fca5a5"></span>
+        <span class="sal-pdot" style="background:#fcd34d"></span>
+        <span class="sal-pdot" style="background:#86efac"></span>
+        <span class="sal-purl">Example lead batch &middot; delivered daily 7:00 AM</span>
+      </div>
+      <div class="sal-pbody">
+        <div class="sal-prow"><span class="gk-face"><img src="{% static 'images/people/face-al.jpg' %}" alt=""></span><div><div class="sal-pwho">A. Lindqvist</div><div class="sal-pnote">VP Engineering &middot; Series B SaaS</div></div><span class="sal-pfit">94% ICP</span></div>
+        <div class="sal-prow"><span class="gk-face"><img src="{% static 'images/people/face-mk.jpg' %}" alt=""></span><div><div class="sal-pwho">M. Keller</div><div class="sal-pnote">Head of Ops &middot; 120 seats</div></div><span class="sal-pfit">92% ICP</span></div>
+        <div class="sal-prow"><span class="gk-face"><img src="{% static 'images/people/face-rs.jpg' %}" alt=""></span><div><div class="sal-pwho">R. Souza</div><div class="sal-pnote">CTO &middot; developer tooling</div></div><span class="sal-pfit">90% ICP</span></div>
+        <div class="sal-prow"><span class="gk-face"><img src="{% static 'images/people/face-jn.jpg' %}" alt=""></span><div><div class="sal-pwho">J. Naylor</div><div class="sal-pnote">VP Sales &middot; fintech platform</div></div><span class="sal-pfit">88% ICP</span></div>
+      </div>
+      <div class="sal-pfoot">&hellip;12 more, enriched and CRM-ready</div>
+    </div>
+  </section>
+
+  <!-- Agents Section -->
+  <section class="gk-section">
+    <div style="text-align:center;max-width:42rem;margin:0 auto">
+      <h2 class="gk-h2" style="text-align:center">
         Deploy in seconds
       </h2>
-      <p class="mt-4 text-lg text-gray-500 max-w-2xl mx-auto">
+      <p class="sal-lede">
         Pre-built agents for every stage of your sales workflow.
       </p>
     </div>
 
     <!-- Featured employee: B2B Lead Research -->
-    <div class="mb-10">
-      <div class="agent-card group relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-600 p-1">
-        <div class="absolute inset-0 bg-gradient-to-br from-blue-400/20 via-transparent to-indigo-400/20 pointer-events-none"></div>
-        <div class="relative bg-white rounded-[1.35rem] p-8 lg:p-10">
-          <div class="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
-            <!-- Left: Content -->
-            <div>
-              <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 text-xs font-semibold tracking-wide uppercase mb-6">
-                <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-                Most Popular
-              </div>
-              <h3 class="text-2xl lg:text-3xl font-medium text-gray-900 mb-4">B2B Lead Research AI Employee</h3>
-              <p class="text-gray-600 text-lg leading-relaxed mb-8">
-                Your 24/7 prospecting partner that searches LinkedIn, company databases, and industry sources to discover and qualify leads matching your ideal customer profile.
-              </p>
-              <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-3 text-sm text-gray-600 mb-8">
-                <li class="flex items-center gap-3">
-                  <div class="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                    </svg>
-                  </div>
-                  ICP-based targeting
-                </li>
-                <li class="flex items-center gap-3">
-                  <div class="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                    </svg>
-                  </div>
-                  Multi-source discovery
-                </li>
-                <li class="flex items-center gap-3">
-                  <div class="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                    </svg>
-                  </div>
-                  CRM integration
-                </li>
-                <li class="flex items-center gap-3">
-                  <div class="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                    </svg>
-                  </div>
-                  Scheduled runs
-                </li>
-              </ul>
-              <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="inline-flex" data-analytics-cta-id="sales_lead_hunter" data-analytics-placement="featured_agent" data-analytics-intent="spawn_agent">
-                {% csrf_token %}
-                <input type="hidden" name="source_page" value="sales_lead_hunter" />
-                <input type="hidden" name="trial_onboarding" value="1" />
-                <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-                <button type="submit" class="group/btn inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
-                  {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
-                  <svg class="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                  </svg>
-                </button>
-              </form>
+    <div class="gk-card-pop sal-feature">
+      <div class="sal-feature-grid">
+        <!-- Left: Content -->
+        <div>
+          <div class="sal-pill-live" style="margin-bottom:20px">
+            Most Popular
+          </div>
+          <h3 style="font-size:clamp(20px,2vw,26px);font-weight:400;color:#fff;margin:0 0 12px">B2B Lead Research AI Employee</h3>
+          <p style="color:#b7aed4;font-size:15px;line-height:1.7;margin:0 0 22px">
+            Your 24/7 prospecting partner that searches LinkedIn, company databases, and industry sources to discover and qualify leads matching your ideal customer profile.
+          </p>
+          <ul style="list-style:none;margin:0 0 24px;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px 24px">
+            <li class="sal-check">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+              </svg>
+              ICP-based targeting
+            </li>
+            <li class="sal-check">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+              </svg>
+              Multi-source discovery
+            </li>
+            <li class="sal-check">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+              </svg>
+              CRM integration
+            </li>
+            <li class="sal-check">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+              </svg>
+              Scheduled runs
+            </li>
+          </ul>
+          <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="inline-flex" data-analytics-cta-id="sales_lead_hunter" data-analytics-placement="featured_agent" data-analytics-intent="spawn_agent">
+            {% csrf_token %}
+            <input type="hidden" name="source_page" value="sales_lead_hunter" />
+            <input type="hidden" name="trial_onboarding" value="1" />
+            <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+            <button type="submit" class="gk-btn group/btn">
+              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
+              <svg class="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </form>
+        </div>
+        <!-- Right: Visual -->
+        <div class="hidden lg:block">
+          <div class="sal-cluster">
+            <div class="sal-cluster-main">
+              <i data-lucide="target" class="w-12 h-12" style="color:#fff"></i>
             </div>
-            <!-- Right: Visual -->
-            <div class="hidden lg:block">
-              <div class="relative">
-                <!-- Decorative gradient orb -->
-                <div class="absolute -top-8 -right-8 w-64 h-64 bg-gradient-to-br from-blue-200/60 via-indigo-200/40 to-sky-200/60 rounded-full blur-3xl pointer-events-none"></div>
-                <!-- Icon cluster -->
-                <div class="relative flex items-center justify-center py-8">
-                  <div class="relative">
-                    <!-- Main icon -->
-                    <div class="w-28 h-28 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-blue-300/50 rotate-3">
-                      <i data-lucide="target" class="w-14 h-14 text-white"></i>
-                    </div>
-                    <!-- Floating badges -->
-                    <div class="absolute -top-4 -right-6 w-12 h-12 bg-white rounded-xl shadow-lg flex items-center justify-center border border-slate-100">
-                      <i data-lucide="linkedin" class="w-6 h-6 text-[#0A66C2]"></i>
-                    </div>
-                    <div class="absolute -bottom-3 -left-8 w-12 h-12 bg-white rounded-xl shadow-lg flex items-center justify-center border border-slate-100">
-                      <i data-lucide="building-2" class="w-6 h-6 text-gray-700"></i>
-                    </div>
-                    <div class="absolute top-1/2 -right-10 -translate-y-1/2 w-10 h-10 bg-white rounded-lg shadow-lg flex items-center justify-center border border-slate-100">
-                      <i data-lucide="user-plus" class="w-5 h-5 text-blue-600"></i>
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <div class="sal-cluster-badge" style="top:14px;right:16%">
+              <i data-lucide="linkedin" class="w-5 h-5"></i>
+            </div>
+            <div class="sal-cluster-badge" style="bottom:18px;left:18%">
+              <i data-lucide="building-2" class="w-5 h-5"></i>
+            </div>
+            <div class="sal-cluster-badge" style="top:50%;right:6%;transform:translateY(-50%);width:40px;height:40px">
+              <i data-lucide="user-plus" class="w-4 h-4"></i>
             </div>
           </div>
         </div>
@@ -324,47 +322,43 @@
     </div>
 
     <!-- Supporting Agents -->
-    <div class="grid md:grid-cols-2 gap-6">
+    <div class="sal-agents">
       <!-- Agent 2: Account Researcher -->
-      <div class="agent-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
-        <div class="flex items-start gap-5">
-          <div class="w-14 h-14 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200/50 flex-shrink-0">
-            <i data-lucide="sparkles" class="w-7 h-7 text-white"></i>
-          </div>
-          <div class="flex-1 min-w-0">
-            <h3 class="text-xl font-medium text-gray-900 mb-2">Account Research AI Employee</h3>
-            <p class="text-gray-600 leading-relaxed mb-5">
-              Enriches prospect profiles with company intel, tech stack, funding status, and key decision-makers to personalize your outreach.
-            </p>
-          </div>
+      <div class="gk-card-edge sal-agent">
+        <div class="sal-agent-ic">
+          <i data-lucide="sparkles" class="w-6 h-6"></i>
         </div>
-        <ul class="space-y-2.5 text-sm text-gray-500 mb-6 mt-5 pl-[4.75rem]">
-          <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <h3>Account Research AI Employee</h3>
+        <p class="sal-body">
+          Enriches prospect profiles with company intel, tech stack, funding status, and key decision-makers to personalize your outreach.
+        </p>
+        <ul>
+          <li class="sal-check">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Company enrichment
           </li>
-          <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <li class="sal-check">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Tech stack detection
           </li>
-          <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <li class="sal-check">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Decision-maker mapping
           </li>
         </ul>
-        <div class="pl-[4.75rem]">
+        <div style="margin-top:auto">
           <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'account-research-agent' %}" class="inline-flex" data-analytics-cta-id="sales_account_researcher" data-analytics-placement="supporting_agent" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="sales_account_researcher" />
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-            <button type="submit" class="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
+            <button type="submit" class="sal-link">
               {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
               <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -375,45 +369,41 @@
       </div>
 
       <!-- Agent 3: Outreach Agent -->
-      <div class="agent-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
-        <div class="flex items-start gap-5">
-          <div class="w-14 h-14 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200/50 flex-shrink-0">
-            <i data-lucide="message-circle" class="w-7 h-7 text-white"></i>
-          </div>
-          <div class="flex-1 min-w-0">
-            <h3 class="text-xl font-medium text-gray-900 mb-2">Outreach AI Employee</h3>
-            <p class="text-gray-600 leading-relaxed mb-5">
-              Crafts personalized outreach sequences and keeps your pipeline warm with automated, contextual follow-ups.
-            </p>
-          </div>
+      <div class="gk-card-edge sal-agent">
+        <div class="sal-agent-ic">
+          <i data-lucide="message-circle" class="w-6 h-6"></i>
         </div>
-        <ul class="space-y-2.5 text-sm text-gray-500 mb-6 mt-5 pl-[4.75rem]">
-          <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <h3>Outreach AI Employee</h3>
+        <p class="sal-body">
+          Crafts personalized outreach sequences and keeps your pipeline warm with automated, contextual follow-ups.
+        </p>
+        <ul>
+          <li class="sal-check">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Personalized messaging
           </li>
-          <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <li class="sal-check">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Multi-channel sequences
           </li>
-          <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <li class="sal-check">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
             Smart follow-ups
           </li>
         </ul>
-        <div class="pl-[4.75rem]">
+        <div style="margin-top:auto">
           <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'outreach-agent' %}" class="inline-flex" data-analytics-cta-id="sales_outreach_agent" data-analytics-placement="supporting_agent" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="sales_outreach_agent" />
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-            <button type="submit" class="inline-flex items-center text-sm font-medium text-emerald-600 hover:text-emerald-700">
+            <button type="submit" class="sal-link">
               {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy This Employee{% endif %}
               <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -423,407 +413,381 @@
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- How It Works -->
-<section id="how-it-works" class="relative pt-0 pb-16 lg:pb-20 overflow-hidden scroll-mt-20">
-  <!-- Subtle gradient background -->
-  <div class="absolute inset-0 bg-gradient-to-b from-white via-slate-50/50 to-white pointer-events-none"></div>
-
-  <div class="relative max-w-6xl mx-auto px-6">
-    <div class="text-center pt-12 pb-24">
-      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+  <!-- How It Works -->
+  <section id="how-it-works" class="gk-section scroll-mt-20">
+    <div style="text-align:center;max-width:42rem;margin:0 auto">
+      <h2 class="gk-h2" style="text-align:center">
         How it works
       </h2>
-      <p class="mt-4 text-lg text-gray-500">
+      <p class="sal-lede">
         Define your ICP. Your agent fills your pipeline.
       </p>
     </div>
 
-    <div class="grid lg:grid-cols-2 gap-16 lg:gap-20 items-center">
-      <!-- Left: Steps -->
-      <div class="space-y-12">
-        <div class="flex gap-6">
-          <div class="flex-shrink-0">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-blue-200/50">1</div>
-          </div>
-          <div>
-            <h3 class="text-xl font-medium text-gray-900 mb-3">Define your ideal customer</h3>
-            <p class="text-gray-600 leading-relaxed">
-              Tell your agent who you're targeting. Industry, company size, job titles, tech stack, funding stage. Speak naturally, like briefing a new SDR.
-            </p>
-          </div>
+    <div class="sal-steps">
+      <div class="sal-stepc">
+        <div class="sal-sviz">
+          <div class="sal-mini"><span class="sal-ck">&#10003;</span>Industry &middot; size &middot; titles</div>
+          <div class="sal-mini"><span class="sal-ck">&#10003;</span>Tech stack &middot; funding stage</div>
         </div>
+        <div class="sal-stepn">1</div>
+        <h3>Define your ideal customer</h3>
+        <p>
+          Tell your agent who you're targeting. Industry, company size, job titles, tech stack, funding stage. Speak naturally, like briefing a new SDR.
+        </p>
+      </div>
 
-        <div class="flex gap-6">
-          <div class="flex-shrink-0">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-indigo-200/50">2</div>
-          </div>
-          <div>
-            <h3 class="text-xl font-medium text-gray-900 mb-3">Your agent delivers qualified leads</h3>
-            <p class="text-gray-600 leading-relaxed">
-              Working continuously in the background, your agent searches sources and qualifies prospects against your criteria, then reaches out with matches as they're found.
-            </p>
-            <!-- 24/7 badge -->
-            <div class="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 text-sm font-medium">
-              <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-              Always on, always prospecting
-            </div>
-          </div>
+      <div class="sal-stepc">
+        <div class="sal-sviz">
+          <div class="sal-mini">&#128269; Searching sources</div>
+          <div class="sal-mini">&#129504; Qualified against your ICP</div>
         </div>
-
-        <div class="flex gap-6">
-          <div class="flex-shrink-0">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-sky-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-blue-200/50">3</div>
-          </div>
-          <div>
-            <h3 class="text-xl font-medium text-gray-900 mb-3">Refine as you go</h3>
-            <p class="text-gray-600 leading-relaxed">
-              Chat with your agent anytime to adjust targeting, give feedback on results, or shift focus to new verticals. It learns from your input and adapts its search accordingly.
-            </p>
-          </div>
+        <div class="sal-stepn">2</div>
+        <h3>Your agent delivers qualified leads</h3>
+        <p>
+          Working continuously in the background, your agent searches sources and qualifies prospects against your criteria, then reaches out with matches as they're found.
+        </p>
+        <div class="sal-chip-live">
+          Always on, always prospecting
         </div>
       </div>
 
-      <!-- Right: Visual -->
-      <div class="relative">
-        <!-- Decorative gradient orb -->
-        <div class="absolute -top-8 -right-8 w-72 h-72 bg-gradient-to-br from-blue-200/50 via-indigo-200/30 to-sky-200/50 rounded-full blur-3xl pointer-events-none"></div>
-        <div class="absolute -bottom-8 -left-8 w-48 h-48 bg-gradient-to-br from-indigo-200/40 to-blue-200/40 rounded-full blur-2xl pointer-events-none"></div>
-
-        <!-- Visual representation -->
-        <div class="relative rounded-3xl overflow-hidden shadow-2xl shadow-blue-200/40 border border-white/60 bg-gradient-to-br from-blue-50 to-indigo-50 p-8 lg:p-12">
-          <div class="space-y-6">
-            <!-- Lead card mock -->
-            <div class="bg-white rounded-xl p-4 shadow-lg border border-blue-100">
-              <div class="flex items-center gap-3 mb-3">
-                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white font-semibold text-sm">JD</div>
-                <div>
-                  <div class="font-medium text-gray-900">New Lead Found</div>
-                  <div class="text-xs text-gray-500">Just now</div>
-                </div>
-                <div class="ml-auto">
-                  <span class="inline-flex items-center px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1"></span>
-                    High fit
-                  </span>
-                </div>
-              </div>
-              <div class="text-sm text-gray-600">
-                <div class="font-medium text-gray-900">Jane Doe</div>
-                <div>VP of Engineering at TechCorp</div>
-                <div class="text-gray-400 mt-1">Series B &bull; 150 employees &bull; Uses AWS</div>
-              </div>
-            </div>
-
-            <!-- Stats mini -->
-            <div class="grid grid-cols-3 gap-3">
-              <div class="bg-white/80 rounded-lg p-3 text-center">
-                <div class="text-2xl font-light text-blue-600">47</div>
-                <div class="text-xs text-gray-500">Leads today</div>
-              </div>
-              <div class="bg-white/80 rounded-lg p-3 text-center">
-                <div class="text-2xl font-light text-blue-600">89%</div>
-                <div class="text-xs text-gray-500">ICP match</div>
-              </div>
-              <div class="bg-white/80 rounded-lg p-3 text-center">
-                <div class="text-2xl font-light text-emerald-600">12</div>
-                <div class="text-xs text-gray-500">Meetings</div>
-              </div>
-            </div>
-          </div>
+      <div class="sal-stepc">
+        <div class="sal-sviz">
+          <div class="sal-mini">&#128172; Shift focus to new verticals</div>
+          <div class="sal-mini"><span class="sal-ck">&#10003;</span>Search adapts to feedback</div>
         </div>
-
-        <!-- Caption -->
-        <p class="mt-4 text-center text-sm text-gray-500">
-          Your agent delivers qualified leads as they're found
+        <div class="sal-stepn">3</div>
+        <h3>Refine as you go</h3>
+        <p>
+          Chat with your agent anytime to adjust targeting, give feedback on results, or shift focus to new verticals. It learns from your input and adapts its search accordingly.
         </p>
       </div>
     </div>
-  </div>
-</section>
 
-<!-- Benefits Section -->
-<section class="relative pt-8 pb-20 lg:pt-10 lg:pb-24 overflow-hidden bg-white">
+    <!-- Product proof: example lead detail window -->
+    <div class="sal-lead-wrap">
+      <div class="sal-proof">
+        <div class="sal-pbar">
+          <span class="sal-pdot" style="background:#fca5a5"></span>
+          <span class="sal-pdot" style="background:#fcd34d"></span>
+          <span class="sal-pdot" style="background:#86efac"></span>
+          <span class="sal-purl">Example lead notification</span>
+        </div>
+        <div class="sal-pbody">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+            <span class="gk-face" style="width:34px;height:34px"><img src="{% static 'images/people/face-jn.jpg' %}" alt=""></span>
+            <div>
+              <div style="font-size:13px;font-weight:550;color:#111827">New Lead Found</div>
+              <div style="font-size:11px;color:#9ca3af">Just now</div>
+            </div>
+            <span class="sal-pfit" style="background:#e9f9f0;color:#047857">High fit</span>
+          </div>
+          <div style="font-size:13px;color:#4b5563">
+            <div style="font-weight:550;color:#111827">Jane Doe</div>
+            <div>VP of Engineering at TechCorp</div>
+            <div class="sal-lead-note">Series B &bull; 150 employees &bull; Uses AWS</div>
+          </div>
+          <div class="sal-lead-stats">
+            <div class="sal-lead-stat">
+              <b>47</b>
+              <span>Leads today</span>
+            </div>
+            <div class="sal-lead-stat">
+              <b>89%</b>
+              <span>ICP match</span>
+            </div>
+            <div class="sal-lead-stat">
+              <b>12</b>
+              <span>Meetings</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="sal-cap">
+        Your agent delivers qualified leads as they're found
+      </p>
+    </div>
+  </section>
 
-  <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
-    <div class="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+  <!-- Benefits Section -->
+  <section class="gk-section">
+    <div class="sal-2col">
       <!-- Left: Benefits -->
-      <div class="lg:pr-4">
-        <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+      <div>
+        <h2 class="gk-h2">
           Why teams choose Gobii
         </h2>
-        <p class="mt-4 text-lg text-gray-500 mb-10">
+        <p class="sal-lede" style="margin-bottom:22px">
           Sales tools require constant attention. Gobii agents work autonomously, expanding your pipeline without adding headcount.
         </p>
 
-        <div class="space-y-6">
-          <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-white/80 transition-colors">
-            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-200/50">
-              <i data-lucide="clock" class="w-6 h-6 text-white"></i>
+        <div>
+          <div class="sal-benefit">
+            <div class="sal-benefit-ic">
+              <i data-lucide="clock" class="w-5 h-5"></i>
             </div>
             <div>
-              <h3 class="text-lg font-medium text-gray-900 mb-1">Reclaim your calendar</h3>
-              <p class="text-gray-600 leading-relaxed">Stop spending hours on manual prospecting. Let your agent handle the research while you focus on closing deals.</p>
+              <h3>Reclaim your calendar</h3>
+              <p>Stop spending hours on manual prospecting. Let your agent handle the research while you focus on closing deals.</p>
             </div>
           </div>
 
-          <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-white/80 transition-colors">
-            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-200/50">
-              <i data-lucide="trending-up" class="w-6 h-6 text-white"></i>
+          <div class="sal-benefit">
+            <div class="sal-benefit-ic">
+              <i data-lucide="trending-up" class="w-5 h-5"></i>
             </div>
             <div>
-              <h3 class="text-lg font-medium text-gray-900 mb-1">Scale instantly</h3>
-              <p class="text-gray-600 leading-relaxed">Targeting 5 accounts or 500? Agents scale without training, ramp time, or burnout.</p>
+              <h3>Scale instantly</h3>
+              <p>Targeting 5 accounts or 500? Agents scale without training, ramp time, or burnout.</p>
             </div>
           </div>
 
-          <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-white/80 transition-colors">
-            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-200/50">
-              <i data-lucide="check-circle" class="w-6 h-6 text-white"></i>
+          <div class="sal-benefit">
+            <div class="sal-benefit-ic">
+              <i data-lucide="check-circle" class="w-5 h-5"></i>
             </div>
             <div>
-              <h3 class="text-lg font-medium text-gray-900 mb-1">Consistent quality</h3>
-              <p class="text-gray-600 leading-relaxed">AI evaluates every prospect against your ICP. No fatigue, no shortcuts, no missed opportunities.</p>
+              <h3>Consistent quality</h3>
+              <p>AI evaluates every prospect against your ICP. No fatigue, no shortcuts, no missed opportunities.</p>
             </div>
           </div>
         </div>
       </div>
 
       <!-- Right: Testimonial -->
-      <div class="relative">
-        <!-- Decorative gradient orb -->
-        <div class="absolute -top-8 -right-8 w-48 h-48 bg-gradient-to-br from-blue-200/60 to-indigo-200/60 rounded-full blur-3xl pointer-events-none"></div>
-
-        <div class="relative bg-gradient-to-br from-blue-50 via-indigo-50/80 to-sky-50/60 rounded-3xl p-8 sm:p-10 lg:p-12 shadow-xl shadow-blue-100/50 border border-white/60">
-          <blockquote>
-            <svg class="w-12 h-12 text-blue-300 mb-6" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
-            </svg>
-            <p class="text-xl text-gray-700 leading-relaxed">
-              Our SDRs used to spend 4 hours a day on prospecting. Now our Gobii agent delivers qualified leads to their inbox every morning. Pipeline is up 3x.
-            </p>
-            <footer class="mt-8 flex items-center gap-4">
-              <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-semibold shadow-lg shadow-blue-300/50">MR</div>
-              <div>
-                <div class="font-medium text-gray-900">Michael R.</div>
-                <div class="text-sm text-gray-500">VP Sales, SaaS Company</div>
-              </div>
-            </footer>
-          </blockquote>
-        </div>
+      <div class="gk-card-glass sal-quote">
+        <blockquote>
+          <svg class="w-10 h-10" style="color:rgba(196,181,253,.45);margin-bottom:18px" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
+          </svg>
+          <p>
+            Our SDRs used to spend 4 hours a day on prospecting. Now our Gobii agent delivers qualified leads to their inbox every morning. Pipeline is up 3x.
+          </p>
+          <footer>
+            <div class="sal-quote-av">MR</div>
+            <div>
+              <div style="font-weight:550;color:#fff;font-size:14px">Michael R.</div>
+              <div style="font-size:12.5px;color:#8b7fb8">VP Sales, SaaS Company</div>
+            </div>
+          </footer>
+        </blockquote>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- FAQ Section -->
-<section id="sales-questions" class="relative pt-8 pb-16 lg:pt-10 lg:pb-20 overflow-hidden scroll-mt-20">
-  <div class="absolute inset-0 bg-gradient-to-b from-white via-slate-50/60 to-white pointer-events-none"></div>
-
-  <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
-    <div class="grid lg:grid-cols-[0.9fr_1.1fr] gap-10 lg:gap-16 items-start">
-      <div class="lg:sticky lg:top-24">
-        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold tracking-wide uppercase mb-6">
-          <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+  <!-- FAQ Section -->
+  <section id="sales-questions" class="gk-section scroll-mt-20">
+    <div class="sal-faq-grid">
+      <div class="sal-faq-sticky">
+        <div class="sal-pill-live" style="margin-bottom:20px">
           Human-reviewed workflows
         </div>
-        <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+        <h2 class="gk-h2">
           Sales automation, without losing the seller
         </h2>
-        <p class="mt-5 text-lg text-gray-600 leading-relaxed">
+        <p class="sal-lede">
           Gobii is built for the repetitive work around outbound pipeline: finding prospects, researching accounts, enriching records, preparing outreach, and keeping handoffs moving. Your team still reviews the leads and owns the relationship.
         </p>
-        <div class="mt-8 grid grid-cols-2 gap-3 text-sm">
-          <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
-            <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Input</span>
+        <div class="sal-tiles">
+          <div class="gk-glassrow sal-tile">
+            <span>Input</span>
             ICP criteria
           </div>
-          <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
-            <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Agent work</span>
+          <div class="gk-glassrow sal-tile">
+            <span>Agent work</span>
             Search + enrich
           </div>
-          <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
-            <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Output</span>
+          <div class="gk-glassrow sal-tile">
+            <span>Output</span>
             Prospect data
           </div>
-          <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
-            <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Control</span>
+          <div class="gk-glassrow sal-tile">
+            <span>Control</span>
             Seller review
           </div>
         </div>
       </div>
 
       <div>
-        <div class="divide-y divide-slate-200 rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/40 overflow-hidden">
-          <details class="group p-6 sm:p-7" open>
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">What are Gobii AI sales agents?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+        <div class="gk-faq" style="display:flex;flex-direction:column;gap:10px">
+          <details open>
+            <summary>What are Gobii AI sales agents?</summary>
+            <p>
               Gobii AI sales agents are persistent AI employees that help sales teams automate repetitive prospecting, account research, enrichment, and outreach-prep work. A seller defines the ideal customer profile in plain language: target industries, company size, geography, job titles, tech stack, funding stage, buying signals, and disqualifying criteria. The agent then searches permitted sources, researches companies and contacts, organizes findings, and prepares structured lead data for review. Gobii is best suited for top-of-funnel sales work that normally requires browser research, spreadsheet upkeep, CRM handoff, and recurring follow-up. Because agents can keep working in the background, teams can run daily or weekly prospecting workflows without manually rebuilding the same searches. Sales teams still control targeting, approve messaging, review lead quality, and decide which prospects should enter an active outbound motion from the first touch through follow-up.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">How do Gobii sales agents find prospects?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>How do Gobii sales agents find prospects?</summary>
+            <p>
               Gobii sales agents find prospects by turning a seller's ICP into a repeatable search and research workflow. The agent can look across permitted web sources, professional profiles, company pages, databases, spreadsheets, and connected tools to identify companies or contacts that match the criteria. It can enrich each prospect with account context such as role, company size, industry, tech stack, funding signals, source links, and notes that explain why the lead may be relevant. For recurring programs, the same workflow can run on a schedule or respond when another tool sends a webhook. Teams can refine the workflow over time by changing the ICP, narrowing or broadening the market, giving feedback on matches, or triggering the agent from events such as form submissions, CRM updates, meeting notes, or webhook payloads while keeping source context attached.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">Which sales tasks can Gobii automate?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>Which sales tasks can Gobii automate?</summary>
+            <p>
               Gobii can automate many repetitive top-of-funnel sales tasks while keeping sales teams in control of judgment and outreach quality. Common workflows include lead generation, account research, prospect enrichment, list building, ICP matching, spreadsheet updates, CRM-ready exports, outreach drafting, follow-up preparation, and recurring monitoring for new opportunities. Gobii agents can also work persistently in the background, so teams can delegate research that should happen daily, weekly, or whenever a trigger fires. The strongest use cases are tasks that require structured browsing, comparison, enrichment, and organization. Gobii should support sales teams by preparing better research and cleaner handoffs, not by replacing human ownership of targeting, messaging, compliance, or relationship-building.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">How is Gobii different from a lead database or sales engagement tool?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>How is Gobii different from a lead database or sales engagement tool?</summary>
+            <p>
               Gobii is different from a lead database because it does not only hand you a static list. A lead database is usually a source of records; Gobii is an agent platform that can search, research, compare, enrich, and organize sales work around your instructions. Gobii is also different from a traditional sales engagement tool because it can help before a prospect is ready for a sequence: finding accounts, researching context, checking fit, preparing notes, and exporting structured data. In practical terms, lead databases supply raw inputs, sales engagement tools manage outbound execution, and Gobii helps with the research and workflow layer between those systems.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">What outputs can sales teams export?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>What outputs can sales teams export?</summary>
+            <p>
               Sales teams can use Gobii to produce structured prospect and account data that is easier to review, share, and move into downstream sales workflows. Depending on the workflow, outputs can include company names, contact names, titles, source URLs, ICP-fit notes, enrichment fields, tech stack signals, funding context, account summaries, outreach drafts, follow-up notes, and reviewer comments. Gobii agents can send results to Google Sheets, CSV files, webhooks, and configured CRM workflows. Teams can inspect the work, export the results, and trigger follow-up steps without manually copying data between tools.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">How should teams review AI-sourced leads?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>How should teams review AI-sourced leads?</summary>
+            <p>
               Teams should review AI-sourced leads the same way they would review any outbound prospect list: with clear criteria, source checks, and human approval before action. A sales or RevOps owner should confirm that each account matches the ICP, verify source links, check that enrichment notes are factual, and remove prospects that do not meet the agreed targeting rules. Outreach drafts should be reviewed for accuracy, tone, consent requirements, and company policy before sending. Gobii can help surface prospects, prepare context, and keep workflows moving, but sellers remain responsible for deciding who to contact, what to say, when to follow up, and how to comply with applicable outreach rules.
             </p>
           </details>
 
-          <details class="group p-6 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">What data and privacy controls matter for sales prospecting workflows?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>What data and privacy controls matter for sales prospecting workflows?</summary>
+            <p>
               Sales prospecting workflows should be designed around approved sources, limited credential scope, review steps, and careful handling of contact data. Teams should decide which websites, databases, spreadsheets, CRMs, and integrations an agent may use; what data it may collect; where outputs should be stored; and who can review or export results. Credentials should be encrypted, scoped to the right domain or integration, and not exposed unnecessarily to the model or logs. For trust and compliance, outputs should stay factual, source-linked, relevant to the sales workflow, and subject to human review before outreach.
             </p>
           </details>
         </div>
 
-        <div class="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-slate-200/40">
-          <div class="grid md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-slate-200">
-            <div class="p-5">
-              <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="sliders-horizontal" class="w-4 h-4 text-indigo-600"></i>
-                Criteria
-              </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Industry, company size, titles, tech stack, geography, and buying signals.</p>
+        <div class="sal-strip">
+          <div class="gk-glassrow sal-strip-cell">
+            <div class="sal-strip-h">
+              <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+              Criteria
             </div>
-            <div class="p-5">
-              <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="search" class="w-4 h-4 text-blue-600"></i>
-                Research
-              </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Approved sources, professional profiles, company pages, databases, and spreadsheets.</p>
+            <p>Industry, company size, titles, tech stack, geography, and buying signals.</p>
+          </div>
+          <div class="gk-glassrow sal-strip-cell">
+            <div class="sal-strip-h">
+              <i data-lucide="search" class="w-4 h-4"></i>
+              Research
             </div>
-            <div class="p-5">
-              <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-600"></i>
-                Export
-              </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Google Sheets, CSV, webhooks, CRM-ready fields, notes, and outreach drafts.</p>
+            <p>Approved sources, professional profiles, company pages, databases, and spreadsheets.</p>
+          </div>
+          <div class="gk-glassrow sal-strip-cell">
+            <div class="sal-strip-h">
+              <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+              Export
             </div>
-            <div class="p-5">
-              <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="user-check" class="w-4 h-4 text-sky-600"></i>
-                Review
-              </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Sellers validate fit, approve messaging, and own outreach decisions.</p>
+            <p>Google Sheets, CSV, webhooks, CRM-ready fields, notes, and outreach drafts.</p>
+          </div>
+          <div class="gk-glassrow sal-strip-cell">
+            <div class="sal-strip-h">
+              <i data-lucide="user-check" class="w-4 h-4"></i>
+              Review
             </div>
+            <p>Sellers validate fit, approve messaging, and own outreach decisions.</p>
           </div>
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- Final CTA -->
-<section class="relative pt-8 pb-24 lg:pt-10 lg:pb-28 overflow-hidden isolate">
-  <!-- Centered radial gradient that fades to transparent on all edges -->
-  <div class="absolute inset-0 pointer-events-none">
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_50%_50%,rgba(99,102,241,0.12),transparent_70%)]"></div>
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_50%_50%,rgba(79,70,229,0.06),transparent_60%)]"></div>
-  </div>
+  <!-- Final CTA -->
+  <div class="sal-band-wrap">
+    <div class="gk-band">
+      <div class="sal-pill-live" style="margin-bottom:18px">
+        Ready to deploy
+      </div>
 
-  <!-- Soft floating orbs with heavy blur -->
-  <div class="absolute top-1/2 left-1/3 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-300/20 rounded-full blur-[100px] pointer-events-none"></div>
-  <div class="absolute top-1/2 right-1/3 -translate-y-1/2 w-[400px] h-[400px] bg-violet-300/15 rounded-full blur-[100px] pointer-events-none"></div>
+      <h2>
+        Start filling your pipeline
+      </h2>
+      <p style="max-width:36rem;margin-left:auto;margin-right:auto">
+        Deploy your first sales agent today and watch your pipeline grow.
+      </p>
 
-  <div class="relative max-w-4xl mx-auto px-6 text-center">
-    <!-- Decorative badge -->
-    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/70 backdrop-blur-sm border border-indigo-200/50 shadow-sm mb-8">
-      <span class="w-2 h-2 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 animate-pulse"></span>
-      <span class="text-sm font-medium text-indigo-700">Ready to deploy</span>
-    </div>
+      <div class="sal-band-ctas">
+        <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="sales_final_cta" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          <button type="submit" class="gk-btn w-full group">
+            {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy AI Employee{% endif %}
+            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </form>
+        <a href="#how-it-works" class="gk-btn-quiet w-full sm:w-auto" data-analytics-cta-id="sales_final_cta_how_it_works" data-analytics-placement="final_cta" data-analytics-intent="view_how_it_works">
+          See how it works
+        </a>
+      </div>
 
-    <h2 class="text-4xl sm:text-5xl font-light text-gray-900 tracking-tight">
-      Start filling your pipeline
-    </h2>
-    <p class="mt-5 text-xl text-gray-600 max-w-xl mx-auto leading-relaxed">
-      Deploy your first sales agent today and watch your pipeline grow.
-    </p>
-
-    <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
-        {% csrf_token %}
-        <input type="hidden" name="source_page" value="sales_final_cta" />
-        <input type="hidden" name="trial_onboarding" value="1" />
-        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-        <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-300/50 hover:shadow-xl hover:shadow-indigo-300/60 transition-all duration-200 hover:-translate-y-0.5">
-          {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy AI Employee{% endif %}
-          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      <!-- Trust indicators -->
+      <div class="sal-trust">
+        <div style="display:flex;align-items:center;gap:8px">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
           </svg>
-        </button>
-      </form>
-      <a href="#how-it-works" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-indigo-200 shadow-sm hover:shadow transition-all duration-200" data-analytics-cta-id="sales_final_cta_how_it_works" data-analytics-placement="final_cta" data-analytics-intent="view_how_it_works">
-        See how it works
-      </a>
-    </div>
-
-    <!-- Trust indicators -->
-    <div class="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-4 text-sm text-gray-500">
-      <div class="flex items-center gap-2">
-        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-        </svg>
-        Deploy in minutes
-      </div>
-      <div class="flex items-center gap-2">
-        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-        </svg>
-        Cancel anytime
+          Deploy in minutes
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+          Cancel anytime
+        </div>
       </div>
     </div>
   </div>
-</section>
+</div>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.sal-prow'));
+  if (rows.length) {
+    if (reduce) {
+      rows.forEach(function (r) { r.classList.add('on'); });
+    } else {
+      var gen = 0;
+      var loop = function () {
+        var g = ++gen;
+        rows.forEach(function (r) { r.classList.remove('on'); });
+        rows.forEach(function (r, i) {
+          setTimeout(function () { if (g === gen) r.classList.add('on'); }, 400 + i * 420);
+        });
+        setTimeout(function () { if (g === gen) loop(); }, 400 + rows.length * 420 + 2600);
+      };
+      loop();
+    }
+  }
+  var steps = Array.prototype.slice.call(document.querySelectorAll('.sal-stepc'));
+  if (steps.length && !reduce) {
+    var sgen = 0;
+    var sloop = function () {
+      var g = ++sgen;
+      steps.forEach(function (el, i) {
+        setTimeout(function () {
+          if (g !== sgen) return;
+          steps.forEach(function (x) { x.classList.remove('hot'); });
+          el.classList.add('hot');
+        }, 600 + i * 1400);
+      });
+      setTimeout(function () {
+        if (g !== sgen) return;
+        steps.forEach(function (x) { x.classList.remove('hot'); });
+        sloop();
+      }, 600 + steps.length * 1400 + 1200);
+    };
+    sloop();
+  }
+})();
+</script>
 {% endblock %}

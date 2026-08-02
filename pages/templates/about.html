@@ -28,61 +28,68 @@
 {% endblock %}
 
 {% block content %}
-<section class="relative overflow-hidden bg-white text-slate-900">
-  <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-    <div class="max-w-3xl">
-      <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl">About Gobii</h1>
-      <p class="mt-5 max-w-2xl text-2xl font-light leading-snug text-slate-700 sm:text-3xl">
-        AI employees for teams with real work to do.
-      </p>
-      {% if settings.GOBII_PROPRIETARY_MODE %}
-      {% url 'account_signup' as about_signup_url %}
-      {% url 'account_signup_modal' as about_signup_modal_url %}
-      <div class="mt-8 flex flex-col gap-3 sm:flex-row">
-        <a
-          href="/"
-          data-analytics-cta-id="about_start_free_trial"
-          data-analytics-placement="about_hero"
-          data-analytics-intent="start_trial"
-          data-analytics-label="Try Gobii Today"
-          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-        >
-          Try Gobii Today
-          <i data-lucide="arrow-right" class="h-4 w-4"></i>
-        </a>
-      </div>
-      {% endif %}
+<div class="gk-luxe">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+  <style>
+    .about-hero { position: relative; z-index: 1; max-width: 860px; margin: 0 auto; padding: 72px 24px 0; text-align: center; }
+    .about-hero .gk-sub { margin-top: 16px; }
+    .about-hero .about-ctas { margin-top: 28px; display: flex; justify-content: center; }
+    .about-body { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; padding: 64px 24px 96px; }
+    .about-body .gk-h2 { margin-bottom: 24px; }
+    .about-body p { color: #b7aed4; font-size: 16px; line-height: 1.75; margin-bottom: 18px; }
+    .about-body p:last-child { margin-bottom: 0; }
+    .about-body a { color: #c4b5fd; }
+    .about-body a:hover { color: #fff; }
+  </style>
+  <section class="about-hero">
+    <h1 class="gk-display">About Gobii</h1>
+    <p class="gk-sub">
+      AI employees for teams with real work to do.
+    </p>
+    {% if settings.GOBII_PROPRIETARY_MODE %}
+    {% url 'account_signup' as about_signup_url %}
+    {% url 'account_signup_modal' as about_signup_modal_url %}
+    <div class="about-ctas">
+      <a
+        href="/"
+        data-analytics-cta-id="about_start_free_trial"
+        data-analytics-placement="about_hero"
+        data-analytics-intent="start_trial"
+        data-analytics-label="Try Gobii Today"
+        class="gk-btn"
+      >
+        Try Gobii Today
+        <i data-lucide="arrow-right" class="h-4 w-4"></i>
+      </a>
     </div>
-  </div>
-</section>
+    {% endif %}
+  </section>
 
-<section class="bg-white pb-20 text-slate-900">
-  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-    <h2 class="text-3xl font-semibold tracking-tight mb-6">Empowering AI&nbsp;agents to browse&nbsp;the web for&nbsp;you.</h2>
-    <p class="text-lg leading-relaxed mb-4">
+  <section class="about-body">
+    <h2 class="gk-h2">Empowering AI&nbsp;agents to browse&nbsp;the web for&nbsp;you.</h2>
+    <p>
       <a href="{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}" aria-label="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }}"
-         title="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }} Homepage" style="text-decoration: underline; font-weight: bold;">Gobii</a> is an AI agent platform for teams with real work to do.
+         title="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }} Homepage" style="text-decoration: underline; font-weight: 600;">Gobii</a> is an AI agent platform for teams with real work to do.
     </p>
 
-    <p class="text-lg leading-relaxed mb-4">Our agents are virtual employees: they can browse the web, gather research, organize data, complete forms, use connected apps, and deliver reports. You can chat with them, email them, or text them, and they keep working in the background while you focus on higher-value decisions.</p>
+    <p>Our agents are virtual employees: they can browse the web, gather research, organize data, complete forms, use connected apps, and deliver reports. You can chat with them, email them, or text them, and they keep working in the background while you focus on higher-value decisions.</p>
 
-    <p class="text-lg leading-relaxed mb-4">We believe AI agents should not just answer questions. They should help move work forward.</p>
+    <p>We believe AI agents should not just answer questions. They should help move work forward.</p>
 
-    <p class="text-lg leading-relaxed mb-4">That means giving agents the infrastructure they need to operate reliably: cloud-hosted browsers, persistent memory, built-in tools, structured data, integrations, live previews, audit trails, and guardrails for safe execution. Gobii turns web-based work into something you can delegate.</p>
+    <p>That means giving agents the infrastructure they need to operate reliably: cloud-hosted browsers, persistent memory, built-in tools, structured data, integrations, live previews, audit trails, and guardrails for safe execution. Gobii turns web-based work into something you can delegate.</p>
 
-    <p class="text-lg leading-relaxed mb-4">Today, teams use Gobii for recruiting, sales research, operations, competitive intelligence, compliance monitoring, and other workflows where the work is important but painfully repetitive.</p>
+    <p>Today, teams use Gobii for recruiting, sales research, operations, competitive intelligence, compliance monitoring, and other workflows where the work is important but painfully repetitive.</p>
 
-    <p class="text-lg leading-relaxed mb-4">Our vision is simple: humans and AI agents working together, each doing what they do best.</p>
+    <p>Our vision is simple: humans and AI agents working together, each doing what they do best.</p>
 
-    <p class="text-lg leading-relaxed mb-4">If you believe the future of work includes always-on AI employees, we’d love to hear from you.</p>
-    <p class="text-lg leading-relaxed">
+    <p>If you believe the future of work includes always-on AI employees, we’d love to hear from you.</p>
+    <p>
       {% if settings.GOBII_PROPRIETARY_MODE %}
-      <a href="{% url 'proprietary:contact' %}" class="text-blue-600 hover:underline">Say hello ↗</a>
+      <a href="{% url 'proprietary:contact' %}" class="hover:underline">Say hello ↗</a>
       {% else %}
-      <a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}" class="text-blue-600 hover:underline">Say hello ↗</a>
+      <a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}" class="hover:underline">Say hello ↗</a>
       {% endif %}
     </p>
-  </div>
-</section>
-
-{% endblock %} 
+  </section>
+</div>
+{% endblock %}

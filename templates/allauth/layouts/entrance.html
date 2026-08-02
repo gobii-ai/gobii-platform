@@ -4,10 +4,27 @@
 {% block head_extras %}
   {{ block.super }}
   <meta name="robots" content="noindex,follow">
+  {% include "includes/_gk_auth.html" %}
+  <style>
+    /* Canvas floor for the entrance family. The card below sits on .gk-luxe,
+       but a few of allauth's own entrance templates override {% templatetag openblock %} block content {% templatetag closeblock %}
+       outright; darkening <body> keeps those from showing a white slab between
+       our dark nav and dark footer. These selectors out-specify the utility
+       classes base.html puts on <body>, so no !important is needed. This lives
+       here rather than in _gk_auth.html because that file also ships inside the
+       auth modal fragment, which is injected into other pages. */
+    body.bg-white { background-color: #100a20; }
+    body.text-slate-800 { color: #ece9f6; }
+  </style>
 {% endblock %}
 
 {% block content %}
-<div class="flex justify-center pt-20">
-  {% block body_inner %}{% endblock %}
+<div class="gk-luxe">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+  <div class="gk-auth-wrap">
+    <div class="gk-auth gk-auth-card">
+      {% block body_inner %}{% endblock %}
+    </div>
+  </div>
 </div>
 {% endblock %}

@@ -1,0 +1,274 @@
+{% comment %}
+  Gobii Luxe — account / auth surfaces ("S1 quiet card").
+
+  Scoped CSS for every allauth entrance page and for the auth modal fragments.
+  Included from `allauth/layouts/entrance.html` (head_extras) and, in modal mode,
+  from the `_*_content.html` partials so the HTMX-injected fragment carries its
+  own styling.
+
+  Everything here is presentation only. It relies on tokens already defined by
+  `includes/_gk_theme.html` (@property --gkang, .gk-btn, .gk-btn-quiet,
+  .gk-luxe, .gk-aurora-drift) which base.html always loads.
+{% endcomment %}
+<style>
+  /* ── Page shell ─────────────────────────────────────────────────────── */
+  .gk-auth-wrap {
+    position: relative; z-index: 1;
+    min-height: calc(100vh - 86px);
+    display: grid; place-items: center;
+    padding: clamp(24px, 5vh, 56px) clamp(14px, 4vw, 24px) clamp(56px, 9vh, 92px);
+  }
+  .gk-auth-card {
+    --gk-auth-pad: clamp(22px, 3vw, 34px);
+    width: 100%; max-width: 424px;
+    padding: var(--gk-auth-pad);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, .1);
+    background: rgba(255, 255, 255, .045);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    box-shadow: 0 30px 90px rgba(3, 1, 12, .6);
+  }
+  .gk-auth { color-scheme: dark; }
+
+  /* ── Type ───────────────────────────────────────────────────────────── */
+  .gk-auth-title {
+    margin: 0; color: #fff; font-weight: 300; letter-spacing: -.8px;
+    font-size: clamp(23px, 2.2vw, 27px); line-height: 1.18; text-align: center;
+    text-wrap: balance;
+  }
+  .gk-auth-title-left { text-align: left; }
+  .gk-auth-alt { margin: 7px 0 0; font-size: 13px; color: #a99cc9; text-align: center; }
+  .gk-auth-alt a { color: #c4b5fd; text-decoration: none; font-weight: 550; }
+  .gk-auth-alt a:hover { text-decoration: underline; }
+  .gk-auth-lede { margin: 10px 0 0; font-size: 13.5px; line-height: 1.65; color: #b7aed4; text-align: center; }
+  .gk-auth-lede-left { text-align: left; }
+  .gk-auth-head { margin-bottom: 20px; }
+
+  .gk-auth-inline-link { color: #c4b5fd; text-decoration: underline; text-underline-offset: 2px; }
+  .gk-auth-inline-link:hover { color: #ddd0ff; }
+
+  /* Unclassed markup coming from allauth's own element templates
+     (already_logged_in, {% templatetag openblock %} element p {% templatetag closeblock %}, …). :not([class]) keeps these
+     from out-specifying the classed rules above. */
+  .gk-auth p:not([class]){ margin: 12px 0 0; font-size: 13.5px; line-height: 1.65; color: #b7aed4; }
+  .gk-auth a:not([class]) { color: #c4b5fd; }
+  .gk-auth strong { color: #ece9f6; }
+
+  /* ── Fields ─────────────────────────────────────────────────────────── */
+  .gk-auth-form { margin-top: 22px; }
+  .gk-auth-field { margin-bottom: 15px; }
+  .gk-auth-field:last-child { margin-bottom: 0; }
+  .gk-auth-label {
+    display: block; margin-bottom: 7px;
+    font-size: 12.5px; font-weight: 550; color: #cfc7e8;
+  }
+  .gk-auth-labelrow {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 7px;
+  }
+  .gk-auth-labelrow .gk-auth-label { margin-bottom: 0; }
+  .gk-auth-link-sm { font-size: 12px; color: #c4b5fd; text-decoration: none; white-space: nowrap; }
+  .gk-auth-link-sm:hover { text-decoration: underline; color: #ddd0ff; }
+
+  .gk-auth-input {
+    display: block; width: 100%;
+    font: inherit; font-size: 14px; color: #fff;
+    padding: 12px 14px; border-radius: 11px;
+    background: rgba(8, 5, 20, .55);
+    border: 1px solid rgba(255, 255, 255, .14);
+    outline: none;
+    transition: border-color .18s, box-shadow .18s, background .18s;
+  }
+  .gk-auth-input::placeholder { color: #8b80b5; }
+  .gk-auth-input:hover { border-color: rgba(255, 255, 255, .24); }
+  .gk-auth-input:focus {
+    border-color: rgba(196, 181, 253, .75);
+    background: rgba(8, 5, 20, .75);
+    box-shadow: 0 0 0 4px rgba(139, 92, 246, .22);
+  }
+  .gk-auth-input[readonly] { color: #d5cdec; background: rgba(139, 92, 246, .14); border-color: rgba(196, 181, 253, .28); }
+  .gk-auth-input-err, .gk-auth-input[aria-invalid="true"] {
+    border-color: rgba(248, 113, 113, .7);
+  }
+  .gk-auth-input-err:focus, .gk-auth-input[aria-invalid="true"]:focus {
+    border-color: rgba(252, 165, 165, .9); box-shadow: 0 0 0 4px rgba(244, 63, 94, .22);
+  }
+  /* Password managers repaint autofilled inputs white; keep them on-theme
+     without touching type / name / autocomplete. */
+  .gk-auth input:-webkit-autofill,
+  .gk-auth input:-webkit-autofill:hover,
+  .gk-auth input:-webkit-autofill:focus {
+    -webkit-text-fill-color: #fff;
+    caret-color: #fff;
+    -webkit-box-shadow: 0 0 0 1000px #140d29 inset;
+    transition: background-color 9999s ease-in-out 0s;
+  }
+  .gk-auth-help { margin: 7px 0 0; font-size: 11.5px; line-height: 1.55; color: #9d92c0; }
+
+  /* ── Errors — louder on dark than the old red-600-on-white ──────────── */
+  .gk-auth-err { margin: 7px 0 0; font-size: 12.5px; line-height: 1.5; color: #fca5a5; }
+  .gk-auth-err:empty { display: none; }
+  .gk-auth-alert,
+  .gk-auth .errorlist {
+    margin: 0 0 15px; padding: 11px 14px; list-style: none;
+    border-radius: 12px;
+    background: rgba(244, 63, 94, .13);
+    border: 1px solid rgba(248, 113, 113, .4);
+  }
+  .gk-auth-alert ul { margin: 0; padding: 0; list-style: none; }
+  .gk-auth-alert li,
+  .gk-auth .errorlist li { font-size: 13px; line-height: 1.55; color: #fecaca; }
+  .gk-auth-alert li + li,
+  .gk-auth .errorlist li + li { margin-top: 6px; }
+  .gk-auth-alert a, .gk-auth .errorlist a { color: #fff; text-decoration: underline; }
+
+  /* ── Social providers ───────────────────────────────────────────────── */
+  .gk-auth-social { display: flex; flex-direction: column; gap: 9px; margin-top: 20px; }
+  .gk-auth-social a {
+    display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
+    font: inherit; font-size: 13.5px; font-weight: 550; color: #ece9f6; text-decoration: none;
+    padding: 11px 16px; border-radius: 11px;
+    background: rgba(255, 255, 255, .055);
+    border: 1px solid rgba(255, 255, 255, .13);
+    transition: background .18s, border-color .18s;
+  }
+  .gk-auth-social a:hover { background: rgba(255, 255, 255, .1); border-color: rgba(196, 181, 253, .35); color: #fff; }
+  .gk-auth-social svg { width: 17px; height: 17px; flex: none; }
+
+  .gk-auth-divider {
+    display: flex; align-items: center; gap: 12px; margin: 18px 0;
+    font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; color: #9d92c0;
+  }
+  .gk-auth-divider::before, .gk-auth-divider::after {
+    content: ''; flex: 1; height: 1px; background: rgba(255, 255, 255, .11);
+  }
+
+  /* ── Cloudflare Turnstile ───────────────────────────────────────────────
+     The widget is a third-party iframe whose theme is fixed by
+     settings.TURNSTILE_DEFAULT_CONFIG (server side). It renders light, so it
+     gets a deliberate light inset instead of floating as a white brick. The
+     block bleeds to the card edge so the fixed 300px widget never forces a
+     horizontal scrollbar at 360px. */
+  .gk-auth-turnstile {
+    margin: 18px calc(-1 * var(--gk-auth-pad, 0px)) 4px;
+    display: flex; flex-direction: column; align-items: center;
+    overflow-x: hidden;
+  }
+  .gk-auth-turnstile-frame {
+    padding: 7px; border-radius: 13px; max-width: 100%;
+    width: 316px; min-height: 79px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid transparent;
+    transition: background .2s, border-color .2s, box-shadow .2s;
+  }
+  /* Space is reserved up front, so there is no layout shift when the widget mounts.
+     The widget itself now renders dark (TURNSTILE_DEFAULT_CONFIG in settings), so this
+     only needs to seat it on the card — no light inset, and nothing to hide behind
+     :has(), which means browsers without :has() support look the same. */
+  .gk-auth-turnstile-frame {
+    background: rgba(255, 255, 255, .04);
+    border-color: rgba(255, 255, 255, .1);
+  }
+  .gk-auth-turnstile-frame .cf-turnstile { line-height: 0; }
+  .gk-auth-turnstile .gk-auth-err { text-align: center; }
+
+  /* ── Actions ────────────────────────────────────────────────────────── */
+  .gk-auth-submit { width: 100%; margin-top: 4px; padding-left: 18px; padding-right: 18px; }
+  .gk-auth-submit:disabled { cursor: not-allowed; opacity: .55; }
+  .gk-auth-submit:disabled:hover { transform: none; box-shadow: none; }
+  .gk-auth-quiet { width: 100%; margin-top: 4px; }
+  .gk-auth-actions { margin-top: 22px; display: flex; flex-direction: column; gap: 10px; }
+  .gk-auth-legal { margin: 15px 0 0; font-size: 11.5px; line-height: 1.6; color: #9d92c0; text-align: center; }
+  .gk-auth-legal a { color: #c4b5fd; text-decoration: none; }
+  .gk-auth-legal a:hover { text-decoration: underline; }
+  .gk-auth-foot { margin: 16px 0 0; font-size: 13px; color: #a99cc9; text-align: center; }
+  .gk-auth-foot a { color: #c4b5fd; text-decoration: none; font-weight: 550; }
+  .gk-auth-foot a:hover { text-decoration: underline; }
+
+  /* ── Status pages (reset sent, email verification, password changed) ─── */
+  .gk-auth-center { text-align: center; }
+  .gk-auth-glyph {
+    width: 52px; height: 52px; margin: 0 auto 18px; border-radius: 15px;
+    display: grid; place-items: center;
+    color: #c4b5fd;
+    background: rgba(139, 92, 246, .16);
+    border: 1px solid rgba(196, 181, 253, .28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 10px 30px rgba(109, 40, 217, .25);
+  }
+  .gk-auth-glyph svg { width: 24px; height: 24px; }
+  .gk-auth-glyph-ok { color: #6ee7b7; background: rgba(52, 211, 153, .13); border-color: rgba(110, 231, 183, .3); }
+  .gk-auth-glyph-warn { color: #fca5a5; background: rgba(244, 63, 94, .13); border-color: rgba(248, 113, 113, .32); }
+  .gk-auth-badge {
+    display: inline-flex; align-items: center; gap: 7px; margin-bottom: 14px;
+    padding: 5px 13px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase;
+    color: #e9dcff; background: rgba(139, 92, 246, .18); border: 1px solid rgba(196, 181, 253, .28);
+  }
+
+  /* ── Focus visibility (keyboard) ────────────────────────────────────── */
+  /* Inputs carry their own violet ring on :focus, so only the link/button
+     controls take the outline — otherwise text fields get a doubled ring. */
+  .gk-auth a:focus-visible,
+  .gk-auth button:focus-visible,
+  .gk-auth summary:focus-visible {
+    outline: 2px solid #c4b5fd; outline-offset: 2px; border-radius: 8px;
+  }
+  .gk-auth-input:focus-visible { outline: none; }
+
+  /* ── Modal mode ─────────────────────────────────────────────────────────
+     The auth fragment is injected into the shared generic modal, whose panel
+     is a white Tailwind card we must not edit. These id-scoped rules repaint
+     that shell so the dialog matches the dark site it opens over. */
+  /* The generic modal body is `text-center` below the sm breakpoint; the auth
+     fragment is a form and must read left-aligned at every width. */
+  .gk-auth-modal { --gk-auth-pad: 16px; display: block; text-align: left; }
+  @media (min-width: 640px) { .gk-auth-modal { --gk-auth-pad: 24px; } }
+  .gk-auth-modal-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px;
+  }
+  .gk-auth-back {
+    display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px 6px 6px;
+    font: inherit; font-size: 13px; font-weight: 500; color: #c4b5fd;
+    background: none; border: 0; border-radius: 9px; cursor: pointer;
+    transition: color .15s, background .15s;
+  }
+  .gk-auth-back:hover { color: #fff; background: rgba(255, 255, 255, .07); }
+  .gk-auth-back svg { width: 15px; height: 15px; }
+  .gk-auth-close {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    height: 34px; width: 34px; margin-left: auto;
+    color: #a99cc9; background: none; border: 0; border-radius: 999px; cursor: pointer;
+    transition: color .15s, background .15s;
+  }
+  .gk-auth-close:hover { color: #fff; background: rgba(255, 255, 255, .09); }
+  .gk-auth-close svg { width: 18px; height: 18px; }
+
+  #cta-signup-modal .bg-white.rounded-lg {
+    background-color: #150d2a;
+    background-image: linear-gradient(180deg, rgba(38, 25, 70, .96), rgba(19, 12, 40, .98));
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 20px;
+    box-shadow: 0 40px 110px rgba(2, 1, 10, .75);
+    color: #ece9f6;
+  }
+  #cta-signup-modal .bg-white.rounded-lg .bg-white { background-color: transparent; }
+  #cta-signup-modal [data-modal-backdrop] { background-color: rgba(6, 3, 16, .78); }
+
+  /* The shared modal shell (partials/_generic_modal.html) uses
+     "items-start sm:items-center" plus pb-20, so on phones the auth panel pinned to the
+     top of the screen with a big dead gap underneath. Scoped here rather than changing
+     the shell, because other modals are tall and rely on top alignment to scroll.
+     Centred, but it still scrolls if the panel is taller than the viewport. */
+  @media (max-width: 639px) {
+    #cta-signup-modal > .flex.min-h-full {
+      align-items: center;
+      padding-top: 1rem;
+      padding-bottom: 1rem;
+    }
+  }
+  #cta-signup-modal [data-cta-signup-modal-loading] { color: #b7aed4; }
+  #cta-signup-modal [data-cta-signup-modal-error] {
+    background-color: rgba(244, 63, 94, .14);
+    border-color: rgba(248, 113, 113, .42);
+    color: #fecaca;
+  }
+</style>

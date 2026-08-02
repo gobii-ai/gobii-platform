@@ -1,11 +1,14 @@
 {% load static %}
 
-<img src="{% static 'images/gobii_fish_with_text_purple_nav_2x.webp' %}"
-     srcset="{% static 'images/gobii_fish_with_text_purple_nav_1x.webp' %} 1x, {% static 'images/gobii_fish_with_text_purple_nav_2x.webp' %} 2x, {% static 'images/gobii_fish_with_text_purple_nav_3x.webp' %} 3x"
-     alt="Gobii Fish Wordmark"
-     class="h-10 w-auto"
-     width="108"
-     height="40"
-     loading="eager"
-     decoding="async"
-     fetchpriority="high">
+<span class="gk-logo-lockup">
+  <img src="{% static 'images/gobii-fish.svg' %}"
+       alt=""
+       aria-hidden="true"
+       class="gk-logo-fish"
+       width="32"
+       height="32"
+       loading="eager"
+       decoding="async"
+       fetchpriority="high">
+  <span class="gk-logo-word">gobii</span>
+</span>

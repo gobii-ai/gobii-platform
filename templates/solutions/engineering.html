@@ -7,260 +7,173 @@
 {{ block.super }}
 {% include "solutions/_seo_meta.html" %}
 <style>
-  .engineering-panel {
-    position: relative;
-    overflow: hidden;
-    isolation: isolate;
-  }
-
-  .engineering-panel::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(circle at 20% 25%, rgba(79, 70, 229, 0.16) 0%, rgba(79, 70, 229, 0) 55%),
-      radial-gradient(circle at 75% 35%, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0) 60%),
-      radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.1) 0%, rgba(129, 140, 248, 0) 70%);
-    opacity: 0.8;
-    filter: blur(40px);
-    pointer-events: none;
-    z-index: 2;
-  }
-
-  .engineering-panel::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
-    pointer-events: none;
-    z-index: 3;
-    mix-blend-mode: lighten;
-  }
-
-  .engineering-gradient-bg {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.35) 0%, rgba(129, 140, 248, 0.4) 40%, rgba(59, 130, 246, 0.3) 100%);
-    -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
-    mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
-  }
-
-  .engineering-content {
-    position: relative;
-    z-index: 10;
-    min-height: inherit;
-  }
-
-  .engineering-content::after {
-    content: "";
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 20;
-    height: 10rem;
-    pointer-events: none;
-    background: linear-gradient(to top, #fff 0%, rgba(255, 255, 255, 0.8) 50%, rgba(255, 255, 255, 0) 100%);
-  }
-
-  /* Hero image as atmospheric background element */
-  .hero-image-bg {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
-    pointer-events: none;
-    overflow: hidden;
-  }
-
-  .hero-image-bg img {
-    position: absolute;
-    right: -5%;
-    top: 0;
-    width: 70%;
-    height: 100%;
-    object-fit: cover;
-    object-position: 50% 75%;
-    opacity: 1;
-    -webkit-mask-image:
-      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
-      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
-    -webkit-mask-composite: source-in;
-    mask-image:
-      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
-      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
-    mask-composite: intersect;
-  }
-
-  @media (max-width: 1023px) {
-    .hero-image-bg img {
-      right: -10%;
-      width: 100%;
-      object-position: 65% 72%;
-      opacity: 0.45;
-      -webkit-mask-image:
-        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
-        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
-      mask-image:
-        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
-        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
-    }
-
-    .engineering-panel::after {
-      background: linear-gradient(90deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.6) 40%, rgba(255, 255, 255, 0.3) 70%, transparent 100%),
-                  linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.6) 100%);
-    }
-  }
-
-  .feature-card {
-    transition: all 0.2s ease;
-  }
-
-  .feature-card:hover {
-    transform: translateY(-2px);
-    border-color: rgba(79, 70, 229, 0.26);
-    box-shadow: 0 24px 48px -28px rgba(79, 70, 229, 0.35);
-  }
-
-  .code-block {
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    border-radius: 0.75rem;
-    overflow: hidden;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
-  }
-
-  .code-block pre {
-    margin: 0;
-    padding: 1.5rem;
-    overflow-x: auto;
-    font-size: 0.875rem;
-    line-height: 1.6;
-  }
-
-  .code-block code {
-    color: #e2e8f0;
-  }
-
+  /* engineering — page-scoped layout on the Gobii Luxe theme */
+  .eng-hero { max-width: 1100px; margin: 0 auto; padding: 64px 24px 0; position: relative; }
+  .eng-hero::before { content: ''; position: absolute; width: min(46vw, 640px); height: 360px;
+    border-radius: 50%; filter: blur(100px); opacity: .32; pointer-events: none; top: -40px; right: 4%;
+    background: radial-gradient(closest-side, rgba(168,85,247,.5), transparent); }
+  .eng-hero > * { position: relative; }
+  .eng-crumbs { font-size: 12.5px; color: #8b7fb8; margin-bottom: 14px; }
+  .eng-crumbs a { color: #c4b5fd; text-decoration: none; }
+  .eng-hero h1 { margin-top: 12px; max-width: 22ch; }
+  .eng-hero .gk-sub { margin-top: 14px; max-width: 58ch; }
+  .eng-ctas { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+  .eng-stats { display: inline-flex; flex-wrap: wrap; gap: 20px 34px; margin-top: 28px; padding: 16px 24px; }
+  .eng-stat b { display: block; font-size: 24px; font-weight: 300; color: #fff; }
+  .eng-stat span { font-size: 11px; color: #8b7fb8; }
+  .eng-lede { color: #b7aed4; font-size: 15px; line-height: 1.65; margin-top: 12px; }
+  /* code window — the page's product proof, dark by design */
+  .eng-codewrap { max-width: 860px; margin: 30px auto 0; }
+  .code-block { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 0.75rem;
+    overflow: hidden; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    border: 1px solid rgba(255,255,255,.12);
+    box-shadow: 0 34px 90px rgba(5,2,18,.6), 0 0 70px rgba(168,85,247,.14); }
+  .code-block pre { margin: 0; padding: 1.5rem; overflow-x: auto; font-size: 0.875rem; line-height: 1.6; }
+  .code-block code { color: #e2e8f0; }
   .code-block .comment { color: #64748b; }
   .code-block .keyword { color: #c084fc; }
   .code-block .string { color: #34d399; }
   .code-block .function { color: #60a5fa; }
   .code-block .variable { color: #f472b6; }
+  .eng-codebar { display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+    background: rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.08); }
+  .eng-codebar .eng-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .eng-codebar span.eng-fname { color: #94a3b8; font-size: 13px; margin-left: 8px;
+    font-family: ui-sans-serif, system-ui, sans-serif; }
+  /* bento cards */
+  .eng-bento { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 30px; }
+  @media (min-width: 768px) { .eng-bento { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 1024px) { .eng-bento { grid-template-columns: repeat(3, 1fr); }
+    .eng-span2 { grid-column: span 2; } .eng-span3 { grid-column: span 3; } }
+  .eng-card { padding: 28px; position: relative; overflow: hidden; }
+  .eng-card-ic { width: 46px; height: 46px; border-radius: 14px; display: flex; align-items: center;
+    justify-content: center; color: #fff; background: linear-gradient(120deg,#7c3aed,#a855f7);
+    box-shadow: 0 10px 26px rgba(124,58,237,.4); }
+  .eng-card h3 { font-size: 17px; font-weight: 600; color: #fff; margin: 18px 0 8px; }
+  .eng-card p { color: #a99cc9; font-size: 13.5px; line-height: 1.65; margin: 0 0 16px; }
+  .eng-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+  .eng-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  /* use cases + resources */
+  .eng-uses { display: grid; gap: 14px; margin-top: 28px; }
+  @media (min-width: 768px) { .eng-uses { grid-template-columns: 1fr 1fr; } }
+  .eng-use { display: flex; gap: 18px; padding: 24px; }
+  .eng-use-ic { flex-shrink: 0; width: 46px; height: 46px; border-radius: 13px; display: flex;
+    align-items: center; justify-content: center; color: #c4b5fd; background: rgba(139,92,246,.18); }
+  .eng-use h3 { font-size: 15.5px; font-weight: 600; color: #fff; margin: 0 0 6px; }
+  .eng-use p { color: #a99cc9; font-size: 13px; line-height: 1.6; margin: 0; }
+  .eng-res { display: grid; gap: 14px; margin-top: 28px; }
+  @media (min-width: 768px) { .eng-res { grid-template-columns: repeat(3, 1fr); } }
+  .eng-res-card { display: block; padding: 28px; text-decoration: none; }
+  .eng-res-card h3 { font-size: 16px; font-weight: 600; color: #fff; margin: 16px 0 6px; }
+  .eng-res-card p { color: #a99cc9; font-size: 13px; line-height: 1.6; margin: 0 0 14px; }
+  .eng-res-link { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 550; color: #c4b5fd; }
+  .eng-res-card:hover .eng-res-link { color: #fff; }
+  /* FAQ */
+  .eng-faq-grid { display: grid; gap: 40px; align-items: start; margin-top: 26px; }
+  @media (min-width: 1024px) { .eng-faq-grid { grid-template-columns: .9fr 1.1fr; gap: 56px; }
+    .eng-faq-sticky { position: sticky; top: 96px; } }
+  .eng-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 26px; }
+  .eng-tile { padding: 13px 16px; font-size: 13px; color: #d5cdec; }
+  .eng-tile span { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px;
+    text-transform: uppercase; color: #8b7fb8; margin-bottom: 3px; }
+  .eng-faq code { border-radius: 5px; background: rgba(139,92,246,.18); padding: 1px 6px;
+    font-size: .85em; color: #e9dcff; }
+  .eng-strip { display: grid; gap: 10px; margin-top: 22px; }
+  @media (min-width: 768px) { .eng-strip { grid-template-columns: repeat(4, 1fr); } }
+  .eng-strip-cell { padding: 16px 18px; }
+  .eng-strip-cell .eng-strip-h { display: flex; align-items: center; gap: 8px; font-size: 13px;
+    font-weight: 600; color: #fff; }
+  .eng-strip-cell .eng-strip-h i { color: #a78bfa; }
+  .eng-strip-cell p { margin: 8px 0 0; font-size: 12.5px; line-height: 1.6; color: #a99cc9; }
+  /* closer band */
+  .eng-band-wrap { max-width: 1100px; margin: 80px auto 0; padding: 0 24px 8px; }
+  .eng-band-ctas { display: flex; flex-direction: column; gap: 12px; justify-content: center; align-items: center; }
+  @media (min-width: 640px) { .eng-band-ctas { flex-direction: row; } }
+  .eng-trust { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+    gap: 12px 30px; font-size: 13px; color: #c4b5fd; }
+  .eng-trust a { color: #c4b5fd; text-decoration: none; display: flex; align-items: center; gap: 8px; }
+  .eng-trust a:hover { color: #fff; }
+  .eng-trust svg { color: #f0abfc; }
 </style>
 {% endblock %}
 
 {% block content %}
-<!-- Hero Section -->
-<div class="relative engineering-panel -mt-16 min-h-[600px] lg:min-h-[700px]">
-  <div class="engineering-gradient-bg" aria-hidden="true"></div>
+<div class="gk-luxe">
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
 
-  <!-- Hero image as atmospheric background -->
-  <div class="hero-image-bg" aria-hidden="true">
-    <picture>
-      <source
-        type="image/webp"
-        srcset="{% static 'images/solutions/engineering-hero-640.webp' %} 640w,
-                {% static 'images/solutions/engineering-hero-960.webp' %} 960w,
-                {% static 'images/solutions/engineering-hero-1280.webp' %} 1280w,
-                {% static 'images/solutions/engineering-hero-1920.webp' %} 1920w"
-        sizes="(max-width: 1023px) 100vw, 70vw"
-      >
-      <img
-        src="{% static 'images/solutions/engineering-hero-1280.jpg' %}"
-        srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
-                {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
-                {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
-                {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w"
-        sizes="(max-width: 1023px) 100vw, 70vw"
-        alt=""
-        width="1280"
-        height="543"
-        loading="eager"
-        fetchpriority="high"
-        decoding="async"
-      >
-    </picture>
-  </div>
+  <!-- Hero Section -->
+  <section class="eng-hero">
+    <nav class="eng-crumbs" aria-label="Breadcrumb">
+      <a href="{% url 'pages:solutions' %}">Solutions</a>
+      <span aria-hidden="true">/</span>
+      <span>API</span>
+    </nav>
+    <p class="gk-eyebrow">AI Agent API</p>
+    <h1 class="gk-display">
+      Deploy and manage
+      <span class="gk-accent">always-on AI employees</span>
+    </h1>
 
-  <!-- Grid pattern overlay -->
-  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[4]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
+    <p class="gk-sub">
+      Gobii's Agent API gives each employee a charter, schedule, timeline, tools, channels, and persistent workspace. Create them once, keep them working, and manage their full lifecycle from your product.
+    </p>
 
-  <section class="relative engineering-content">
-    <div class="relative max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
+    <div class="eng-ctas">
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto" data-analytics-cta-id="engineering_hero" data-analytics-placement="hero" data-analytics-intent="get_api_keys">
+        {% csrf_token %}
+        <input type="hidden" name="source_page" value="engineering_hero" />
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="api_keys" />
+        <button type="submit" class="gk-btn w-full sm:w-auto group">
+          {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
+          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
+      <a href="https://docs.gobii.ai/developers/developer-agents" class="gk-btn-quiet w-full sm:w-auto">
+        Read the Agent API docs
+      </a>
+    </div>
 
-      <!-- Hero Content -->
-      <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
-        <p class="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-violet-800">AI Agent API</p>
-        <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
-          Deploy and manage
-          <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">always-on AI employees</span>
-        </h1>
-
-        <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
-          Gobii's Agent API gives each employee a charter, schedule, timeline, tools, channels, and persistent workspace. Create them once, keep them working, and manage their full lifecycle from your product.
-        </p>
-
-        <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto" data-analytics-cta-id="engineering_hero" data-analytics-placement="hero" data-analytics-intent="get_api_keys">
-            {% csrf_token %}
-            <input type="hidden" name="source_page" value="engineering_hero" />
-            <input type="hidden" name="trial_onboarding" value="1" />
-            <input type="hidden" name="trial_onboarding_target" value="api_keys" />
-            <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
-              {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
-              <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-              </svg>
-            </button>
-          </form>
-          <a href="https://docs.gobii.ai/developers/developer-agents" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
-            Read the Agent API docs
-          </a>
-        </div>
-
-        <!-- Inline stats -->
-        <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">
-          <div>
-            <div class="text-3xl font-light text-gray-900">REST</div>
-            <p class="text-sm text-gray-800 mt-1">Full lifecycle API</p>
-          </div>
-          <div>
-            <div class="text-3xl font-light text-gray-900">24/7</div>
-            <p class="text-sm text-gray-800 mt-1">Schedules + events</p>
-          </div>
-          <div>
-            <div class="text-3xl font-light text-gray-900">Open</div>
-            <p class="text-sm text-gray-800 mt-1">Gobii Cloud or self-hosted</p>
-          </div>
-        </div>
+    <!-- Inline stats -->
+    <div class="gk-glassrow eng-stats">
+      <div class="eng-stat">
+        <b>REST</b>
+        <span>Full lifecycle API</span>
+      </div>
+      <div class="eng-stat">
+        <b>24/7</b>
+        <span>Schedules + events</span>
+      </div>
+      <div class="eng-stat">
+        <b>Open</b>
+        <span>Gobii Cloud or self-hosted</span>
       </div>
     </div>
   </section>
-</div>
 
-<!-- Code Example Section -->
-<section class="relative bg-white pb-12">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="text-center pt-4 pb-16">
-      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+  <!-- Code Example Section -->
+  <section class="gk-section gk-section-plain">
+    <div style="text-align:center;max-width:42rem;margin:0 auto">
+      <h2 class="gk-h2" style="text-align:center">
         Create an AI employee in one request
       </h2>
-      <p class="mt-4 text-lg text-gray-500 max-w-2xl mx-auto">
+      <p class="eng-lede">
         Give it a responsibility and schedule. Gobii provisions the persistent agent and keeps its configuration available between runs.
       </p>
     </div>
 
     <!-- Code Example -->
-    <div class="mb-16">
-      <div class="code-block shadow-2xl shadow-slate-300/50 border border-slate-200/50">
-        <div class="flex items-center gap-2 px-4 py-3 bg-slate-800/50 border-b border-slate-700/50">
-          <div class="flex gap-1.5">
-            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
-            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+    <div class="eng-codewrap">
+      <div class="code-block">
+        <div class="eng-codebar">
+          <div style="display:flex;gap:6px">
+            <div class="eng-dot" style="background:rgba(239,68,68,.8)"></div>
+            <div class="eng-dot" style="background:rgba(234,179,8,.8)"></div>
+            <div class="eng-dot" style="background:rgba(34,197,94,.8)"></div>
           </div>
-          <span class="text-slate-400 text-sm ml-2">create_agent.py</span>
+          <span class="eng-fname">create_agent.py</span>
         </div>
         <pre><code><span class="keyword">import</span> requests
 
@@ -282,293 +195,255 @@ agent = response.<span class="function">json</span>()
 <span class="keyword">print</span>(agent[<span class="string">"id"</span>], agent[<span class="string">"life_state"</span>])</code></pre>
       </div>
     </div>
+  </section>
 
-  </div>
-</section>
-
-<!-- Platform Capabilities Section -->
-<section class="relative py-20 lg:py-28 overflow-hidden">
-  <!-- Background -->
-  <div class="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-900 to-indigo-950"></div>
-  <div class="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(120,119,198,0.3),transparent)]"></div>
-
-  <!-- Grid pattern -->
-  <div class="absolute inset-0 opacity-[0.03]" style="background-image: url(&quot;data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E&quot;);"></div>
-
-  <div class="relative max-w-7xl mx-auto px-6">
-    <div class="text-center mb-16">
-      <h2 class="text-3xl sm:text-4xl lg:text-5xl font-light text-white tracking-tight">
+  <!-- Platform Capabilities Section -->
+  <section class="gk-section">
+    <div style="text-align:center;max-width:42rem;margin:0 auto">
+      <h2 class="gk-h2" style="text-align:center">
         One API for the full employee lifecycle
       </h2>
-      <p class="mt-4 text-lg text-slate-400 max-w-2xl mx-auto">
+      <p class="eng-lede">
         Deploy the agent, give it recurring responsibilities, connect its tools, inspect its work, and pause or update it without rebuilding your infrastructure.
       </p>
     </div>
 
     <!-- Bento Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
+    <div class="eng-bento">
 
       <!-- Agent lifecycle - Large -->
-      <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute top-0 right-0 w-64 h-64 bg-violet-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
-        <div class="relative">
-          <div class="flex items-start justify-between mb-6">
-            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
-              <i data-lucide="refresh-cw" class="w-6 h-6 text-white"></i>
-            </div>
-            <span class="px-3 py-1 rounded-full bg-violet-500/10 text-violet-400 text-xs font-medium border border-violet-500/20">Long-lived by default</span>
+      <div class="gk-card-edge eng-card eng-span2">
+        <div class="eng-card-top">
+          <div class="eng-card-ic">
+            <i data-lucide="refresh-cw" class="w-5 h-5"></i>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Agent lifecycle</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
-            Create an AI employee with a charter, then retrieve, update, activate, deactivate, or delete it through stable REST resources. Configuration and state persist between interactions.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Create</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Configure</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Pause</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Resume</span>
-          </div>
+          <span class="gk-chip">Long-lived by default</span>
+        </div>
+        <h3>Agent lifecycle</h3>
+        <p>
+          Create an AI employee with a charter, then retrieve, update, activate, deactivate, or delete it through stable REST resources. Configuration and state persist between interactions.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Create</span>
+          <span class="gk-chip">Configure</span>
+          <span class="gk-chip">Pause</span>
+          <span class="gk-chip">Resume</span>
         </div>
       </div>
 
       <!-- Schedules and events -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-indigo-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-indigo-500/20 transition-all duration-500"></div>
-        <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg shadow-indigo-500/25 mb-6">
-            <i data-lucide="clock-3" class="w-6 h-6 text-white"></i>
-          </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Schedules and events</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
-            Wake employees on cron-like schedules, inbound messages, or webhooks. Long-running responsibilities continue without an open browser tab or synchronous request.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cron schedules</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Event triggers</span>
-          </div>
+      <div class="gk-card-glass eng-card">
+        <div class="eng-card-ic">
+          <i data-lucide="clock-3" class="w-5 h-5"></i>
+        </div>
+        <h3>Schedules and events</h3>
+        <p>
+          Wake employees on cron-like schedules, inbound messages, or webhooks. Long-running responsibilities continue without an open browser tab or synchronous request.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Cron schedules</span>
+          <span class="gk-chip">Event triggers</span>
         </div>
       </div>
 
       <!-- Tools and connected apps -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-purple-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute top-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-purple-500/20 transition-all duration-500"></div>
-        <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-500/25 mb-6">
-            <i data-lucide="plug" class="w-6 h-6 text-white"></i>
-          </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Tools and connected apps</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
-            Equip each employee with MCP servers and connected app tools. Keep access scoped at the platform, organization, user, or individual-agent level.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">MCP</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Agent-scoped access</span>
-          </div>
+      <div class="gk-card-glass eng-card">
+        <div class="eng-card-ic">
+          <i data-lucide="plug" class="w-5 h-5"></i>
+        </div>
+        <h3>Tools and connected apps</h3>
+        <p>
+          Equip each employee with MCP servers and connected app tools. Keep access scoped at the platform, organization, user, or individual-agent level.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">MCP</span>
+          <span class="gk-chip">Agent-scoped access</span>
         </div>
       </div>
 
       <!-- Persistent workspace - Large -->
-      <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-fuchsia-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute bottom-0 right-0 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl translate-y-1/2 translate-x-1/2 group-hover:bg-fuchsia-500/20 transition-all duration-500"></div>
-        <div class="relative">
-          <div class="flex items-start justify-between mb-6">
-            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-fuchsia-500 to-pink-600 flex items-center justify-center shadow-lg shadow-fuchsia-500/25">
-              <i data-lucide="database" class="w-6 h-6 text-white"></i>
-            </div>
-            <span class="px-3 py-1 rounded-full bg-fuchsia-500/10 text-fuchsia-400 text-xs font-medium border border-fuchsia-500/20">Per-Agent</span>
+      <div class="gk-card-edge eng-card eng-span2">
+        <div class="eng-card-top">
+          <div class="eng-card-ic">
+            <i data-lucide="database" class="w-5 h-5"></i>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Persistent workspace</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
-            Give every employee durable files, structured data, browser state, and working context. Their workspace survives across scheduled runs, messages, and tool calls.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Files</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">SQLite</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Browser state</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cross-session context</span>
-          </div>
+          <span class="gk-chip">Per-Agent</span>
+        </div>
+        <h3>Persistent workspace</h3>
+        <p>
+          Give every employee durable files, structured data, browser state, and working context. Their workspace survives across scheduled runs, messages, and tool calls.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Files</span>
+          <span class="gk-chip">SQLite</span>
+          <span class="gk-chip">Browser state</span>
+          <span class="gk-chip">Cross-session context</span>
         </div>
       </div>
 
       <!-- Messages and timelines -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-cyan-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute top-0 right-0 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-cyan-500/20 transition-all duration-500"></div>
-        <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 mb-6">
-            <i data-lucide="messages-square" class="w-6 h-6 text-white"></i>
-          </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Messages and timelines</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
-            Send work into an employee, fetch its event timeline, check processing state, and inspect recent browser tasks from your own application.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Messages</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Activity timeline</span>
-          </div>
+      <div class="gk-card-glass eng-card">
+        <div class="eng-card-ic">
+          <i data-lucide="messages-square" class="w-5 h-5"></i>
+        </div>
+        <h3>Messages and timelines</h3>
+        <p>
+          Send work into an employee, fetch its event timeline, check processing state, and inspect recent browser tasks from your own application.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Messages</span>
+          <span class="gk-chip">Activity timeline</span>
         </div>
       </div>
 
       <!-- Browser automation -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-emerald-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute bottom-0 left-0 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-emerald-500/20 transition-all duration-500"></div>
-        <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 mb-6">
-            <i data-lucide="monitor" class="w-6 h-6 text-white"></i>
-          </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Browser automation</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
-            Employees can use real cloud browsers for multistep web work, preserve authenticated sessions, download files, and capture visual output.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Real Chrome</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Persistent sessions</span>
-          </div>
+      <div class="gk-card-glass eng-card">
+        <div class="eng-card-ic">
+          <i data-lucide="monitor" class="w-5 h-5"></i>
+        </div>
+        <h3>Browser automation</h3>
+        <p>
+          Employees can use real cloud browsers for multistep web work, preserve authenticated sessions, download files, and capture visual output.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Real Chrome</span>
+          <span class="gk-chip">Persistent sessions</span>
         </div>
       </div>
 
       <!-- Team controls -->
-      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-amber-500/30 transition-all duration-300 overflow-hidden">
-        <div class="absolute top-0 left-0 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-amber-500/20 transition-all duration-500"></div>
-        <div class="relative">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/25 mb-6">
-            <i data-lucide="users" class="w-6 h-6 text-white"></i>
-          </div>
-          <h3 class="text-xl font-semibold text-white mb-3">Team controls</h3>
-          <p class="text-slate-400 leading-relaxed mb-6">
-            Create organization-owned employees with shared API keys, choose intelligence tiers, set daily credit limits, and keep ownership separate from individual users.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Organizations</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Usage controls</span>
-          </div>
+      <div class="gk-card-glass eng-card">
+        <div class="eng-card-ic">
+          <i data-lucide="users" class="w-5 h-5"></i>
+        </div>
+        <h3>Team controls</h3>
+        <p>
+          Create organization-owned employees with shared API keys, choose intelligence tiers, set daily credit limits, and keep ownership separate from individual users.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Organizations</span>
+          <span class="gk-chip">Usage controls</span>
         </div>
       </div>
 
       <!-- Open source deployment -->
-      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="lg:col-span-3 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-slate-500/50 transition-all duration-300 overflow-hidden">
-        <div class="absolute top-0 right-0 w-64 h-64 bg-slate-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-slate-400/15 transition-all duration-500"></div>
-        <div class="relative flex flex-col md:flex-row md:items-center gap-6">
-          <div class="flex-shrink-0">
-            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center shadow-lg shadow-slate-500/25">
-              <i data-lucide="github" class="w-6 h-6 text-white"></i>
-            </div>
+      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="gk-card-edge eng-card eng-span3" style="text-decoration:none">
+        <div class="flex flex-col md:flex-row md:items-center gap-6">
+          <div class="eng-card-ic" style="flex-shrink:0">
+            <i data-lucide="github" class="w-5 h-5"></i>
           </div>
-          <div class="flex-grow">
-            <div class="flex items-center gap-3 mb-2">
-              <h3 class="text-xl font-semibold text-white">Gobii Cloud or self-hosted</h3>
-              <span class="px-2.5 py-0.5 rounded-full bg-slate-700/50 text-slate-300 text-xs font-medium border border-slate-600/50">Open Source</span>
+          <div style="flex-grow:1">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+              <h3 style="margin:0">Gobii Cloud or self-hosted</h3>
+              <span class="gk-chip">Open Source</span>
             </div>
-            <p class="text-slate-400 leading-relaxed">
+            <p style="margin:0">
               Use Gobii Cloud for the fastest path to production, or run the same open-source platform in your infrastructure. Gobii builds on browser-use and adds the durable runtime, communication, memory, tools, and controls needed for always-on employees.
             </p>
           </div>
-          <div class="flex-shrink-0 flex flex-wrap md:flex-col gap-2">
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Managed cloud</span>
-            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Self-hosted</span>
+          <div class="eng-chips" style="flex-shrink:0">
+            <span class="gk-chip">Managed cloud</span>
+            <span class="gk-chip">Self-hosted</span>
           </div>
         </div>
       </a>
 
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- Use Cases Section -->
-<section id="use-cases" class="relative pt-0 pb-16 lg:pb-20 overflow-hidden scroll-mt-20">
-  <div class="relative max-w-6xl mx-auto px-6">
-    <div class="text-center pt-12 pb-16">
-      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+  <!-- Use Cases Section -->
+  <section id="use-cases" class="gk-section scroll-mt-20">
+    <div style="text-align:center;max-width:42rem;margin:0 auto">
+      <h2 class="gk-h2" style="text-align:center">
         What teams deploy with the Agent API
       </h2>
-      <p class="mt-4 text-lg text-gray-500">
+      <p class="eng-lede">
         Long-lived employees for work that starts on a schedule, arrives as an event, or spans multiple systems.
       </p>
     </div>
 
-    <div class="grid md:grid-cols-2 gap-8">
+    <div class="eng-uses">
       <!-- Use Case 1 -->
-      <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
-        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center">
-          <i data-lucide="database" class="w-6 h-6 text-indigo-600"></i>
+      <div class="gk-card-glass eng-use">
+        <div class="eng-use-ic">
+          <i data-lucide="database" class="w-5 h-5"></i>
         </div>
         <div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Research and monitoring employees</h3>
-          <p class="text-gray-600 text-sm leading-relaxed">
+          <h3>Research and monitoring employees</h3>
+          <p>
             Continuously watch markets, competitors, candidates, accounts, or public sources and deliver source-linked findings on a schedule.
           </p>
         </div>
       </div>
 
       <!-- Use Case 2 -->
-      <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
-        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-violet-100 flex items-center justify-center">
-          <i data-lucide="mail" class="w-6 h-6 text-violet-600"></i>
+      <div class="gk-card-glass eng-use">
+        <div class="eng-use-ic">
+          <i data-lucide="mail" class="w-5 h-5"></i>
         </div>
         <div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Event-driven operations employees</h3>
-          <p class="text-gray-600 text-sm leading-relaxed">
+          <h3>Event-driven operations employees</h3>
+          <p>
             Trigger work from your product, inbound webhook, email, or SMS, then inspect the employee's response and activity timeline.
           </p>
         </div>
       </div>
 
       <!-- Use Case 3 -->
-      <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
-        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
-          <i data-lucide="refresh-cw" class="w-6 h-6 text-purple-600"></i>
+      <div class="gk-card-glass eng-use">
+        <div class="eng-use-ic">
+          <i data-lucide="refresh-cw" class="w-5 h-5"></i>
         </div>
         <div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Embedded agent experiences</h3>
-          <p class="text-gray-600 text-sm leading-relaxed">
+          <h3>Embedded agent experiences</h3>
+          <p>
             Create and manage dedicated agents behind your own interface while Gobii handles schedules, state, tools, messages, and browser execution.
           </p>
         </div>
       </div>
 
       <!-- Use Case 4 -->
-      <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
-        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-fuchsia-100 flex items-center justify-center">
-          <i data-lucide="eye" class="w-6 h-6 text-fuchsia-600"></i>
+      <div class="gk-card-glass eng-use">
+        <div class="eng-use-ic">
+          <i data-lucide="eye" class="w-5 h-5"></i>
         </div>
         <div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Cross-tool workflow employees</h3>
-          <p class="text-gray-600 text-sm leading-relaxed">
+          <h3>Cross-tool workflow employees</h3>
+          <p>
             Give an employee connected apps, MCP tools, files, structured storage, and a browser so it can carry multistep work across systems.
           </p>
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- Resources Section -->
-<section class="relative pt-8 pb-20 lg:pt-10 lg:pb-24 overflow-hidden bg-white">
-  <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
-    <div class="text-center mb-16">
-      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+  <!-- Resources Section -->
+  <section class="gk-section">
+    <div style="text-align:center;max-width:42rem;margin:0 auto">
+      <h2 class="gk-h2" style="text-align:center">
         API resources
       </h2>
-      <p class="mt-4 text-lg text-gray-500">
+      <p class="eng-lede">
         Start with the current Agent API or run the platform yourself.
       </p>
     </div>
 
-    <div class="grid md:grid-cols-3 gap-8">
+    <div class="eng-res">
       <!-- Console / Get Started - Primary -->
-      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="group block p-8 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 border border-violet-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-200/50 ring-2 ring-violet-200/50" data-analytics-cta-id="engineering_resources_api_key" data-analytics-placement="resources" data-analytics-intent="get_api_keys">
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="gk-card-edge eng-res-card group" data-analytics-cta-id="engineering_resources_api_key" data-analytics-placement="resources" data-analytics-intent="get_api_keys">
         {% csrf_token %}
         <input type="hidden" name="source_page" value="engineering_resources_api_key" />
         <input type="hidden" name="trial_onboarding" value="1" />
         <input type="hidden" name="trial_onboarding_target" value="api_keys" />
-        <button type="submit" class="text-left w-full">
-          <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-300/30">
-            <i data-lucide="key" class="w-6 h-6 text-white"></i>
+        <button type="submit" class="text-left w-full" style="background:none;border:0;padding:0;cursor:pointer;font:inherit;color:inherit">
+          <div class="eng-card-ic">
+            <i data-lucide="key" class="w-5 h-5"></i>
           </div>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Get API Key</h3>
-          <p class="text-gray-600 text-sm leading-relaxed mb-4">
+          <h3>Get API Key</h3>
+          <p>
             Create an account and generate your API key in seconds.
           </p>
-          <span class="inline-flex items-center text-sm font-medium text-violet-700 group-hover:text-violet-800">
+          <span class="eng-res-link">
             {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
             <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -578,15 +453,15 @@ agent = response.<span class="function">json</span>()
       </form>
 
       <!-- Docs -->
-      <a href="https://docs.gobii.ai/developers/developer-agents" class="group block p-8 rounded-2xl bg-white border border-slate-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-100/50">
-        <div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-5 group-hover:bg-slate-200 transition-colors">
-          <i data-lucide="book-open" class="w-6 h-6 text-slate-600"></i>
+      <a href="https://docs.gobii.ai/developers/developer-agents" class="gk-card-glass eng-res-card group">
+        <div class="eng-use-ic">
+          <i data-lucide="book-open" class="w-5 h-5"></i>
         </div>
-        <h3 class="text-lg font-medium text-gray-900 mb-2">Documentation</h3>
-        <p class="text-gray-600 text-sm leading-relaxed mb-4">
+        <h3>Documentation</h3>
+        <p>
           Current endpoints, resource fields, lifecycle actions, messaging, timelines, and examples.
         </p>
-        <span class="inline-flex items-center text-sm font-medium text-slate-600 group-hover:text-slate-700">
+        <span class="eng-res-link">
           Read the docs
           <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -595,15 +470,15 @@ agent = response.<span class="function">json</span>()
       </a>
 
       <!-- GitHub -->
-      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="group block p-8 rounded-2xl bg-white border border-slate-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-100/50">
-        <div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-5 group-hover:bg-slate-200 transition-colors">
-          <i data-lucide="github" class="w-6 h-6 text-slate-700"></i>
+      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="gk-card-glass eng-res-card group">
+        <div class="eng-use-ic">
+          <i data-lucide="github" class="w-5 h-5"></i>
         </div>
-        <h3 class="text-lg font-medium text-gray-900 mb-2">Open Source</h3>
-        <p class="text-gray-600 text-sm leading-relaxed mb-4">
+        <h3>Open Source</h3>
+        <p>
           Self-host Gobii with our open-source codebase. Full control, your infrastructure.
         </p>
-        <span class="inline-flex items-center text-sm font-medium text-slate-700 group-hover:text-slate-900">
+        <span class="eng-res-link">
           View on GitHub
           <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -611,202 +486,167 @@ agent = response.<span class="function">json</span>()
         </span>
       </a>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- API Questions Section -->
-<section id="engineering-questions" class="relative pt-8 pb-16 lg:pt-10 lg:pb-20 overflow-hidden scroll-mt-20">
-  <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
-    <div class="grid lg:grid-cols-[0.9fr_1.1fr] gap-10 lg:gap-16 items-start">
-      <div class="lg:sticky lg:top-24">
-        <p class="mb-5 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">Built for ongoing work</p>
-        <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+  <!-- API Questions Section -->
+  <section id="engineering-questions" class="gk-section scroll-mt-20">
+    <div class="eng-faq-grid">
+      <div class="eng-faq-sticky">
+        <p class="gk-eyebrow" style="margin-bottom:14px">Built for ongoing work</p>
+        <h2 class="gk-h2">
           More than a one-off agent run
         </h2>
-        <p class="mt-5 text-lg text-gray-600 leading-relaxed">
+        <p class="eng-lede">
           The primary API resource is a long-lived AI employee with a charter, status, timeline, schedule, channels, files, tools, and operating controls. Browser automation is one capability inside that broader lifecycle.
         </p>
-        <div class="mt-8 grid grid-cols-2 gap-3 text-sm">
-          <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
-            <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Input</span>
+        <div class="eng-tiles">
+          <div class="gk-glassrow eng-tile">
+            <span>Input</span>
             Charter + events
           </div>
-          <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
-            <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Agent work</span>
+          <div class="gk-glassrow eng-tile">
+            <span>Agent work</span>
             Reason + use tools
           </div>
-          <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
-            <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Output</span>
+          <div class="gk-glassrow eng-tile">
+            <span>Output</span>
             Timeline + deliverables
           </div>
-          <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700">
-            <span class="block text-xs font-semibold uppercase tracking-wide text-slate-400">Control</span>
+          <div class="gk-glassrow eng-tile">
+            <span>Control</span>
             Cloud or self-hosted
           </div>
         </div>
       </div>
 
       <div>
-        <div class="space-y-2">
-          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7" open>
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">What is an AI Agent API?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+        <div class="gk-faq eng-faq" style="display:flex;flex-direction:column;gap:10px">
+          <details open>
+            <summary>What is an AI Agent API?</summary>
+            <p>
               An AI Agent API lets a product deploy and manage AI employees programmatically. Gobii's Agent API is built around persistent agents: create an employee once, assign its charter and schedule, connect tools, send it messages, inspect its timeline and processing state, update its configuration, or pause it without deleting its work.
             </p>
           </details>
 
-          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">How do I deploy an always-on AI employee?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
-              Send a POST request to <code class="rounded bg-violet-50 px-1.5 py-0.5 text-sm text-violet-800">/api/v1/agents/</code> with a name, charter, and optional cron-like schedule. Gobii returns the employee's ID and lifecycle state. You can then message it, read its timeline, check processing status, change its schedule or tools, and activate or deactivate it through that stable resource.
+          <details>
+            <summary>How do I deploy an always-on AI employee?</summary>
+            <p>
+              Send a POST request to <code>/api/v1/agents/</code> with a name, charter, and optional cron-like schedule. Gobii returns the employee's ID and lifecycle state. You can then message it, read its timeline, check processing status, change its schedule or tools, and activate or deactivate it through that stable resource.
             </p>
           </details>
 
-          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">What can I manage through the Agent API?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>What can I manage through the Agent API?</summary>
+            <p>
               The API covers creation, retrieval, updates, soft deletion, activation, deactivation, schedule validation, inbound messages, timelines, processing status, and recent browser tasks. Agent configuration can include a charter, schedule, contact policy, preferred intelligence tier, daily credit limit, templates, and enabled MCP servers. Organization API keys can manage organization-owned agents separately from personal agents.
             </p>
           </details>
 
-          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">How do schedules, messages, and webhooks keep employees always on?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>How do schedules, messages, and webhooks keep employees always on?</summary>
+            <p>
               A schedule wakes an employee for recurring responsibilities, while inbound messages and webhooks let external systems trigger work when something changes. Gobii queues that work durably and preserves the employee's configuration and workspace between interactions. Your product can fetch the timeline or processing snapshot instead of holding a synchronous request open.
             </p>
           </details>
 
-          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">Can Gobii employees use browsers and other tools?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>Can Gobii employees use browsers and other tools?</summary>
+            <p>
               Yes. Browser automation is available for work across rendered websites and authenticated sessions, but it is not the whole platform. Employees can also use connected app tools, MCP servers, files, an embedded SQLite workspace, email, SMS, and webhooks. Their work can produce timeline events, structured data, files, screenshots, database records, and downstream webhook payloads.
             </p>
           </details>
 
-          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">When should teams use Gobii Cloud API versus self-hosting?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>When should teams use Gobii Cloud API versus self-hosting?</summary>
+            <p>
               Use Gobii Cloud when you want the fastest path to production without operating the agent runtime, scheduler, browsers, storage, and upgrades. Self-host the open-source platform when you need deeper infrastructure control, private network access, data residency, or customization. The API model stays centered on the same persistent agent resource in either environment.
             </p>
           </details>
 
-          <details class="group rounded-2xl bg-white p-6 ring-1 ring-slate-200 sm:p-7">
-            <summary class="flex items-start justify-between gap-6 cursor-pointer list-none">
-              <span class="text-lg font-medium text-gray-900">What data and privacy controls matter for API agent workflows?</span>
-              <i data-lucide="plus" class="mt-1 w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0"></i>
-            </summary>
-            <p class="mt-4 text-gray-600 leading-relaxed">
+          <details>
+            <summary>What data and privacy controls matter for API agent workflows?</summary>
+            <p>
               Scope each employee to the tools, credentials, contacts, and data it needs. Use organization ownership and agent-level tool configuration to separate access, set credit limits to bound usage, and inspect timelines or deliverables for important work. Keep human approval around customer-facing, financial, destructive, or otherwise sensitive actions.
             </p>
           </details>
         </div>
 
-        <div class="mt-8">
-          <div class="grid gap-4 md:grid-cols-4">
-            <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
-              <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="terminal" class="w-4 h-4 text-indigo-600"></i>
-                API
-              </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Create employees, change configuration, schedule work, pause, resume, or delete.</p>
+        <div class="eng-strip">
+          <div class="gk-glassrow eng-strip-cell">
+            <div class="eng-strip-h">
+              <i data-lucide="terminal" class="w-4 h-4"></i>
+              API
             </div>
-            <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
-              <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="monitor" class="w-4 h-4 text-violet-600"></i>
-                Browsers
-              </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Use cloud browsers, connected apps, MCP servers, files, and structured storage.</p>
+            <p>Create employees, change configuration, schedule work, pause, resume, or delete.</p>
+          </div>
+          <div class="gk-glassrow eng-strip-cell">
+            <div class="eng-strip-h">
+              <i data-lucide="monitor" class="w-4 h-4"></i>
+              Browsers
             </div>
-            <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
-              <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="webhook" class="w-4 h-4 text-cyan-600"></i>
-                Observe
-              </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Read timelines, processing state, browser tasks, messages, and deliverables.</p>
+            <p>Use cloud browsers, connected apps, MCP servers, files, and structured storage.</p>
+          </div>
+          <div class="gk-glassrow eng-strip-cell">
+            <div class="eng-strip-h">
+              <i data-lucide="webhook" class="w-4 h-4"></i>
+              Observe
             </div>
-            <div class="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
-              <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <i data-lucide="shield-check" class="w-4 h-4 text-emerald-600"></i>
-                Review
-              </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">Scope credentials, approve sensitive actions, and keep important outputs auditable.</p>
+            <p>Read timelines, processing state, browser tasks, messages, and deliverables.</p>
+          </div>
+          <div class="gk-glassrow eng-strip-cell">
+            <div class="eng-strip-h">
+              <i data-lucide="shield-check" class="w-4 h-4"></i>
+              Review
             </div>
+            <p>Scope credentials, approve sensitive actions, and keep important outputs auditable.</p>
           </div>
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- Final CTA -->
-<section class="relative pt-8 pb-24 lg:pt-10 lg:pb-28 overflow-hidden isolate">
-  <!-- Centered radial gradient that fades to transparent on all edges -->
-  <div class="absolute inset-0 pointer-events-none">
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_50%_50%,rgba(139,92,246,0.15),transparent_70%)]"></div>
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_50%_50%,rgba(99,102,241,0.08),transparent_60%)]"></div>
-  </div>
+  <!-- Final CTA -->
+  <div class="eng-band-wrap">
+    <div class="gk-band">
+      <h2>
+        Deploy your first AI employee
+      </h2>
+      <p style="max-width:36rem;margin-left:auto;margin-right:auto">
+        Start with Gobii Cloud, then manage the employee's schedule, tools, messages, and lifecycle through the Agent API.
+      </p>
 
-  <!-- Soft floating orbs with heavy blur -->
-  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[450px] h-[450px] bg-violet-300/20 rounded-full blur-[120px] pointer-events-none"></div>
-  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-indigo-300/15 rounded-full blur-[100px] pointer-events-none"></div>
+      <div class="eng-band-ctas">
+        <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto" data-analytics-cta-id="engineering_final_cta" data-analytics-placement="final_cta" data-analytics-intent="get_api_keys">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="engineering_final_cta" />
+          <input type="hidden" name="trial_onboarding" value="1" />
+          <input type="hidden" name="trial_onboarding_target" value="api_keys" />
+          <button type="submit" class="gk-btn w-full group">
+            {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
+            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </form>
+        <a href="https://docs.gobii.ai/developers/developer-agents" class="gk-btn-quiet w-full sm:w-auto">
+          Read the Agent API docs
+        </a>
+      </div>
 
-  <div class="relative max-w-4xl mx-auto px-6 text-center">
-    <h2 class="text-4xl sm:text-5xl font-light text-gray-900 tracking-tight">
-      Deploy your first AI employee
-    </h2>
-    <p class="mt-5 text-xl text-gray-600 max-w-xl mx-auto leading-relaxed">
-      Start with Gobii Cloud, then manage the employee's schedule, tools, messages, and lifecycle through the Agent API.
-    </p>
-
-    <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto" data-analytics-cta-id="engineering_final_cta" data-analytics-placement="final_cta" data-analytics-intent="get_api_keys">
-        {% csrf_token %}
-        <input type="hidden" name="source_page" value="engineering_final_cta" />
-        <input type="hidden" name="trial_onboarding" value="1" />
-        <input type="hidden" name="trial_onboarding_target" value="api_keys" />
-        <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
-          {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
-          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      <!-- Trust indicators -->
+      <div class="eng-trust">
+        <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener">
+          <i data-lucide="github" class="w-5 h-5"></i>
+          Open source
+        </a>
+        <div style="display:flex;align-items:center;gap:8px">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
           </svg>
-        </button>
-      </form>
-      <a href="https://docs.gobii.ai/developers/developer-agents" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
-        Read the Agent API docs
-      </a>
-    </div>
-
-    <!-- Trust indicators -->
-    <div class="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-4 text-sm text-gray-500">
-      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="flex items-center gap-2 hover:text-gray-700 transition-colors">
-        <i data-lucide="github" class="w-5 h-5"></i>
-        Open source
-      </a>
-      <div class="flex items-center gap-2">
-        <svg class="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-        </svg>
-        Free tier available
+          Free tier available
+        </div>
       </div>
     </div>
   </div>
-</section>
+</div>
 {% endblock %}

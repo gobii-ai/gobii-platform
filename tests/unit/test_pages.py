@@ -430,7 +430,7 @@ class HomePageTests(TestCase):
         self.assertNotIn("https://www.saashub.com/gobii", organization_schema["sameAs"])
 
     def test_home_page_charter_textarea_has_hidden_accessible_label(self):
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
@@ -442,7 +442,7 @@ class HomePageTests(TestCase):
         self.assertEqual(label.get_text(strip=True), "Describe what you want your Gobii to do")
 
     def test_home_page_form_controls_have_accessible_names(self):
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
@@ -542,7 +542,7 @@ class HomePageTests(TestCase):
             )
         self.client.force_login(user)
 
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, reverse("proprietary:startup_checkout"))
@@ -699,7 +699,7 @@ class HomePageTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
         view_all_link = next(
@@ -716,7 +716,7 @@ class HomePageTests(TestCase):
 
         parsed = urlparse(view_all_link["href"])
         self.assertEqual(parsed.path, "/app/agents")
-        self.assertEqual(parse_qs(parsed.query).get("return_to"), ["/"])
+        self.assertEqual(parse_qs(parsed.query).get("return_to"), ["/?dc=review+niche+job+boards+weekly"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_page_exposes_all_pretrained_workers(self):
@@ -819,7 +819,7 @@ class HomePageTests(TestCase):
             prefetch_apps=["slack"],
         )
 
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context.get("homepage_integrations_enabled"))
@@ -864,7 +864,7 @@ class HomePageTests(TestCase):
         },
     )
     def test_home_page_renders_built_in_integrations(self, _mock_integrations):
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context.get("homepage_integrations_enabled"))
@@ -916,7 +916,7 @@ class HomePageTests(TestCase):
         },
     )
     def test_home_page_keeps_integrations_trigger_when_no_inline_icons_match(self, _mock_integrations):
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context.get("homepage_integrations_inline_builtins"), [])
         self.assertContains(response, 'id="homepage-integrations-root"')
@@ -1000,7 +1000,7 @@ class HomePageTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_home_cta_text_for_authenticated_users(self):
-        unauth_response = self.client.get("/")
+        unauth_response = self.client.get("/", {"dc": "review niche job boards weekly"})
         self.assertEqual(unauth_response.status_code, 200)
         unauth_soup = BeautifulSoup(unauth_response.content, "html.parser")
         unauth_hero_form = unauth_soup.find("form", {"id": "create-agent-form"})
@@ -1028,7 +1028,7 @@ class HomePageTests(TestCase):
         )
         self.client.force_login(user)
 
-        auth_response = self.client.get("/")
+        auth_response = self.client.get("/", {"dc": "review niche job boards weekly"})
         self.assertEqual(auth_response.status_code, 200)
         auth_soup = BeautifulSoup(auth_response.content, "html.parser")
         auth_hero_form = auth_soup.find("form", {"id": "create-agent-form"})
@@ -1086,11 +1086,11 @@ class HomePageTests(TestCase):
             normalized_page_text.replace(" ,", ",").replace(" ?", "?").replace(" .", ".")
         )
         self.assertIn(
-            "Delegate qualified sourcing to AI employees",
+            "20 qualified candidates, delivered to your ATS every week.",
             normalized_page_text,
         )
         self.assertIn(
-            "Find leads, candidates, companies, and opportunities on a schedule.",
+            "Hire a Gobii that already knows the job.",
             normalized_page_text,
         )
         self.assertIn(
@@ -1098,35 +1098,175 @@ class HomePageTests(TestCase):
             "capable of browser automation, web research, data collection, and workflow execution.",
             normalized_page_text,
         )
-        self.assertIn("Deploy an AI Employee", normalized_page_text)
-        self.assertIn("Put a proven AI employee to work in minutes", normalized_page_text)
+        self.assertIn("Browse the full agent library", normalized_page_text)
         self.assertNotRegex(normalized_page_text, r"(?i)\b(?:worker|coworker)s?\b")
         self.assertNotIn("Source candidates", normalized_page_text)
         self.assertNotIn("Need LinkedIn Recruiter?", normalized_page_text)
         self.assertNotIn("Paste a role brief", normalized_page_text)
-        hero_form = soup.find("form", {"id": "create-agent-form"})
-        self.assertIsNotNone(hero_form)
-        hero_markup = str(hero_form)
-        self.assertIn("data-integrations-inline", hero_markup)
-        self.assertIn("data-integrations-open", hero_markup)
-        self.assertIn("Apps", hero_form.get_text(" ", strip=True))
-        self.assertEqual(hero_form.get("data-analytics-cta-id"), "home_hero")
-        self.assertEqual(hero_form.get("data-analytics-placement"), "hero")
-        self.assertEqual(hero_form.get("data-analytics-intent"), "spawn_agent")
-        hero_button = hero_form.find("button", {"type": "submit"})
-        self.assertIsNotNone(hero_button)
-        self.assertEqual(self._normalized_button_text(hero_button), "Start Sourcing")
-        self.assertIn("7-day free trial.", normalized_page_text)
-        self.assertIsNone(hero_form.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"}))
+        # The charter form no longer renders on the default template-first page;
+        # its markup and analytics contracts are asserted on the landing render
+        # by the CTA and integrations tests.
+        self.assertIsNone(soup.find("form", {"id": "create-agent-form"}))
+        hire_source = soup.find("input", {"name": "source_page", "value": "home_pretrained_workers"})
+        self.assertIsNotNone(hire_source)
+        self.assertIn("7-day free trial", normalized_page_text)
         self.assertIsNone(soup.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"}))
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {"href": reverse("pages:solution_recruiting_candidate_sourcing")},
+            )
+        )
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {"href": reverse("pages:solution_sales_ai_sales_agent")},
+            )
+        )
         response_text = response.content.decode("utf-8")
-        self.assertIn("images/integrations/pipedream/linkedin.svg", response_text)
-        self.assertIn("images/integrations/pipedream/google_sheets.svg", response_text)
         self.assertNotIn("images/integrations/proprietary/greenhouse.svg", response_text)
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        GOBII_RELEASE_ENV="prod",
+        PUBLIC_SITE_URL="https://gobii.ai",
+    )
+    def test_home_spawn_query_renders_blank_custom_agent_form(self):
+        session = self.client.session
+        session["agent_charter"] = "Stale template instructions"
+        session["agent_charter_source"] = "template"
+        session.save()
+
+        response = self.client.get("/", {"spawn": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["home_use_k"])
+        self.assertFalse(response.context["home_search_indexable"])
+        soup = BeautifulSoup(response.content, "html.parser")
+        form = soup.find("form", {"id": "create-agent-form"})
+        self.assertIsNotNone(form)
+        self.assertEqual(form.find("textarea", {"name": "charter"}).get_text(strip=True), "")
+        self.assertIsNone(soup.find("link", rel="canonical"))
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "robots"})["content"],
+            "noindex, follow",
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.views.get_homepage_pretrained_payload")
+    def test_home_category_ctas_deploy_templates_matching_each_promise(self, mock_payload):
+        def template(
+            *,
+            code: str,
+            display_name: str,
+            category: str,
+            slug: str,
+        ) -> dict[str, object]:
+            category_slug = category.lower().replace(" ", "-").replace("&", "")
+            return {
+                "code": code,
+                "display_name": display_name,
+                "tagline": f"{display_name} tagline",
+                "description": f"{display_name} description",
+                "charter": f"{display_name} charter",
+                "base_schedule": "",
+                "schedule_jitter_minutes": 0,
+                "event_triggers": [],
+                "default_tools": [],
+                "recommended_contact_channel": "email",
+                "category": category,
+                "hero_image_path": "",
+                "priority": 50,
+                "is_active": True,
+                "show_on_homepage": True,
+                "detail_url": f"/library/{category_slug}/{slug}/",
+                "hire_url": f"/library/{category_slug}/{slug}/hire/",
+                "detail_link_label": f"View the {display_name}",
+                "schedule_description": "",
+                "display_default_tools": [],
+            }
+
+        templates = [
+            template(code=code, display_name=name, category=category, slug=slug)
+            for code, name, category, slug in (
+                ("candidate-researcher", "Candidate Researcher", "Recruiting", "candidate-researcher"),
+                ("ai-agent-for-candidate-sourcing", "Candidate Sourcing AI Employee", "Recruiting", "candidate-sourcing-agent"),
+                ("sales-pipeline-whisperer", "Pipeline Whisperer", "Revenue", "sales-pipeline-whisperer"),
+                ("b2b-lead-research-agent", "B2B Lead Research AI Agent", "Sales", "b2b-lead-research-agent"),
+                ("real-estate-research-analyst", "Real Estate Research Analyst", "Research", "real-estate-research-analyst"),
+                ("competitor-intelligence-analyst", "Competitor Intelligence Analyst", "External Intel", "competitor-intelligence-analyst"),
+            )
+        ]
+        mock_payload.return_value = {
+            "templates": templates,
+            "categories": ["Recruiting", "Revenue", "Sales", "Research", "External Intel"],
+            "total": len(templates),
+        }
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        groups = {group["key"]: group for group in response.context["home_hero_groups"]}
+        recruiting_group = groups["recruiting"]
+        self.assertEqual(recruiting_group["workers"][0].code, "candidate-researcher")
+        self.assertEqual(
+            recruiting_group["featured_worker"].code,
+            "ai-agent-for-candidate-sourcing",
+        )
+        self.assertEqual(groups["sales"]["workers"][0].code, "sales-pipeline-whisperer")
+        self.assertEqual(
+            groups["sales"]["featured_worker"].code,
+            "b2b-lead-research-agent",
+        )
+        self.assertEqual(
+            groups["research"]["workers"][0].code,
+            "real-estate-research-analyst",
+        )
+        self.assertEqual(
+            groups["research"]["featured_worker"].code,
+            "competitor-intelligence-analyst",
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        cta_form = soup.find("form", {"id": "gk-cta-form"})
+        self.assertIsNotNone(cta_form)
+        self.assertEqual(
+            cta_form["action"],
+            "/library/recruiting/candidate-sourcing-agent/hire/",
+        )
+        self.assertEqual(cta_form["data-analytics-cta-id"], "home_k_hero")
+        self.assertEqual(cta_form["data-analytics-placement"], "hero")
+        self.assertEqual(cta_form["data-analytics-intent"], "hire_agent")
+        self.assertFalse(
+            cta_form.find("button", type="submit").has_attr("data-analytics-cta-id")
+        )
+        category_buttons = {
+            button["data-k"]: button
+            for button in soup.select(".gk-cat[data-analytics-cta-id]")
+        }
+        self.assertEqual(
+            category_buttons["recruiting"]["data-analytics-cta-id"],
+            "home_k_category_recruiting",
+        )
+        self.assertEqual(
+            category_buttons["all"]["data-analytics-intent"],
+            "select_agent_category",
+        )
+        self.assertContains(
+            response,
+            '"recruiting": "/library/recruiting/candidate\\u002Dsourcing\\u002Dagent/hire/"',
+        )
+        self.assertContains(
+            response,
+            '"sales": "/library/sales/b2b\\u002Dlead\\u002Dresearch\\u002Dagent/hire/"',
+        )
+        self.assertContains(
+            response,
+            '"research": "/library/external\\u002Dintel/competitor\\u002Dintelligence\\u002Danalyst/hire/"',
+        )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_prompt_placeholder_matches_generic_copy(self):
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(
@@ -1147,13 +1287,12 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
-        source_links = [
+        closer_links = [
             link
-            for link in soup.find_all("a", {"href": "#create-agent-form"})
-            if "Start Free Trial" in link.get_text(" ", strip=True)
+            for link in soup.find_all("a", {"href": "#hire-agents"})
+            if "Hire your first agent" in link.get_text(" ", strip=True)
         ]
-        self.assertGreaterEqual(len(source_links), 1)
-        self.assertContains(response, "#create-agent-form")
+        self.assertGreaterEqual(len(closer_links), 1)
         self.assertNotContains(response, "scroll-margin-top: 6rem")
         self.assertNotContains(response, "getCreateAgentScrollTop")
         self.assertNotContains(response, "header.hs-header")
@@ -1168,7 +1307,7 @@ class HomePageTests(TestCase):
         )
         self.client.force_login(user)
 
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
 
@@ -1201,7 +1340,7 @@ class HomePageTests(TestCase):
         UserFlags.objects.create(user=user, is_freemium_grandfathered=True)
         self.client.force_login(user)
 
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
 
@@ -1683,7 +1822,7 @@ class HomePageTests(TestCase):
         session[page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = ["slack", "trello"]
         session.save()
 
-        response = self.client.get("/")
+        response = self.client.get("/", {"dc": "review niche job boards weekly"})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -2540,11 +2679,9 @@ class SitemapTests(TestCase):
         self.assertNotContains(response, "Kramer Beverage")
         self.assertNotContains(response, "Shore Point")
         self.assertNotContains(response, "Stateside Brands")
-        hero_image = soup.find("img", {"src": static("images/solutions/sales-hero-1280.jpg")})
-        self.assertIsNotNone(hero_image)
-        hero_webp_source = hero_image.find_parent("picture").find("source", {"type": "image/webp"})
-        self.assertIsNotNone(hero_webp_source)
-        self.assertIn("sales-hero-1280.webp", hero_webp_source.get("srcset"))
+        # The stock-photo hero was removed in the k redesign; the page now uses a
+        # clean styled hero. The product proof screenshot below remains.
+        self.assertIsNone(soup.find("img", {"src": static("images/solutions/sales-hero-1280.jpg")}))
         proof_image = soup.find(
             "img",
             {"alt": "Fully anonymized Leroy output example showing source-linked sales leads in a review table"},
@@ -2577,8 +2714,9 @@ class SitemapTests(TestCase):
         self.assertIsNotNone(final_form)
         final_button = final_form.find("button")
         self.assertIsNotNone(final_button)
-        self.assertIn("bg-white", final_button.get("class", []))
-        self.assertIn("text-slate-950", final_button.get("class", []))
+        # Luxe redesign: the closer-band CTA uses the shared conic-ring button
+        # (gk-btn) instead of the old white-on-violet button.
+        self.assertIn("gk-btn", final_button.get("class", []))
 
         json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
         json_ld_by_type = {}
@@ -2636,7 +2774,9 @@ class SitemapTests(TestCase):
         content = response.content.decode()
         self.assertIn("http://example.com/pricing/", content)
         self.assertIn("http://example.com/blog/", content)
+        self.assertIn("http://example.com/about/", content)
         self.assertNotIn("http://example.com/docs/", content)
+        self.assertNotIn("http://example.com/team/", content)
         self.assertNotIn("/subscribe/startup/", content)
         self.assertNotIn("/subscribe/pro/", content)
         self.assertNotIn("/subscribe/scale/", content)
@@ -3064,13 +3204,8 @@ class ComparisonPageTests(TestCase):
         headings = soup.find_all("h1")
         self.assertEqual(len(headings), 1)
         self.assertEqual(headings[0].get_text(" ", strip=True), "AI agent platform comparisons")
-        webp_source = soup.find("source", {"type": "image/webp"})
-        self.assertIsNotNone(webp_source)
-        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
-        hero_image = soup.find("img", {"alt": "AI agent platform evaluation workspace"})
-        self.assertIsNotNone(hero_image)
-        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
-        self.assertNotIn("engineering-hero.jpg", hero_image.get("src"))
+        # Stock-photo heroes were removed in the k redesign.
+        self.assertIsNone(soup.find("img", {"alt": "AI agent platform evaluation workspace"}))
         self.assertNotContains(response, "django_htmx/htmx")
         self.assertNotContains(response, "https://js.stripe.com")
         self.assertNotContains(response, "js/account_auth_forms.js")
@@ -3221,13 +3356,8 @@ class ComparisonPageTests(TestCase):
         self.assertIn("Source note", content)
         self.assertIn("June 2026", content)
         self.assertIn("Last reviewed June 3, 2026 by Gobii editorial team.", content)
-        webp_source = soup.find("source", {"type": "image/webp"})
-        self.assertIsNotNone(webp_source)
-        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
-        hero_image = soup.find("img", {"alt": "AI agent platform evaluation workspace"})
-        self.assertIsNotNone(hero_image)
-        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
-        self.assertNotIn("engineering-hero.jpg", hero_image.get("src"))
+        # Stock-photo heroes were removed in the k redesign.
+        self.assertIsNone(soup.find("img", {"alt": "AI agent platform evaluation workspace"}))
         self.assertNotContains(response, "https://js.stripe.com")
         self.assertNotContains(response, "js/account_auth_forms.js")
         self.assertNotContains(response, "js/cta_signup_modal.js")
@@ -3320,12 +3450,8 @@ class ComparisonPageTests(TestCase):
         self.assertIn("n8n alternative", content)
         self.assertIn("Source note", content)
         self.assertIn("Last reviewed June 4, 2026 by Gobii editorial team.", content)
-        webp_source = soup.find("source", {"type": "image/webp"})
-        self.assertIsNotNone(webp_source)
-        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
-        hero_image = soup.find("img", {"alt": "AI agent platform evaluation workspace"})
-        self.assertIsNotNone(hero_image)
-        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        # Stock-photo heroes were removed in the k redesign.
+        self.assertIsNone(soup.find("img", {"alt": "AI agent platform evaluation workspace"}))
         self.assertNotContains(response, "https://js.stripe.com")
         self.assertNotContains(response, "js/account_auth_forms.js")
         self.assertNotContains(response, "js/cta_signup_modal.js")
@@ -3435,12 +3561,8 @@ class ComparisonPageTests(TestCase):
         self.assertIn("Zapier Agents alternative", content)
         self.assertIn("Source note", content)
         self.assertIn("Last reviewed June 7, 2026 by Gobii editorial team.", content)
-        webp_source = soup.find("source", {"type": "image/webp"})
-        self.assertIsNotNone(webp_source)
-        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
-        hero_image = soup.find("img", {"alt": "AI agent platform evaluation workspace"})
-        self.assertIsNotNone(hero_image)
-        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        # Stock-photo heroes were removed in the k redesign.
+        self.assertIsNone(soup.find("img", {"alt": "AI agent platform evaluation workspace"}))
         self.assertNotContains(response, "https://js.stripe.com")
         self.assertNotContains(response, "js/account_auth_forms.js")
         self.assertNotContains(response, "js/cta_signup_modal.js")
@@ -3562,12 +3684,8 @@ class ComparisonPageTests(TestCase):
         self.assertIn("Lindy alternative", content)
         self.assertIn("Source note", content)
         self.assertIn("Last reviewed June 14, 2026 by Gobii editorial team.", content)
-        webp_source = soup.find("source", {"type": "image/webp"})
-        self.assertIsNotNone(webp_source)
-        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
-        hero_image = soup.find("img", {"alt": "AI agent platform evaluation workspace"})
-        self.assertIsNotNone(hero_image)
-        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        # Stock-photo heroes were removed in the k redesign.
+        self.assertIsNone(soup.find("img", {"alt": "AI agent platform evaluation workspace"}))
         self.assertNotContains(response, "https://js.stripe.com")
         self.assertNotContains(response, "js/account_auth_forms.js")
         self.assertNotContains(response, "js/cta_signup_modal.js")
@@ -3602,7 +3720,7 @@ class ComparisonPageTests(TestCase):
         soup = BeautifulSoup(response.content, "html.parser")
         footer = soup.find("footer")
         self.assertIsNotNone(footer)
-        comparisons_heading = footer.find("h3", string="Comparisons")
+        comparisons_heading = footer.find("h4", string="Comparisons")
         self.assertIsNotNone(comparisons_heading)
         comparisons_link = footer.find("a", {"href": reverse("proprietary:comparisons")})
         self.assertIsNotNone(comparisons_link)
@@ -3874,14 +3992,16 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         page_text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
         page_text = page_text.replace(" ,", ",").replace(" .", ".")
         self.assertIn("Solutions", page_text)
-        self.assertIn("Discover", page_text)
+        self.assertIn("Agents", page_text)
         self.assertIn("API", page_text)
+        h1_text = re.sub(r"\s+", " ", soup.find("h1").get_text(" ", strip=True))
+        h1_text = h1_text.replace(" ,", ",").replace(" .", ".")
         self.assertEqual(
-            soup.find("h1").get_text(" ", strip=True),
-            "Delegate qualified sourcing to AI employees",
+            h1_text,
+            "20 qualified candidates, delivered to your ATS every week.",
         )
         self.assertIn(
-            "Find leads, candidates, companies, and opportunities on a schedule.",
+            "Hire a Gobii that already knows the job.",
             page_text,
         )
         for retired_slug in ("health-care", "defense"):
@@ -3904,7 +4024,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         )
         self.assertIsNotNone(soup.find("a", {"href": reverse("pages:library")}))
         self.assertNotIn("Solutions", soup.get_text(" ", strip=True))
-        self.assertIn("Discover", soup.get_text(" ", strip=True))
+        self.assertIn("Agents", soup.get_text(" ", strip=True))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_restored_solution_urls_render(self):
@@ -5600,8 +5720,10 @@ class AuthLinkTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         content = response.content.decode()
+        # Copy changed with the auth redesign ("New here? Create an account"). The
+        # assertions below still pin the behaviour that matters: utm + next passthrough.
         match = re.search(
-            r"Don't have an account yet\\?.*?href=\"([^\"]+)\"[^>]*>Sign up here</a>",
+            r"New here\\?.*?href=\"([^\"]+)\"[^>]*>Create an account</a>",
             content,
             re.S,
         )
@@ -5736,7 +5858,9 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, "Complete sign up")
         self.assertContains(response, "You started with LinkedIn. Finish creating your account below.")
         self.assertContains(response, f'action="{reverse("socialaccount_signup")}"')
-        self.assertContains(response, "bg-white max-w-md")
+        # The auth pages moved from the light bootstrap card to the dark Luxe shell;
+        # the assertion still checks the form renders inside the entrance card.
+        self.assertContains(response, "gk-auth-card")
 
     def test_signup_modal_renders_email_start_and_popup_social_urls(self):
         for provider in ("facebook", "google"):
