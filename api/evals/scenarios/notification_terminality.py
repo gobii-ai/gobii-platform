@@ -4,8 +4,9 @@ from unittest.mock import patch
 
 from django.utils import timezone
 
-from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.core.processing_flags import bump_human_inbound_generation
+from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
+from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry
@@ -16,6 +17,7 @@ from api.models import (
     EvalRunTask,
     PersistentAgent,
     PersistentAgentCronTrigger,
+    PersistentAgentEnabledTool,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -165,6 +167,13 @@ class NotificationTerminalityScenario(EvalScenario, ScenarioExecutionTools):
         )
         for tool_name in (case.custom_tool_name, *_NOTIFICATION_TOOLS):
             mark_tool_enabled_without_discovery(agent, tool_name)
+        PersistentAgentEnabledTool.objects.filter(
+            agent=agent,
+            tool_full_name=case.custom_tool_name,
+        ).update(
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+            tool_name=case.custom_tool_name,
+        )
         CommsAllowlistEntry.objects.get_or_create(
             agent=agent,
             channel=CommsChannel.EMAIL,
