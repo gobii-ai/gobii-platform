@@ -283,7 +283,7 @@
       function motionReduced() {
         if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return true;
         var perf = window.GobiiHomePerf;
-        return !!(perf && typeof perf.shouldReduceHomepageMotion === 'function' && perf.shouldReduceHomepageMotion());
+        return false; /* phones animate too; genuine prefers-reduced-motion handled above */
       }
 
       /* restart .gkw-row arrivals inside `el`, staggered */

@@ -416,9 +416,12 @@
     var ticks = [].slice.call(sec.querySelectorAll('.gk-nt-tick'));
     var tallies = [].slice.call(end.querySelectorAll('b[data-n]'));
 
-    var perf = window.GobiiHomePerf;
+    /* These sections animate on phones too. GobiiHomePerf.shouldReduceHomepageMotion()
+       treats any coarse pointer or narrow screen as reduced motion, which predates this
+       redesign and would silently kill the story animations on every phone. They are
+       IntersectionObserver-gated, pause off-screen, and animate only opacity/transform,
+       so the cost is bounded. Genuine prefers-reduced-motion is still honoured. */
     var reduced = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
-                  !!(perf && typeof perf.shouldReduceHomepageMotion === 'function' && perf.shouldReduceHomepageMotion()) ||
                   /* the cinema layout stacks via display:contents; anything that can't do that
                      gets the static timeline, which is plain block flow. */
                   !(window.CSS && CSS.supports && CSS.supports('display', 'contents'));

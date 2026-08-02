@@ -14,7 +14,7 @@
   Capability tiles only claim what the product actually does today.
 
   Motion: gated on IntersectionObserver; renders the finished state under
-  prefers-reduced-motion or window.GobiiHomePerf.shouldReduceHomepageMotion().
+  prefers-reduced-motion. Phones animate; only a genuine OS preference opts out.
   Only opacity/transform animate, plus the vessel's own (text-free) fill height,
   so the section never changes height.
 {% endcomment %}
@@ -414,8 +414,7 @@
 
       var perf = window.GobiiHomePerf;
       var reduced = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
-                    !!(perf && typeof perf.shouldReduceHomepageMotion === 'function' &&
-                       perf.shouldReduceHomepageMotion());
+                    false; /* see note above: phones animate too */
 
       if (reduced || typeof window.IntersectionObserver !== 'function' ||
           typeof window.requestAnimationFrame !== 'function') {
