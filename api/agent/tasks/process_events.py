@@ -57,6 +57,13 @@ PROCESS_AGENT_EVENTS_QUEUED_QUEUE_KWARG = "_queued_queue"
 _queue_latency_histogram = None
 
 
+def _schedule_trigger_description(name: str, schedule_key: str, instruction: str) -> str:
+    description = f"Scheduled trigger: {name} [{schedule_key}]"
+    if instruction:
+        return f"{description}\nInstruction: {instruction}"
+    return description
+
+
 def _process_agent_events_queue_latency_histogram():
     global _queue_latency_histogram
     provider = metrics.get_meter_provider()
@@ -797,8 +804,10 @@ def process_agent_schedule_trigger_task(
                         with transaction.atomic():
                             step = PersistentAgentStep.objects.create(
                                 agent=agent,
-                                description=(
-                                    f"Scheduled trigger: {claimed.name} [{claimed.schedule_key}]"
+                                description=_schedule_trigger_description(
+                                    claimed.name,
+                                    claimed.schedule_key,
+                                    claimed.instruction,
                                 ),
                             )
                             cron_expression = (

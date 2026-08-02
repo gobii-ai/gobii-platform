@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.system_skills.service import enable_system_skills
+from api.agent.tasks.process_events import _schedule_trigger_description
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
@@ -1380,7 +1381,11 @@ class ManagedOnboardingCheckinScenario(EvalScenario, ScenarioExecutionTools):
         trigger_step = PersistentAgentStep.objects.create(
             agent=agent,
             eval_run_id=run_id,
-            description=f"Scheduled trigger: {claimed.name} [{claimed.schedule_key}]",
+            description=_schedule_trigger_description(
+                claimed.name,
+                claimed.schedule_key,
+                claimed.instruction,
+            ),
         )
         PersistentAgentCronTrigger.objects.create(
             step=trigger_step,
@@ -1564,7 +1569,11 @@ class ManagedIdleScheduleStaysQuietScenario(ManagedOnboardingCheckinScenario):
         trigger_step = PersistentAgentStep.objects.create(
             agent=agent,
             eval_run_id=run_id,
-            description=f"Scheduled trigger: {schedule.name} [{schedule.schedule_key}]",
+            description=_schedule_trigger_description(
+                schedule.name,
+                schedule.schedule_key,
+                schedule.instruction,
+            ),
         )
         PersistentAgentCronTrigger.objects.create(
             step=trigger_step,

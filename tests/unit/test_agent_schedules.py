@@ -516,6 +516,11 @@ class AgentScheduleTriggerTaskTests(TestCase):
             trigger.schedule_instruction,
             "Review the open incidents and report material changes.",
         )
+        self.assertEqual(
+            trigger.step.description,
+            "Scheduled trigger: Operations review [operations_review]\n"
+            "Instruction: Review the open incidents and report material changes.",
+        )
         self.assertEqual(trigger.scheduled_for, self.scheduled_for)
         self.assertEqual(len(trigger.occurrence_key), 64)
         self.assertEqual(schedule.revision, 2)
