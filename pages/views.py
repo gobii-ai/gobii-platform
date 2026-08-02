@@ -258,6 +258,19 @@ HOMEPAGE_HERO_GROUP_DEFS = (
     ),
 )
 HOMEPAGE_HERO_ROW_SIZE = 3
+HOMEPAGE_HERO_FEATURED_TEMPLATE_CODES = {
+    "recruiting": (
+        "ai-agent-for-candidate-sourcing",
+        "talent-scout",
+    ),
+    "sales": (
+        "b2b-lead-research-agent",
+        "lead-hunter",
+    ),
+    "research": (
+        "competitor-intelligence-analyst",
+    ),
+}
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
 
@@ -270,7 +283,24 @@ def build_homepage_hero_groups(templates: list[dict]) -> list[dict]:
             if (template.get("category") or "").strip().lower() in category_labels
         ]
         if workers:
-            groups.append({"key": key, "label": label, "workers": workers[:HOMEPAGE_HERO_ROW_SIZE]})
+            featured_codes = HOMEPAGE_HERO_FEATURED_TEMPLATE_CODES.get(key, ())
+            featured_worker = next(
+                (
+                    worker
+                    for featured_code in featured_codes
+                    for worker in workers
+                    if worker.code == featured_code
+                ),
+                workers[0],
+            )
+            groups.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "workers": workers[:HOMEPAGE_HERO_ROW_SIZE],
+                    "featured_worker": featured_worker,
+                }
+            )
     return groups
 
 
@@ -1047,13 +1077,14 @@ class HomePage(TemplateView):
 
     def _renders_legacy_home(self) -> bool:
         # Mirrors the template-branch decision made in get_context_data: landing
-        # params and a session-saved (non-template) charter render the legacy
-        # page with the charter box; the default render is the template-first page.
+        # params, explicit custom creation, and a session-saved (non-template)
+        # charter render the legacy page with the charter box; the default render
+        # is the template-first page.
         if not settings.GOBII_PROPRIETARY_MODE:
             return True
         request = self.request
         if request.GET.get("spawn") == "1":
-            return False
+            return True
         if "dc" in request.GET or "g" in request.GET:
             return True
         return (
@@ -1100,6 +1131,7 @@ class HomePage(TemplateView):
         context["home_social_image_url"] = _public_site_absolute_url(
             static(HOMEPAGE_SOCIAL_IMAGE_PATH)
         )
+        context["home_custom_agent_creation"] = self.request.GET.get("spawn") == "1"
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 
@@ -1333,11 +1365,12 @@ class HomePage(TemplateView):
             )
 
             # The template-first hero replaces the charter-box hero on the default
-            # render only. Landing renders (?g=/?dc=) and a session-saved charter
-            # keep the legacy hero so ad landings and the post-signup return flow
-            # still show the visitor's charter above the fold.
+            # render only. Explicit custom creation, landing renders (?g=/?dc=),
+            # and a session-saved charter keep the legacy hero so the relevant
+            # instructions remain above the fold.
             home_use_k = not (
-                context.get("landing_hero_text")
+                context["home_custom_agent_creation"]
+                or context.get("landing_hero_text")
                 or context.get("default_charter")
                 or context.get("agent_charter_saved")
             )
@@ -1404,10 +1437,11 @@ class HomePage(TemplateView):
             context['recent_agents_remaining'] = max(fallback_total - len(recent_agents), 0)
             context['recent_agents_total'] = fallback_total
 
-        if (
-            settings.GOBII_PROPRIETARY_MODE
+        context["home_search_indexable"] = (
+            not context["home_custom_agent_creation"]
             and (not context.get("default_charter") or context.get("agent_charter_saved"))
-        ):
+        )
+        if settings.GOBII_PROPRIETARY_MODE and context["home_search_indexable"]:
             context["home_structured_data_json"] = html_safe_json_dumps(
                 build_homepage_structured_data(
                     brand_name=home_brand_name,
@@ -4401,7 +4435,6 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 'proprietary:privacy',
                 'proprietary:editorial_policy',
                 'proprietary:about',
-                'proprietary:team',
                 'proprietary:careers',
                 'proprietary:blog_index',
                 'proprietary:comparisons',

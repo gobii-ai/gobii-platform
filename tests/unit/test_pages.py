@@ -1111,8 +1111,158 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(hire_source)
         self.assertIn("7-day free trial", normalized_page_text)
         self.assertIsNone(soup.find("a", {"data-analytics-cta-id": "home_linkedin_recruiter_sales"}))
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {"href": reverse("pages:solution_recruiting_candidate_sourcing")},
+            )
+        )
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {"href": reverse("pages:solution_sales_ai_sales_agent")},
+            )
+        )
         response_text = response.content.decode("utf-8")
         self.assertNotIn("images/integrations/proprietary/greenhouse.svg", response_text)
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        GOBII_RELEASE_ENV="prod",
+        PUBLIC_SITE_URL="https://gobii.ai",
+    )
+    def test_home_spawn_query_renders_blank_custom_agent_form(self):
+        session = self.client.session
+        session["agent_charter"] = "Stale template instructions"
+        session["agent_charter_source"] = "template"
+        session.save()
+
+        response = self.client.get("/", {"spawn": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["home_use_k"])
+        self.assertFalse(response.context["home_search_indexable"])
+        soup = BeautifulSoup(response.content, "html.parser")
+        form = soup.find("form", {"id": "create-agent-form"})
+        self.assertIsNotNone(form)
+        self.assertEqual(form.find("textarea", {"name": "charter"}).get_text(strip=True), "")
+        self.assertIsNone(soup.find("link", rel="canonical"))
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "robots"})["content"],
+            "noindex, follow",
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.views.get_homepage_pretrained_payload")
+    def test_home_category_ctas_deploy_templates_matching_each_promise(self, mock_payload):
+        def template(
+            *,
+            code: str,
+            display_name: str,
+            category: str,
+            slug: str,
+        ) -> dict[str, object]:
+            category_slug = category.lower().replace(" ", "-").replace("&", "")
+            return {
+                "code": code,
+                "display_name": display_name,
+                "tagline": f"{display_name} tagline",
+                "description": f"{display_name} description",
+                "charter": f"{display_name} charter",
+                "base_schedule": "",
+                "schedule_jitter_minutes": 0,
+                "event_triggers": [],
+                "default_tools": [],
+                "recommended_contact_channel": "email",
+                "category": category,
+                "hero_image_path": "",
+                "priority": 50,
+                "is_active": True,
+                "show_on_homepage": True,
+                "detail_url": f"/library/{category_slug}/{slug}/",
+                "hire_url": f"/library/{category_slug}/{slug}/hire/",
+                "detail_link_label": f"View the {display_name}",
+                "schedule_description": "",
+                "display_default_tools": [],
+            }
+
+        templates = [
+            template(code=code, display_name=name, category=category, slug=slug)
+            for code, name, category, slug in (
+                ("candidate-researcher", "Candidate Researcher", "Recruiting", "candidate-researcher"),
+                ("ai-agent-for-candidate-sourcing", "Candidate Sourcing AI Employee", "Recruiting", "candidate-sourcing-agent"),
+                ("sales-pipeline-whisperer", "Pipeline Whisperer", "Revenue", "sales-pipeline-whisperer"),
+                ("b2b-lead-research-agent", "B2B Lead Research AI Agent", "Sales", "b2b-lead-research-agent"),
+                ("real-estate-research-analyst", "Real Estate Research Analyst", "Research", "real-estate-research-analyst"),
+                ("competitor-intelligence-analyst", "Competitor Intelligence Analyst", "External Intel", "competitor-intelligence-analyst"),
+            )
+        ]
+        mock_payload.return_value = {
+            "templates": templates,
+            "categories": ["Recruiting", "Revenue", "Sales", "Research", "External Intel"],
+            "total": len(templates),
+        }
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        groups = {group["key"]: group for group in response.context["home_hero_groups"]}
+        recruiting_group = groups["recruiting"]
+        self.assertEqual(recruiting_group["workers"][0].code, "candidate-researcher")
+        self.assertEqual(
+            recruiting_group["featured_worker"].code,
+            "ai-agent-for-candidate-sourcing",
+        )
+        self.assertEqual(groups["sales"]["workers"][0].code, "sales-pipeline-whisperer")
+        self.assertEqual(
+            groups["sales"]["featured_worker"].code,
+            "b2b-lead-research-agent",
+        )
+        self.assertEqual(
+            groups["research"]["workers"][0].code,
+            "real-estate-research-analyst",
+        )
+        self.assertEqual(
+            groups["research"]["featured_worker"].code,
+            "competitor-intelligence-analyst",
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        cta_form = soup.find("form", {"id": "gk-cta-form"})
+        self.assertIsNotNone(cta_form)
+        self.assertEqual(
+            cta_form["action"],
+            "/library/recruiting/candidate-sourcing-agent/hire/",
+        )
+        self.assertEqual(cta_form["data-analytics-cta-id"], "home_k_hero")
+        self.assertEqual(cta_form["data-analytics-placement"], "hero")
+        self.assertEqual(cta_form["data-analytics-intent"], "hire_agent")
+        self.assertFalse(
+            cta_form.find("button", type="submit").has_attr("data-analytics-cta-id")
+        )
+        category_buttons = {
+            button["data-k"]: button
+            for button in soup.select(".gk-cat[data-analytics-cta-id]")
+        }
+        self.assertEqual(
+            category_buttons["recruiting"]["data-analytics-cta-id"],
+            "home_k_category_recruiting",
+        )
+        self.assertEqual(
+            category_buttons["all"]["data-analytics-intent"],
+            "select_agent_category",
+        )
+        self.assertContains(
+            response,
+            '"recruiting": "/library/recruiting/candidate\\u002Dsourcing\\u002Dagent/hire/"',
+        )
+        self.assertContains(
+            response,
+            '"sales": "/library/sales/b2b\\u002Dlead\\u002Dresearch\\u002Dagent/hire/"',
+        )
+        self.assertContains(
+            response,
+            '"research": "/library/external\\u002Dintel/competitor\\u002Dintelligence\\u002Danalyst/hire/"',
+        )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_prompt_placeholder_matches_generic_copy(self):
@@ -2624,7 +2774,9 @@ class SitemapTests(TestCase):
         content = response.content.decode()
         self.assertIn("http://example.com/pricing/", content)
         self.assertIn("http://example.com/blog/", content)
+        self.assertIn("http://example.com/about/", content)
         self.assertNotIn("http://example.com/docs/", content)
+        self.assertNotIn("http://example.com/team/", content)
         self.assertNotIn("/subscribe/startup/", content)
         self.assertNotIn("/subscribe/pro/", content)
         self.assertNotIn("/subscribe/scale/", content)

@@ -2,9 +2,11 @@
 <div class="gk-hero">
   <div class="gk-cats" id="gk-cats">
     {% for group in home_hero_groups %}
-      <button type="button" class="gk-pill gk-cat" data-k="{{ group.key }}" data-active="{% if forloop.first %}true{% else %}false{% endif %}">{{ group.label }}</button>
+      <button type="button" class="gk-pill gk-cat" data-k="{{ group.key }}" data-active="{% if forloop.first %}true{% else %}false{% endif %}"
+              data-analytics-cta-id="home_k_category_{{ group.key }}" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">{{ group.label }}</button>
     {% endfor %}
-    <button type="button" class="gk-pill gk-cat" data-k="all" data-active="{% if not home_hero_groups %}true{% else %}false{% endif %}">All agents</button>
+    <button type="button" class="gk-pill gk-cat" data-k="all" data-active="{% if not home_hero_groups %}true{% else %}false{% endif %}"
+            data-analytics-cta-id="home_k_category_all" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">All agents</button>
   </div>
 
   <div class="gk-hswap" id="gk-hswap">
@@ -40,12 +42,12 @@
   falls back to browsing, which is the only case where scrolling is the right behaviour.
 {% endcomment %}
     {% if home_hero_groups %}
-    <form method="post" action="{{ home_hero_groups.0.workers.0.hire_url }}" id="gk-cta-form" data-lazy-csrf>
+    <form method="post" action="{{ home_hero_groups.0.featured_worker.hire_url }}" id="gk-cta-form" data-lazy-csrf
+          data-analytics-cta-id="home_k_hero" data-analytics-placement="hero" data-analytics-intent="hire_agent">
       <input type="hidden" name="source_page" value="home_hero_cta" />
       <input type="hidden" name="trial_onboarding" value="1" />
       <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
-      <button type="submit" id="gk-cta" class="gk-btn"
-              data-analytics-cta-id="home_k_hero" data-analytics-placement="hero" data-analytics-intent="hire_agent">
+      <button type="submit" id="gk-cta" class="gk-btn">
         Hire the {{ home_hero_groups.0.label|lower }} agent
       </button>
     </form>

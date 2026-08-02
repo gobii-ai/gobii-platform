@@ -22,7 +22,7 @@
                 <input type="hidden" name="selected_pipedream_app_slugs" value="{{ app_slug }}" />
               {% endfor %}
             </div>
-            
+
             <!-- Charter Input with inline CTA button -->
             <div>
               <!-- Unified input + button container -->
@@ -186,7 +186,7 @@
                   </div>
                 </div>
               </div>
-              
+
               {% if agent_charter_form.charter.errors %}
                 <div class="mt-2 text-red-600 text-sm flex items-center gap-2">
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -297,7 +297,7 @@
                   {% else %}
                   <p class="text-sm text-slate-600 line-clamp-2 leading-relaxed">{{ agent.listing_description }}</p>
                   {% endif %}
-                  
+
                   <div class="absolute inset-0 rounded-2xl ring-1 ring-inset ring-black/0 group-hover:ring-indigo-500/10 transition-all duration-300"></div>
                 </a>
                 {% endfor %}

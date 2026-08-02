@@ -14,8 +14,8 @@
 
     /* the featured agent each category's CTA hires */
     var CTA_HIRE_URLS = {
-      {% for group in home_hero_groups %}{% if group.workers %}
-      "{{ group.key|escapejs }}": "{{ group.workers.0.hire_url|escapejs }}",
+      {% for group in home_hero_groups %}{% if group.featured_worker %}
+      "{{ group.key|escapejs }}": "{{ group.featured_worker.hire_url|escapejs }}",
       {% endif %}{% endfor %}
     };
 

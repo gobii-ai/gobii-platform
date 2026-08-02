@@ -4,7 +4,7 @@
 {% block title %}{{ home_meta_title }}{% endblock %}
 {% block canonical_link %}
   {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and home_canonical_url %}
-  {% if not default_charter or agent_charter_saved %}
+  {% if home_search_indexable %}
   <link rel="canonical" href="{{ home_canonical_url }}">
   {% endif %}
   {% endif %}
@@ -13,11 +13,11 @@
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="{{ home_meta_description }}">
-  {% if default_charter and not agent_charter_saved %}
+  {% if not home_search_indexable %}
   <meta name="robots" content="noindex, follow">
   {% endif %}
   {% if home_social_metadata_enabled %}
-  {% if not default_charter or agent_charter_saved %}
+  {% if home_search_indexable %}
   <meta property="og:type" content="website">
   <meta property="og:locale" content="en_US">
   <meta property="og:title" content="{{ home_meta_title }}">

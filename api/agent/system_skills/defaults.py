@@ -713,10 +713,10 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "For outreach, sequence enrollment, revealing paid contact data, or sending candidates to recruiters, summarize "
         "the exact side effects and recipients first unless the user has already clearly approved that action. Respect "
         "contact permissions and never invent recruiter recipients or candidate contact details.\n"
-        "If source access is partial, a tool errors, or the requested candidate count cannot be met responsibly, report "
-        "the verified partial set, the reason the rest is blocked or low confidence, and the next bounded search path. "
-        "Once the verified set can answer the request, deliver it instead of repeating source searches or ledger reads. "
-        "Quality and criteria fidelity beat volume."
+        "If source access is partial, a tool errors, or the requested count cannot be met responsibly, report the "
+        "verified partial set, blocker, and next bounded search path. When fallback search and verification produce "
+        "the requested batch, deliver immediately; do not repeat equivalent searches or add ledger work unless "
+        "requested. Quality and criteria fidelity beat volume."
     ),
 )
 
