@@ -3525,7 +3525,9 @@ def _get_queued_workload_context(agent: PersistentAgent) -> str:
             "There is newer input in this same conversation. Decide whether it is a correction or cancellation of "
             "the earlier request, or independent added work. A correction replaces the stale part; independent added "
             "work does not erase a valid result already completed but not yet delivered. Reconcile both and deliver "
-            "each still-valid outcome exactly once."
+            "each still-valid outcome exactly once. If the preserved result contains structured material rows, the "
+            "first SQLite call imports them set-wise from current __tool_results before the added work; do not pre-read "
+            "them or copy them through rows/bindings."
         )
 
     conversations = {str(conversation_id) for conversation_id, _channel in competing}
