@@ -892,6 +892,9 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
         calls = get_tool_calls_for_run(run_id, after=first.timestamp)
         source_calls = [call for call in calls if call.tool_name == "http_request"]
         replies = [call for call in calls if call.tool_name == "send_chat_message"]
+        failed_calls = [
+            call for call in calls if call.status == PersistentAgentToolCall.Status.ERROR
+        ]
         progress_replies = [
             call for call in replies if (call.tool_params or {}).get("will_continue_work") is True
         ]
@@ -902,6 +905,7 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
         exact_shape = (
             len(follow_ups) == 1
             and len(source_calls) == 2
+            and not failed_calls
             and len(final_replies) == 1
             and len(progress_replies) <= 1
         )
@@ -914,7 +918,8 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
                 observed_summary=(
                     f"Expected two source/action calls, one follow-up, at most one progress update, and one final "
                     f"reply; saw source={len(source_calls)}, follow_up={len(follow_ups)}, "
-                    f"progress={len(progress_replies)}, final={len(final_replies)}."
+                    f"failed_tools={len(failed_calls)}, progress={len(progress_replies)}, "
+                    f"final={len(final_replies)}."
                 ),
                 artifacts={"tool_calls": calls},
             )
