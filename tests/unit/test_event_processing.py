@@ -93,6 +93,7 @@ from api.agent.tools.tool_manager import enable_tools
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tasks.process_events import (
     AGENT_DEFAULT_PROCESSING_QUEUE,
+    _scheduled_execution_is_throttled,
     process_agent_cron_trigger_task,
     process_agent_events_task,
     _remove_orphaned_celery_beat_task,
@@ -4324,6 +4325,52 @@ class CronTriggerTaskTests(TestCase):
         from api.services.cron_throttle import cron_throttle_pending_footer_key
         pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
         self.assertTrue(fake_redis.get(pending_key))
+
+    @patch("api.agent.tasks.process_events.switch_is_active", return_value=True)
+    def test_cron_throttle_clears_stale_notice_when_eligibility_ends(self, _mock_switch):
+        from api.services.cron_throttle import (
+            CronThrottleDecision,
+            cron_throttle_pending_footer_key,
+        )
+        from config.redis_client import _FakeRedis
+
+        fake_redis = _FakeRedis()
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        fake_redis.set(pending_key, "1", ex=86400)
+        no_longer_eligible = CronThrottleDecision(
+            throttling_applies=False,
+            allow_execution=True,
+            stage=0,
+            base_interval_seconds=86400,
+            effective_interval_seconds=86400,
+            reason="plan_not_throttled",
+        )
+        eligible_again = CronThrottleDecision(
+            throttling_applies=True,
+            allow_execution=False,
+            stage=1,
+            base_interval_seconds=86400,
+            effective_interval_seconds=172800,
+            reason="throttled",
+        )
+
+        with (
+            patch(
+                "api.services.cron_throttle.evaluate_free_plan_cron_throttle",
+                return_value=no_longer_eligible,
+            ) as mock_evaluate,
+            patch("config.redis_client.get_redis_client", return_value=fake_redis),
+            patch("api.services.cron_throttle.get_redis_client", return_value=fake_redis),
+        ):
+            throttled = _scheduled_execution_is_throttled(self.agent, "@daily")
+            self.assertFalse(throttled)
+            self.assertFalse(fake_redis.get(pending_key))
+
+            mock_evaluate.return_value = eligible_again
+            self.assertFalse(_scheduled_execution_is_throttled(self.agent, "@daily"))
+            self.assertFalse(fake_redis.get(pending_key))
+            self.assertTrue(_scheduled_execution_is_throttled(self.agent, "@daily"))
+            self.assertTrue(fake_redis.get(pending_key))
 
     @patch('redbeat.RedBeatSchedulerEntry.from_key')
     @patch('celery.current_app')
