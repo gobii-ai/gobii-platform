@@ -86,6 +86,15 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
     guild_id = str(params.get("guild_id") or "").strip()
     body = str(params.get("message") or "").strip()
     attachment_paths = params.get("attachments")
+    body = substitute_variables_with_filespace(body, agent)
+    if content_error := markdown_only_error(body, surface="Discord"):
+        return content_error
+    try:
+        resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
+    except AttachmentResolutionError as exc:
+        return {"status": "error", "message": str(exc)}
+    if not body and not resolved_attachments:
+        return {"status": "error", "message": "message is required when attachments is empty."}
     try:
         subscription = resolve_active_subscription(
             agent,
@@ -96,15 +105,6 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
     except DiscordBotIntegrationError as exc:
         return {"status": "error", "message": str(exc)}
     channel_id = subscription.channel_id
-    body = substitute_variables_with_filespace(body, agent)
-    if content_error := markdown_only_error(body, surface="Discord"):
-        return content_error
-    try:
-        resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
-    except AttachmentResolutionError as exc:
-        return {"status": "error", "message": str(exc)}
-    if not body and not resolved_attachments:
-        return {"status": "error", "message": "message is required when attachments is empty."}
     try:
         message = send_channel_message(
             agent,
