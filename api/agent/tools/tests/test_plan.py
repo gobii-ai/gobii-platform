@@ -112,7 +112,7 @@ class UpdatePlanResearchSuppressionTests(TestCase):
         self.assertIn("mark its delivery step done in update_plan", prompt)
         self.assertIn("the following send completes it", prompt)
         self.assertIn("send once with false", prompt)
-        self.assertIn("leave other requests parked", prompt)
+        self.assertIn("leave other requests in todo", prompt)
         self.assertIn("Do not update this plan between evidence batches", prompt)
 
     def test_legacy_planning_state_still_prompts_for_final_delivery(self):

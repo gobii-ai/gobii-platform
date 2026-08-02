@@ -17,6 +17,7 @@ _HTML_HREF_TAG_RE = re.compile(
 )
 _REFERENCE_RE = re.compile(r"\$\[link:([^\]]*)\]", re.IGNORECASE)
 _REFERENCE_PREFIX_RE = re.compile(r"\$\[link:", re.IGNORECASE)
+_RAW_URL_REFERENCE_RE = re.compile(r"\$\[link:(https?://[^\]\s]+)\]", re.IGNORECASE)
 _PUBLIC_ID_PATTERN = r"L[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}"
 _PUBLIC_ID_RE = re.compile(_PUBLIC_ID_PATTERN, re.IGNORECASE)
 _NAKED_DESTINATION_RE = re.compile(rf"(?:\]\(\s*|href\s*=\s*['\"]\s*)({_PUBLIC_ID_PATTERN})(?=\s*(?:\)|['\"]))", re.IGNORECASE)
@@ -136,6 +137,8 @@ def pair_prompt_urls(text: str, agent, *, create: bool) -> str:
 
 def resolve_link_references(text: str, agent) -> str:
     text = text or ""
+    # A wrapped raw URL is unambiguous and no less trusted than the same already-allowed URL without the wrapper.
+    text = _RAW_URL_REFERENCE_RE.sub(lambda match: match.group(1), text)
     text = _INVERTED_MARKDOWN_REFERENCE_RE.sub(
         lambda match: f"[{match.group('reference')}]({match.group('reference')})",
         text,

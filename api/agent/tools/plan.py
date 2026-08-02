@@ -477,7 +477,7 @@ def format_current_plan_for_prompt(agent) -> str:
     if snapshot.todo_count or snapshot.doing_count:
         heading += (
             " before final delivery: mark its delivery step done in update_plan (the following send completes it), "
-            "then send once with false; leave other requests parked. Do not update this plan between evidence batches"
+            "then send once with false; leave other requests in todo. Do not update this plan between evidence batches"
         )
     lines = [
         heading,

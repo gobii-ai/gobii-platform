@@ -108,7 +108,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("Owner report with 4+ items", body_guidance)
         self.assertIn("Covered N/N", body_guidance)
         self.assertIn("one requested-field Markdown table", body_guidance)
-        self.assertIn("exact entity name", body_guidance)
+        self.assertIn("link entity names", body_guidance)
+        self.assertIn("adjacent handles or exact raw URLs", body_guidance)
         self.assertIn("other chat/outreach light", body_guidance)
         self.assertNotIn("$[link:id]", body_guidance)
         delivery_fields = (

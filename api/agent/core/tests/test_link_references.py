@@ -1071,3 +1071,11 @@ class LinkReferenceTests(TestCase):
 
         self.assertEqual(len(prepared.prepared_calls), 1)
         self.assertFalse(prepared.followup_required)
+
+    def test_raw_urls_accidentally_wrapped_as_references_are_normalized(self):
+        raw_url = "https://profiles.example.test/avery?view=full"
+
+        self.assertEqual(
+            resolve_link_references(f"[Avery]($[link:{raw_url}])", self.agent),
+            f"[Avery]({raw_url})",
+        )

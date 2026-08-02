@@ -2805,6 +2805,8 @@ class ImpliedSendTests(TestCase):
             workload = _get_queued_workload_context(self.agent)
             self.assertIn("1 newer inbound message", workload)
             self.assertIn("queued, not replacements", workload)
+            self.assertIn("leave unrelated steps in todo", workload)
+            self.assertNotIn("park", workload)
             self.assertEqual(advance_inbound_routing_scope(self.agent, scope), scope)
 
             follow_up = PersistentAgentMessage.objects.create(
