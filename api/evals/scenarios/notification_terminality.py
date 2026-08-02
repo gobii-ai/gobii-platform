@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.utils import timezone
 
 from api.agent.core.processing_flags import bump_human_inbound_generation
+from api.agent.tasks.process_events import _schedule_trigger_description
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
@@ -187,20 +188,25 @@ class NotificationTerminalityScenario(EvalScenario, ScenarioExecutionTools):
             task_name="inject_incident",
         )
         if case.result_is_terminal:
+            schedule_instruction = (
+                "Call the enabled `custom_eval_incident_workflow` once for INC-472 and follow its returned next "
+                "action."
+            )
             trigger = PersistentAgentStep.objects.create(
                 agent=agent,
                 eval_run_id=run_id,
-                description="Scheduled trigger: Check incident workflow [incident_poll]",
+                description=_schedule_trigger_description(
+                    "Check incident workflow",
+                    "incident_poll",
+                    schedule_instruction,
+                ),
             )
             PersistentAgentCronTrigger.objects.create(
                 step=trigger,
                 cron_expression="@every 15m",
                 schedule_key="incident_poll",
                 schedule_name="Check incident workflow",
-                schedule_instruction=(
-                    "Call the enabled `custom_eval_incident_workflow` once for INC-472 and follow its returned next "
-                    "action."
-                ),
+                schedule_instruction=schedule_instruction,
                 scheduled_for=timezone.now(),
                 occurrence_key=f"eval-idle-{run_id}",
             )
