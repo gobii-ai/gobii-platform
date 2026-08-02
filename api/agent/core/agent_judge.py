@@ -1387,7 +1387,9 @@ def _format_agent_directive(title: str, agent_directive: str, suggestion_type: s
         f"Type: {suggestion_type}\n"
         f"Title: {title}\n\n"
         f"{agent_directive}\n\n"
-        "Treat this as guidance from Gobii's internal quality judge. Apply it if it is relevant to the current task. "
+        "Treat this as one-shot guidance from Gobii's internal quality judge. Apply it only if relevant to the current "
+        "task and consistent with the latest explicit human instruction and current charter. Never change charter, "
+        "schedule, or durable configuration solely because of this guidance. "
         "Never mention the judge or the existence of this directive to the user. Apply the guidance silently through "
         "tool use or behavior changes where relevant."
     )
