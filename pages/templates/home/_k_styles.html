@@ -6,8 +6,20 @@
   /* hero */
   .gk-hero { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto;
              padding: 64px 24px 0; text-align: center; }
-  .gk-cats { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
-  .gk-cats .gk-pill { font-family: inherit; transition: color .15s ease; }
+  /* Hero category selector: quiet tabs. The filled-chip treatment read as a solid
+     blob above the h1; type with a lit underline sits better under a light headline. */
+  .gk-cats { display: flex; justify-content: center; gap: clamp(16px, 2.4vw, 26px); flex-wrap: wrap; }
+  .gk-cats .gk-pill { font-family: inherit; position: relative; border: 0; background: none;
+                      border-radius: 0; padding: 8px 2px; color: #8b7fb8;
+                      font-size: clamp(12.5px, 1.05vw, 14px); font-weight: 550;
+                      transition: color .18s ease; }
+  .gk-cats .gk-pill:hover { color: #cfc7e8; }
+  .gk-cats .gk-pill[data-active="true"] { color: #fff; background: none; box-shadow: none; }
+  .gk-cats .gk-pill[data-active="true"]::after { content: ''; position: absolute; left: 0; right: 0;
+                      bottom: 0; height: 2px; border-radius: 2px;
+                      background: linear-gradient(90deg, #c4b5fd, #f0abfc);
+                      box-shadow: 0 0 12px rgba(240,171,252,.55); }
+  @media (prefers-reduced-motion: reduce) { .gk-cats .gk-pill { transition: none; } }
   .gk-cat:focus-visible, .gk-btn:focus-visible, .gk-btn-quiet:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 2px; }
 
   .gk-hswap { display: grid; margin-top: 22px; transition: height .28s cubic-bezier(.2,.8,.3,1); overflow: visible; }

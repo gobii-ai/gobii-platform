@@ -43,8 +43,24 @@
 <style>
   .blogpost-meta { color: #b7aed4; font-size: 14px; }
   .blogpost-dot { width: 4px; height: 4px; border-radius: 999px; background: rgba(255,255,255,.3); }
-  .blogpost-paper { background: linear-gradient(180deg, #fff, #fbfaff); border: 1px solid rgba(233,228,246,.9);
-                    border-radius: 16px; box-shadow: 0 34px 90px rgba(5,2,18,.55), 0 0 70px rgba(168,85,247,.1); }
+  /* Article body was a white "paper" card. It reads as a slab bolted under the dark
+     header, so the prose now lives on the same canvas as everything else. */
+  .blogpost-paper { background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.09);
+                    border-radius: 16px; box-shadow: 0 34px 90px rgba(5,2,18,.5); }
+  .blogpost-paper .prose { color: #b7aed4; }
+  .blogpost-paper .prose :is(h1,h2,h3,h4,strong,b,th) { color: #fff; }
+  .blogpost-paper .prose :is(p,li,td) { color: #b7aed4; }
+  .blogpost-paper .prose a { color: #c4b5fd; }
+  .blogpost-paper .prose a:hover { color: #fff; }
+  .blogpost-paper .prose :is(pre,code) { background: rgba(8,5,20,.6); color: #e9dcff;
+                    border: 1px solid rgba(255,255,255,.09); }
+  .blogpost-paper .prose blockquote { border-left-color: rgba(196,181,253,.4); color: #cfc7e8; }
+  .blogpost-paper .prose hr { border-color: rgba(255,255,255,.1); }
+  /* tables were the largest light blocks in the audit */
+  .blog-table-scroll { background: transparent !important; }
+  .blogpost-paper .prose table { background: transparent; }
+  .blogpost-paper .prose :is(th,td) { border-color: rgba(255,255,255,.1); }
+  .blogpost-paper .prose thead { background: rgba(255,255,255,.04); }
 </style>
 <article>
   <section class="relative mx-auto px-6 pt-16" style="max-width:1100px">
@@ -88,7 +104,7 @@
 
   <div class="mx-auto px-6 pt-12" style="max-width:1100px">
     <div class="blogpost-paper mx-auto max-w-3xl px-6 py-10 sm:px-8">
-      <div class="prose prose-slate prose-headings:font-normal max-w-none lg:prose-lg">
+      <div class="prose prose-invert prose-headings:font-normal max-w-none lg:prose-lg">
         {{ post.html|safe }}
       </div>
     </div>

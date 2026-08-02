@@ -1,0 +1,35 @@
+{% comment %}
+  Long-form policy/legal pages (editorial policy, privacy, data deletion).
+  One source so the whole set stays consistent on the dark canvas.
+{% endcomment %}
+<style>
+  /* base.html ships <body class="bg-white">, so any page that does not wrap itself in
+     .gk-luxe lands on a white body. These pages opt into the ink canvas explicitly
+     rather than each one patching its own container. */
+  body.bg-white { background: linear-gradient(170deg,#0f0a1e 0%,#16102b 40%,#241a4a 100%) !important; }
+  body.bg-white, body.bg-white p, body.bg-white li { color: #b7aed4; }
+  /* Long-form policy pages sit on the same dark canvas as everything else.
+     Shared with privacy / data-deletion so the whole set stays consistent. */
+  .gk-doc { max-width: 860px; margin: 0 auto; padding: clamp(40px,6vw,72px) 24px clamp(56px,7vw,88px);
+            color: #ece9f6; }
+  .gk-doc h1 { color: #fff; font-weight: 300; letter-spacing: -1px; }
+  .gk-doc-meta { color: #8b7fb8; }
+  .gk-doc-lede { color: #cfc7e8; }
+  .gk-doc-strong { color: #fff; }
+  .gk-doc-prose { color: #b7aed4; font-size: 15.5px; line-height: 1.8; }
+  .gk-doc-prose :is(h2, h3, h4) { color: #fff; font-weight: 550; letter-spacing: -.3px;
+                                  margin: 2em 0 .6em; }
+  .gk-doc-prose h2 { font-size: clamp(19px,2.2vw,24px); }
+  .gk-doc-prose h3 { font-size: 16.5px; }
+  .gk-doc-prose :is(p, li) { color: #b7aed4; }
+  .gk-doc-prose strong { color: #fff; }
+  .gk-doc-prose a { color: #c4b5fd; text-decoration: underline; text-underline-offset: 3px; }
+  .gk-doc-prose a:hover { color: #fff; }
+  .gk-doc-prose :is(ul, ol) { padding-left: 1.3em; margin: 1em 0; }
+  .gk-doc-prose li { margin: .45em 0; }
+  .gk-doc-prose hr { border: 0; border-top: 1px solid rgba(255,255,255,.1); margin: 2.4em 0; }
+  .gk-doc-prose blockquote { border-left: 2px solid rgba(196,181,253,.4); padding-left: 1em;
+                             color: #cfc7e8; margin: 1.4em 0; }
+  .gk-doc-prose code { background: rgba(255,255,255,.06); padding: .15em .4em; border-radius: 5px;
+                       font-size: .92em; color: #e9dcff; }
+</style>

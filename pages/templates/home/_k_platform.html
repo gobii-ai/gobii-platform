@@ -169,7 +169,7 @@
   .gk-pf-fine { color: #7f74a8; font-size: 10.5px; line-height: 1.55; margin: 8px 0 0; }
 
   /* ---------------- capability tiles ---------------- */
-  .gk-pf-capsect { margin-top: clamp(40px,5vw,64px); }
+  .gk-pf-capsect { margin-top: var(--gk-sect-gap); }
   .gk-pf-capsect .gk-sect-head { margin-bottom: clamp(18px,2.2vw,26px); }
   .gk-pf-caps { display: grid; grid-template-columns: 1fr; gap: clamp(9px,1.2vw,13px); }
   @media (min-width: 520px) { .gk-pf-caps { grid-template-columns: repeat(2, minmax(0,1fr)); } }
@@ -205,14 +205,42 @@
     .gk-pf-surf .gk-pf-w1, .gk-pf-surf .gk-pf-w2, .gk-pf-bubbles i, .gk-pf-pulse { animation: none !important; }
     .gk-pf-rchip, .gk-pf-goalmet, .gk-pf-mk, .gk-pf-mk .gk-pf-cap { transition: none !important; }
   }
+  .gk-pf-caps4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+                 gap: 12px; margin-top: clamp(20px,2.6vw,30px); }
+  .gk-pf-cap4 { display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; border-radius: 14px;
+                border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); }
+  .gk-pf-ic4 { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+               font-size: 16px; flex: none; background: rgba(139,92,246,.16);
+               border: 1px solid rgba(196,181,253,.22); }
+  .gk-pf-cap4 b { display: block; color: #fff; font-size: 13.5px; font-weight: 600; }
+  .gk-pf-cap4 i { font-style: normal; display: block; color: #a99cc9; font-size: 11.5px;
+                  margin-top: 3px; line-height: 1.5; }
+  .gk-pf-def { color: #8b7fb8; font-size: 14px; line-height: 1.65; text-align: center;
+               max-width: 78ch; margin: clamp(20px,2.6vw,28px) auto 0; }
 </style>
 
 <section id="what-is-gobii" class="gk-section gk-pf" aria-labelledby="what-is-gobii-heading" data-animate>
   <div class="gk-sect-head">
-    <span class="gk-eyebrow">THE PLATFORM</span>
-    <h2 id="what-is-gobii-heading">What is Gobii?</h2>
-    <p class="gk-sub gk-pf-def">Gobii is an AI agent platform that gives businesses always-on virtual employees capable of browser automation, web research, data collection, and workflow execution.</p>
+    {% comment %}
+      "What is Gobii?" is a query people type and this section ranks on it, so it stays
+      visible and indexable as the eyebrow while the h2 does the selling.
+    {% endcomment %}
+    <span class="gk-eyebrow gk-eyebrow-caps">What is Gobii?</span>
+    <h2 id="what-is-gobii-heading">Always-on virtual employees that <span class="gk-accent">actually do the work</span></h2>
   </div>
+
+  <div class="gk-pf-caps4">
+    <div class="gk-pf-cap4"><span class="gk-pf-ic4" aria-hidden="true">&#127760;</span>
+      <div><b>Browser automation</b><i>logs in and clicks, on the live web</i></div></div>
+    <div class="gk-pf-cap4"><span class="gk-pf-ic4" aria-hidden="true">&#128269;</span>
+      <div><b>Web research</b><i>reads the open web, not a stale index</i></div></div>
+    <div class="gk-pf-cap4"><span class="gk-pf-ic4" aria-hidden="true">&#128451;</span>
+      <div><b>Data collection</b><i>structured records, not screenshots</i></div></div>
+    <div class="gk-pf-cap4"><span class="gk-pf-ic4" aria-hidden="true">&#9881;</span>
+      <div><b>Workflow execution</b><i>it finishes the job, not just the search</i></div></div>
+  </div>
+
+  <p class="gk-pf-def">Gobii is an AI agent platform that gives businesses always-on virtual employees capable of browser automation, web research, data collection, and workflow execution.</p>
 
   <p class="gk-pf-lead">Put a number on <span class="gk-accent">the work it takes off your desk</span></p>
 
@@ -313,11 +341,9 @@
       <p class="gk-sect-sub">Every capability below is in the product today &mdash; on Gobii Cloud, or self-hosted from the open-source (MIT) build.</p>
     </div>
     <div class="gk-pf-caps">
-      <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">🌐</span><div><h3>Drives a real browser</h3><i>logs in, clicks, fills forms &mdash; on the live web</i></div></div>
       <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">🗄️</span><div><h3>Its own database</h3><i>a private SQLite it reads, writes and remembers with</i></div></div>
       <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">⏰</span><div><h3>Runs on a schedule &mdash; or on an event</h3><i>every morning at 6, or the second a webhook fires</i></div></div>
       <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">💬</span><div><h3>Reachable anywhere</h3><i>its own email address and phone number, plus Discord and web chat</i></div></div>
-      <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">🔗</span><div><h3>Connects your stack</h3><i>Greenhouse, HubSpot, Apollo, Google Sheets &mdash; and anything with an API</i></div></div>
       <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">📄</span><div><h3>Makes real artifacts</h3><i>CSVs, PDFs, charts and images &mdash; attached and delivered</i></div></div>
       <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">🔐</span><div><h3>Handles credentials safely</h3><i>encrypted secrets, per-agent sandboxing, audit trails &mdash; and it asks before it acts</i></div></div>
       <div class="gk-pf-cap2"><span class="gk-pf-ic" aria-hidden="true">👥</span><div><h3>Works with other agents</h3><i>hand off, delegate, and pull a human in when it matters</i></div></div>

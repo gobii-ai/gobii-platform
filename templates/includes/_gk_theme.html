@@ -81,10 +81,15 @@
                     box-shadow: 0 0 0 5px #150d28, 0 6px 18px rgba(124,58,237,.5); white-space: nowrap; }
 
   /* Sections */
-  .gk-section { max-width: 1100px; margin: 0 auto; padding: 76px 24px 0; position: relative; }
-  .gk-section::before { content: ''; position: absolute; top: 38px; left: 24px; right: 24px; height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(196,181,253,.18) 50%, transparent); }
-  .gk-section-plain::before { display: none; }
+  /* One rhythm, no rules. A section boundary is space, not a hairline: the old
+     separator sat ~20px above the eyebrow and competed with it rather than
+     separating anything. --gk-sect-gap is the single knob for page rhythm. */
+  :root { --gk-sect-gap: clamp(64px, 7.2vw, 104px); }
+  .gk-section { max-width: 1100px; margin: 0 auto; padding: var(--gk-sect-gap) 24px 0;
+                position: relative; }
+  .gk-section::before { content: none; }
+  .gk-section-plain { padding-top: calc(var(--gk-sect-gap) * .42); }
+  .gk-eyebrow-caps { text-transform: uppercase; }
   .gk-h2 { font-weight: 300; font-size: clamp(24px, 2.4vw, 30px); letter-spacing: -.6px; color: #fff; margin: 0; }
   .gk-glassrow { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); border-radius: 16px; }
   .gk-glass-label { color: #8b7fb8; }

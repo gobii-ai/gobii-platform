@@ -7,16 +7,21 @@
   <meta name="description" content="How Gobii authors, sources, reviews, updates, and corrects articles about AI agents and business workflows.">
 {% endblock %}
 
+{% block early_head_styles %}
+{{ block.super }}
+{% include "includes/_gk_doc.html" %}
+{% endblock %}
+
 {% block content %}
-<article class="bg-white text-slate-900">
+<article class="gk-doc">
   <div class="mx-auto max-w-3xl px-6 py-16 sm:py-20">
     <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl">Editorial Policy</h1>
-    <p class="mt-4 text-sm text-slate-600"><em>Last updated: July 9, 2026</em></p>
-    <p class="mt-8 text-lg leading-relaxed text-slate-700">
+    <p class="mt-4 text-sm gk-doc-meta"><em>Last updated: July 9, 2026</em></p>
+    <p class="mt-8 text-lg leading-relaxed gk-doc-lede">
       This policy covers articles, guides, comparisons, case studies, and product updates published on the Gobii website. It explains how we handle authorship, evidence, commercial context, updates, and corrections.
     </p>
 
-    <div class="prose prose-slate mt-12 max-w-none lg:prose-lg">
+    <div class="gk-doc-prose mt-12">
       <h2>Editorial standards</h2>
       <p>We aim to publish useful, accurate material that clearly separates verified facts, Gobii's perspective, and first-hand experience. We do not publish invented statistics, customer outcomes, credentials, or deployment results.</p>
 
