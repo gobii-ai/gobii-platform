@@ -1,0 +1,556 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ comparison_seo_title }}{% endblock %}
+
+{% block canonical_link %}
+<link rel="canonical" href="{{ canonical_url }}">
+{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="{{ comparison_seo_description }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ comparison_seo_title }}">
+<meta property="og:description" content="{{ comparison_seo_description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="Gobii">
+<meta property="og:image" content="{{ comparison_social_image_url }}">
+<meta property="og:image:alt" content="{{ comparison_social_image_alt }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ comparison_seo_title }}">
+<meta name="twitter:description" content="{{ comparison_seo_description }}">
+<meta name="twitter:image" content="{{ comparison_social_image_url }}">
+<meta name="twitter:image:alt" content="{{ comparison_social_image_alt }}">
+<script type="application/ld+json">{{ comparison_structured_data_json }}</script>
+<script type="application/ld+json">{{ comparison_breadcrumb_json }}</script>
+{% if comparison_faq_json %}<script type="application/ld+json">{{ comparison_faq_json }}</script>{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="gk-luxe">
+  <style>
+    /* comparison detail (LinkedIn Recruiter) — page-scoped layout */
+    .cmpd-hero { max-width: 1100px; margin: 0 auto; padding: 64px 24px 0; position: relative; }
+    .cmpd-crumbs { font-size: 12.5px; margin: 0 0 14px; }
+    .cmpd-crumbs a { color: #c4b5fd; text-decoration: none; }
+    .cmpd-crumbs a:hover { color: #fff; }
+    .cmpd-hero h1 { margin-top: 12px; max-width: 29ch; }
+    .cmpd-hero .cmpd-sub { margin-top: 14px; max-width: 72ch; }
+    .cmpd-hero .cmpd-sub a { color: #ddd6fe; text-decoration: underline; text-decoration-color: rgba(196,181,253,.4); text-underline-offset: 3px; }
+    .cmpd-hero .cmpd-sub a:hover { color: #fff; }
+    .cmpd-byline { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 18px 0 0;
+                    color: #9f93c5; font-size: 12px; line-height: 1.55; }
+    .cmpd-byline a { color: #c4b5fd; text-decoration: none; }
+    .cmpd-byline a:hover { color: #fff; }
+    .cmpd-ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+    .cmpd-jump { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-top: 30px;
+                 padding: 16px 18px; border: 1px solid rgba(196,181,253,.18); border-radius: 14px;
+                 background: rgba(76,29,149,.12); }
+    .cmpd-jump-label { color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .cmpd-jump-links { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+    .cmpd-jump a { color: #c4b5fd; font-size: 12.5px; font-weight: 600; text-decoration: none; }
+    .cmpd-jump a:hover { color: #fff; }
+    .cmpd-anchor { scroll-margin-top: 112px; }
+    .cmpd-split { display: grid; gap: 28px; margin-top: 6px; }
+    @media (min-width: 1024px) {
+      .cmpd-split { grid-template-columns: .9fr 1.1fr; align-items: start; }
+      .cmpd-split-wide { grid-template-columns: 1fr .8fr; }
+    }
+    .cmpd-h2 { margin-top: 12px; }
+    .cmpd-prose p { color: #b7aed4; font-size: 14.5px; line-height: 1.72; margin: 0; }
+    .cmpd-prose p + p { margin-top: 14px; }
+    .cmpd-prose a { color: #c4b5fd; text-decoration: underline; text-decoration-color: rgba(196,181,253,.35); text-underline-offset: 3px; }
+    .cmpd-prose a:hover { color: #fff; }
+    .cmpd-cite { white-space: nowrap; font-size: .86em; font-weight: 650; }
+    .cmpd-inline-link { color: #c4b5fd; text-decoration: underline; text-decoration-color: rgba(196,181,253,.35); text-underline-offset: 3px; }
+    .cmpd-inline-link:hover { color: #fff; }
+    .cmpd-grid2, .cmpd-grid3 { display: grid; gap: 16px; margin-top: 26px; }
+    @media (min-width: 850px) { .cmpd-grid2 { grid-template-columns: 1fr 1fr; } }
+    @media (min-width: 980px) { .cmpd-grid3 { grid-template-columns: repeat(3, 1fr); } }
+    .cmpd-card { padding: 24px; }
+    .cmpd-cardhead { display: flex; align-items: center; gap: 12px; }
+    .cmpd-ichip { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center;
+                  border-radius: 10px; color: #fff; flex-shrink: 0;
+                  background: linear-gradient(120deg, #7c3aed, #a855f7); }
+    .cmpd-card h2, .cmpd-card h3 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
+    .cmpd-card p { color: #b7aed4; font-size: 13.5px; line-height: 1.67; margin: 14px 0 0; }
+    .cmpd-card p a { color: #c4b5fd; text-decoration: underline; text-decoration-color: rgba(196,181,253,.35); text-underline-offset: 3px; }
+    .cmpd-card p a:hover { color: #fff; }
+    .cmpd-tablewrap { margin-top: 26px; }
+    .cmpd-tablewrap thead th + th, .cmpd-tablewrap tbody td + td { text-align: left; color: #d5cdec; }
+    .cmpd-tablewrap tbody th { padding: 12px 18px; color: #fff; font-weight: 600; font-size: 13px;
+                               text-align: left; border-top: 1px solid rgba(255,255,255,.07);
+                               vertical-align: top; min-width: 160px; }
+    .cmpd-tablewrap tbody td { vertical-align: top; min-width: 220px; }
+    .cmpd-tablewrap tbody td:last-child { min-width: 135px; color: #fff; font-weight: 600; }
+    .cmpd-win { color: #6ee7b7; }
+    .cmpd-band { text-align: left; }
+    .cmpd-band h2 { text-align: left; margin-top: 12px; }
+    .cmpd-band .cmpd-prose p { color: #c4b5fd; margin: 0; }
+    .cmpd-band .cmpd-prose p + p { margin-top: 14px; }
+    .cmpd-checks { list-style: none; padding: 0; color: #d5cdec; font-size: 13.5px; line-height: 1.65; }
+    .cmpd-check-ic { color: #34d399; flex-shrink: 0; }
+    .cmpd-aside { padding: 26px; }
+    .cmpd-aside h2, .cmpd-aside h3 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
+    .cmpd-aside p { color: #b7aed4; font-size: 13px; line-height: 1.65; margin: 14px 0 0; }
+    .cmpd-links { display: flex; flex-direction: column; gap: 12px; margin-top: 20px;
+                  font-size: 13px; font-weight: 600; }
+    .cmpd-links a { display: inline-flex; align-items: center; color: #c4b5fd; text-decoration: none; }
+    .cmpd-links a:hover { color: #fff; }
+    .cmpd-note { color: #8f83b2; font-size: 12px; line-height: 1.65; margin-top: 14px; }
+    .cmpd-source-caption { color: #8f83b2; font-size: 11.5px; line-height: 1.65; margin: 12px 2px 0; }
+    .cmpd-source-caption a { color: #b8a9e5; text-decoration: underline; text-decoration-color: rgba(184,169,229,.35); text-underline-offset: 3px; }
+    .cmpd-source-caption a:hover { color: #fff; }
+  </style>
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+<main id="main-content">
+  <section class="cmpd-hero">
+    <p class="cmpd-crumbs">
+      <a href="{% url 'proprietary:comparisons' %}" class="inline-flex items-center">
+        <i aria-hidden="true" data-lucide="arrow-left" class="mr-2 size-4"></i>
+        Comparisons
+      </a>
+    </p>
+    <p class="gk-eyebrow">LinkedIn Recruiter vs Gobii</p>
+    <h1 class="gk-display">
+      LinkedIn Recruiter vs Gobii: candidate access or an <span class="gk-accent">AI recruiting workforce?</span>
+    </h1>
+    <p class="gk-sub cmpd-sub">
+      LinkedIn Recruiter helps teams search, engage, and manage candidates inside the world’s largest professional network. Gobii gives teams <a href="{% url 'pages:ai_employees' %}">persistent AI employees</a> that handle the research, systems work, reporting, and recurring operations surrounding candidate sourcing. They solve different bottlenecks—and strong recruiting teams may use both.
+    </p>
+    <p class="cmpd-byline">
+      <span>Published {{ comparison.published_display|default:comparison.last_reviewed_display }}</span>
+      <span aria-hidden="true">·</span>
+      <span>Last reviewed {{ comparison.last_reviewed_display }}</span>
+      <span aria-hidden="true">·</span>
+      <a href="{% url 'proprietary:editorial_policy' %}">Gobii publishes this comparison and has a commercial interest in the outcome</a>
+    </p>
+    <div class="cmpd-ctas">
+      <a href="{% url 'pages:solution' slug='recruiting' %}" class="gk-btn">
+        See Gobii for Recruiting
+        <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
+      </a>
+      <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-sourcing-agent' %}" class="gk-btn-quiet">
+        Inspect the Sourcing Agent
+      </a>
+    </div>
+    <nav class="cmpd-jump" aria-label="On this page">
+      <span class="cmpd-jump-label">On this page</span>
+      <span class="cmpd-jump-links">
+        <a href="#tier-differences">Recruiter tiers</a>
+        <a href="#feature-comparison">Feature comparison</a>
+        <a href="#linkedin-wins">Where LinkedIn wins</a>
+        <a href="#gobii-wins">Where Gobii wins</a>
+        <a href="#combined-workflow">Combined workflow</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQs</a>
+      </span>
+    </nav>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-split">
+      <div>
+        <p class="gk-eyebrow">Executive summary</p>
+        <h2 class="gk-h2 cmpd-h2">
+          LinkedIn Recruiter gives you the network. Gobii gives you the workforce around it.
+        </h2>
+      </div>
+      <div class="cmpd-prose">
+        <p>
+          <strong class="text-white">The main difference:</strong> LinkedIn Recruiter is a talent sourcing and engagement system built on LinkedIn’s proprietary professional graph. Gobii is a configurable AI workforce that can carry recruiting work across permitted websites, files, spreadsheets, applications, channels, and internal processes.
+        </p>
+        <p>
+          LinkedIn Recruiter is stronger when your advantage depends on LinkedIn itself. Its network includes more than 1.3 billion member profiles <a class="cmpd-cite" href="https://news.linkedin.com/2026/linkedin-reaches-the-milestone-of-100-million-users-in-brazil" target="_blank" rel="noopener">(source)</a>. Recruiters can use private signals such as Open to Work, apply specialist filters, organize prospects in projects, and contact people through InMail. Recruiter Corporate and RPS+ can also add Hiring Assistant, which sources, evaluates, prescreens, and helps with outreach inside LinkedIn’s hiring environment <a class="cmpd-cite" href="https://www.linkedin.com/help/recruiter/answer/a7109304" target="_blank" rel="noopener">(source)</a>.
+        </p>
+        <p>
+          Gobii is the better fit when the difficult work extends beyond that environment. A recruiting Gobii can research approved public sources, inspect portfolios or publications, and compare candidates against a custom rubric. It can also read resumes and role briefs, maintain a structured tracker, prepare client-ready shortlists, update connected systems, and return on a schedule.
+        </p>
+        <p>
+          The practical answer is often complementary. Keep LinkedIn Recruiter for its unique network, private intent signals, and InMail. Use Gobii to eliminate the research, handoffs, reporting, and cross-system work around it. Gobii does not need to imitate or automate LinkedIn to make a recruiter dramatically more productive.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div>
+      <p class="gk-eyebrow">The 30-second decision</p>
+      <h2 class="gk-h2 cmpd-h2">Choose the system that matches the constraint.</h2>
+    </div>
+    <div class="cmpd-grid3">
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip"><i aria-hidden="true" data-lucide="network" class="size-5"></i></span>
+          <h3>Choose LinkedIn Recruiter if...</h3>
+        </div>
+        <p>
+          Your priority is direct access to LinkedIn’s member graph, private candidate-interest signals, advanced recruiter filters, native InMail, LinkedIn Jobs applicants, shared projects, and standardized recruiting analytics. This is especially compelling for high-volume teams whose sourcing motion is centered on LinkedIn.
+        </p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip"><i aria-hidden="true" data-lucide="users" class="size-5"></i></span>
+          <h3>Choose Gobii if...</h3>
+        </div>
+        <p>
+          Your bottleneck is the work around sourcing: external research, evidence-based qualification, resume and file handling, custom scoring, ATS or tracker upkeep, recruiter briefings, hiring-manager reports, and recurring operations that span multiple tools. You want adaptable AI capacity rather than another search seat.
+        </p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip"><i aria-hidden="true" data-lucide="combine" class="size-5"></i></span>
+          <h3>Use both if...</h3>
+        </div>
+        <p>
+          LinkedIn is a strategic candidate channel, but your team still loses hours to research, spreadsheets, handoffs, reporting, and systems administration. Recruiters can retain control of LinkedIn search and engagement while Gobii performs approved work before, after, and alongside those steps.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section id="tier-differences" class="gk-section cmpd-anchor">
+    <div class="gk-band cmpd-band">
+      <p class="gk-eyebrow">A crucial tier distinction</p>
+      <h2 class="gk-h2">“LinkedIn Recruiter” can mean four different products.</h2>
+      <div class="cmpd-prose" style="margin-top:18px;max-width:84ch">
+        <p>
+          Recruiter Lite is designed for individuals and smaller businesses with lighter hiring needs. It includes access through third-degree connections, 20+ search filters, and 30 monthly InMails per seat. It does <strong class="text-white">not</strong> include Hiring Assistant. RPS and RPS+ target staffing firms, while Recruiter Corporate targets mid-market and enterprise teams. Corporate includes full-network access, 40+ filters, 150 monthly InMails per seat, advanced reporting, and integrations with 28+ ATS partners <a class="cmpd-cite" href="https://www.linkedin.com/help/recruiter/answer/a417251" target="_blank" rel="noopener">(tier source)</a>. Hiring Assistant is a separate add-on for Corporate and RPS+ customers, with progressive availability and monthly action allowances <a class="cmpd-cite" href="https://www.linkedin.com/help/recruiter/answer/a8342057" target="_blank" rel="noopener">(allowance source)</a>. Compare the specific tier—not the LinkedIn Recruiter name in isolation.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="feature-comparison" class="gk-section cmpd-anchor">
+    <div>
+      <p class="gk-eyebrow">At a glance</p>
+      <h2 class="gk-h2 cmpd-h2">Professional-network intelligence vs a configurable recruiting workforce.</h2>
+    </div>
+    <div class="gk-tablewrap cmpd-tablewrap">
+      <table style="min-width:1200px">
+        <thead>
+          <tr>
+            <th scope="col">Recruiting dimension</th>
+            <th scope="col">LinkedIn Recruiter</th>
+            <th scope="col">Gobii</th>
+            <th scope="col">Edge</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Candidate network</th>
+            <td>LinkedIn’s proprietary graph of 1.3B+ professionals and 71M companies</td>
+            <td>Works across public, connected, uploaded, and team-approved sources</td>
+            <td>LinkedIn</td>
+          </tr>
+          <tr>
+            <th scope="row">Private intent signals</th>
+            <td>Open to Work, activity, employer interest, relationship, and engagement signals</td>
+            <td>Can use signals supplied through permitted sources and connected systems</td>
+            <td>LinkedIn</td>
+          </tr>
+          <tr>
+            <th scope="row">Recruiter search UX</th>
+            <td>Recruiter-native filters, Spotlights, saved searches, projects, and AI-assisted search</td>
+            <td>Delegate a brief in natural language, then refine instructions and outputs</td>
+            <td>LinkedIn</td>
+          </tr>
+          <tr>
+            <th scope="row">AI sourcing inside LinkedIn</th>
+            <td>Hiring Assistant can source and evaluate candidates for eligible licensed tiers</td>
+            <td>Does not perform unauthorized automation on LinkedIn</td>
+            <td>LinkedIn</td>
+          </tr>
+          <tr>
+            <th scope="row">External evidence research</th>
+            <td>Hiring Assistant currently centers on profiles, resumes, screening responses, and notes</td>
+            <td>Can research approved portfolios, publications, GitHub, directories, company sites, and niche boards</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Custom evaluation process</th>
+            <td>Structured around LinkedIn projects, qualifications, sourcing goals, and product controls</td>
+            <td>Custom rubrics, evidence requirements, scoring logic, exceptions, and deliverable formats</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Native candidate outreach</th>
+            <td>InMail, AI-assisted drafts, bulk messaging, follow-ups, and engagement analytics</td>
+            <td>Approved email, SMS, drafts, and connected outreach systems—not LinkedIn InMail</td>
+            <td>LinkedIn</td>
+          </tr>
+          <tr>
+            <th scope="row">Applicant review</th>
+            <td>Hiring Assistant can evaluate LinkedIn applicants and some supported ATS applicants</td>
+            <td>Can process supplied resumes, files, forms, and data according to a team-defined workflow</td>
+            <td>Depends</td>
+          </tr>
+          <tr>
+            <th scope="row">Cross-system execution</th>
+            <td>28+ ATS partners on advanced tiers, plus LinkedIn’s own projects and reporting</td>
+            <td>Works across connected apps, browser-based systems, files, spreadsheets, APIs, and MCP servers</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Finished deliverables</th>
+            <td>Search results, candidate projects, messages, analytics, and platform reports</td>
+            <td>Shortlists, research briefs, client submissions, tracker updates, scorecards, and recurring reports</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Persistent role ownership</th>
+            <td>Hiring Assistant works within enabled hiring projects and sourcing goals</td>
+            <td>Multiple persistent AI employees can own distinct sourcing, research, coordination, and reporting roles</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Human oversight</th>
+            <td>Recruiter review is built into Hiring Assistant candidate communication and qualification changes</td>
+            <td>Approval boundaries, narrow access, credential requests, timeline visibility, and team controls</td>
+            <td>Both</td>
+          </tr>
+          <tr>
+            <th scope="row">Standardized recruiting governance</th>
+            <td>Enterprise recruiting administration, reporting, data ownership, and OFCCP tracking</td>
+            <td>Flexible platform governance and auditable work, configured for each organization</td>
+            <td>LinkedIn</td>
+          </tr>
+          <tr>
+            <th scope="row">Deployment</th>
+            <td>LinkedIn-hosted SaaS</td>
+            <td>Gobii Cloud or open-source, MIT-licensed self-hosting</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Use beyond recruiting</th>
+            <td>Purpose-built for talent sourcing and hiring</td>
+            <td>The same workforce can support sales, operations, research, customer work, and engineering</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cmpd-source-caption">
+      Table sources: <a href="https://www.linkedin.com/help/recruiter/answer/a417251" target="_blank" rel="noopener">LinkedIn Recruiter tiers</a>,
+      <a href="https://www.linkedin.com/help/recruiter/answer/a7109304" target="_blank" rel="noopener">Hiring Assistant capabilities</a>,
+      <a href="https://www.linkedin.com/help/linkedin/answer/a1341387" target="_blank" rel="noopener">LinkedIn automation policy</a>,
+      <a href="https://docs.gobii.ai/" target="_blank" rel="noopener">Gobii documentation</a>, and
+      <a href="{% url 'proprietary:pricing' %}">Gobii pricing</a>. Reviewed August 2, 2026.
+    </p>
+  </section>
+
+  <section id="linkedin-wins" class="gk-section cmpd-anchor">
+    <div class="cmpd-split cmpd-split-wide">
+      <div>
+        <p class="gk-eyebrow">Where LinkedIn wins</p>
+        <h2 class="gk-h2 cmpd-h2">LinkedIn owns signals an external AI workforce cannot recreate.</h2>
+        <div class="cmpd-prose" style="margin-top:22px">
+          <p>
+            LinkedIn’s enduring advantage is not merely that it has many profiles. The network holds professional identity, relationships, activity, hiring interest, applications, recruiter interaction history, and a native contact channel. In June 2026, LinkedIn reported more than 1.3 billion professionals and 71 million companies across 200+ countries and territories <a class="cmpd-cite" href="https://news.linkedin.com/2026/linkedin-reaches-the-milestone-of-100-million-users-in-brazil" target="_blank" rel="noopener">(source)</a>.
+          </p>
+          <p>
+            Recruiter turns that graph into a mature operating environment. Advanced tiers add 40+ search filters, Spotlights that prioritize candidates using recruiter-relevant signals, shared projects, pooled InMail, ATS integrations, analytics, and formal administration. Recruiters who want fine-grained, hands-on control of search have a specialized interface built for exactly that job.
+          </p>
+          <p>
+            Hiring Assistant makes the platform more than a database with a search box. It can create a project from a job description, role link, ideal candidate, or uploaded file. It can recommend qualifications, source and evaluate candidates, streamline applicant review, help prescreen up to 25 candidates at once, and draft messages. It continues sourcing toward a goal and learns from recruiter feedback <a class="cmpd-cite" href="https://www.linkedin.com/help/recruiter/answer/a7109304" target="_blank" rel="noopener">(source)</a>. That is genuine agentic recruiting functionality, not a cosmetic AI feature.
+          </p>
+          <p>
+            If your recruiting strategy depends on LinkedIn’s private graph and InMail, Gobii is not a like-for-like replacement. LinkedIn Recruiter should remain the system for that access and engagement.
+          </p>
+        </div>
+      </div>
+      <aside class="gk-card-glass cmpd-aside">
+        <h3>LinkedIn’s strongest reasons to buy</h3>
+        <ul class="cmpd-checks space-y-3 mt-5">
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Proprietary candidate and company network</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Private interest and engagement signals</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Purpose-built recruiter search and projects</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Native InMail and LinkedIn Jobs workflow</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check" class="cmpd-check-ic size-4 mt-0.5"></i><span>Enterprise hiring analytics and governance</span></li>
+        </ul>
+        <div class="cmpd-links">
+          <a href="https://news.linkedin.com/2026/linkedin-reaches-the-milestone-of-100-million-users-in-brazil" target="_blank" rel="noopener">LinkedIn network statistics <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="https://www.linkedin.com/help/recruiter/answer/a7109304" target="_blank" rel="noopener">Hiring Assistant capabilities <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="https://www.linkedin.com/help/recruiter/answer/a8342057" target="_blank" rel="noopener">Hiring Assistant action limits <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="gobii-wins" class="gk-section cmpd-anchor">
+    <div class="cmpd-split">
+      <div>
+        <p class="gk-eyebrow">Where Gobii wins</p>
+        <h2 class="gk-h2 cmpd-h2">Your sourcing process does not end when you find a profile.</h2>
+      </div>
+      <div class="cmpd-prose">
+        <p>
+          Finding a plausible candidate is often the beginning of the work. A recruiter may still need to validate achievements, inspect a portfolio, and look for technical contributions. They may also need to resolve conflicting information, prepare a submission, update an ATS, notify a hiring manager, and revisit the market when requirements change.
+        </p>
+        <p>
+          Gobii’s advantage is adaptability across that entire process. A team can configure persistent employees with specific charters, files, tools, schedules, contacts, and approval boundaries. A sourcing Gobii can find prospects in permitted public sources. A research Gobii can deepen the evidence. A coordinator can keep a tracker current. A reporting Gobii can turn pipeline state into a weekly client or leadership brief. <a class="cmpd-inline-link" href="{% url 'proprietary:teams' %}">Gobii for Teams</a> centralizes shared agents, credentials, integrations, and access controls.
+        </p>
+        <p>
+          The evaluation can match the recruiting process you actually run. An executive-search firm might require evidence of market ownership, board experience, and recent speaking activity. A technical recruiter might inspect GitHub contributions, package ownership, research publications, or project documentation. A healthcare recruiter might work across licensure directories and employer pages. Gobii can follow those organization-specific instructions and return the sources behind its conclusions.
+        </p>
+        <p>
+          This matters for agencies and lean internal teams because the same platform can cover work that would otherwise require several point tools, manual research, and repeated coordination. Gobii is not just an “AI search” feature. It is a place to deploy recruiting capacity around ongoing responsibilities.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="combined-workflow" class="gk-section cmpd-anchor">
+    <div>
+      <p class="gk-eyebrow">A stronger combined workflow</p>
+      <h2 class="gk-h2 cmpd-h2">Keep LinkedIn for the graph. Put Gobii around the process.</h2>
+    </div>
+    <div class="cmpd-grid2">
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead"><span class="cmpd-ichip"><i aria-hidden="true" data-lucide="briefcase-business" class="size-5"></i></span><h3>1. Structure the role</h3></div>
+        <p>Give Gobii the intake notes, job description, must-have criteria, evidence requirements, exclusions, target organizations, geography, and required output. It can produce a reusable rubric and research plan for recruiter approval.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead"><span class="cmpd-ichip"><i aria-hidden="true" data-lucide="search" class="size-5"></i></span><h3>2. Use LinkedIn’s native advantage</h3></div>
+        <p>Recruiters use Recruiter search, Spotlights, Hiring Assistant where licensed, saved projects, private signals, and InMail inside LinkedIn. Gobii does not scrape profiles, imitate user actions, or send LinkedIn messages through an unauthorized route <a href="https://www.linkedin.com/help/linkedin/answer/a1341387" target="_blank" rel="noopener">(policy)</a>.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead"><span class="cmpd-ichip"><i aria-hidden="true" data-lucide="scan-search" class="size-5"></i></span><h3>3. Deepen the evidence</h3></div>
+        <p>Through customer-approved handoffs and permitted sources, Gobii researches public portfolios, publications, company bios, GitHub, directories, specialist communities, and other evidence. It records links, explains fit, and flags gaps instead of merely repeating profile text.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead"><span class="cmpd-ichip"><i aria-hidden="true" data-lucide="clipboard-check" class="size-5"></i></span><h3>4. Finish and maintain the work</h3></div>
+        <p>Gobii prepares recruiter-ready shortlists, updates an approved tracker or connected system, drafts briefings, packages submissions, and returns on a schedule. Recruiters retain judgment and relationship ownership while repetitive operations keep moving.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="pricing" class="gk-section cmpd-anchor">
+    <div class="cmpd-split cmpd-split-wide">
+      <div>
+        <p class="gk-eyebrow">Pricing reality</p>
+        <h2 class="gk-h2 cmpd-h2">Different budgets buy different assets.</h2>
+        <div class="cmpd-prose" style="margin-top:22px">
+          <p>
+            LinkedIn publishes US Recruiter Lite pricing at $170 per month or $1,680 per year for one license. For two to five licenses, it lists $270 per month or $2,670 per year per license. Recruiter Professional Services, RPS+, Recruiter Corporate, and Hiring Assistant use contract-specific pricing <a class="cmpd-cite" href="https://www.linkedin.com/help/recruiter/answer/a417251" target="_blank" rel="noopener">(pricing source)</a>. Corporate and RPS+ customers also select a Hiring Assistant action tier. LinkedIn documents monthly sourcing and applicant-evaluation limits per license, with work stopping when the allowance is reached <a class="cmpd-cite" href="https://www.linkedin.com/help/recruiter/answer/a8342057" target="_blank" rel="noopener">(limits source)</a>.
+          </p>
+          <p>
+            <a class="cmpd-inline-link" href="{% url 'proprietary:pricing' %}">Gobii Pro</a> is $50 per month for 1,000 tasks and unlimited always-on agents. Scale is $250 per month for 10,000 tasks. Team is $50 per seat per month with pooled task capacity, shared agents, credentials, integrations, roles, and billing. Enterprise agreements add dedicated infrastructure, SLAs, and custom governance. The open-source, MIT-licensed platform can also be self-hosted.
+          </p>
+          <p>
+            This is not an apples-to-apples seat comparison. LinkedIn pricing buys privileged network access, recruiter search, private signals, InMail, and hiring-product workflows. Gobii pricing buys flexible AI execution capacity; it does not buy LinkedIn’s graph or InMail. Evaluate the cost against the specific bottleneck and include the human hours, external research, systems work, and reporting each option removes.
+          </p>
+        </div>
+      </div>
+      <aside class="gk-card-glass cmpd-aside">
+        <h3>Current published starting points</h3>
+        <ul class="cmpd-checks space-y-3 mt-5">
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="badge-dollar-sign" class="cmpd-check-ic size-4 mt-0.5"></i><span>Recruiter Lite: $170/month for one US license</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="badge-dollar-sign" class="cmpd-check-ic size-4 mt-0.5"></i><span>Corporate, RPS, RPS+, Hiring Assistant: contact sales</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="badge-dollar-sign" class="cmpd-check-ic size-4 mt-0.5"></i><span>Gobii Pro: $50/month with 1,000 tasks</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="badge-dollar-sign" class="cmpd-check-ic size-4 mt-0.5"></i><span>Gobii Scale: $250/month with 10,000 tasks</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="code-xml" class="cmpd-check-ic size-4 mt-0.5"></i><span>Gobii self-hosted: open source and MIT licensed</span></li>
+        </ul>
+        <div class="cmpd-links">
+          <a href="https://www.linkedin.com/help/recruiter/answer/a417251" target="_blank" rel="noopener">LinkedIn Recruiter product comparison <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="{% url 'proprietary:pricing' %}">Gobii pricing <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i></a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener">Gobii open-source repository <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+        </div>
+        <p class="cmpd-note">Prices and allowances reflect vendor-published information reviewed August 2, 2026. Regional prices, contracts, packaging, and usage policies can change.</p>
+      </aside>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="gk-band cmpd-band">
+      <p class="gk-eyebrow">Responsible platform use</p>
+      <h2 class="gk-h2">Does Gobii search or automate LinkedIn?</h2>
+      <div class="cmpd-prose" style="margin-top:18px;max-width:84ch">
+        <p>
+          <strong class="text-white">Not through unauthorized scraping or automation.</strong> LinkedIn prohibits third-party crawlers, bots, extensions, and other software that scrape, copy, or automate activity on its website <a class="cmpd-cite" href="https://www.linkedin.com/help/linkedin/answer/a1341387" target="_blank" rel="noopener">(policy source)</a>. Gobii should work alongside LinkedIn Recruiter through customer-approved processes, permitted data handoffs, external public research, ATS workflows, and authorized systems. It should not automate profile access or InMail in violation of LinkedIn’s terms.
+        </p>
+        <p>
+          This boundary is also good recruiting practice. Keep relationship-sensitive actions and hiring decisions under human control. Give AI employees the narrowest system access they need, require approval for sensitive changes and communications, preserve sources behind research conclusions, and review outputs for relevance, bias, privacy, and job-relatedness before acting.
+        </p>
+      </div>
+      <div class="cmpd-links" style="max-width:84ch">
+        <a href="https://www.linkedin.com/help/linkedin/answer/a1341387" target="_blank" rel="noopener">Read LinkedIn’s prohibited software and extensions policy <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+        <a href="https://docs.gobii.ai/using-gobii/approvals-and-requests" target="_blank" rel="noopener">Read about Gobii approvals and requests <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="gk-section cmpd-anchor">
+    <div>
+      <p class="gk-eyebrow">Frequently asked questions</p>
+      <h2 class="gk-h2 cmpd-h2">Common buying questions.</h2>
+    </div>
+    <div class="cmpd-grid2">
+      <article class="gk-card-edge cmpd-card">
+        <h3>Does Recruiter Lite include Hiring Assistant?</h3>
+        <p>No. LinkedIn’s current product comparison lists Hiring Assistant as an add-on for Recruiter Corporate and RPS+, not Recruiter Lite or standard RPS. Availability is progressive, and an eligible user needs a separate permission and license <a href="https://www.linkedin.com/help/recruiter/answer/a417251" target="_blank" rel="noopener">(source)</a>.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Can Gobii replace LinkedIn Recruiter?</h3>
+        <p>Only if you do not depend on LinkedIn’s private graph, recruiter filters, interest signals, Jobs workflow, or InMail. Gobii can replace substantial research and recruiting-operations work, but it does not reproduce privileged LinkedIn access. Many teams will get the best result by using both.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Which is better for an agency or executive-search firm?</h3>
+        <p>LinkedIn Recruiter is stronger when network access and InMail are core channels. Gobii becomes compelling when differentiation comes from custom market mapping, multi-source evidence, niche research, tailored client submissions, and repeatable reporting. An agency can pair the two to increase recruiter capacity without weakening the relationship-led work.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Can Hiring Assistant evaluate GitHub and portfolios?</h3>
+        <p>Not as a current native data source according to LinkedIn’s August 2026 FAQ. LinkedIn says Hiring Assistant uses profile data, resumes, screening responses, recruiting notes, and world knowledge. External professional data such as GitHub is planned for future support. Gobii can research permitted external evidence now <a href="https://www.linkedin.com/help/recruiter/answer/a7109304" target="_blank" rel="noopener">(source)</a>.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Is Gobii a LinkedIn Recruiter alternative for a small business?</h3>
+        <p>It can be if the business values open-web research and flexible execution more than private LinkedIn signals and InMail. Recruiter Lite is the straightforward specialist choice for lighter LinkedIn-centered sourcing. Gobii is the broader choice when one AI workforce should support recruiting plus adjacent research and operations.</p>
+      </article>
+      <article class="gk-card-edge cmpd-card">
+        <h3>Which platform handles the ATS?</h3>
+        <p>Advanced LinkedIn Recruiter tiers offer formal integrations with 28+ ATS partners, and some Hiring Assistant customers can evaluate ATS applicants through supported connected projects <a href="https://www.linkedin.com/help/recruiter/answer/a7109304" target="_blank" rel="noopener">(source)</a>. Gobii is more adaptable when the workflow crosses a supported ATS, an unsupported or browser-only system, spreadsheets, files, APIs, and team communication tools.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-split cmpd-split-wide">
+      <div>
+        <p class="gk-eyebrow">Bottom line</p>
+        <h2 class="gk-h2 cmpd-h2">Keep LinkedIn Recruiter for the network. Use Gobii to eliminate the work that still happens outside it.</h2>
+        <div class="cmpd-prose" style="margin-top:22px">
+          <p>
+            LinkedIn Recruiter is the better product for accessing and engaging LinkedIn’s professional network. Gobii is the better platform for deploying adaptable AI employees that perform the broader, customized work surrounding candidate sourcing.
+          </p>
+          <p>
+            Choose LinkedIn when the scarce asset is proprietary candidate access. Choose Gobii when the scarce asset is recruiter time and your workflow extends across the open web, files, tools, reporting, and recurring operations. Use both when you need LinkedIn’s graph and a workforce that can finish everything around it.
+          </p>
+        </div>
+        <div class="cmpd-ctas">
+          <a href="{% url 'account_signup' %}" class="gk-btn">Build your recruiting workforce <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i></a>
+          <a href="{% url 'proprietary:comparison_detail' slug='juicebox-vs-gobii' %}" class="gk-btn-quiet">Compare Juicebox vs Gobii</a>
+        </div>
+      </div>
+      <aside class="gk-card-glass cmpd-aside">
+        <h3>Primary source note</h3>
+        <p>
+          This comparison was prepared from current official LinkedIn Recruiter product, Hiring Assistant, licensing, pricing, network, and platform-policy documentation; Gobii product documentation, pricing, recruiting materials, and source code; and hands-on review of the capabilities being compared.
+        </p>
+        <div class="cmpd-links">
+          <a href="https://www.linkedin.com/help/recruiter/answer/a417251" target="_blank" rel="noopener">LinkedIn Recruiter tiers <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="https://www.linkedin.com/help/recruiter/answer/a7109304" target="_blank" rel="noopener">LinkedIn Hiring Assistant FAQ <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="https://docs.gobii.ai/" target="_blank" rel="noopener">Gobii documentation <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="https://gobii.ai/solutions/recruiting/" target="_blank" rel="noopener">Gobii for recruiting <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="https://gobii.ai/library/recruiting/candidate-sourcing-agent/" target="_blank" rel="noopener">Candidate Sourcing Agent <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener">Gobii on GitHub <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i></a>
+        </div>
+        <p class="cmpd-note">
+          Last reviewed {{ comparison.last_reviewed_display }} by {{ comparison.reviewed_by }}. Gobii publishes this comparison and has a commercial interest in the outcome. Product capabilities, limits, prices, and policies can change; verify current terms with each vendor before purchasing.
+        </p>
+      </aside>
+    </div>
+  </section>
+</main>
+</div>
+{% endblock %}

@@ -3083,6 +3083,7 @@ class ComparisonPageTests(TestCase):
     zapier_agents_comparison_slug = "zapier-agents-vs-gobii"
     lindy_comparison_slug = "lindy-vs-gobii"
     juicebox_comparison_slug = "juicebox-vs-gobii"
+    linkedin_recruiter_comparison_slug = "linkedin-recruiter-vs-gobii"
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_comparisons_page_renders_with_metadata_and_published_links(self):
@@ -3233,6 +3234,13 @@ class ComparisonPageTests(TestCase):
         self.assertIsNotNone(juicebox_card)
         self.assertIn("Juicebox vs Gobii", juicebox_card.get_text(" ", strip=True))
         self.assertIn("Published", juicebox_card.get_text(" ", strip=True))
+        linkedin_recruiter_card = soup.find("article", {"id": "linkedin-recruiter"})
+        self.assertIsNotNone(linkedin_recruiter_card)
+        self.assertIn(
+            "LinkedIn Recruiter vs Gobii",
+            linkedin_recruiter_card.get_text(" ", strip=True),
+        )
+        self.assertIn("Published", linkedin_recruiter_card.get_text(" ", strip=True))
         self.assertIsNotNone(
             soup.find(
                 "a",
@@ -3261,6 +3269,17 @@ class ComparisonPageTests(TestCase):
             soup.find(
                 "a",
                 {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.juicebox_comparison_slug})},
+            )
+        )
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {
+                    "href": reverse(
+                        "proprietary:comparison_detail",
+                        kwargs={"slug": self.linkedin_recruiter_comparison_slug},
+                    )
+                },
             )
         )
 
@@ -3807,6 +3826,161 @@ class ComparisonPageTests(TestCase):
         self.assertIsNotNone(main.find("a", {"href": "https://github.com/gobii-ai/gobii-platform"}))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_linkedin_recruiter_comparison_page_renders_with_fair_positioning_and_sources(self):
+        response = self.client.get(
+            reverse(
+                "proprietary:comparison_detail",
+                kwargs={"slug": self.linkedin_recruiter_comparison_slug},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        comparison = page_views.get_comparison(self.linkedin_recruiter_comparison_slug)
+        expected_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
+
+        self.assertEqual(soup.title.get_text(strip=True), comparison["seo_title"])
+        self.assertEqual(
+            soup.find("meta", {"name": "description"}).get("content"),
+            comparison["seo_description"],
+        )
+        self.assertEqual(soup.find("link", {"rel": "canonical"}).get("href"), expected_url)
+        self.assertEqual(
+            soup.find("meta", {"property": "og:image:alt"}).get("content"),
+            "Gobii and LinkedIn Recruiter AI agent platform comparison",
+        )
+
+        json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
+        self.assertEqual(len(json_ld_scripts), 3)
+        structured_data = json.loads(json_ld_scripts[0].string)
+        self.assertEqual(structured_data["@type"], "WebPage")
+        self.assertEqual(structured_data["@id"], f"{expected_url}#webpage")
+        self.assertEqual(structured_data["datePublished"], "2026-08-02")
+        self.assertEqual(structured_data["dateModified"], "2026-08-02")
+        self.assertEqual(
+            [item["name"] for item in structured_data["about"]],
+            ["Gobii", "LinkedIn Recruiter"],
+        )
+        self.assertEqual(
+            structured_data["about"][1]["applicationCategory"],
+            "Recruiting and talent sourcing platform",
+        )
+        self.assertEqual(structured_data["about"][1]["operatingSystem"], "Web")
+        self.assertEqual(
+            structured_data["about"][1]["sameAs"],
+            list(comparison["competitor_same_as"]),
+        )
+        self.assertEqual(
+            structured_data["about"][1]["url"],
+            "https://business.linkedin.com/talent-solutions/recruiter",
+        )
+
+        breadcrumb_data = json.loads(json_ld_scripts[1].string)
+        self.assertEqual(
+            [item["name"] for item in breadcrumb_data["itemListElement"]],
+            ["Home", "Comparisons", "LinkedIn Recruiter vs Gobii"],
+        )
+        faq_data = json.loads(json_ld_scripts[2].string)
+        self.assertEqual(faq_data["@type"], "FAQPage")
+        self.assertEqual(faq_data["@id"], f"{expected_url}#faq")
+        self.assertEqual(
+            [item["name"] for item in faq_data["mainEntity"]],
+            [item["question"] for item in comparison["faq_items"]],
+        )
+        self.assertEqual(
+            [item["acceptedAnswer"]["text"] for item in faq_data["mainEntity"]],
+            [item["answer"] for item in comparison["faq_items"]],
+        )
+
+        self.assertEqual(len(soup.find_all("h1")), 1)
+        content = soup.get_text(" ", strip=True)
+        self.assertIn(
+            "LinkedIn Recruiter vs Gobii: candidate access or an AI recruiting workforce?",
+            content,
+        )
+        self.assertIn(
+            "LinkedIn Recruiter gives you the network. Gobii gives you the workforce around it.",
+            content,
+        )
+        self.assertIn(
+            "LinkedIn Recruiter is a talent sourcing and engagement system built on "
+            "LinkedIn’s proprietary professional graph. Gobii is a configurable AI "
+            "workforce that can carry recruiting work across permitted websites, files, "
+            "spreadsheets, applications, channels, and internal processes.",
+            content,
+        )
+        self.assertIn("Choose LinkedIn Recruiter if", content)
+        self.assertIn("Choose Gobii if", content)
+        self.assertIn("Use both if", content)
+        self.assertIn("Published August 2, 2026", content)
+        self.assertIn(
+            "Gobii publishes this comparison and has a commercial interest in the outcome",
+            content,
+        )
+        self.assertIn("Does Gobii search or automate LinkedIn?", content)
+        self.assertIn("Not through unauthorized scraping or automation.", content)
+        self.assertIn(
+            "Keep LinkedIn Recruiter for the network. Use Gobii to eliminate the work that still happens outside it.",
+            content,
+        )
+        self.assertIn("Last reviewed August 2, 2026 by Gobii editorial team.", content)
+        self.assertNotContains(response, "https://js.stripe.com")
+        self.assertNotContains(response, "js/account_auth_forms.js")
+        self.assertNotContains(response, "js/cta_signup_modal.js")
+
+        main = soup.find("main")
+        self.assertIsNotNone(main)
+        self.assertGreaterEqual(len(main.get_text(" ", strip=True).split()), 1500)
+        jump_navigation = main.find("nav", {"aria-label": "On this page"})
+        self.assertIsNotNone(jump_navigation)
+        self.assertEqual(
+            [link.get("href") for link in jump_navigation.find_all("a")],
+            [
+                "#tier-differences",
+                "#feature-comparison",
+                "#linkedin-wins",
+                "#gobii-wins",
+                "#combined-workflow",
+                "#pricing",
+                "#faq",
+            ],
+        )
+        for section_id in (
+            "tier-differences",
+            "feature-comparison",
+            "linkedin-wins",
+            "gobii-wins",
+            "combined-workflow",
+            "pricing",
+            "faq",
+        ):
+            self.assertIsNotNone(main.find("section", {"id": section_id}))
+        supporting_heading = main.find("h3", string="LinkedIn’s strongest reasons to buy")
+        self.assertIsNotNone(supporting_heading)
+        self.assertIsNone(main.find("h2", string="LinkedIn’s strongest reasons to buy"))
+        self.assertIsNotNone(main.find("h3", string="Current published starting points"))
+        self.assertIsNotNone(main.find("h3", string="Primary source note"))
+        self.assertIn("Table sources:", content)
+        self.assertIsNotNone(
+            main.find("a", {"href": "https://www.linkedin.com/help/recruiter/answer/a417251"})
+        )
+        self.assertIsNotNone(
+            main.find("a", {"href": "https://www.linkedin.com/help/recruiter/answer/a7109304"})
+        )
+        self.assertIsNotNone(
+            main.find("a", {"href": "https://www.linkedin.com/help/recruiter/answer/a8342057"})
+        )
+        self.assertIsNotNone(
+            main.find("a", {"href": "https://www.linkedin.com/help/linkedin/answer/a1341387"})
+        )
+        self.assertIsNotNone(main.find("a", {"href": "https://gobii.ai/solutions/recruiting/"}))
+        self.assertIsNotNone(main.find("a", {"href": "https://github.com/gobii-ai/gobii-platform"}))
+        self.assertIsNotNone(main.find("a", {"href": reverse("pages:ai_employees")}))
+        self.assertIsNotNone(main.find("a", {"href": reverse("proprietary:pricing")}))
+        self.assertIsNotNone(main.find("a", {"href": reverse("proprietary:teams")}))
+        self.assertIsNotNone(main.find("a", {"href": reverse("proprietary:editorial_policy")}))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_footer_includes_comparisons_hub_link_in_proprietary_mode(self):
         response = self.client.get(reverse("proprietary:comparisons"))
 
@@ -3849,6 +4023,20 @@ class ComparisonPageTests(TestCase):
         )
         self.assertIsNotNone(juicebox_link)
         self.assertEqual(juicebox_link.get_text(strip=True), "Juicebox vs Gobii")
+        linkedin_recruiter_link = footer.find(
+            "a",
+            {
+                "href": reverse(
+                    "proprietary:comparison_detail",
+                    kwargs={"slug": self.linkedin_recruiter_comparison_slug},
+                )
+            },
+        )
+        self.assertIsNotNone(linkedin_recruiter_link)
+        self.assertEqual(
+            linkedin_recruiter_link.get_text(strip=True),
+            "LinkedIn Recruiter vs Gobii",
+        )
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_comparison_pages_and_footer_column_are_absent_in_community_mode(self):
@@ -3874,6 +4062,13 @@ class ComparisonPageTests(TestCase):
             reverse("proprietary:comparison_detail", kwargs={"slug": self.juicebox_comparison_slug})
         )
         self.assertEqual(juicebox_detail_response.status_code, 404)
+        linkedin_recruiter_detail_response = self.client.get(
+            reverse(
+                "proprietary:comparison_detail",
+                kwargs={"slug": self.linkedin_recruiter_comparison_slug},
+            )
+        )
+        self.assertEqual(linkedin_recruiter_detail_response.status_code, 404)
 
         home_response = self.client.get(reverse("pages:home"))
         self.assertEqual(home_response.status_code, 200)
@@ -3900,6 +4095,10 @@ class ComparisonPageTests(TestCase):
         self.assertIn(f"<loc>http://example.com/comparisons/{self.zapier_agents_comparison_slug}/</loc>", content)
         self.assertIn(f"<loc>http://example.com/comparisons/{self.lindy_comparison_slug}/</loc>", content)
         self.assertIn(f"<loc>http://example.com/comparisons/{self.juicebox_comparison_slug}/</loc>", content)
+        self.assertIn(
+            f"<loc>http://example.com/comparisons/{self.linkedin_recruiter_comparison_slug}/</loc>",
+            content,
+        )
         self.assertNotIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -3914,6 +4113,10 @@ class ComparisonPageTests(TestCase):
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.zapier_agents_comparison_slug}/</loc>", content)
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.lindy_comparison_slug}/</loc>", content)
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.juicebox_comparison_slug}/</loc>", content)
+        self.assertNotIn(
+            f"<loc>http://example.com/comparisons/{self.linkedin_recruiter_comparison_slug}/</loc>",
+            content,
+        )
 
 
 @tag("batch_pages")

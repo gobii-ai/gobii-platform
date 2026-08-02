@@ -174,6 +174,105 @@ COMPARISON_CATALOG = (
         "reviewed_by": "Gobii editorial team",
         "source_reviewed": "August 2026",
     },
+    {
+        "slug": "linkedin-recruiter-vs-gobii",
+        "competitor_name": "LinkedIn Recruiter",
+        "title": "LinkedIn Recruiter vs Gobii",
+        "template_name": "comparisons/detail_linkedin_recruiter.html",
+        "seo_title": "LinkedIn Recruiter vs Gobii: AI Recruiting Comparison",
+        "seo_description": (
+            "Compare LinkedIn Recruiter and Gobii for candidate sourcing, AI research, "
+            "outreach, ATS workflows, reporting, pricing, and recruiting automation."
+        ),
+        "summary": (
+            "A recruiting comparison of LinkedIn's proprietary professional network and "
+            "Hiring Assistant with Gobii's adaptable AI workforce for work across the hiring stack."
+        ),
+        "status": COMPARISON_STATUS_PUBLISHED,
+        "target_keywords": (
+            "LinkedIn Recruiter vs Gobii",
+            "Gobii vs LinkedIn Recruiter",
+            "LinkedIn Recruiter alternative",
+            "AI recruiting platform comparison",
+        ),
+        "competitor_url": "https://business.linkedin.com/talent-solutions/recruiter",
+        "competitor_application_category": "Recruiting and talent sourcing platform",
+        "competitor_operating_system": "Web",
+        "competitor_same_as": (
+            "https://www.linkedin.com/help/recruiter/answer/a417251",
+            "https://www.linkedin.com/help/recruiter/answer/a7109304",
+        ),
+        "competitor_schema_description": (
+            "Recruiting platform for searching LinkedIn's professional network, engaging "
+            "candidates with InMail, managing projects, and using AI-assisted hiring features."
+        ),
+        "faq_items": (
+            {
+                "question": "Does Recruiter Lite include Hiring Assistant?",
+                "answer": (
+                    "No. LinkedIn's current product comparison lists Hiring Assistant as an "
+                    "add-on for Recruiter Corporate and RPS+, not Recruiter Lite or standard "
+                    "RPS. Availability is progressive, and an eligible user needs a separate "
+                    "permission and license."
+                ),
+            },
+            {
+                "question": "Can Gobii replace LinkedIn Recruiter?",
+                "answer": (
+                    "Only if you do not depend on LinkedIn's private graph, recruiter filters, "
+                    "interest signals, Jobs workflow, or InMail. Gobii can replace substantial "
+                    "research and recruiting-operations work, but it does not reproduce "
+                    "privileged LinkedIn access. Many teams will get the best result by using both."
+                ),
+            },
+            {
+                "question": "Which is better for an agency or executive-search firm?",
+                "answer": (
+                    "LinkedIn Recruiter is stronger when network access and InMail are core "
+                    "channels. Gobii becomes compelling when differentiation comes from custom "
+                    "market mapping, multi-source evidence, niche research, tailored client "
+                    "submissions, and repeatable reporting. Agencies can pair the two to increase "
+                    "recruiter capacity without weakening relationship-led work."
+                ),
+            },
+            {
+                "question": "Can Hiring Assistant evaluate GitHub and portfolios?",
+                "answer": (
+                    "Not as a current native data source according to LinkedIn's August 2026 FAQ. "
+                    "LinkedIn says Hiring Assistant uses profile data, resumes, screening "
+                    "responses, recruiting notes, and world knowledge, while external "
+                    "professional data such as GitHub is planned for future support. Gobii can "
+                    "research permitted external evidence now."
+                ),
+            },
+            {
+                "question": "Is Gobii a LinkedIn Recruiter alternative for a small business?",
+                "answer": (
+                    "It can be if the business values open-web research and flexible execution "
+                    "more than private LinkedIn signals and InMail. Recruiter Lite is the "
+                    "straightforward specialist choice for lighter LinkedIn-centered sourcing. "
+                    "Gobii is the broader choice when one AI workforce should support recruiting "
+                    "plus adjacent research and operations."
+                ),
+            },
+            {
+                "question": "Which platform handles the ATS?",
+                "answer": (
+                    "Advanced LinkedIn Recruiter tiers offer formal integrations with more than "
+                    "28 ATS partners, and some Hiring Assistant customers can evaluate ATS "
+                    "applicants through supported connected projects. Gobii is more adaptable "
+                    "when the workflow crosses a supported ATS, an unsupported or browser-only "
+                    "system, spreadsheets, files, APIs, and team communication tools."
+                ),
+            },
+        ),
+        "published_date": "2026-08-02",
+        "published_display": "August 2, 2026",
+        "last_reviewed_date": "2026-08-02",
+        "last_reviewed_display": "August 2, 2026",
+        "reviewed_by": "Gobii editorial team",
+        "source_reviewed": "August 2026",
+    },
 )
 
 

@@ -4394,6 +4394,25 @@ class ComparisonDetailView(TemplateView):
                 },
             ],
         }
+        faq_items = comparison.get("faq_items", ())
+        faq_data = None
+        if faq_items:
+            faq_data = {
+                "@context": "https://schema.org",
+                "@type": "FAQPage",
+                "@id": f"{canonical_url}#faq",
+                "mainEntity": [
+                    {
+                        "@type": "Question",
+                        "name": item["question"],
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": item["answer"],
+                        },
+                    }
+                    for item in faq_items
+                ],
+            }
 
         context.update(
             {
@@ -4410,6 +4429,7 @@ class ComparisonDetailView(TemplateView):
                 ),
                 "comparison_structured_data_json": html_safe_json_dumps(structured_data),
                 "comparison_breadcrumb_json": html_safe_json_dumps(breadcrumb_data),
+                "comparison_faq_json": html_safe_json_dumps(faq_data) if faq_data else "",
                 "canonical_url": canonical_url,
             }
         )
