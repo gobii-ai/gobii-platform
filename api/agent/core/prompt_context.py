@@ -3321,13 +3321,17 @@ def add_budget_awareness_sections(
     # Time awareness for pacing (avoid rapid-fire tool calls).
     if agent is not None:
         try:
-            anchor = getattr(agent, "last_interaction_at", None) or getattr(agent, "created_at", None)
+            anchor = getattr(agent, "last_interaction_at", None)
+            anchor_label = "last user interaction"
+            if anchor is None:
+                anchor = getattr(agent, "created_at", None)
+                anchor_label = "agent creation"
             if anchor is not None:
                 delta = dj_timezone.now() - anchor
                 sections.append(
                     (
                         "time_since_last_interaction",
-                        f"Time since last user interaction: {_format_age(delta)} (at {anchor.isoformat()}).",
+                        f"Time since {anchor_label}: {_format_age(delta)} (at {anchor.isoformat()}).",
                         2,
                         True,
                     )
@@ -4112,7 +4116,8 @@ def _get_managed_peer_first_run_instruction() -> str:
     return (
         "FIRST-RUN RECIPIENT PRECEDENCE: Only when the Current Charter routes routine coordination to a named reachable "
         "peer manager, Route 1 above does not apply: send no first-run message to either owner or manager; sleep until "
-        "assigned work or a relevant trigger. Otherwise follow Route 1 normally."
+        "assigned work or a relevant trigger. If a scheduled trigger is current, perform its explicit instruction "
+        "without falling back to an owner welcome. Otherwise follow Route 1 normally."
     )
 
 

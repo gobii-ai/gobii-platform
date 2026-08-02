@@ -1471,6 +1471,19 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
 
+    def test_creation_time_is_not_labeled_as_user_interaction(self):
+        self.agent.last_interaction_at = None
+        self.agent.save(update_fields=["last_interaction_at"])
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        self.assertIn("Time since agent creation:", user_message["content"])
+        self.assertNotIn("Time since last user interaction:", user_message["content"])
+
     def test_current_datetime_includes_user_local_time_when_timezone_saved(self):
         UserPreference.update_known_preferences(
             self.user,

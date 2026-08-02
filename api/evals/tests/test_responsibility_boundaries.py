@@ -133,6 +133,8 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         self.assertIn("Route 1 above does not apply", instruction)
         self.assertIn("send no first-run message to either owner or manager", instruction)
         self.assertIn("sleep until assigned work or a relevant trigger", instruction)
+        self.assertIn("scheduled trigger is current", instruction)
+        self.assertIn("without falling back to an owner welcome", instruction)
         self.assertIn("Otherwise follow Route 1 normally", instruction)
 
     def test_suite_registers_all_boundary_scenarios(self):
