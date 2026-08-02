@@ -211,26 +211,32 @@
       document.querySelectorAll('.gk-row-block').forEach(function (row) {
         row.hidden = key !== 'all' && row.dataset.row !== key;
       });
-      /* Hiring is a POST, browsing is a link — swap which control is shown rather than
-         re-pointing one element at two different kinds of destination. */
+      /* One button. For a category it submits the hire POST for that category's featured
+         agent; for "all" there is no featured agent, so it browses instead. */
       var ctaForm = document.getElementById('gk-cta-form');
-      var ctaBrowse = document.getElementById('gk-cta-browse');
       var hireUrl = CTA_HIRE_URLS[key];
-      if (ctaForm && ctaBrowse) {
+      if (cta) cta.textContent = CTA_LABELS[key] || CTA_LABELS.all;
+      if (ctaForm) {
         if (key !== 'all' && hireUrl) {
           ctaForm.setAttribute('action', hireUrl);
-          ctaForm.hidden = false;
-          ctaBrowse.hidden = true;
-          if (cta) cta.textContent = CTA_LABELS[key] || CTA_LABELS.all;
+          ctaForm.dataset.browse = '';
         } else {
-          ctaForm.hidden = true;
-          ctaBrowse.hidden = false;
+          ctaForm.dataset.browse = 'true';
         }
-      } else if (cta) {
-        cta.textContent = CTA_LABELS[key] || CTA_LABELS.all;
       }
+
       renderDemo(key);
       window.requestAnimationFrame(syncHeadlineHeight);
+    }
+
+    var ctaFormEl = document.getElementById('gk-cta-form');
+    if (ctaFormEl) {
+      ctaFormEl.addEventListener('submit', function (event) {
+        if (ctaFormEl.dataset.browse !== 'true') return;
+        event.preventDefault();
+        var target = document.getElementById('hire-agents');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     }
 
     cats.addEventListener('click', function (event) {

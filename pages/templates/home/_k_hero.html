@@ -33,10 +33,13 @@
   </div>
 
   <div class="gk-cta-row">
+{% comment %}
+  The primary CTA hires the featured agent for the active category — the same POST the
+  "Deploy This Employee" buttons make — rather than scrolling the page. Its action swaps
+  with the category tabs; see _k_scripts.html. When there are no categories at all it
+  falls back to browsing, which is the only case where scrolling is the right behaviour.
+{% endcomment %}
     {% if home_hero_groups %}
-    {# The primary CTA hires the featured agent for the active category — the same POST
-       the "Deploy This Employee" buttons make — rather than scrolling down the page.
-       Its action swaps with the category tabs; see _k_scripts.html. #}
     <form method="post" action="{{ home_hero_groups.0.workers.0.hire_url }}" id="gk-cta-form" data-lazy-csrf>
       <input type="hidden" name="source_page" value="home_hero_cta" />
       <input type="hidden" name="trial_onboarding" value="1" />
@@ -46,12 +49,12 @@
         Hire the {{ home_hero_groups.0.label|lower }} agent
       </button>
     </form>
-    {% endif %}
-    {# "Browse all agents" is navigation, not an action, so it stays an anchor. #}
-    <a id="gk-cta-browse" class="gk-btn" href="#hire-agents"{% if home_hero_groups %} hidden{% endif %}
+    {% else %}
+    <a id="gk-cta-browse" class="gk-btn" href="#hire-agents"
        data-analytics-cta-id="home_k_hero_browse" data-analytics-placement="hero" data-analytics-intent="browse_agents">
       Browse all agents
     </a>
+    {% endif %}
     <a class="gk-btn-quiet" href="#pricing"
        data-analytics-cta-id="home_k_hero_pricing" data-analytics-placement="hero" data-analytics-intent="view_pricing">See pricing</a>
   </div>

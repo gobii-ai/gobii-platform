@@ -23,9 +23,16 @@
   .gk-cat:focus-visible, .gk-btn:focus-visible, .gk-btn-quiet:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 2px; }
 
   .gk-hswap { display: grid; margin-top: 22px; transition: height .28s cubic-bezier(.2,.8,.3,1); overflow: visible; }
-  .gk-hgroup { grid-area: 1 / 1; align-self: start; opacity: 0; transform: translateY(6px); pointer-events: none;
-               transition: opacity .28s ease, transform .28s cubic-bezier(.2,.8,.3,1); }
-  .gk-hgroup.gk-live { opacity: 1; transform: none; pointer-events: auto; }
+  /* Inactive headlines were opacity-0 only, so they stayed in the page text and the
+     accessibility tree — a screen reader read all four. visibility removes them from
+     both while still allowing the cross-fade. */
+  .gk-hgroup { grid-area: 1 / 1; align-self: start; opacity: 0; transform: translateY(6px);
+               pointer-events: none; visibility: hidden;
+               transition: opacity .28s ease, transform .28s cubic-bezier(.2,.8,.3,1),
+                           visibility 0s linear .28s; }
+  .gk-hgroup.gk-live { opacity: 1; transform: none; pointer-events: auto; visibility: visible;
+                       transition: opacity .28s ease, transform .28s cubic-bezier(.2,.8,.3,1),
+                                   visibility 0s; }
   .gk-h1 { font-weight: 300; letter-spacing: -1.4px; color: #fff; line-height: 1.1; margin: 0 auto;
            font-size: clamp(28px, 3.6vw, 47px); text-wrap: balance; max-width: 26ch; }
   .gk-hgroup[data-g="all"] .gk-h1 { max-width: none; }
