@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ comparison_seo_title }}{% endblock %}
+
+{% block canonical_link %}
+<link rel="canonical" href="{{ canonical_url }}">
+{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="{{ comparison_seo_description }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ comparison_seo_title }}">
+<meta property="og:description" content="{{ comparison_seo_description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="Gobii">
+<meta property="og:image" content="{{ comparison_social_image_url }}">
+<meta property="og:image:alt" content="{{ comparison_social_image_alt }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ comparison_seo_title }}">
+<meta name="twitter:description" content="{{ comparison_seo_description }}">
+<meta name="twitter:image" content="{{ comparison_social_image_url }}">
+<meta name="twitter:image:alt" content="{{ comparison_social_image_alt }}">
+<script type="application/ld+json">{{ comparison_structured_data_json }}</script>
+<script type="application/ld+json">{{ comparison_breadcrumb_json }}</script>
+{% endblock %}
+
+{% block content %}
+<div class="gk-luxe">
+  <style>
+    /* comparison detail (juicebox) — page-scoped layout */
+    .cmpd-hero { max-width: 1100px; margin: 0 auto; padding: 64px 24px 0; position: relative; }
+    .cmpd-crumbs { font-size: 12.5px; margin: 0 0 14px; }
+    .cmpd-crumbs a { color: #c4b5fd; text-decoration: none; }
+    .cmpd-crumbs a:hover { color: #fff; }
+    .cmpd-hero h1 { margin-top: 12px; max-width: 28ch; }
+    .cmpd-hero .cmpd-sub { margin-top: 14px; max-width: 70ch; }
+    .cmpd-ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+    .cmpd-split { display: grid; gap: 28px; margin-top: 6px; }
+    @media (min-width: 1024px) {
+      .cmpd-split { grid-template-columns: 0.9fr 1.1fr; align-items: start; }
+      .cmpd-split-wide { grid-template-columns: 1fr 0.8fr; }
+    }
+    .cmpd-h2 { margin-top: 12px; }
+    .cmpd-prose p { color: #b7aed4; font-size: 14.5px; line-height: 1.7; margin: 0; }
+    .cmpd-prose p + p { margin-top: 14px; }
+    .cmpd-grid2 { display: grid; gap: 16px; margin-top: 26px; }
+    @media (min-width: 900px) { .cmpd-grid2 { grid-template-columns: 1fr 1fr; } }
+    .cmpd-card { padding: 24px; }
+    .cmpd-cardhead { display: flex; align-items: center; gap: 12px; }
+    .cmpd-ichip { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center;
+                  border-radius: 10px; color: #fff; flex-shrink: 0;
+                  background: linear-gradient(120deg, #7c3aed, #a855f7); }
+    .cmpd-card h2, .cmpd-card h3 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
+    .cmpd-card p { color: #b7aed4; font-size: 13.5px; line-height: 1.65; margin: 14px 0 0; }
+    .cmpd-tablewrap { margin-top: 26px; }
+    .cmpd-tablewrap thead th + th, .cmpd-tablewrap tbody td + td { text-align: left; color: #d5cdec; }
+    .cmpd-tablewrap tbody th { padding: 12px 18px; color: #fff; font-weight: 600; font-size: 13px;
+                               text-align: left; border-top: 1px solid rgba(255,255,255,.07);
+                               vertical-align: top; min-width: 150px; }
+    .cmpd-tablewrap tbody td { vertical-align: top; min-width: 210px; }
+    .cmpd-tablewrap tbody td:last-child { min-width: 120px; color: #fff; font-weight: 600; }
+    .cmpd-win { color: #6ee7b7; }
+    .cmpd-band { text-align: left; }
+    .cmpd-band h2 { text-align: left; margin-top: 12px; }
+    .cmpd-band .cmpd-prose p { color: #c4b5fd; margin: 0; }
+    .cmpd-band .cmpd-prose p + p { margin-top: 14px; }
+    .cmpd-checks { list-style: none; padding: 0; color: #d5cdec; font-size: 13.5px; line-height: 1.6; }
+    .cmpd-check-ic { color: #34d399; flex-shrink: 0; }
+    .cmpd-aside { padding: 26px; }
+    .cmpd-aside h2 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
+    .cmpd-aside p { color: #b7aed4; font-size: 13px; line-height: 1.65; margin: 14px 0 0; }
+    .cmpd-links { display: flex; flex-direction: column; gap: 12px; margin-top: 20px;
+                  font-size: 13px; font-weight: 600; }
+    .cmpd-links a { display: inline-flex; align-items: center; color: #c4b5fd; text-decoration: none; }
+    .cmpd-links a:hover { color: #fff; }
+    .cmpd-note { color: #8f83b2; font-size: 12px; line-height: 1.6; margin-top: 14px; }
+  </style>
+  <div class="gk-aurora-drift" aria-hidden="true"></div>
+<main id="main-content">
+  <section class="cmpd-hero">
+    <p class="cmpd-crumbs">
+      <a href="{% url 'proprietary:comparisons' %}" class="inline-flex items-center">
+        <i aria-hidden="true" data-lucide="arrow-left" class="mr-2 size-4"></i>
+        Comparisons
+      </a>
+    </p>
+    <p class="gk-eyebrow">Juicebox vs Gobii for recruiting</p>
+    <h1 class="gk-display">
+      Juicebox vs Gobii: recruiting tool or <span class="gk-accent">AI workforce?</span>
+    </h1>
+    <p class="gk-sub cmpd-sub">
+      Juicebox gives recruiters a polished search, contact data, and outreach stack built on 800M+ profiles. Gobii gives recruiting teams persistent AI employees that can source, research, screen, update systems, handle files, and keep the workflow moving. If you need more than another search seat, Gobii is the stronger platform.
+    </p>
+    <div class="cmpd-ctas">
+      <a href="{% url 'pages:solution' slug='recruiting' %}" class="gk-btn">
+        See Gobii for Recruiting
+        <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
+      </a>
+      <a href="{% url 'pages:public_template_detail' 'recruiting' 'candidate-sourcing-agent' %}" class="gk-btn-quiet">
+        Inspect the Sourcing Agent
+      </a>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-split">
+      <div>
+        <p class="gk-eyebrow">Executive summary</p>
+        <h2 class="gk-h2 cmpd-h2">
+          Juicebox searches a talent graph. Gobii does the recruiting work around it.
+        </h2>
+      </div>
+      <div class="cmpd-prose">
+        <p>
+          <strong class="text-white">The main difference:</strong> Juicebox is recruiting software built around candidate data and outreach. Gobii is an AI workforce platform that can execute sourcing, research, screening, reporting, and cross-system recruiting workflows.
+        </p>
+        <p>
+          Juicebox is purpose-built recruiting software. Its center of gravity is fast candidate discovery across a large aggregated profile index, followed by candidate ranking, contact enrichment, sequences, talent insights, and ATS or CRM export. For a recruiter who wants to open one application, find candidates, reveal contact details, and start outreach, it is an excellent specialist product.
+        </p>
+        <p>
+          Gobii is built around a different unit of value: the AI employee. A recruiting agent can take a role brief, search approved sources, compare candidates against explicit criteria, research work history and portfolios, read files, maintain a structured shortlist, prepare outreach, update connected systems, and return recruiter-ready reports on a schedule.
+        </p>
+        <p>
+          That distinction matters. Juicebox makes a sourcing workflow faster. Gobii can own a recurring recruiting responsibility across the open web and the tools your team already uses. Unless the proprietary 800M+ profile index and bundled contact data are the product features you specifically need, Gobii gives you a broader recruiting workforce at a lower starting price.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div>
+      <p class="gk-eyebrow">The 30-second decision</p>
+      <h2 class="gk-h2 cmpd-h2">Choose the system that matches the bottleneck.</h2>
+    </div>
+    <div class="cmpd-grid2">
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip">
+            <i aria-hidden="true" data-lucide="database" class="size-5"></i>
+          </span>
+          <h3>Choose Juicebox if...</h3>
+        </div>
+        <p>
+          Your bottleneck is access to a large candidate index, recruiter-native search, verified email and phone data, built-in outreach sequences, talent-market insights, and turnkey exports into a supported ATS or CRM. You want recruiting software, and you want it ready immediately.
+        </p>
+      </article>
+
+      <article class="gk-card-edge cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip">
+            <i aria-hidden="true" data-lucide="users" class="size-5"></i>
+          </span>
+          <h3>Choose Gobii if...</h3>
+        </div>
+        <p>
+          Your bottleneck is the work: searching multiple sources, researching fit, reading resumes, organizing evidence, using websites, updating spreadsheets or systems, preparing deliverables, and repeating the process for every role. You want AI recruiting capacity, not another tool for recruiters to operate.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div>
+      <p class="gk-eyebrow">At a glance</p>
+      <h2 class="gk-h2 cmpd-h2">Gobii wins when the evaluation extends beyond candidate search.</h2>
+    </div>
+    <div class="gk-tablewrap cmpd-tablewrap">
+      <table style="min-width:1180px">
+        <thead>
+          <tr>
+            <th scope="col">Recruiting dimension</th>
+            <th scope="col">Gobii</th>
+            <th scope="col">Juicebox</th>
+            <th scope="col">Edge</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Candidate universe</th>
+            <td>Searches public, connected, and team-approved sources</td>
+            <td>Search across 800M+ profiles aggregated from 30+ sources</td>
+            <td>Juicebox</td>
+          </tr>
+          <tr>
+            <th scope="row">Recruiter search experience</th>
+            <td>Delegate a brief in natural language and refine through conversation</td>
+            <td>Purpose-built recruiting search, filters, ranking, projects, and talent insights</td>
+            <td>Juicebox</td>
+          </tr>
+          <tr>
+            <th scope="row">Search outside a fixed database</th>
+            <td>Can investigate niche boards, portfolios, GitHub, company sites, directories, and approved portals</td>
+            <td>Optimized around the Juicebox profile graph and connected recruiting workflow</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Candidate research</th>
+            <td>Custom evidence gathering, source links, role-fit analysis, gaps, portfolios, and work-history context</td>
+            <td>AI profile analysis, spotlighting, ranking, and custom recruiting criteria</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Contact enrichment</th>
+            <td>Can use connected enrichment providers or approved external tools</td>
+            <td>Native contact credits for emails and phone numbers</td>
+            <td>Juicebox</td>
+          </tr>
+          <tr>
+            <th scope="row">Outreach sequences</th>
+            <td>Custom drafts, follow-up workflows, approvals, email, SMS, and connected tools</td>
+            <td>Native personalized sequences, mailboxes, follow-ups, and performance analytics</td>
+            <td>Juicebox</td>
+          </tr>
+          <tr>
+            <th scope="row">Browser automation</th>
+            <td>Core runtime for multistep website work, authenticated sessions, forms, downloads, and screenshots</td>
+            <td>Recruiting agents operate within Juicebox's sourcing and outreach product</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Custom recruiting workflows</th>
+            <td>Adaptable charters, schedules, tools, files, approvals, events, and output formats</td>
+            <td>Strong flexibility inside recruiting search, evaluation, shortlist, and outreach workflows</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Resumes and files</th>
+            <td>Reads attachments and workspace files; produces reports, CSVs, PDFs, screenshots, and structured records</td>
+            <td>Candidate profiles and recruiting exports are the primary artifacts</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">ATS and CRM work</th>
+            <td>Connected apps, API and webhook workflows, plus browser execution where appropriate</td>
+            <td>41 ATS and 21 CRM integrations advertised, with CSV export as a fallback</td>
+            <td>Depends</td>
+          </tr>
+          <tr>
+            <th scope="row">Recruiter-ready deliverables</th>
+            <td>Arbitrary shortlists, scorecards, client briefs, market maps, charts, spreadsheets, and scheduled reports</td>
+            <td>Search results, shortlists, contact exports, outreach, and talent insights</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Multiple AI specialists</th>
+            <td>Separate persistent employees for sourcing, research, resume review, reporting, coordination, or other business functions</td>
+            <td>Multiple recruiting agents can work independently across different job openings</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Beyond recruiting</th>
+            <td>The same platform supports sales, operations, research, monitoring, customer success, and reporting</td>
+            <td>Purpose-built for recruiting and talent workflows</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Deployment and source access</th>
+            <td>Managed cloud or free MIT-licensed self-hosting</td>
+            <td>Managed proprietary SaaS</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Starting economics</th>
+            <td>Pro is $50/month with 1,000 tasks and unlimited always-on agents; self-hosted software is free</td>
+            <td>Starter is $99/seat/month annually; Juicebox Agents are $199/agent/month</td>
+            <td><span class="cmpd-win">Gobii</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cmpd-note">
+      “Edge” reflects the stated capability and this page's recruiting-operations use case, not a universal product score. Pricing is public list pricing reviewed in {{ comparison.source_reviewed }}; plan terms and usage allowances can change.
+    </p>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-split">
+      <div>
+        <p class="gk-eyebrow">Where Juicebox wins</p>
+        <h2 class="gk-h2 cmpd-h2">It compresses search, contact data, and outreach into one recruiting product.</h2>
+      </div>
+      <div class="cmpd-prose">
+        <p>
+          Juicebox's strongest advantage is immediate access to its candidate universe. Recruiters can search more than 800 million profiles across more than 30 sources, evaluate thousands of profiles against hiring criteria, reveal contact data, and move candidates into outreach without assembling separate data vendors.
+        </p>
+        <p>
+          Its interface is unapologetically recruiter-first. Searches, filters, projects, candidate analysis, market insights, mailboxes, sequences, response analytics, and supported ATS or CRM integrations expose familiar recruiting concepts directly. That specialization can make Juicebox faster to adopt for teams with a conventional outbound sourcing motion.
+        </p>
+        <p>
+          Juicebox also offers recruiting agents that calibrate searches conversationally, assess candidates, personalize outreach, and run with manual checkpoints or greater autonomy. Gobii should not be chosen on the mistaken assumption that Juicebox is merely a static search box. It is a capable recruiting automation product.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-grid2" style="margin-top:0;gap:40px">
+      <div>
+        <p class="gk-eyebrow">Where Gobii pulls ahead</p>
+        <h2 class="gk-h2 cmpd-h2">It turns the whole sourcing routine into a delegated responsibility.</h2>
+        <div class="cmpd-prose" style="margin-top:18px">
+          <p>
+            Recruiting rarely starts and ends inside one database. Strong candidates appear on professional profiles, portfolios, GitHub, association directories, company team pages, conference sites, niche communities, spreadsheets, and internal lists. Gobii can move across approved sources, preserve context, gather evidence, and return one structured result.
+          </p>
+          <p>
+            The same employee can wake every morning, revisit a search, evaluate new profiles against the role brief, flag gaps, update a shortlist, prepare personalized outreach angles, and notify the recruiter. It can also read resumes and job descriptions, use browser-only systems, organize files, and create client or hiring-manager deliverables.
+          </p>
+          <p>
+            This is the practical Gobii vs Juicebox distinction: Juicebox improves the recruiting application. Gobii expands the recruiting team. When the job crosses tools, sources, files, and review steps, the broader employee runtime matters more than the elegance of a single search interface.
+          </p>
+          <p>
+            For teams evaluating a Juicebox alternative, Gobii is the stronger choice when adaptability, recurring execution, and finished recruiting deliverables matter more than access to one vendor's candidate graph.
+          </p>
+        </div>
+      </div>
+      <div>
+        <p class="gk-eyebrow">One platform, specialized roles</p>
+        <ul class="cmpd-checks mt-6 grid gap-3 sm:grid-cols-2">
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Candidate sourcing</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Profile research</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Resume review</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Portfolio analysis</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Outreach preparation</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>ATS coordination</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Pipeline reporting</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Client-ready market maps</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-split">
+      <div>
+        <p class="gk-eyebrow">Pricing reality</p>
+        <h2 class="gk-h2 cmpd-h2">Gobii starts at half the price and does not meter AI employees by seat.</h2>
+      </div>
+      <div class="cmpd-prose">
+        <p>
+          Juicebox's public annual pricing starts at $99 per seat each month for Starter and $179 per seat each month for Growth. The recruiting agent product is listed at an additional $199 per agent each month. Those plans include valuable candidate data, contact credits, exports, and recruiting-specific functionality, so the comparison is not price alone.
+        </p>
+        <p>
+          Gobii Pro is $50 per month with 1,000 included tasks and unlimited always-on agents. Scale is $250 per month with 10,000 tasks, and Team is $50 per seat each month with pooled task credits. The MIT-licensed self-hosted platform is free, excluding the infrastructure and model usage you operate yourself.
+        </p>
+        <p>
+          If the proprietary candidate graph replaces separate data subscriptions, Juicebox can justify its premium. If you already have candidate sources and need more capacity to research, organize, follow up, and operate across systems, Gobii's economics are difficult to ignore.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="cmpd-grid2">
+      <article class="gk-card-glass cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip">
+            <i aria-hidden="true" data-lucide="refresh-cw" class="size-5"></i>
+          </span>
+          <h2>Can Gobii replace Juicebox?</h2>
+        </div>
+        <p>
+          Gobii can replace much of the manual sourcing, research, screening, file handling, reporting, and cross-system coordination around recruiting. It does not claim to reproduce Juicebox's proprietary 800M+ profile index or bundle the same native contact dataset. Choose based on whether the data asset or the adaptable worker is more important to you.
+        </p>
+      </article>
+
+      <article class="gk-card-glass cmpd-card">
+        <div class="cmpd-cardhead">
+          <span class="cmpd-ichip">
+            <i aria-hidden="true" data-lucide="combine" class="size-5"></i>
+          </span>
+          <h2>Can Gobii work alongside Juicebox?</h2>
+        </div>
+        <p>
+          Yes. A team can use Juicebox for candidate discovery and contact data while Gobii handles supplementary research, resume and portfolio review, custom scorecards, browser-only sources, hiring-manager reports, spreadsheet updates, and adjacent operations. Gobii becomes the workforce layer around the specialist recruiting database.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section class="gk-section gk-section-plain" style="padding-top:56px">
+    <div class="gk-band cmpd-band">
+      <div style="max-width:830px">
+        <p class="gk-eyebrow">Bottom line</p>
+        <h2>Buy Juicebox for its database. Choose Gobii for the recruiting workforce.</h2>
+        <div class="cmpd-prose" style="margin-top:16px">
+          <p>
+            Juicebox is one of the clearer choices for a recruiter who wants an integrated candidate graph, contact enrichment, and outreach application. But if your real need is an AI teammate that can own repeatable sourcing and research work across the web, files, systems, and reporting loops, Gobii is the more capable and adaptable choice—and it keeps creating value outside recruiting after the role is filled.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="gk-section gk-closer">
+    <div class="cmpd-split cmpd-split-wide">
+      <div>
+        <p class="gk-eyebrow">Put an AI recruiter to work</p>
+        <h2 class="gk-h2 cmpd-h2">Start with candidate sourcing. Expand into the recruiting workflow your team actually runs.</h2>
+        <div class="cmpd-prose" style="margin-top:18px;max-width:62ch">
+          <p>
+            Give Gobii a role brief, preferred sources, evaluation criteria, exclusions, review rules, and delivery schedule. Your recruiting employee can return a source-linked shortlist, adapt to feedback, and keep working while recruiters focus on conversations and hiring decisions.
+          </p>
+        </div>
+        <div class="cmpd-ctas" style="margin-top:28px">
+          <a href="{% url 'pages:solution' slug='recruiting' %}" class="gk-btn">
+            Explore Gobii Recruiting
+            <i aria-hidden="true" data-lucide="arrow-right" class="size-4"></i>
+          </a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="gk-btn-quiet">
+            Review the Open Source Repo
+          </a>
+        </div>
+      </div>
+      <aside class="gk-card-glass cmpd-aside">
+        <h2>Source note</h2>
+        <p>
+          This comparison is based on public Gobii and Juicebox product, recruiting-agent, outreach, pricing, documentation, and repository information reviewed in {{ comparison.source_reviewed }}.
+        </p>
+        <p>
+          Gobii publishes this page and has a commercial interest in the comparison. Juicebox capabilities are described from its own public materials, and its genuine strengths are included to make the decision useful.
+        </p>
+        <p>
+          Last reviewed {{ comparison.last_reviewed_display }} by {{ comparison.reviewed_by }}.
+        </p>
+        <div class="cmpd-links">
+          <a href="https://juicebox.ai/peoplegpt" target="_blank" rel="noopener">
+            Juicebox candidate search
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://juicebox.ai/agents" target="_blank" rel="noopener">
+            Juicebox recruiting agents
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://juicebox.ai/outreach" target="_blank" rel="noopener">
+            Juicebox contact data and outreach
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://juicebox.ai/pricing" target="_blank" rel="noopener">
+            Juicebox pricing and integrations
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://gobii.ai/solutions/recruiting/" target="_blank" rel="noopener">
+            Gobii recruiting agents
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://gobii.ai/library/recruiting/candidate-sourcing-agent/" target="_blank" rel="noopener">
+            Gobii Candidate Sourcing Agent
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://gobii.ai/pricing/" target="_blank" rel="noopener">
+            Gobii pricing
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://gobii.ai/solutions/engineering/" target="_blank" rel="noopener">
+            Gobii browser and agent runtime
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+          <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener">
+            Gobii open-source repository
+            <i aria-hidden="true" data-lucide="external-link" class="ml-2 size-4"></i>
+          </a>
+        </div>
+      </aside>
+    </div>
+  </section>
+</main>
+</div>
+{% endblock %}

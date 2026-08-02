@@ -136,6 +136,44 @@ COMPARISON_CATALOG = (
         "reviewed_by": "Gobii editorial team",
         "source_reviewed": "June 2026",
     },
+    {
+        "slug": "juicebox-vs-gobii",
+        "competitor_name": "Juicebox",
+        "title": "Juicebox vs Gobii",
+        "template_name": "comparisons/detail_juicebox.html",
+        "seo_title": "Juicebox vs Gobii: AI Recruiting Platform Comparison | Gobii",
+        "seo_description": (
+            "Comparing Juicebox vs Gobii for recruiting? See when to choose Juicebox's "
+            "candidate database and when Gobii's AI employees are the stronger recruiting workforce."
+        ),
+        "summary": (
+            "A recruiting-first comparison of Juicebox's candidate search and outreach stack "
+            "with Gobii's customizable AI employees for end-to-end recruiting work."
+        ),
+        "status": COMPARISON_STATUS_PUBLISHED,
+        "target_keywords": (
+            "Juicebox vs Gobii",
+            "Gobii vs Juicebox",
+            "Juicebox alternative",
+            "AI recruiting platform comparison",
+        ),
+        "competitor_url": "https://juicebox.ai/",
+        "competitor_application_category": "AI recruiting and candidate sourcing platform",
+        "competitor_operating_system": "Web",
+        "competitor_same_as": (
+            "https://juicebox.ai/peoplegpt",
+            "https://juicebox.ai/agents",
+        ),
+        "competitor_schema_description": (
+            "AI recruiting platform for candidate search, talent analysis, contact enrichment, "
+            "outreach, and recruiting agents."
+        ),
+        "published_date": "2026-08-02",
+        "last_reviewed_date": "2026-08-02",
+        "last_reviewed_display": "August 2, 2026",
+        "reviewed_by": "Gobii editorial team",
+        "source_reviewed": "August 2026",
+    },
 )
 
 

@@ -3082,6 +3082,7 @@ class ComparisonPageTests(TestCase):
     n8n_comparison_slug = "n8n-vs-gobii"
     zapier_agents_comparison_slug = "zapier-agents-vs-gobii"
     lindy_comparison_slug = "lindy-vs-gobii"
+    juicebox_comparison_slug = "juicebox-vs-gobii"
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_comparisons_page_renders_with_metadata_and_published_links(self):
@@ -3228,6 +3229,10 @@ class ComparisonPageTests(TestCase):
         self.assertIsNotNone(lindy_card)
         self.assertIn("Lindy vs Gobii", lindy_card.get_text(" ", strip=True))
         self.assertIn("Published", lindy_card.get_text(" ", strip=True))
+        juicebox_card = soup.find("article", {"id": "juicebox"})
+        self.assertIsNotNone(juicebox_card)
+        self.assertIn("Juicebox vs Gobii", juicebox_card.get_text(" ", strip=True))
+        self.assertIn("Published", juicebox_card.get_text(" ", strip=True))
         self.assertIsNotNone(
             soup.find(
                 "a",
@@ -3250,6 +3255,12 @@ class ComparisonPageTests(TestCase):
             soup.find(
                 "a",
                 {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.lindy_comparison_slug})},
+            )
+        )
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.juicebox_comparison_slug})},
             )
         )
 
@@ -3713,6 +3724,89 @@ class ComparisonPageTests(TestCase):
         self.assertIsNone(main.find("a", {"href": "https://github.com/gobii-ai"}))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_juicebox_comparison_page_renders_with_recruiting_positioning_and_sources(self):
+        response = self.client.get(
+            reverse("proprietary:comparison_detail", kwargs={"slug": self.juicebox_comparison_slug})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        comparison = page_views.get_comparison(self.juicebox_comparison_slug)
+        expected_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
+
+        self.assertEqual(soup.title.get_text(strip=True), comparison["seo_title"])
+        self.assertEqual(
+            soup.find("meta", {"name": "description"}).get("content"),
+            comparison["seo_description"],
+        )
+        self.assertEqual(soup.find("link", {"rel": "canonical"}).get("href"), expected_url)
+        self.assertEqual(
+            soup.find("meta", {"property": "og:image:alt"}).get("content"),
+            "Gobii and Juicebox AI agent platform comparison",
+        )
+
+        json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
+        self.assertEqual(len(json_ld_scripts), 2)
+        structured_data = json.loads(json_ld_scripts[0].string)
+        self.assertEqual(structured_data["@type"], "WebPage")
+        self.assertEqual(structured_data["@id"], f"{expected_url}#webpage")
+        self.assertEqual(structured_data["datePublished"], "2026-08-02")
+        self.assertEqual(structured_data["dateModified"], "2026-08-02")
+        self.assertEqual(
+            [item["name"] for item in structured_data["about"]],
+            ["Gobii", "Juicebox"],
+        )
+        self.assertEqual(
+            structured_data["about"][1]["applicationCategory"],
+            "AI recruiting and candidate sourcing platform",
+        )
+        self.assertEqual(structured_data["about"][1]["operatingSystem"], "Web")
+        self.assertEqual(
+            structured_data["about"][1]["sameAs"],
+            list(comparison["competitor_same_as"]),
+        )
+        self.assertEqual(structured_data["about"][1]["url"], "https://juicebox.ai/")
+
+        breadcrumb_data = json.loads(json_ld_scripts[1].string)
+        self.assertEqual(
+            [item["name"] for item in breadcrumb_data["itemListElement"]],
+            ["Home", "Comparisons", "Juicebox vs Gobii"],
+        )
+
+        headings = soup.find_all("h1")
+        self.assertEqual(len(headings), 1)
+        content = soup.get_text(" ", strip=True)
+        self.assertIn("Juicebox vs Gobii: recruiting tool or AI workforce?", content)
+        self.assertIn("Juicebox searches a talent graph. Gobii does the recruiting work around it.", content)
+        self.assertIn(
+            "Juicebox is recruiting software built around candidate data and outreach. "
+            "Gobii is an AI workforce platform that can execute sourcing, research, "
+            "screening, reporting, and cross-system recruiting workflows.",
+            content,
+        )
+        self.assertIn("Choose Juicebox if", content)
+        self.assertIn("Choose Gobii if", content)
+        self.assertIn("Buy Juicebox for its database. Choose Gobii for the recruiting workforce.", content)
+        self.assertIn("Gobii vs Juicebox distinction", content)
+        self.assertIn("Juicebox alternative", content)
+        self.assertIn("Last reviewed August 2, 2026 by Gobii editorial team.", content)
+        self.assertNotContains(response, "https://js.stripe.com")
+        self.assertNotContains(response, "js/account_auth_forms.js")
+        self.assertNotContains(response, "js/cta_signup_modal.js")
+
+        main = soup.find("main")
+        self.assertIsNotNone(main)
+        self.assertIsNotNone(main.find("a", {"href": "https://juicebox.ai/peoplegpt"}))
+        self.assertIsNotNone(main.find("a", {"href": "https://juicebox.ai/agents"}))
+        self.assertIsNotNone(main.find("a", {"href": "https://juicebox.ai/outreach"}))
+        self.assertIsNotNone(main.find("a", {"href": "https://juicebox.ai/pricing"}))
+        self.assertIsNotNone(main.find("a", {"href": "https://gobii.ai/solutions/recruiting/"}))
+        self.assertIsNotNone(
+            main.find("a", {"href": "https://gobii.ai/library/recruiting/candidate-sourcing-agent/"})
+        )
+        self.assertIsNotNone(main.find("a", {"href": "https://github.com/gobii-ai/gobii-platform"}))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_footer_includes_comparisons_hub_link_in_proprietary_mode(self):
         response = self.client.get(reverse("proprietary:comparisons"))
 
@@ -3749,6 +3843,12 @@ class ComparisonPageTests(TestCase):
         )
         self.assertIsNotNone(lindy_link)
         self.assertEqual(lindy_link.get_text(strip=True), "Lindy vs Gobii")
+        juicebox_link = footer.find(
+            "a",
+            {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.juicebox_comparison_slug})},
+        )
+        self.assertIsNotNone(juicebox_link)
+        self.assertEqual(juicebox_link.get_text(strip=True), "Juicebox vs Gobii")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_comparison_pages_and_footer_column_are_absent_in_community_mode(self):
@@ -3770,6 +3870,10 @@ class ComparisonPageTests(TestCase):
             reverse("proprietary:comparison_detail", kwargs={"slug": self.lindy_comparison_slug})
         )
         self.assertEqual(lindy_detail_response.status_code, 404)
+        juicebox_detail_response = self.client.get(
+            reverse("proprietary:comparison_detail", kwargs={"slug": self.juicebox_comparison_slug})
+        )
+        self.assertEqual(juicebox_detail_response.status_code, 404)
 
         home_response = self.client.get(reverse("pages:home"))
         self.assertEqual(home_response.status_code, 200)
@@ -3795,6 +3899,7 @@ class ComparisonPageTests(TestCase):
         self.assertIn(f"<loc>http://example.com/comparisons/{self.n8n_comparison_slug}/</loc>", content)
         self.assertIn(f"<loc>http://example.com/comparisons/{self.zapier_agents_comparison_slug}/</loc>", content)
         self.assertIn(f"<loc>http://example.com/comparisons/{self.lindy_comparison_slug}/</loc>", content)
+        self.assertIn(f"<loc>http://example.com/comparisons/{self.juicebox_comparison_slug}/</loc>", content)
         self.assertNotIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
@@ -3808,6 +3913,7 @@ class ComparisonPageTests(TestCase):
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.n8n_comparison_slug}/</loc>", content)
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.zapier_agents_comparison_slug}/</loc>", content)
         self.assertNotIn(f"<loc>http://example.com/comparisons/{self.lindy_comparison_slug}/</loc>", content)
+        self.assertNotIn(f"<loc>http://example.com/comparisons/{self.juicebox_comparison_slug}/</loc>", content)
 
 
 @tag("batch_pages")
