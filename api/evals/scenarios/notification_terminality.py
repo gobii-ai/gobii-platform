@@ -708,30 +708,51 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
         )
         first = self.inject_message(
             agent_id,
-            "Fetch https://status.example.test/incidents/INC-472 and tell me its current status.",
+            (
+                "Fetch https://tracker.example.test/tickets?ids=22,144,233 and give me the exact current title and "
+                "status for all three tickets."
+            ),
             trigger_processing=False,
             eval_run_id=run_id,
         )
         follow_ups = []
+        source_attempts = 0
 
         def complete_source_then_interrupt(_agent, _params):
-            follow_ups.append(
-                self.inject_message(
-                    agent_id,
-                    "Also include the current owner when you report it.",
-                    trigger_processing=False,
-                    eval_run_id=run_id,
+            nonlocal source_attempts
+            source_attempts += 1
+            if source_attempts == 1:
+                follow_ups.append(
+                    self.inject_message(
+                        agent_id,
+                        (
+                            "Separately, POST https://tracker.example.test/tickets/515/close to close #515 as "
+                            "already fixed."
+                        ),
+                        trigger_processing=False,
+                        eval_run_id=run_id,
+                    )
                 )
-            )
+                return {
+                    "status": "ok",
+                    "status_code": 200,
+                    "url": "https://tracker.example.test/tickets?ids=22,144,233",
+                    "content": {
+                        "tickets": [
+                            {"id": 22, "title": "CSV exports omit quoted fields", "status": "open"},
+                            {"id": 144, "title": "Peer handoff loses attribution", "status": "triaged"},
+                            {"id": 233, "title": "Scheduled digest duplicates rows", "status": "fixed"},
+                        ]
+                    },
+                }
             return {
                 "status": "ok",
                 "status_code": 200,
-                "url": "https://status.example.test/incidents/INC-472",
+                "url": "https://tracker.example.test/tickets/515/close",
                 "content": {
-                    "incident_id": "INC-472",
-                    "status": "resolved",
-                    "owner": "Dana Ruiz",
-                    "resolved_at": "2026-08-01T22:15:00Z",
+                    "ticket_id": 515,
+                    "status": "closed",
+                    "resolution": "already_fixed",
                 },
             }
 
@@ -786,7 +807,7 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
         source_calls = [call for call in calls if call.tool_name == "http_request"]
         replies = [call for call in calls if call.tool_name == "send_chat_message"]
         reply = str((replies[0].tool_params or {}).get("body") or "") if len(replies) == 1 else ""
-        exact_shape = len(follow_ups) == 1 and len(source_calls) == 1 and len(replies) == 1
+        exact_shape = len(follow_ups) == 1 and len(source_calls) == 2 and len(replies) == 1
         if not exact_shape:
             self.record_task_result(
                 run_id,
@@ -794,7 +815,7 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_reconciled_delivery",
                 observed_summary=(
-                    f"Expected one source call, one follow-up, and one final reply; saw "
+                    f"Expected two source/action calls, one follow-up, and one final reply; saw "
                     f"source={len(source_calls)}, follow_up={len(follow_ups)}, reply={len(replies)}."
                 ),
                 artifacts={"tool_calls": calls},
@@ -802,13 +823,18 @@ class InterruptedCompletedOutcomeScenario(EvalScenario, ScenarioExecutionTools):
             return
         choice, reasoning = self.llm_judge(
             question=(
-                "Does the single reply reconcile both requests by reporting incident INC-472 as resolved and naming "
-                "Dana Ruiz as owner, without claiming the lookup was lost, restarting it, or omitting either result?"
+                "Does the single reply reconcile both independent requests by reporting the exact current title and "
+                "status for tickets #22, #144, and #233, and confirming from the successful POST that #515 closed, "
+                "without omitting the earlier completed lookup or inventing different states?"
             ),
             context=(
                 f"Initial request:\n{first.body}\n\n"
                 f"Follow-up:\n{follow_ups[0].body}\n\n"
-                "Completed source result:\nINC-472; status=resolved; owner=Dana Ruiz.\n\n"
+                "Completed first result:\n"
+                "#22 CSV exports omit quoted fields (open)\n"
+                "#144 Peer handoff loses attribution (triaged)\n"
+                "#233 Scheduled digest duplicates rows (fixed)\n\n"
+                "Completed second result:\n#515 closed; resolution=already_fixed.\n\n"
                 f"Reply:\n{reply}"
             ),
             options=["Reconciles both exactly once", "Drops, repeats, or contradicts an outcome"],
