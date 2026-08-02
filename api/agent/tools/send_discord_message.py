@@ -95,16 +95,20 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
         return {"status": "error", "message": str(exc)}
     if not body and not resolved_attachments:
         return {"status": "error", "message": "message is required when attachments is empty."}
-    try:
-        subscription = resolve_active_subscription(
-            agent,
-            channel_id=channel_id,
-            channel_name=channel_name,
-            guild_id=guild_id,
-        )
-    except DiscordBotIntegrationError as exc:
-        return {"status": "error", "message": str(exc)}
-    channel_id = subscription.channel_id
+    subscription = None
+    if channel_name:
+        try:
+            subscription = resolve_active_subscription(
+                agent,
+                channel_id=channel_id,
+                channel_name=channel_name,
+                guild_id=guild_id,
+            )
+        except DiscordBotIntegrationError as exc:
+            return {"status": "error", "message": str(exc)}
+        channel_id = subscription.channel_id
+    elif not channel_id:
+        return {"status": "error", "message": "channel_id or channel_name is required."}
     try:
         message = send_channel_message(
             agent,
@@ -117,10 +121,11 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
             "message_id": str(message.id),
             "discord_message_id": str((message.raw_payload or {}).get("discord_message_id") or ""),
             "channel_id": channel_id,
-            "channel_name": subscription.channel_name,
-            "guild_id": subscription.guild.guild_id,
             "attachment_count": len(resolved_attachments),
         }
+        if subscription:
+            result["channel_name"] = subscription.channel_name
+            result["guild_id"] = subscription.guild.guild_id
         if params.get("will_continue_work") is False:
             result["auto_sleep_ok"] = True
         return result
