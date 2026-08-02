@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from api.agent.core import event_processing as ep
 from api.agent.comms.routing import (
+    InboundRoutingScope,
     advance_inbound_routing_scope,
     bind_inbound_routing_scope,
     capture_inbound_routing_scope,
@@ -2815,8 +2816,83 @@ class ImpliedSendTests(TestCase):
             )
             advanced = advance_inbound_routing_scope(self.agent, scope)
             self.assertEqual(advanced.message_id, follow_up.id)
+            self.assertEqual(advanced.previous_message_id, requester_message.id)
+
+            advanced_token = bind_inbound_routing_scope(advanced)
+            try:
+                same_conversation_workload = _get_queued_workload_context(self.agent)
+            finally:
+                reset_inbound_routing_scope(advanced_token)
+            self.assertIn("newer input in this same conversation", same_conversation_workload)
+            self.assertIn("completed but not yet delivered", same_conversation_workload)
+            self.assertIn("correction or cancellation", same_conversation_workload)
         finally:
             reset_inbound_routing_scope(token)
+
+    def test_background_turn_does_not_treat_historical_inbound_as_unanswered(self):
+        self._add_inbound_web_message("An earlier request that already triggered its own turn.")
+        finalized = ep._FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        token = bind_inbound_routing_scope(
+            InboundRoutingScope(agent_id=self.agent.id, message_id=None)
+        )
+        try:
+            self.assertFalse(
+                ep._should_continue_for_unanswered_inbound_after_tools(
+                    self.agent,
+                    finalized,
+                )
+            )
+        finally:
+            reset_inbound_routing_scope(token)
+
+    def test_nested_custom_tool_sleep_signal_ends_background_work(self):
+        prepared = ep._PreparedToolExecution(
+            idx=1,
+            tool_name="custom_poll_helper",
+            tool_params={},
+            exec_params={},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call_poll",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason=None,
+        )
+        finalized = ep._finalize_tool_batch(
+            self.agent,
+            [
+                ep._ToolExecutionOutcome(
+                    prepared=prepared,
+                    result={
+                        "status": "ok",
+                        "result": {
+                            "status": "ok",
+                            "message_count": 0,
+                            "messages": [],
+                            "next_action": "sleep",
+                        },
+                    },
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+            ],
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.result_directed_sleep)
+        self.assertFalse(finalized.followup_required)
 
     def test_proactive_run_does_not_treat_historical_email_as_current_requester(self):
         start_web_session(self.agent, self.user)

@@ -4,6 +4,9 @@ from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401
 from api.evals.scenarios.notification_terminality import (
+    CUSTOM_TOOL_IDLE_RESULT_SLEEPS,
+    EXTERNAL_ACTION_EVIDENCE_INTEGRITY,
+    INTERRUPTED_COMPLETED_OUTCOME,
     NOTIFICATION_TERMINALITY_COMPLETED,
     NOTIFICATION_TERMINALITY_REMAINING,
     NON_RETRYABLE_SOURCE_TERMINALITY,
@@ -30,6 +33,9 @@ class NotificationTerminalityEvalTests(SimpleTestCase):
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), NOTIFICATION_TERMINALITY_SCENARIO_SLUGS)
         self.assertIn(NON_RETRYABLE_SOURCE_TERMINALITY, suite.scenario_slugs)
+        self.assertIn(EXTERNAL_ACTION_EVIDENCE_INTEGRITY, suite.scenario_slugs)
+        self.assertIn(INTERRUPTED_COMPLETED_OUTCOME, suite.scenario_slugs)
+        self.assertIn(CUSTOM_TOOL_IDLE_RESULT_SLEEPS, suite.scenario_slugs)
 
     def test_completed_side_effects_reject_direct_notification_repeats(self):
         case = next(case for case in _CASES if case.slug == NOTIFICATION_TERMINALITY_COMPLETED)
@@ -105,3 +111,10 @@ class NotificationTerminalityEvalTests(SimpleTestCase):
         )
 
         self.assertFalse(passed)
+
+    def test_idle_custom_result_is_terminal_without_a_followup_completion(self):
+        case = next(case for case in _CASES if case.slug == CUSTOM_TOOL_IDLE_RESULT_SLEEPS)
+
+        self.assertTrue(case.result_is_terminal)
+        self.assertEqual(case.custom_result["result"]["next_action"], "sleep")
+        self.assertFalse(case.notifications_remain)

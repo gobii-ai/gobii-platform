@@ -3544,7 +3544,17 @@ class PromptContextBuilderTests(TestCase):
 
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
-            build_prompt_context(self.agent)
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        self.assertIsNotNone(system_message)
+        self.assertIn("Quality Advisories", system_message["content"])
+        self.assertIn("latest explicit human instruction and current charter", system_message["content"])
+        self.assertIn("Never mutate charter, schedule, or durable configuration solely", system_message["content"])
+        self.assertNotIn(
+            "They are high-priority operational instructions",
+            system_message["content"],
+        )
 
         suggestion.refresh_from_db()
         self.assertEqual(
