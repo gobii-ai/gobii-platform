@@ -1,61 +1,75 @@
 {% load static %}
 {% comment %}
-  Social proof rail. Customers lead in an even grid and the investor sits beneath them,
-  all inside one contained bar so it reads as a single object rather than two stacked
-  rows under the hero.
+  Social proof rail.
 
-  The investor mark keeps its own colour (and is brightened, because their wordmark is a
-  muted mauve gradient that otherwise disappears into the panel). Customer marks are
+  The investor mark is a seal straddling the panel's top edge — deliberately a separate
+  object from the customer row. When both captions shared one flex row they stacked on
+  phones and read as a single broken sentence ("trusted by teams at backed by"); making
+  the investor structurally separate means that cannot recur at any width.
+
+  The investor mark keeps its own colour and is brightened, because their wordmark is a
+  muted mauve gradient that otherwise disappears into the panel. Customer marks are
   normalised to white at 72% so six different brands read as one row, and their heights
   are optically balanced — wide wordmarks sit shorter than compact lockups — rather than
   uniform. All assets vendored locally; nothing is hotlinked.
 {% endcomment %}
 <style>
-  .gk-sp-bar { max-width: 1000px; margin: 0 auto; padding: clamp(20px,2.6vw,26px) clamp(18px,3vw,32px);
-               border-radius: 18px; background: rgba(255,255,255,.03);
-               border: 1px solid rgba(255,255,255,.08); }
-  /* caption and investor share one line, so nothing stacks under the hero and there is
-     no footer rule cutting the panel in half */
-  .gk-sp-top { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
-  .gk-sp-lab { font-size: 10px; letter-spacing: 2.2px; font-weight: 600; color: #8b7fb8;
-               text-transform: uppercase; }
-  .gk-sp-div { width: 1px; height: 15px; background: rgba(255,255,255,.14); }
-  .gk-sp-ocv { display: inline-flex; align-items: center; gap: 8px; color: #8b7fb8; font-size: 11.5px; }
-  .gk-sp-ocv img { height: 22px; width: auto; filter: brightness(1.75) saturate(1.15); }
+  .gk-sp-panel { position: relative; max-width: 1000px; margin: 0 auto;
+                 padding: clamp(30px,3.4vw,38px) clamp(18px,3vw,30px) clamp(22px,2.6vw,28px);
+                 border-radius: 20px; background: rgba(255,255,255,.03);
+                 border: 1px solid rgba(255,255,255,.09); }
+  /* the seal sits on the border itself, so it reads as applied to the panel */
+  .gk-sp-seal { position: absolute; top: 0; left: 50%; transform: translate(-50%,-50%);
+                display: inline-flex; align-items: center; gap: 9px; white-space: nowrap;
+                padding: 7px 16px; border-radius: 999px; background: #150d2a;
+                border: 1px solid rgba(255,255,255,.14);
+                box-shadow: 0 6px 22px rgba(3,1,12,.6); }
+  .gk-sp-seal span { font-size: 9px; letter-spacing: 1.6px; font-weight: 700; color: #8b7fb8;
+                     text-transform: uppercase; }
+  .gk-sp-seal img { height: 20px; width: auto; filter: brightness(1.75) saturate(1.15); }
+  .gk-sp-cap { display: block; text-align: center; font-size: 10px; letter-spacing: 2.2px;
+               font-weight: 600; color: #8b7fb8; text-transform: uppercase; margin-bottom: 18px; }
   /* an even grid, so a wrap never strands one logo alone on a second row */
   .gk-sp-logos { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); align-items: center;
-                 gap: clamp(16px,3vw,34px); margin-top: 20px; }
+                 gap: clamp(16px,2.8vw,30px); }
   .gk-sp-logo { display: grid; place-items: center; min-width: 0; }
-  .gk-sp-logo img { max-width: 100%; filter: grayscale(1) brightness(0) invert(1); opacity: .72;
+  .gk-sp-logo img { max-width: 100%; filter: grayscale(1) brightness(0) invert(1); opacity: .74;
                     transition: opacity .2s ease; }
   .gk-sp-logo:hover img { opacity: 1; }
-  @media (max-width: 820px) { .gk-sp-logos { grid-template-columns: repeat(3, minmax(0,1fr)); row-gap: 24px; } }
-  @media (max-width: 420px) { .gk-sp-logos { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  @media (max-width: 820px) { .gk-sp-logos { grid-template-columns: repeat(3, minmax(0,1fr)); row-gap: 26px; } }
+  @media (max-width: 430px) {
+    .gk-sp-logos { grid-template-columns: repeat(2, minmax(0,1fr)); row-gap: 24px; }
+    /* Stays nowrap: the seal is absolutely positioned, so allowing a break makes it
+       shrink-to-fit to the narrow width and wrap unnecessarily. It fits on one line at
+       360 once the mark is scaled slightly. */
+    .gk-sp-seal { padding: 6px 13px; gap: 7px; }
+    .gk-sp-seal img { height: 17px; }
+    .gk-sp-seal span { font-size: 8.5px; letter-spacing: 1.2px; }
+  }
   @media (prefers-reduced-motion: reduce) { .gk-sp-logo img { transition: none; } }
 </style>
 
 <section class="gk-section gk-section-plain gk-sp" aria-label="Investors and customers" data-animate>
-  <div class="gk-sp-bar">
-    <div class="gk-sp-top">
-      <span class="gk-sp-lab">Trusted by teams at</span>
-      <span class="gk-sp-div" aria-hidden="true"></span>
-      <span class="gk-sp-ocv">Backed by
-        <img src="{% static 'images/customers/ocv.svg' %}" alt="Open Core Ventures"
-          loading="lazy" decoding="async"></span>
-    </div>
+  <div class="gk-sp-panel">
+    <span class="gk-sp-seal">
+      <span>Backed by</span>
+      <img src="{% static 'images/customers/ocv.svg' %}" alt="Open Core Ventures"
+        width="154" height="20" decoding="async">
+    </span>
+    <span class="gk-sp-cap">Trusted by teams at</span>
     <div class="gk-sp-logos">
       <span class="gk-sp-logo"><img src="{% static 'images/customers/brex.png' %}" alt="Brex"
-        style="height:21px" loading="lazy" decoding="async"></span>
-      <span class="gk-sp-logo"><img src="{% static 'images/customers/qcells.png' %}" alt="Qcells"
-        style="height:21px" loading="lazy" decoding="async"></span>
-      <span class="gk-sp-logo"><img src="{% static 'images/customers/brightdata.svg' %}" alt="Bright Data"
-        style="height:20px" loading="lazy" decoding="async"></span>
-      <span class="gk-sp-logo"><img src="{% static 'images/customers/lark.webp' %}" alt="Lark Health"
-        style="height:21px" loading="lazy" decoding="async"></span>
-      <span class="gk-sp-logo"><img src="{% static 'images/customers/mantra.png' %}" alt="Mantra Health"
-        style="height:16px" loading="lazy" decoding="async"></span>
-      <span class="gk-sp-logo"><img src="{% static 'images/customers/crisp.svg' %}" alt="Crisp"
         style="height:22px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/qcells.png' %}" alt="Qcells"
+        style="height:22px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/brightdata.svg' %}" alt="Bright Data"
+        style="height:21px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/lark.webp' %}" alt="Lark Health"
+        style="height:22px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/mantra.png' %}" alt="Mantra Health"
+        style="height:17px" loading="lazy" decoding="async"></span>
+      <span class="gk-sp-logo"><img src="{% static 'images/customers/crisp.svg' %}" alt="Crisp"
+        style="height:23px" loading="lazy" decoding="async"></span>
     </div>
   </div>
 </section>
