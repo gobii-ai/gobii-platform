@@ -2694,10 +2694,8 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
-        self.assertIn(
-            "Short action or current-batch continuation: material rows via SQLite",
-            system_prompt,
-        )
+        self.assertIn("Named enabled tool: call it directly, never search", system_prompt)
+        self.assertIn("Use SQLite for multi-step/reusable rows; otherwise direct tools", system_prompt)
         self.assertIn("Ready routes", system_prompt)
         self.assertIn("opaque auth refs only for the requested operation", system_prompt)
         self.assertIn("no preflight", system_prompt)
