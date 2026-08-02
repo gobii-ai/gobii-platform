@@ -252,6 +252,19 @@
   }
   #cta-signup-modal .bg-white.rounded-lg .bg-white { background-color: transparent; }
   #cta-signup-modal [data-modal-backdrop] { background-color: rgba(6, 3, 16, .78); }
+
+  /* The shared modal shell (partials/_generic_modal.html) uses
+     "items-start sm:items-center" plus pb-20, so on phones the auth panel pinned to the
+     top of the screen with a big dead gap underneath. Scoped here rather than changing
+     the shell, because other modals are tall and rely on top alignment to scroll.
+     Centred, but it still scrolls if the panel is taller than the viewport. */
+  @media (max-width: 639px) {
+    #cta-signup-modal > .flex.min-h-full {
+      align-items: center;
+      padding-top: 1rem;
+      padding-bottom: 1rem;
+    }
+  }
   #cta-signup-modal [data-cta-signup-modal-loading] { color: #b7aed4; }
   #cta-signup-modal [data-cta-signup-modal-error] {
     background-color: rgba(244, 63, 94, .14);
