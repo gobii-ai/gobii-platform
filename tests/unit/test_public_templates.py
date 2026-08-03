@@ -957,6 +957,9 @@ class PublicTemplateRouteTests(TestCase):
             f"{template.display_name} AI Employee",
         )
         soup = BeautifulSoup(response.content, "html.parser")
+        main_landmarks = soup.find_all("main")
+        self.assertEqual(len(main_landmarks), 1)
+        self.assertEqual(main_landmarks[0].get("id"), "main")
         self.assertEqual(
             soup.body["data-analytics-cta-tracking-enabled"],
             "true",
@@ -1762,11 +1765,22 @@ class LibraryViewTests(TestCase):
         self.assertContains(response, public_template.display_name)
         self.assertContains(response, curated_template.display_name)
         self.assertNotContains(response, "Private Library Template")
+        soup = BeautifulSoup(response.content, "html.parser")
+        main_landmarks = soup.find_all("main")
+        self.assertEqual(len(main_landmarks), 1)
+        self.assertEqual(main_landmarks[0].get("id"), "main")
+        category_links = {
+            link.get_text(" ", strip=True): link.get("href")
+            for link in soup.select(".gklibf-pills a.gklibf-pill")
+        }
+        active_filter = soup.select_one('.gklibf-pills a[aria-current="page"]')
+        self.assertEqual(active_filter.get_text(" ", strip=True), "All 2")
+        self.assertEqual(category_links["Operations 1"], "/library/operations/")
+        self.assertEqual(category_links["Team Ops 1"], "/library/team-ops/")
         self.assertContains(
             response,
             'data-analytics-cta-tracking-enabled="true"',
         )
-        soup = BeautifulSoup(response.content, "html.parser")
         self.assertEqual(len(soup.find_all("h1")), 1)
         custom_agent_link = soup.find(
             "a",
@@ -1793,7 +1807,36 @@ class LibraryViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["library_initial_category"], "HR & Recruiting")
         self.assertEqual(response.context["library_initial_payload"]["totalAgents"], 1)
+        self.assertEqual(response.context["library_initial_payload"]["selectedCategorySlug"], "recruiting")
+        recruiting_category = next(
+            category
+            for category in response.context["library_initial_payload"]["topCategories"]
+            if category["name"] == "HR & Recruiting"
+        )
+        self.assertEqual(recruiting_category["slug"], "recruiting")
         self.assertContains(response, template.display_name)
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        collection_page = next(item for item in structured_data if item.get("@type") == "CollectionPage")
+        item_list = next(item for item in structured_data if item.get("@type") == "ItemList")
+        breadcrumb_list = next(item for item in structured_data if item.get("@type") == "BreadcrumbList")
+        self.assertEqual(collection_page["name"], "HR & Recruiting AI Employee Templates")
+        self.assertEqual(collection_page["description"], response.context["library_page_description"])
+        self.assertEqual(item_list["name"], "Popular HR & Recruiting AI Employee Templates")
+        self.assertEqual(
+            [item["name"] for item in breadcrumb_list["itemListElement"]],
+            ["Home", "AI Employee Template Library", "HR & Recruiting"],
+        )
+        self.assertEqual(
+            breadcrumb_list["itemListElement"][2]["item"],
+            "http://testserver/library/recruiting/",
+        )
+        active_category_link = soup.select_one(".gklibf-pills a.gklibf-pill.is-on")
+        self.assertEqual(active_category_link["href"], "/library/recruiting/")
+        self.assertEqual(active_category_link["aria-current"], "page")
         self.assertEqual(alias_response.status_code, 301)
         self.assertEqual(alias_response["Location"], "/library/recruiting/")
 
@@ -1884,6 +1927,56 @@ class LibraryViewTests(TestCase):
         self.assertEqual(payload["limit"], 2)
         self.assertEqual(len(payload["agents"]), 2)
         self.assertFalse(payload["hasMore"])
+
+    @tag("batch_public_templates")
+    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
+    def test_library_public_pages_render_crawlable_pagination(self):
+        for index in range(26):
+            self.create_curated_template(
+                code=f"crawlable-page-template-{index:02d}",
+                category="Operations",
+                display_name=f"Crawlable Page Template {index:02d}",
+                is_official=True,
+            )
+
+        first_response = self.client.get("/library/operations/")
+        second_response = self.client.get("/library/operations/", {"page": 2})
+        official_response = self.client.get("/library/operations/", {"official": "true"})
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(len(first_response.context["library_initial_payload"]["agents"]), 24)
+        self.assertEqual(len(second_response.context["library_initial_payload"]["agents"]), 2)
+        self.assertEqual(second_response.context["library_initial_payload"]["offset"], 24)
+
+        first_soup = BeautifulSoup(first_response.content, "html.parser")
+        first_pagination = first_soup.find("nav", {"aria-label": "Library pages"})
+        self.assertEqual(first_pagination.find("a")["href"], "/library/operations/?page=2")
+
+        second_soup = BeautifulSoup(second_response.content, "html.parser")
+        second_pagination = second_soup.find("nav", {"aria-label": "Library pages"})
+        self.assertEqual(second_pagination.find("a")["href"], "/library/operations/")
+        self.assertEqual(second_pagination.find(attrs={"aria-current": "page"}).get_text(strip=True), "Page 2 of 2")
+        self.assertEqual(
+            second_soup.find("link", rel="canonical")["href"],
+            "http://testserver/library/operations/?page=2",
+        )
+        structured_data = [
+            json.loads(script.string)
+            for script in second_soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        item_list = next(item for item in structured_data if item.get("@type") == "ItemList")
+        self.assertEqual(item_list["itemListElement"][0]["position"], 25)
+
+        official_soup = BeautifulSoup(official_response.content, "html.parser")
+        official_pagination = official_soup.find("nav", {"aria-label": "Library pages"})
+        official_next = official_pagination.find("a")
+        self.assertEqual(official_next["href"], "/library/operations/?official=true&page=2")
+        self.assertEqual(official_next["rel"], ["nofollow"])
+
+        self.assertEqual(self.client.get("/library/operations/", {"page": 0}).status_code, 404)
+        self.assertEqual(self.client.get("/library/operations/", {"page": "invalid"}).status_code, 404)
+        self.assertEqual(self.client.get("/library/operations/", {"page": 3}).status_code, 404)
 
     @tag("batch_public_templates")
     def test_library_like_api_requires_authentication(self):

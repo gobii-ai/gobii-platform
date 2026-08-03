@@ -17,12 +17,14 @@ export type LibraryAgent = {
 
 export type LibraryCategory = {
   name: string
+  slug: string
   count: number
 }
 
 export type LibraryAgentsPayload = {
   agents: LibraryAgent[]
   topCategories: LibraryCategory[]
+  selectedCategorySlug: string
   totalAgents: number
   libraryTotalAgents: number
   officialTotalAgents: number

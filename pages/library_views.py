@@ -2,6 +2,7 @@ import json
 import uuid
 from json import JSONDecodeError
 from typing import Any
+from urllib.parse import urlencode
 
 from django.core.cache import cache
 from django.db.models import BooleanField, Case, CharField, Count, Exists, F, OuterRef, Q, Value, When
@@ -116,6 +117,28 @@ def _parse_query_bool(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}
 
 
+def _parse_library_page_number(value: str | None) -> int:
+    if value in {None, ""}:
+        return 1
+    try:
+        page_number = int(value)
+    except (TypeError, ValueError) as error:
+        raise Http404("Invalid library page") from error
+    if page_number < 1:
+        raise Http404("Invalid library page")
+    return page_number
+
+
+def _library_pagination_url(path: str, page_number: int, *, official_only: bool) -> str:
+    query: list[tuple[str, str]] = []
+    if official_only:
+        query.append(("official", "true"))
+    if page_number > 1:
+        query.append(("page", str(page_number)))
+    encoded_query = urlencode(query)
+    return f"{path}?{encoded_query}" if encoded_query else path
+
+
 def _build_top_categories(*, official_only: bool = False) -> list[dict[str, Any]]:
     queryset = _library_queryset()
     if official_only:
@@ -127,7 +150,11 @@ def _build_top_categories(*, official_only: bool = False) -> list[dict[str, Any]
         .order_by("-count", Lower("normalized_category"))[:10]
     )
     return [
-        {"name": row["normalized_category"], "count": row["count"]}
+        {
+            "name": row["normalized_category"],
+            "slug": public_template_category_slug_from_label(row["normalized_category"]),
+            "count": row["count"],
+        }
         for row in category_rows
     ]
 
@@ -139,6 +166,7 @@ def _get_top_categories(*, official_only: bool = False) -> list[dict[str, Any]]:
         valid_items = all(
             isinstance(item, dict)
             and isinstance(item.get("name"), str)
+            and isinstance(item.get("slug"), str)
             and isinstance(item.get("count"), int)
             for item in cached
         )
@@ -329,6 +357,11 @@ def _build_library_payload(
     return {
         "agents": page_agents,
         "topCategories": top_categories,
+        "selectedCategorySlug": (
+            public_template_category_slug_from_label(normalized_category)
+            if normalized_category
+            else ""
+        ),
         "totalAgents": total_agents,
         "libraryTotalAgents": library_total_agents,
         "officialTotalAgents": official_total_agents,
@@ -346,6 +379,7 @@ class LibraryView(TemplateView):
     template_name = "library.html"
 
     def dispatch(self, request, *args, **kwargs):
+        self.page_number = _parse_library_page_number(request.GET.get("page"))
         self.selected_category = ""
         category_slug = kwargs.get("category_slug")
         if category_slug:
@@ -385,16 +419,63 @@ class LibraryView(TemplateView):
             tagline="",
             display_name="AI Employee Template Library",
         )
+        page_offset = (self.page_number - 1) * LIBRARY_DEFAULT_PAGE_SIZE
+        initial_payload = _build_library_payload(
+            self.request,
+            category=selected_category,
+            official_only=official_only,
+            offset=page_offset,
+        )
+        if self.page_number > 1 and page_offset >= initial_payload["totalAgents"]:
+            raise Http404("Library page does not exist")
+
+        total_pages = max(
+            1,
+            (initial_payload["totalAgents"] + LIBRARY_DEFAULT_PAGE_SIZE - 1)
+            // LIBRARY_DEFAULT_PAGE_SIZE,
+        )
+        canonical_path = _library_pagination_url(
+            self.request.path,
+            self.page_number,
+            official_only=False,
+        )
         context["page_name"] = "AI Employee Template Library"
         context["library_initial_category"] = selected_category
         context["library_initial_official_only"] = official_only
         context["library_page_title"] = page_title
         context["library_page_description"] = page_description
-        context["library_initial_payload"] = _build_library_payload(
-            self.request,
-            category=selected_category,
-            official_only=context["library_initial_official_only"],
+        context["library_schema_name"] = (
+            f"{selected_category} AI Employee Templates"
+            if selected_category
+            else "Gobii AI Employee Template Library"
         )
+        context["library_item_list_name"] = (
+            f"Popular {selected_category} AI Employee Templates"
+            if selected_category
+            else "Popular Gobii AI Employee Templates"
+        )
+        context["library_initial_payload"] = initial_payload
+        context["library_current_page"] = self.page_number
+        context["library_total_pages"] = total_pages
+        context["library_previous_page_url"] = (
+            _library_pagination_url(
+                self.request.path,
+                self.page_number - 1,
+                official_only=official_only,
+            )
+            if self.page_number > 1
+            else ""
+        )
+        context["library_next_page_url"] = (
+            _library_pagination_url(
+                self.request.path,
+                self.page_number + 1,
+                official_only=official_only,
+            )
+            if initial_payload["hasMore"]
+            else ""
+        )
+        context["canonical_url"] = self.request.build_absolute_uri(canonical_path)
         return context
 
 

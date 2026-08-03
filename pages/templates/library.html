@@ -18,8 +18,8 @@
     {
       "@context": "https://schema.org",
       "@type": "CollectionPage",
-      "name": "Gobii AI Employee Template Library",
-      "description": "Discover public Gobii AI employee templates by category, then create and customize an employee for your workflow.",
+      "name": "{{ library_schema_name|escapejs }}",
+      "description": "{{ library_page_description|escapejs }}",
       "url": "{{ canonical_url|escapejs }}",
       "isPartOf": {
         "@type": "WebSite",
@@ -33,13 +33,13 @@
       {
         "@context": "https://schema.org",
         "@type": "ItemList",
-        "name": "Popular Gobii AI employee templates",
+        "name": "{{ library_item_list_name|escapejs }}",
         "url": "{{ canonical_url|escapejs }}",
         "itemListElement": [
           {% for agent in library_initial_payload.agents %}
             {
               "@type": "ListItem",
-              "position": {{ forloop.counter }},
+              "position": {{ library_initial_payload.offset|add:forloop.counter }},
               "item": {
                 "@type": "SoftwareApplication",
                 "name": "{{ agent.name|escapejs }}",
@@ -73,14 +73,20 @@
           "position": 2,
           "name": "AI Employee Template Library",
           "item": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:library' %}"
-        }
+        }{% if library_initial_category %},
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "{{ library_initial_category|escapejs }}",
+          "item": "{{ canonical_url|escapejs }}"
+        }{% endif %}
       ]
     }
   </script>
 {% endblock %}
 
 {% block content %}
-<div class="gk-luxe">
+<main id="main" class="gk-luxe">
   <div class="gk-aurora-drift" aria-hidden="true"></div>
   <section class="relative mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
     {{ library_initial_payload|json_script:"library-initial-payload" }}
@@ -104,7 +110,7 @@
       </a>
     </div>
   </section>
-</div>
+</main>
 {% endblock %}
 
 {% block extra_js %}
