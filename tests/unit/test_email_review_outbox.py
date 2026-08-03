@@ -747,6 +747,7 @@ class EmailReviewOutboxTests(TestCase):
         self.agent.save(update_fields=["email_sending_mode"])
         self.assertFalse(classify_email_recipients(self.agent, ["unknown@example.com"]).requires_review)
 
+    @patch("util.urls.settings.PUBLIC_SITE_URL", "https://app.gobii.test")
     @patch("api.services.outbox_notifications.send_mail", return_value=1)
     def test_notification_cycle_sends_only_on_zero_to_one_transition(self, send_mail_mock):
         with self.captureOnCommitCallbacks(execute=True):
@@ -755,6 +756,12 @@ class EmailReviewOutboxTests(TestCase):
             queue_message_for_review(self._message("second-pending@example.com"))
 
         self.assertEqual(send_mail_mock.call_count, 1)
+        message = send_mail_mock.call_args.kwargs["message"]
+        recipients = send_mail_mock.call_args.kwargs["recipient_list"]
+        html_message = send_mail_mock.call_args.kwargs["html_message"]
+        self.assertEqual(recipients, [self.owner.email])
+        self.assertIn("Review in Outbox: https://app.gobii.test/app/outbox", message)
+        self.assertIn('href="https://app.gobii.test/app/outbox"', html_message)
 
     def test_updating_org_default_does_not_clear_minimum(self):
         organization = Organization.objects.create(

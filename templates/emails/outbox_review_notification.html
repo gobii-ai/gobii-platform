@@ -1,0 +1,15 @@
+{% extends "emails/gobii_base.html" %}
+
+{% block content %}
+  <p style="margin: 0 0 16px; font-size: 16px; line-height: 1.6; color: #0f172a;">
+    Your workspace has {{ pending_count }} email{{ pending_count|pluralize }} waiting in Review Before Send.
+  </p>
+  <p style="margin: 0 0 20px;">
+    <a href="{{ outbox_url }}" style="display: inline-block; padding: 10px 16px; border-radius: 999px; background: #1d4ed8; color: #ffffff; text-decoration: none; font-weight: 600;">
+      Review in Outbox
+    </a>
+  </p>
+  <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #475569;">
+    No recipient has received a pending email.
+  </p>
+{% endblock %}

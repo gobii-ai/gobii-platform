@@ -4,6 +4,7 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.core.mail import BadHeaderError, send_mail
 from django.db import transaction
+from django.template.loader import render_to_string
 from django.utils import timezone
 
 from api.models import (
@@ -13,6 +14,7 @@ from api.models import (
     UserPreference,
 )
 from console.role_constants import MEMBER_MANAGE_ROLES
+from util.urls import append_context_query, build_site_url
 
 
 def _workspace_filter(review: OutboundEmailReview) -> dict[str, object]:
@@ -76,12 +78,25 @@ def _send_notification(review: OutboundEmailReview, *, pending_count: int, diges
         if digest or pending_count != 1
         else "An email needs review in Gobii"
     )
-    message = (
-        f"Your workspace has {pending_count} email{'s' if pending_count != 1 else ''} waiting in Review Before Send.\n\n"
-        "Review them at /app/outbox. No recipient has received a pending email."
+    outbox_url = append_context_query(
+        build_site_url("/app/outbox"),
+        str(review.agent.organization_id) if review.agent.organization_id else None,
     )
+    context = {
+        "pending_count": pending_count,
+        "outbox_url": outbox_url,
+    }
+    message = render_to_string("emails/outbox_review_notification.txt", context).strip()
+    html_message = render_to_string("emails/outbox_review_notification.html", context)
     try:
-        send_mail(subject, message, None, recipients, fail_silently=False)
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=None,
+            recipient_list=recipients,
+            html_message=html_message,
+            fail_silently=False,
+        )
     except (SMTPException, BadHeaderError, OSError):
         return
 

@@ -1,0 +1,5 @@
+Your workspace has {{ pending_count }} email{{ pending_count|pluralize }} waiting in Review Before Send.
+
+Review in Outbox: {{ outbox_url }}
+
+No recipient has received a pending email.
