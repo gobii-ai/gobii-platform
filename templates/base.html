@@ -62,7 +62,9 @@
         crossorigin>
 
   <!-- Critical CSS: discover render-blocking styles before analytics scripts. -->
+  {% block tailwind_css %}
   <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+  {% endblock %}
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
   <link rel="stylesheet" href="{% static 'css/globals.css' %}">
   {% include "includes/_gk_theme.html" %}

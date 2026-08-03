@@ -1080,6 +1080,11 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         soup = BeautifulSoup(response.content, "html.parser")
+        stylesheet_urls = {
+            link.get("href") for link in soup.find_all("link", rel="stylesheet")
+        }
+        self.assertIn(static("css/home_tailwind.css"), stylesheet_urls)
+        self.assertNotIn(static("css/tailwind.css"), stylesheet_urls)
         page_text = soup.get_text(" ")
         normalized_page_text = re.sub(r"\s+", " ", page_text)
         normalized_page_text = (
@@ -1145,6 +1150,11 @@ class HomePageTests(TestCase):
         soup = BeautifulSoup(response.content, "html.parser")
         form = soup.find("form", {"id": "create-agent-form"})
         self.assertIsNotNone(form)
+        stylesheet_urls = {
+            link.get("href") for link in soup.find_all("link", rel="stylesheet")
+        }
+        self.assertIn(static("css/tailwind.css"), stylesheet_urls)
+        self.assertNotIn(static("css/home_tailwind.css"), stylesheet_urls)
         self.assertEqual(form.find("textarea", {"name": "charter"}).get_text(strip=True), "")
         self.assertIsNone(soup.find("link", rel="canonical"))
         self.assertEqual(

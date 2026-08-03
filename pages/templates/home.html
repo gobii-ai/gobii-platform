@@ -1,6 +1,14 @@
 {% extends "base.html" %}
+{% load static %}
 {% load vite_tags %}
 {% load cta_tags %}
+{% block tailwind_css %}
+  {% if home_use_k %}
+  <link rel="stylesheet" href="{% static 'css/home_tailwind.css' %}">
+  {% else %}
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+  {% endif %}
+{% endblock %}
 {% block title %}{{ home_meta_title }}{% endblock %}
 {% block canonical_link %}
   {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and home_canonical_url %}
