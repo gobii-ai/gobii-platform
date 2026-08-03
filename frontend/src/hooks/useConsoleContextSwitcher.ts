@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { createOrganization, fetchConsoleContext, switchConsoleContext, type ConsoleContext, type ConsoleContextData, type ConsoleContextOption, type StaffViewContext } from '../api/context'
+import { applyAnalyticsBillingContext } from '../util/analytics'
 import { readStoredConsoleContext, storeConsoleContext } from '../util/consoleContextStorage'
 
 type UseConsoleContextSwitcherOptions = {
@@ -146,16 +147,15 @@ export function useConsoleContextSwitcher({
       if (!data || isSwitching) {
         return
       }
-      const previousContext = data.context
       setIsSwitching(true)
       setMutationError(null)
-      queryClient.setQueryData<ConsoleContextData>(queryKey, { ...data, context })
-      storeConsoleContext(context)
       try {
-        const updated = await switchConsoleContext(context, { persistSession })
+        const result = await switchConsoleContext(context, { persistSession })
+        applyAnalyticsBillingContext(result.billingContext)
         if (!mountedRef.current) {
           return
         }
+        const updated = result.context
         queryClient.setQueryData<ConsoleContextData>(
           queryKey,
           (prev) => (prev ? { ...prev, context: updated } : prev),
@@ -168,11 +168,6 @@ export function useConsoleContextSwitcher({
           return
         }
         console.error('Failed to switch context:', err)
-        queryClient.setQueryData<ConsoleContextData>(
-          queryKey,
-          (prev) => (prev ? { ...prev, context: previousContext } : prev),
-        )
-        storeConsoleContext(previousContext)
         setMutationError('Unable to switch context.')
       } finally {
         if (mountedRef.current) {
@@ -192,6 +187,7 @@ export function useConsoleContextSwitcher({
       setMutationError(null)
       try {
         const created = await createOrganization(name)
+        applyAnalyticsBillingContext(created.billingContext)
         if (!mountedRef.current) {
           return created.context
         }

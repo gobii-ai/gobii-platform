@@ -167,7 +167,6 @@ from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, end_web_session, 
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from util.analytics_billing import resolve_analytics_billing_context_safely
 from util.onboarding import TRIAL_ONBOARDING_TARGET_AGENT_UI, set_trial_onboarding_intent, set_trial_onboarding_requires_plan_selection
 from util.personal_signup_preview import resolve_personal_signup_preview, resolve_personal_signup_preview_onboarding_state
 from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, TrialRequiredValidationError, can_user_send_personal_agent_chat_message
@@ -465,11 +464,7 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
         billing_context = {}
         if Analytics.is_web_analytics_enabled():
             billing_owner = _resolve_request_context_owner(request) or request.user
-            billing_context = resolve_analytics_billing_context_safely(
-                request.user.id,
-                actor_user=request.user,
-                billing_owner=billing_owner,
-            ).as_event_properties()
+            billing_context = Analytics.web_billing_context(request.user, billing_owner)
 
         return JsonResponse(
             {

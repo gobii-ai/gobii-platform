@@ -424,6 +424,16 @@ class Analytics:
         )
 
     @staticmethod
+    def web_billing_context(user, billing_owner=None) -> dict[str, Any]:
+        if not Analytics.is_web_analytics_enabled() or getattr(user, "pk", None) is None:
+            return {}
+        return resolve_analytics_billing_context_safely(
+            user.pk,
+            actor_user=user,
+            billing_owner=billing_owner or user,
+        ).as_event_properties()
+
+    @staticmethod
     def _build_user_flag_traits(user_id) -> dict[str, Any]:
         if user_id in (None, ""):
             return {}

@@ -487,7 +487,11 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         self.assertEqual(m.status, OrganizationMembership.OrgStatus.ACTIVE)
         self.assertEqual(m.role, OrganizationMembership.OrgRole.ADMIN)
 
-    def test_accept_updates_existing_active_membership_role(self):
+    @patch(
+        "console.views.Analytics.web_billing_context",
+        return_value={"organization_id": "invite-org", "plan_at_event": "org_team"},
+    )
+    def test_accept_updates_existing_active_membership_role(self, billing_context_mock):
         # Existing active membership as VIEWER
         OrganizationMembership.objects.create(
             org=self.org,
@@ -502,6 +506,11 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         resp = self.client.post(url)
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["ok"])
+        self.assertEqual(
+            resp.json()["billing_context"],
+            {"organization_id": "invite-org", "plan_at_event": "org_team"},
+        )
+        self.assertEqual(billing_context_mock.call_args.args[1].pk, self.org.pk)
 
         m = OrganizationMembership.objects.get(org=self.org, user=self.invitee)
         self.assertEqual(m.role, OrganizationMembership.OrgRole.ADMIN)

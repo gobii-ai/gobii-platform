@@ -36,6 +36,7 @@ import { ModalForm } from '../components/common/ModalForm'
 import { CustomInstructionsSection } from '../components/settings/CustomInstructionsSection'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
+import { applyAnalyticsBillingContext } from '../util/analytics'
 import { navigateWithinApp } from '../util/appNavigation'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 
@@ -726,6 +727,7 @@ export function OrganizationScreen() {
     setCreateOrganizationErrors([])
     try {
       const created = await createOrganization(nextName)
+      applyAnalyticsBillingContext(created.billingContext)
       publishConsoleContext(created.context)
       setCreateOrganizationOpen(false)
       setCreateOrganizationName('')

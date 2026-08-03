@@ -150,6 +150,7 @@ class SwitchContextView(LoginRequiredMixin, View):
                 can_create_agents = True
                 if str(request.user.id) != context_id:
                     return JsonResponse({'error': 'Invalid personal context'}, status=403)
+                billing_owner = request.user
                 context_name = request.user.get_full_name() or request.user.username or request.user.email or "Personal"
                 if persist:
                     # Store in session
@@ -160,11 +161,12 @@ class SwitchContextView(LoginRequiredMixin, View):
             # If organization context, validate membership
             elif context_type == 'organization':
                 try:
-                    membership = OrganizationMembership.objects.get(
+                    membership = OrganizationMembership.objects.select_related("org").get(
                         user=request.user,
                         org_id=context_id,
                         status=OrganizationMembership.OrgStatus.ACTIVE
                     )
+                    billing_owner = membership.org
                     context_name = membership.org.name
                     can_create_agents = user_role_can_create_org_agents(membership.role, membership.org)
                     if persist:
@@ -184,6 +186,7 @@ class SwitchContextView(LoginRequiredMixin, View):
                     context_name,
                     can_create_agents=can_create_agents,
                 ),
+                'billing_context': Analytics.web_billing_context(request.user, billing_owner),
             })
             
         except Exception as e:
@@ -276,6 +279,7 @@ class OrganizationCreateAPIView(LoginRequiredMixin, View):
                     "role": owner_membership.get_role_display(),
                 },
                 "context": _serialize_context("organization", str(org.id), org.name),
+                "billing_context": Analytics.web_billing_context(request.user, org),
             },
             status=201,
         )

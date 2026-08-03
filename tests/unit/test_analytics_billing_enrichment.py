@@ -9,12 +9,14 @@ from django.utils import timezone
 
 from api.models import Organization, OrganizationMembership, UserBilling, UserFlags
 from constants.plans import PlanNames
+from middleware.analytics_billing import AnalyticsBillingContextCacheMiddleware
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.analytics_billing import (
     AnalyticsAccessType,
     AnalyticsBillingContext,
     AnalyticsBillingStatus,
     EVENT_SCHEMA_VERSION,
+    resolve_analytics_billing_context_safely,
 )
 
 
@@ -193,6 +195,15 @@ class AnalyticsBillingEnrichmentTests(TestCase):
                 self.assertEqual(properties["billing_status_at_event"], status)
                 self.assertEqual(properties["access_type_at_event"], AnalyticsAccessType.NONE)
 
+    def test_canceled_free_subscription_is_no_access_not_unknown(self):
+        actor = self._set_personal_plan(PlanNames.FREE)
+
+        properties = self._capture_event(status="canceled", actor=actor, owner=actor)
+
+        self.assertEqual(properties["plan_at_event"], PlanNames.FREE)
+        self.assertEqual(properties["billing_status_at_event"], AnalyticsBillingStatus.CANCELED)
+        self.assertEqual(properties["access_type_at_event"], AnalyticsAccessType.NONE)
+
     def test_plan_and_status_transition_is_snapshotted_per_event(self):
         actor = self._set_personal_plan(PlanNames.STARTUP)
         trial_properties = self._capture_event(status="trialing", actor=actor, owner=actor)
@@ -287,6 +298,31 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         opted_out_properties = track_mock.call_args.args[2]
         self.assertEqual(opted_out_properties["download_type"], "signed")
         self.assertNotIn("event_schema_version", opted_out_properties)
+
+    def test_billing_context_resolution_is_cached_and_isolated_per_request(self):
+        context = self._paid_context()
+
+        def resolve_twice(_request):
+            first = resolve_analytics_billing_context_safely(
+                self.user.pk,
+                actor_user=self.user,
+                billing_owner=self.user,
+            )
+            second = resolve_analytics_billing_context_safely(
+                self.user.pk,
+            )
+            self.assertIs(first, second)
+            return SimpleNamespace()
+
+        middleware = AnalyticsBillingContextCacheMiddleware(resolve_twice)
+        with patch(
+            "util.analytics_billing.resolve_analytics_billing_context",
+            return_value=context,
+        ) as resolver:
+            middleware(RequestFactory().get("/first/"))
+            middleware(RequestFactory().get("/second/"))
+
+        self.assertEqual(resolver.call_count, 2)
 
     def test_email_open_event_receives_billing_snapshot_and_strips_recipient(self):
         actor = self._set_personal_plan(PlanNames.STARTUP)

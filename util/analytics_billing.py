@@ -1,4 +1,5 @@
 import logging
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Mapping
@@ -18,6 +19,10 @@ logger = logging.getLogger(__name__)
 EVENT_SCHEMA_VERSION = 2
 UNKNOWN_PLAN = "unknown"
 PERSONAL_ACCOUNT_PREFIX = "user:"
+
+_request_billing_context_cache: ContextVar[
+    dict[tuple[str, tuple[str, str]], "AnalyticsBillingContext"] | None
+] = ContextVar("request_billing_context_cache", default=None)
 
 
 class AnalyticsAccessType(StrEnum):
@@ -109,6 +114,38 @@ class AnalyticsBillingContext:
             "plan": str(self.plan_at_event),
             "is_trial": self.access_type_at_event == AnalyticsAccessType.TRIAL,
         }
+
+
+def bind_request_billing_context_cache() -> Token:
+    return _request_billing_context_cache.set({})
+
+
+def reset_request_billing_context_cache(token: Token) -> None:
+    _request_billing_context_cache.reset(token)
+
+
+def _billing_context_cache_key(
+    user_id: object,
+    *,
+    actor_user: object | None,
+    billing_owner: object | None,
+    organization_id: object | None,
+) -> tuple[str, tuple[str, str]]:
+    actor_id = getattr(actor_user, "pk", None) or user_id
+    if billing_owner is not None:
+        owner_id = getattr(billing_owner, "pk", None)
+        owner_type = "personal" if isinstance(billing_owner, get_user_model()) else "organization"
+        owner_key = (owner_type, str(owner_id if owner_id is not None else id(billing_owner)))
+    elif organization_id:
+        organization_id_string = str(organization_id)
+        owner_key = (
+            ("personal", str(actor_id))
+            if organization_id_string.startswith(PERSONAL_ACCOUNT_PREFIX)
+            else ("organization", organization_id_string)
+        )
+    else:
+        owner_key = ("personal", str(actor_id))
+    return str(actor_id), owner_key
 
 
 def _is_sensitive_property_name(key: object) -> bool:
@@ -281,7 +318,7 @@ def _classify_access(
     if plan == PlanNames.FREE:
         if is_grandfathered:
             return AnalyticsAccessType.GRANDFATHERED_FREE
-        if billing_status == AnalyticsBillingStatus.NONE:
+        if billing_status == AnalyticsBillingStatus.NONE or billing_status in INACTIVE_BILLING_STATUSES:
             return AnalyticsAccessType.NONE
         return AnalyticsAccessType.UNKNOWN
     if billing_status == AnalyticsBillingStatus.TRIALING:
@@ -336,8 +373,6 @@ def build_current_billing_profile_traits(
         is_grandfathered=_is_grandfathered_user(user),
         billing_exists=True,
     )
-    if normalized_plan == PlanNames.FREE and normalized_status in INACTIVE_BILLING_STATUSES:
-        access_type = AnalyticsAccessType.NONE
 
     context = AnalyticsBillingContext(
         organization_id=f"{PERSONAL_ACCOUNT_PREFIX}{getattr(user, 'pk', '')}",
@@ -404,8 +439,18 @@ def resolve_analytics_billing_context_safely(
     billing_owner: object | None = None,
     organization_id: object | None = None,
 ) -> AnalyticsBillingContext:
+    cache = _request_billing_context_cache.get()
+    cache_key = _billing_context_cache_key(
+        user_id,
+        actor_user=actor_user,
+        billing_owner=billing_owner,
+        organization_id=organization_id,
+    )
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+
     try:
-        return resolve_analytics_billing_context(
+        context = resolve_analytics_billing_context(
             user_id,
             actor_user=actor_user,
             billing_owner=billing_owner,
@@ -415,9 +460,12 @@ def resolve_analytics_billing_context_safely(
         # This boundary is intentionally broad: analytics must not interrupt the
         # product action or page load that triggered enrichment.
         logger.exception("Failed to resolve analytics billing context for user %s", user_id)
-        return unknown_billing_context(
+        context = unknown_billing_context(
             user_id,
             actor_user=actor_user,
             billing_owner=billing_owner,
             organization_id=organization_id,
         )
+    if cache is not None:
+        cache[cache_key] = context
+    return context

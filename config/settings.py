@@ -463,6 +463,7 @@ if GOBII_PROPRIETARY_MODE:
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "middleware.analytics_billing.AnalyticsBillingContextCacheMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",

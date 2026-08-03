@@ -20,7 +20,7 @@ import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
 import { ImmersivePetLayer } from '../components/pets/ImmersivePetLayer'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { track } from '../util/analytics'
+import { applyAnalyticsBillingContext, track, type AnalyticsBillingContext } from '../util/analytics'
 import { APP_NAVIGATE_EVENT } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
 import { setScheduleDisplayTimeZone } from '../util/schedule'
@@ -61,15 +61,7 @@ type ConsoleSessionPayload = {
   email?: string
   timezone?: string
   is_system_admin?: boolean
-  billing_context?: Record<string, unknown>
-}
-
-function applyAnalyticsBillingContext(payload: ConsoleSessionPayload | null | undefined) {
-  const billingContext = payload?.billing_context
-  if (!billingContext || Object.keys(billingContext).length === 0) {
-    return
-  }
-  window.GobiiSegmentBootstrap?.setDefaultProperties?.(billingContext)
+  billing_context?: AnalyticsBillingContext
 }
 
 type ImmersiveAppProps = {
@@ -819,22 +811,11 @@ export function ImmersiveApp({
   }, [route, location.pathname, location.search, embed])
 
   useEffect(() => {
-    if (route.kind === 'agent-chat') {
-      return () => undefined
-    }
-    const controller = new AbortController()
-    void jsonFetch<ConsoleSessionPayload>('/console/api/session/', { signal: controller.signal })
-      .then(applyAnalyticsBillingContext)
-      .catch(() => undefined)
-    return () => controller.abort()
-  }, [route.kind, selectionRefreshKey])
-
-  useEffect(() => {
     const controller = new AbortController()
     const loadViewer = async () => {
       try {
         const payload = await jsonFetch<ConsoleSessionPayload>('/console/api/session/', { signal: controller.signal })
-        applyAnalyticsBillingContext(payload)
+        applyAnalyticsBillingContext(payload?.billing_context)
         const raw = payload?.user_id ?? null
         const numeric = raw ? Number(raw) : null
         setScheduleDisplayTimeZone(payload?.timezone)

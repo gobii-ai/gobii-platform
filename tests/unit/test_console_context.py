@@ -51,7 +51,11 @@ class OrganizationCreateAPITests(TestCase):
         self.user = User.objects.create_user(username="org-create", email="org-create@example.com", password="pw")
         self.client.force_login(self.user)
 
-    def test_create_organization_api_creates_owner_membership_and_switches_context(self):
+    @patch(
+        "console.context_views.Analytics.web_billing_context",
+        return_value={"organization_id": "new-org", "plan_at_event": "free"},
+    )
+    def test_create_organization_api_creates_owner_membership_and_switches_context(self, billing_context_mock):
         resp = self.client.post(
             reverse("console-organization-create"),
             data=json.dumps({"name": "New Ops Org"}),
@@ -68,6 +72,11 @@ class OrganizationCreateAPITests(TestCase):
             "name": "New Ops Org",
             "canCreateAgents": True,
         })
+        self.assertEqual(
+            payload["billing_context"],
+            {"organization_id": "new-org", "plan_at_event": "free"},
+        )
+        self.assertEqual(billing_context_mock.call_args.args[1].pk, org.pk)
         self.assertTrue(
             OrganizationMembership.objects.filter(
                 org=org,
@@ -795,6 +804,26 @@ class ConsoleContextTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json().get("error"), "Invalid context override.")
+
+    @patch(
+        "console.context_views.Analytics.web_billing_context",
+        return_value={"organization_id": "selected-org", "plan_at_event": "org_team"},
+    )
+    def test_switch_context_returns_selected_billing_context(self, billing_context_mock):
+        self._set_personal_context()
+
+        resp = self.client.post(
+            reverse("switch_context"),
+            data=json.dumps({"type": "organization", "id": str(self.org.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.json()["billing_context"],
+            {"organization_id": "selected-org", "plan_at_event": "org_team"},
+        )
+        self.assertEqual(billing_context_mock.call_args.args[1].pk, self.org.pk)
 
     def test_switch_context_for_agent_returns_org_context_without_persisting_session(self):
         self._set_personal_context()

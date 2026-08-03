@@ -18,7 +18,6 @@ from pages.account_info_cache import account_info_cache_key, account_info_cache_
 from pages.mini_mode import is_mini_mode_enabled
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics
-from util.analytics_billing import resolve_analytics_billing_context_safely
 from util.subscription_helper import (
     reconcile_user_plan_from_stripe,
     get_user_api_rate_limit,
@@ -224,11 +223,7 @@ def analytics(request):
                 request.user.id,
             )
             billing_owner = request.user
-        billing_context = resolve_analytics_billing_context_safely(
-            request.user.id,
-            actor_user=request.user,
-            billing_owner=billing_owner,
-        ).as_event_properties()
+        billing_context = Analytics.web_billing_context(request.user, billing_owner)
 
     analyticsContext = {
         'analytics': {
