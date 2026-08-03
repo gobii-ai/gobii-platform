@@ -1050,6 +1050,13 @@ class HomePageTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     @patch(
+        "config.vite.get_vite_asset",
+        return_value=SimpleNamespace(
+            styles=("/static/frontend/assets/home-test.css",),
+            scripts=("/static/frontend/assets/home-test.js",),
+        ),
+    )
+    @patch(
         "pages.views.get_homepage_integrations_payload",
         return_value={
             "enabled": True,
@@ -1075,7 +1082,11 @@ class HomePageTests(TestCase):
             ],
         },
     )
-    def test_home_page_uses_generic_platform_copy_in_proprietary_mode(self, _mock_integrations):
+    def test_home_page_uses_generic_platform_copy_in_proprietary_mode(
+        self,
+        _mock_integrations,
+        _mock_vite_asset,
+    ):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
 
@@ -1156,7 +1167,14 @@ class HomePageTests(TestCase):
         GOBII_RELEASE_ENV="prod",
         PUBLIC_SITE_URL="https://gobii.ai",
     )
-    def test_home_spawn_query_renders_blank_custom_agent_form(self):
+    @patch(
+        "config.vite.get_vite_asset",
+        return_value=SimpleNamespace(
+            styles=("/static/frontend/assets/home-test.css",),
+            scripts=("/static/frontend/assets/home-test.js",),
+        ),
+    )
+    def test_home_spawn_query_renders_blank_custom_agent_form(self, _mock_vite_asset):
         session = self.client.session
         session["agent_charter"] = "Stale template instructions"
         session["agent_charter_source"] = "template"
