@@ -8,6 +8,7 @@ import type { PendingActionRequest } from '../../types/agentChat'
 import { HumanInputComposerPanel } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
 import { PendingContactRequestsPanel, type PendingContactDraft } from './PendingContactRequestsPanel'
+import { PendingOutboxReviewPanel } from './PendingOutboxReviewPanel'
 import { PendingRequestedSecretsPanel } from './PendingRequestedSecretsPanel'
 import { PendingSpawnRequestPanel } from './PendingSpawnRequestPanel'
 
@@ -42,6 +43,11 @@ type PendingActionComposerPanelProps = {
     }>
   ) => Promise<PendingActionMutationResult | void>
   onViewAllContactRequests?: () => void
+  onResolveOutboxReview?: (
+    reviewId: string,
+    decision: 'approve' | 'deny',
+    expectedVersion: number,
+  ) => Promise<PendingActionMutationResult | void>
   compact?: boolean
 }
 
@@ -62,6 +68,19 @@ function parseInlineError(error: unknown): string {
     }
   }
   return error instanceof Error ? error.message : 'Something went wrong.'
+}
+
+function parseOutboxInlineError(error: unknown): string {
+  if (error instanceof HttpError && error.body && typeof error.body === 'object') {
+    const body = error.body as Record<string, unknown>
+    if (body.error === 'stale_version') {
+      return 'This message changed. Open Outbox to review the latest version.'
+    }
+    if (body.error === 'thread_changed') {
+      return 'The conversation changed after this message was prepared. Review it in Outbox before sending.'
+    }
+  }
+  return parseInlineError(error)
 }
 
 function actionHeading(action: PendingActionRequest): string {
@@ -135,6 +154,7 @@ export function PendingActionComposerPanel({
   onRemoveRequestedSecrets,
   onResolveContactRequests,
   onViewAllContactRequests,
+  onResolveOutboxReview,
   compact = false,
 }: PendingActionComposerPanelProps) {
   const [busySpawnDecision, setBusySpawnDecision] = useState<'approve' | 'decline' | null>(null)
@@ -147,6 +167,8 @@ export function PendingActionComposerPanel({
   const [busyContacts, setBusyContacts] = useState(false)
   const [contactError, setContactError] = useState<string | null>(null)
   const [contactNotice, setContactNotice] = useState<string | null>(null)
+  const [busyOutboxDecision, setBusyOutboxDecision] = useState<'approve' | 'deny' | null>(null)
+  const [outboxError, setOutboxError] = useState<string | null>(null)
 
   const activeAction = actions.find((action) => action.id === activeActionId) ?? actions[0] ?? null
   const orderedHumanInputRequests = activeAction?.kind === 'human_input'
@@ -299,6 +321,25 @@ export function PendingActionComposerPanel({
     }
   }
 
+  const handleResolveOutboxReview = async (
+    decision: 'approve' | 'deny',
+    reviewId: string,
+    expectedVersion: number,
+  ) => {
+    if (activeAction.kind !== 'outbox_reviews' || !onResolveOutboxReview || busyOutboxDecision) {
+      return
+    }
+    setBusyOutboxDecision(decision)
+    setOutboxError(null)
+    try {
+      await onResolveOutboxReview(reviewId, decision, expectedVersion)
+    } catch (error) {
+      setOutboxError(parseOutboxInlineError(error))
+    } finally {
+      setBusyOutboxDecision(null)
+    }
+  }
+
   const hasActionBody = showHumanInputComposer
     || activeAction.kind === 'spawn_request'
     || activeAction.kind === 'requested_secrets'
@@ -408,9 +449,13 @@ export function PendingActionComposerPanel({
               />
             ) : null}
             {activeAction.kind === 'outbox_reviews' ? (
-              <p className="text-xs leading-5 text-slate-600">
-                The recipient has not received this email. Open Outbox to inspect the exact message, edit it, or approve and send it.
-              </p>
+              <PendingOutboxReviewPanel
+                action={activeAction}
+                disabled={disabled || !onResolveOutboxReview}
+                busyDecision={busyOutboxDecision}
+                error={outboxError}
+                onSubmit={handleResolveOutboxReview}
+              />
             ) : null}
           </div>
         ) : null}

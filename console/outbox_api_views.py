@@ -366,7 +366,15 @@ class OutboxDecisionAPIView(ApiLoginRequiredMixin, View):
                 )
             else:
                 review = retry_review(review, actor=request.user)
-            return JsonResponse({"item": serialize_outbox_review(review, detail=True)})
+            response_payload = {"item": serialize_outbox_review(review, detail=True)}
+            if payload.get("includePendingActions") is True:
+                from console.agent_chat.pending_actions import list_pending_action_requests
+
+                response_payload["pending_action_requests"] = list_pending_action_requests(
+                    review.agent,
+                    request.user,
+                )
+            return JsonResponse(response_payload)
         except StaleOutboxVersionError:
             return _stale_response(review)
         except (OutboundEmailReviewError, TypeError, ValueError) as exc:

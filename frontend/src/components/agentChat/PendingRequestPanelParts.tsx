@@ -67,7 +67,7 @@ type ReviewFooterProps = {
   primaryLabel: string
   primaryBusyLabel: string
   primaryDisabled?: boolean
-  theme: 'contact' | 'secret'
+  theme: 'contact' | 'secret' | 'outbox'
   error?: string | null
   notice?: string | null
   onSecondary: () => void
@@ -92,7 +92,9 @@ export function PendingRequestReviewFooter({
 }: ReviewFooterProps) {
   const primaryColor = theme === 'contact'
     ? 'bg-amber-600 hover:bg-amber-700'
-    : 'bg-sky-600 hover:bg-sky-700'
+    : theme === 'outbox'
+      ? 'bg-blue-600 hover:bg-blue-700'
+      : 'bg-sky-600 hover:bg-sky-700'
   return (
     <div className="space-y-2">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

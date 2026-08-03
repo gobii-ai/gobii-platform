@@ -208,6 +208,8 @@ function getPendingActionRequestCount(action: PendingActionRequest): number {
       return Math.max(1, action.count || action.requests.length)
     case 'requested_secrets':
       return Math.max(1, action.count || action.secrets.length)
+    case 'outbox_reviews':
+      return Math.max(1, action.count || action.items.length)
     case 'spawn_request':
       return 1
     default:
@@ -223,6 +225,8 @@ function getPendingWorkingTabKind(action: PendingActionRequest): PendingWorkingT
       return 'credentials'
     case 'contact_requests':
       return 'contacts'
+    case 'outbox_reviews':
+      return 'messages'
     case 'spawn_request':
       return 'agents'
     default:
@@ -240,6 +244,8 @@ function getPendingActionSignature(action: PendingActionRequest): string {
       return `${action.id}:${action.requests.map((request) => request.id).join(',')}`
     case 'spawn_request':
       return `${action.id}:${action.requestId}`
+    case 'outbox_reviews':
+      return `${action.id}:${action.items.map((item) => `${item.id}:${item.version}`).join(',')}`
     default:
       return ''
   }
@@ -249,10 +255,16 @@ function getPendingWorkingTabLabel(tab: PendingWorkingPanelTab): string {
   if (tab.pendingKind === 'questions') {
     return `${tab.count} ${tab.count === 1 ? 'Question' : 'Questions'}`
   }
+  if (tab.pendingKind === 'messages') {
+    return `${tab.count} ${tab.count === 1 ? 'Message' : 'Messages'}`
+  }
   return PENDING_WORKING_TAB_CONFIG[tab.pendingKind].title
 }
 
 function getPendingWorkingTabAriaLabel(tab: PendingWorkingPanelTab): string {
+  if (tab.pendingKind === 'messages') {
+    return `View ${tab.count} pending ${tab.count === 1 ? 'message' : 'messages'}`
+  }
   const label = PENDING_WORKING_TAB_CONFIG[tab.pendingKind].title.toLowerCase()
   return `View ${tab.count} pending ${label} ${tab.count === 1 ? 'request' : 'requests'}`
 }
@@ -281,7 +293,7 @@ type HumanInputComposerBatchResponse = {
 }
 
 type NativeWorkingTabKind = 'google_drive' | 'apollo' | 'hubspot' | 'discord' | 'meta_ads' | 'computer'
-type PendingWorkingTabKind = 'questions' | 'credentials' | 'contacts' | 'agents'
+type PendingWorkingTabKind = 'questions' | 'messages' | 'credentials' | 'contacts' | 'agents'
 type PendingWorkingPanelTab = {
   id: `pending:${PendingWorkingTabKind}`
   kind: 'pending_action'
@@ -294,13 +306,18 @@ type WorkingPanelTab =
   | PendingWorkingPanelTab
   | { id: NativeWorkingTabKind; kind: NativeWorkingTabKind }
 
-const PENDING_WORKING_TAB_ORDER: PendingWorkingTabKind[] = ['questions', 'credentials', 'contacts', 'agents']
+const PENDING_WORKING_TAB_ORDER: PendingWorkingTabKind[] = ['questions', 'messages', 'credentials', 'contacts', 'agents']
 
 const PENDING_WORKING_TAB_CONFIG = {
   questions: {
     title: 'Questions',
     color: '#0284c7',
     icon: <MessageSquareQuote size={11} strokeWidth={2.2} />,
+  },
+  messages: {
+    title: 'Messages',
+    color: '#2563eb',
+    icon: <Mail size={11} strokeWidth={2.2} />,
   },
   credentials: {
     title: 'Credentials',
@@ -541,6 +558,11 @@ type AgentComposerProps = {
     }>
   ) => Promise<PendingActionMutationResult | void>
   onViewAllContactRequests?: () => void
+  onResolveOutboxReview?: (
+    reviewId: string,
+    decision: 'approve' | 'deny',
+    expectedVersion: number,
+  ) => Promise<PendingActionMutationResult | void>
   disabled?: boolean
   disabledReason?: string | null
   autoFocus?: boolean
@@ -589,6 +611,7 @@ export const AgentComposer = memo(function AgentComposer({
   onRemoveRequestedSecrets,
   onResolveContactRequests,
   onViewAllContactRequests,
+  onResolveOutboxReview,
   disabled = false,
   disabledReason = null,
   autoFocus = false,
@@ -2231,7 +2254,7 @@ export const AgentComposer = memo(function AgentComposer({
                             {pendingTabConfig?.icon ?? nativeTabConfig?.icon ?? (tab.kind === 'insight' ? getInsightTabIcon(tab.insight) : null)}
                           </span>
                           <span className="composer-insight-tab-label">{label}</span>
-                          {tab.kind === 'pending_action' && tab.pendingKind !== 'questions' ? (
+                          {tab.kind === 'pending_action' && !['questions', 'messages'].includes(tab.pendingKind) ? (
                             <span className="composer-insight-tab-count">{tab.count}</span>
                           ) : null}
                           {tab.kind === 'insight' && isActive && !isInsightsPaused && isProcessing && (
@@ -2324,6 +2347,7 @@ export const AgentComposer = memo(function AgentComposer({
                       onRemoveRequestedSecrets={onRemoveRequestedSecrets}
                       onResolveContactRequests={onResolveContactRequests}
                       onViewAllContactRequests={onViewAllContactRequests}
+                      onResolveOutboxReview={onResolveOutboxReview}
                       compact={compact}
                     />
                   </div>

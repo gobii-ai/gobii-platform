@@ -55,6 +55,7 @@ from api.services.outbound_email_review import (
 )
 from api.services.persistent_agents import PersistentAgentProvisioningService
 from api.tasks.outbox import reconcile_approved_outbox_emails
+from console.agent_chat.pending_actions import list_pending_action_requests
 from console.outbox_api_views import serialize_outbox_review
 from config.redis_client import _FakeRedis
 from constants.feature_flags import EMAIL_REVIEW_OUTBOX
@@ -816,6 +817,8 @@ class EmailReviewOutboxTests(TestCase):
     def test_outbox_api_uses_versions_and_creates_outbound_only_contact(self, delay_mock):
         message = self._message("new-contact@example.com")
         review = queue_message_for_review(message)
+        pending_actions = list_pending_action_requests(self.agent, self.owner)
+        self.assertEqual(pending_actions[-1]["items"][0]["version"], 1)
         self.client.force_login(self.owner)
         detail_url = reverse("console_outbox_detail", kwargs={"outbox_id": review.id})
 
@@ -837,10 +840,11 @@ class EmailReviewOutboxTests(TestCase):
 
         approve_response = self.client.post(
             reverse("console_outbox_approve", kwargs={"outbox_id": review.id}),
-            data={"expectedVersion": 2},
+            data={"expectedVersion": 2, "includePendingActions": True},
             content_type="application/json",
         )
         self.assertEqual(approve_response.status_code, 200, approve_response.content.decode())
+        self.assertEqual(approve_response.json()["pending_action_requests"], [])
         review.refresh_from_db()
         message.refresh_from_db()
         self.assertEqual(review.status, OutboundEmailReview.Status.APPROVED)
