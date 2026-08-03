@@ -21,6 +21,7 @@ from api.evals.scenarios.hallucinated_links import (
     owner_report_has_resolved_summary,
     owner_report_table_failures,
     provenance_failures,
+    tool_delivery_execution_failures,
 )
 from api.evals.execution import WaitForIdleContext
 from api.evals.runner import _update_suite_state
@@ -247,6 +248,67 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
         for attempts, completion_ids, expected in cases:
             with self.subTest(expected=expected):
                 failures = owner_report_execution_failures(attempts, completion_ids)
+                self.assertTrue(any(expected in failure for failure in failures), failures)
+
+    def test_tool_delivery_execution_contract_accepts_direct_and_single_shape_paths(self):
+        direct = (
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call("send_chat_message", "completion-2", terminal=False),
+        )
+        shaped = (
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call("sqlite_batch", "completion-2"),
+            self._owner_report_call("send_chat_message", "completion-3", terminal=False),
+        )
+
+        self.assertEqual(
+            tool_delivery_execution_failures(direct, ("completion-1", "completion-2")),
+            [],
+        )
+        self.assertEqual(
+            tool_delivery_execution_failures(
+                shaped,
+                ("completion-1", "completion-2", "completion-3"),
+            ),
+            [],
+        )
+
+    def test_tool_delivery_execution_contract_rejects_eventual_recovery(self):
+        repeated_fetch = (
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call("http_request", "completion-2"),
+            self._owner_report_call("send_chat_message", "completion-3", terminal=False),
+        )
+        repeated_shape = (
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call("sqlite_batch", "completion-2"),
+            self._owner_report_call("sqlite_batch", "completion-3"),
+            self._owner_report_call("send_chat_message", "completion-4", terminal=False),
+        )
+        file_detour = (
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call("read_file", "completion-2", result_status="error"),
+            self._owner_report_call("send_chat_message", "completion-3", terminal=False),
+        )
+        parallel = (
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call("sqlite_batch", "completion-1"),
+            self._owner_report_call("send_chat_message", "completion-2", terminal=False),
+        )
+        continuing = (
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call("send_chat_message", "completion-2", terminal=True),
+        )
+        cases = (
+            (repeated_fetch, ("completion-1", "completion-2", "completion-3"), "one source fetch"),
+            (repeated_shape, ("completion-1", "completion-2", "completion-3", "completion-4"), "more than once"),
+            (file_detour, ("completion-1", "completion-2", "completion-3"), "recovery actions"),
+            (parallel, ("completion-1", "completion-2"), "one useful action"),
+            (continuing, ("completion-1", "completion-2"), "terminal web-chat"),
+        )
+        for attempts, completion_ids, expected in cases:
+            with self.subTest(expected=expected):
+                failures = tool_delivery_execution_failures(attempts, completion_ids)
                 self.assertTrue(any(expected in failure for failure in failures), failures)
 
     def test_url_extraction_handles_plain_markdown_and_html_urls(self):
