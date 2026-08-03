@@ -274,11 +274,69 @@ jobs:
 
       # No per-batch PR checks to reduce noise; artifacts are uploaded above.
 
+  timeline-postgres:
+    name: Timeline PostgreSQL Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [tag-guard, complexity-guardrails]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: gobii_timeline
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d gobii_timeline"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DJANGO_SETTINGS_MODULE: config.postgres_test_settings
+      PYTHONUNBUFFERED: "1"
+      UV_PYTHON_DOWNLOADS: "never"
+      DJANGO_SECRET_KEY: test-secret
+      GOBII_ENCRYPTION_KEY: dummy-encryption-key-for-testing
+      POSTGRES_DB: gobii_timeline
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://localhost:6379/0
+      OPENAI_API_KEY: dummy
+      BROWSER_USE_TASK_MAX_COUNT: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv (with cache)
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          ignore-nothing-to-cache: true
+
+      - name: Sync deps (locked)
+        run: uv sync --frozen --all-extras --dev
+
+      - name: Execute timeline candidate SQL on PostgreSQL
+        run: >-
+          uv run python manage.py test
+          tests.unit.test_agent_chat_api.AgentChatAPITests.test_postgres_timeline_candidates_execute_against_postgres
+          --settings=config.postgres_test_settings
+          --parallel 1
+
   report:
     name: Combined Test Results
     runs-on: ubuntu-latest
     if: ${{ always() }}
-    needs: [tests, sandbox-server-tests]
+    needs: [tests, sandbox-server-tests, timeline-postgres]
     steps:
       - name: Download all test result artifacts
         uses: actions/download-artifact@v8

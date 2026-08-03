@@ -94,8 +94,8 @@ from console.agent_chat.timeline import (
     CursorPayload,
     _has_more_after,
     _has_more_before,
+    _portable_timeline_candidates,
     _postgres_timeline_candidates,
-    _steps_queryset,
     fetch_timeline_window,
 )
 from console.agent_chat.timeline import serialize_plan_event
@@ -1022,15 +1022,33 @@ class AgentChatAPITests(TestCase):
             identifier=str(visible_step.id),
         )
 
-        self.assertEqual(
-            [step.id for step in _steps_queryset(agent, "initial", None)],
-            [visible_step.id],
+        initial = fetch_timeline_window(agent, limit=10, viewer_user=self.user)
+        older = fetch_timeline_window(
+            agent,
+            cursor=cursor.encode(),
+            direction="older",
+            limit=10,
+            viewer_user=self.user,
         )
-        self.assertEqual(
-            [step.id for step in _steps_queryset(agent, "older", cursor)],
-            [visible_step.id],
+        newer = fetch_timeline_window(
+            agent,
+            cursor=cursor.encode(),
+            direction="newer",
+            limit=10,
+            viewer_user=self.user,
         )
-        self.assertEqual(_steps_queryset(agent, "newer", cursor), [])
+
+        def tool_names(window):
+            return [
+                entry["toolName"]
+                for event in window.events
+                if event["kind"] == "steps"
+                for entry in event["entries"]
+            ]
+
+        self.assertEqual(tool_names(initial), ["visible_tool"])
+        self.assertNotIn("hidden_tool", tool_names(older))
+        self.assertNotIn("hidden_tool", tool_names(newer))
         self.assertFalse(_has_more_before(agent, cursor))
         self.assertFalse(_has_more_after(agent, cursor))
 
@@ -1162,23 +1180,6 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("$[link:", json.dumps(entry))
         self.assertIn("Link unavailable", entry["caption"])
         self.assertEqual(entry["parameters"]["url"], "Link unavailable")
-
-    @tag("batch_agent_chat")
-    def test_timeline_steps_load_agent_without_per_entry_queries(self):
-        for index in range(3):
-            step = PersistentAgentStep.objects.create(agent=self.agent, description=f"Step {index}")
-            PersistentAgentToolCall.objects.create(
-                step=step,
-                tool_name="http_request",
-                tool_params={"url": f"https://example.com/{index}"},
-                result=json.dumps({"status": "ok"}),
-            )
-
-        steps = _steps_queryset(self.agent, "initial", None)
-        with CaptureQueriesContext(connection) as queries:
-            self.assertTrue(all(step.agent is self.agent or step.agent_id == self.agent.id for step in steps))
-
-        self.assertEqual(len(queries), 0)
 
     @tag("batch_agent_chat")
     def test_timeline_preserves_empty_assignment_display_snapshot(self):
@@ -2127,6 +2128,46 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(cursor_kinds, ["message", "plan", "step", "thinking", "user_action"])
 
     @tag("batch_agent_chat")
+    def test_legacy_kanban_cursor_uses_plan_identifier_tiebreaker(self):
+        cursor_value = int((timezone.now() + timedelta(days=1)).timestamp() * 1_000_000)
+        older_identifier = uuid.UUID(int=1)
+        newer_identifier = uuid.UUID(int=2)
+        for identifier in (older_identifier, newer_identifier):
+            PersistentAgentKanbanEvent.objects.create(
+                agent=self.agent,
+                cursor_value=cursor_value,
+                cursor_identifier=identifier,
+                display_text=f"Plan event {identifier}",
+                primary_action=PersistentAgentKanbanEvent.Action.UPDATED,
+            )
+
+        older_cursor = CursorPayload.decode(f"{cursor_value}:kanban:{older_identifier}")
+        newer_cursor = CursorPayload.decode(f"{cursor_value}:kanban:{newer_identifier}")
+
+        self.assertEqual(older_cursor.kind, "plan")
+        self.assertEqual(newer_cursor.kind, "plan")
+        newer_candidates = _portable_timeline_candidates(
+            self.agent,
+            older_cursor,
+            "newer",
+            10,
+        )
+        older_candidates = _portable_timeline_candidates(
+            self.agent,
+            newer_cursor,
+            "older",
+            10,
+        )
+        self.assertEqual(
+            [candidate.identifier for candidate in newer_candidates if candidate.kind == "plan"],
+            [str(newer_identifier)],
+        )
+        self.assertEqual(
+            [candidate.identifier for candidate in older_candidates if candidate.kind == "plan"],
+            [str(older_identifier)],
+        )
+
+    @tag("batch_agent_chat")
     def test_timeline_query_count_is_bounded_as_message_volume_grows(self):
         fetch_timeline_window(self.agent, limit=10, viewer_user=self.user)
 
@@ -2186,6 +2227,66 @@ class AgentChatAPITests(TestCase):
         self.assertIn("tc.status <> 'queued'", sql)
         self.assertIn("e.thinking_content <> ''", sql)
         self.assertEqual(params[-1], 41)
+
+    @tag("batch_agent_chat")
+    def test_postgres_timeline_candidates_execute_against_postgres(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("The raw candidate query requires PostgreSQL")
+
+        shared_timestamp = timezone.now() + timedelta(minutes=1)
+        shared_cursor_value = int(shared_timestamp.timestamp() * 1_000_000)
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body="PostgreSQL candidate message",
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="PostgreSQL candidate step",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="postgres_candidate_tool",
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            thinking_content="PostgreSQL candidate thinking",
+        )
+        PersistentAgentKanbanEvent.objects.create(
+            agent=self.agent,
+            cursor_value=shared_cursor_value,
+            cursor_identifier=uuid.uuid4(),
+            display_text="PostgreSQL candidate plan",
+            primary_action=PersistentAgentKanbanEvent.Action.UPDATED,
+        )
+        PersistentAgentUserActionEvent.objects.create(
+            agent=self.agent,
+            actor_user=self.user,
+            action_type=PersistentAgentUserActionEvent.ActionType.CONTACTS_APPROVED,
+            occurred_at=shared_timestamp,
+        )
+        PersistentAgentMessage.objects.filter(id=message.id).update(timestamp=shared_timestamp)
+        PersistentAgentStep.objects.filter(id=step.id).update(created_at=shared_timestamp)
+        PersistentAgentCompletion.objects.filter(id=completion.id).update(created_at=shared_timestamp)
+
+        initial = _portable_timeline_candidates(self.agent, None, "initial", 100)
+        self.assertEqual(
+            [candidate.sort_key for candidate in _postgres_timeline_candidates(self.agent, None, "initial", 100)],
+            [candidate.sort_key for candidate in initial],
+        )
+        pivot = initial[len(initial) // 2]
+        cursor = CursorPayload(pivot.value, pivot.kind, pivot.identifier)
+        for direction in ("older", "newer"):
+            expected = _portable_timeline_candidates(self.agent, cursor, direction, 100)
+            actual = _postgres_timeline_candidates(self.agent, cursor, direction, 100)
+            self.assertEqual(
+                [candidate.sort_key for candidate in actual],
+                [candidate.sort_key for candidate in expected],
+            )
 
     @tag("batch_agent_chat")
     @patch("console.agent_chat.timeline.get_processing_heartbeat")

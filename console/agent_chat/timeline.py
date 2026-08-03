@@ -115,8 +115,10 @@ class CursorPayload:
             return None
         try:
             value_str, kind, identifier = raw.split(":", 2)
+            if kind == "kanban":
+                kind = "plan"
             return CursorPayload(value=int(value_str), kind=kind, identifier=identifier)
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
 
@@ -972,163 +974,6 @@ def _build_cluster(entries: Sequence[StepEnvelope], labels: Mapping[str, str]) -
     }
 
 
-def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor: CursorPayload | None) -> Sequence[PersistentAgentMessage]:
-    limit = MAX_PAGE_SIZE * 3
-    qs = (
-        visible_agent_message_queryset(agent)
-        .select_related(
-            "from_endpoint",
-            "to_endpoint",
-            "conversation__peer_link",
-            "peer_agent",
-            "owner_agent",
-            "outbound_email_review",
-        )
-        .prefetch_related("attachments__filespace_node", "cc_endpoints", "bcc_endpoints")
-        .order_by("-timestamp", "-seq")
-    )
-    if direction == "older" and cursor is not None:
-        qs = qs.filter(timestamp__lte=_dt_from_cursor(cursor))
-    elif direction == "newer" and cursor is not None:
-        # For "newer", we need messages AFTER the cursor
-        # This includes: timestamp > cursor_time OR (timestamp == cursor_time AND seq > cursor_seq)
-        dt = _dt_from_cursor(cursor)
-        if cursor.kind == "message":
-            qs = qs.filter(
-                Q(timestamp__gt=dt) | Q(timestamp=dt, seq__gt=cursor.identifier)
-            )
-        else:
-            qs = qs.filter(timestamp__gt=dt)
-    return list(qs[:limit])
-
-
-def _steps_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor: CursorPayload | None) -> Sequence[PersistentAgentStep]:
-    limit = MAX_PAGE_SIZE * 3
-    qs = (
-        visible_tool_steps_queryset(agent)
-        .select_related("tool_call", "agent")
-        .prefetch_related("human_input_requests")
-        .order_by("-created_at", "-id")
-    )
-    if direction == "older" and cursor is not None:
-        qs = qs.filter(created_at__lte=_dt_from_cursor(cursor))
-    elif direction == "newer" and cursor is not None:
-        # For "newer", we need events AFTER the cursor
-        # This includes: created_at > cursor_time OR (created_at == cursor_time AND id > cursor_id)
-        dt = _dt_from_cursor(cursor)
-        if cursor.kind == "step":
-            try:
-                cursor_uuid = uuid.UUID(cursor.identifier)
-                qs = qs.filter(
-                    Q(created_at__gt=dt) | Q(created_at=dt, id__gt=cursor_uuid)
-                )
-            except Exception:
-                qs = qs.filter(created_at__gt=dt)
-        else:
-            qs = qs.filter(created_at__gt=dt)
-    return list(qs[:limit])
-
-
-def _thinking_queryset(
-    agent: PersistentAgent,
-    direction: TimelineDirection,
-    cursor: CursorPayload | None,
-) -> Sequence[PersistentAgentCompletion]:
-    limit = MAX_PAGE_SIZE * 3
-    qs = (
-        PersistentAgentCompletion.objects.filter(
-            agent=agent,
-            completion_type__in=THINKING_COMPLETION_TYPES,
-        )
-        .exclude(thinking_content__isnull=True)
-        .exclude(thinking_content__exact="")
-        .order_by("-created_at", "-id")
-    )
-    if direction == "older" and cursor is not None:
-        qs = qs.filter(created_at__lte=_dt_from_cursor(cursor))
-    elif direction == "newer" and cursor is not None:
-        dt = _dt_from_cursor(cursor)
-        if cursor.kind == "thinking":
-            try:
-                cursor_uuid = uuid.UUID(cursor.identifier)
-                qs = qs.filter(
-                    Q(created_at__gt=dt) | Q(created_at=dt, id__gt=cursor_uuid)
-                )
-            except Exception:
-                qs = qs.filter(created_at__gt=dt)
-        else:
-            qs = qs.filter(created_at__gt=dt)
-    return list(qs[:limit])
-
-
-def _plan_event_queryset(
-    agent: PersistentAgent,
-    direction: TimelineDirection,
-    cursor: CursorPayload | None,
-) -> Sequence[PersistentAgentKanbanEvent]:
-    limit = MAX_PAGE_SIZE * 3
-    qs = (
-        PersistentAgentKanbanEvent.objects.filter(agent=agent)
-        .prefetch_related("changes", "titles")
-        .order_by("-cursor_value", "-cursor_identifier")
-    )
-    if direction == "older" and cursor is not None:
-        qs = qs.filter(cursor_value__lte=cursor.value)
-    elif direction == "newer" and cursor is not None:
-        if cursor.kind in {"kanban", "plan"}:
-            try:
-                cursor_uuid = uuid.UUID(cursor.identifier)
-                qs = qs.filter(
-                    Q(cursor_value__gt=cursor.value)
-                    | Q(cursor_value=cursor.value, cursor_identifier__gt=cursor_uuid)
-                )
-            except Exception:
-                qs = qs.filter(cursor_value__gt=cursor.value)
-        else:
-            qs = qs.filter(cursor_value__gt=cursor.value)
-    return list(qs[:limit])
-
-
-def _user_action_event_queryset(
-    agent: PersistentAgent,
-    direction: TimelineDirection,
-    cursor: CursorPayload | None,
-) -> Sequence[PersistentAgentUserActionEvent]:
-    limit = MAX_PAGE_SIZE * 3
-    qs = (
-        PersistentAgentUserActionEvent.objects.filter(agent=agent)
-        .select_related("actor_user", "agent")
-        .order_by("-occurred_at", "-id")
-    )
-    if direction == "older" and cursor is not None:
-        dt = _dt_from_cursor(cursor)
-        if cursor.kind == "user_action":
-            try:
-                cursor_uuid = uuid.UUID(cursor.identifier)
-                qs = qs.filter(
-                    Q(occurred_at__lt=dt)
-                    | Q(occurred_at=dt, id__lt=cursor_uuid)
-                )
-            except (TypeError, ValueError):
-                qs = qs.filter(occurred_at__lte=dt)
-        else:
-            qs = qs.filter(occurred_at__lt=dt)
-    elif direction == "newer" and cursor is not None:
-        dt = _dt_from_cursor(cursor)
-        if cursor.kind == "user_action":
-            try:
-                cursor_uuid = uuid.UUID(cursor.identifier)
-                qs = qs.filter(
-                    Q(occurred_at__gt=dt)
-                    | Q(occurred_at=dt, id__gt=cursor_uuid)
-                )
-            except (TypeError, ValueError):
-                qs = qs.filter(occurred_at__gt=dt)
-        else:
-            qs = qs.filter(occurred_at__gte=dt)
-    return list(qs[:limit])
-
-
 def _dt_from_cursor(cursor: CursorPayload) -> datetime:
     micros = cursor.value
     return datetime.fromtimestamp(micros / 1_000_000, tz=dt_timezone.utc)
@@ -1573,39 +1418,6 @@ def _hydrate_timeline_candidates(
         for candidate in candidates
         if (candidate.kind, candidate.identifier) in envelope_by_key
     ]
-
-
-def _filter_by_direction(
-    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope],
-    direction: TimelineDirection,
-    cursor: CursorPayload | None,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope]:
-    if not cursor or direction == "initial":
-        return list(envelopes)
-    pivot = (cursor.value, cursor.kind, cursor.identifier)
-    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope] = []
-    for env in envelopes:
-        key = env.sort_key
-        if direction == "older" and key < pivot:
-            filtered.append(env)
-        elif direction == "newer" and key > pivot:
-            filtered.append(env)
-    return filtered
-
-
-def _truncate_for_direction(
-    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope],
-    direction: TimelineDirection,
-    limit: int,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope | UserActionEnvelope]:
-    if not envelopes:
-        return []
-    if direction == "older":
-        return envelopes[-limit:]
-    if direction == "newer":
-        return envelopes[:limit]
-    # initial snapshot -> latest `limit` events
-    return envelopes[-limit:]
 
 
 def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bool:
