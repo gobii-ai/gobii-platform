@@ -1,10 +1,12 @@
 import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { AgentEmotionIndicator } from '../common/AgentEmotionIndicator'
 import { AgentCreateSplitButton, type TeamTemplateCreateMenu } from './AgentCreateSplitButton'
 import { AgentEmptyState, AgentListSectionHeader } from './ChatSidebarParts'
 import { AgentChatAvatar, AgentChatIconButton, AgentChatPill, joinClassNames } from './uiPrimitives'
+import { VirtualizedRosterSurface, type VirtualRosterRow } from './VirtualizedRosterSurface'
 
 type ChatSidebarGalleryProps = {
   variant: 'sidebar' | 'drawer'
@@ -24,6 +26,9 @@ type ChatSidebarGalleryProps = {
   createAgentButtonDisabled?: boolean
   createAgentDisabledReason?: string | null
   teamTemplateMenu?: TeamTemplateCreateMenu | null
+  enabled?: boolean
+  scrollToAgentId?: string | null
+  onScrolledToAgent?: (agentId: string) => void
 }
 
 type GalleryCardProps = {
@@ -92,6 +97,8 @@ function GalleryCard({
             className="agent-gallery-card__avatar"
             imageClassName="agent-gallery-card__avatar-image"
             textClassName="agent-gallery-card__avatar-text"
+            loading="lazy"
+            decoding="async"
           />
           <div className="agent-gallery-card__hero-meta">
             <span className="agent-name-emotion-row">
@@ -192,17 +199,31 @@ export function ChatSidebarGallery({
   createAgentButtonDisabled = false,
   createAgentDisabledReason = null,
   teamTemplateMenu = null,
+  enabled = true,
+  scrollToAgentId,
+  onScrolledToAgent,
 }: ChatSidebarGalleryProps) {
-  const favoriteAgentIdSet = new Set(favoriteAgentIds)
-  const favoriteAgents = agents.filter((agent) => favoriteAgentIdSet.has(agent.id))
-  const allAgents = agents.filter((agent) => !favoriteAgentIdSet.has(agent.id))
-  const showFavoritesSection = favoriteAgents.length > 0
-  const showAllSection = allAgents.length > 0 || !showFavoritesSection
+  const [viewportWidth, setViewportWidth] = useState(0)
+  const handleViewportWidthChange = useCallback((width: number) => {
+    setViewportWidth((current) => current === width ? current : width)
+  }, [])
+  const columnCount = viewportWidth > 0
+    ? variant === 'drawer' && viewportWidth < 560
+      ? 1
+      : Math.max(1, Math.floor((viewportWidth + 12) / (232 + 12)))
+    : 1
+  const rows = useMemo<VirtualRosterRow[]>(() => {
+    const favoriteAgentIdSet = new Set(favoriteAgentIds)
+    const favoriteAgents = agents.filter((agent) => favoriteAgentIdSet.has(agent.id))
+    const allAgents = agents.filter((agent) => !favoriteAgentIdSet.has(agent.id))
+    const showFavoritesSection = favoriteAgents.length > 0
+    const showAllSection = allAgents.length > 0 || !showFavoritesSection
+    const nextRows: VirtualRosterRow[] = []
 
-  return (
-    <div className="agent-gallery-scroll" data-variant={variant}>
-      {onCreateAgent ? (
-        teamTemplateMenu ? (
+    if (onCreateAgent) {
+      nextRows.push({
+        key: 'gallery:create',
+        content: teamTemplateMenu ? (
           <AgentCreateSplitButton
             variant="gallery"
             onCreateAgent={onCreateAgent}
@@ -224,63 +245,80 @@ export function ChatSidebarGallery({
             <Plus className="h-4 w-4" />
             <span>New Agent</span>
           </button>
-        )
-      ) : null}
+        ),
+      })
+    }
 
-      <AgentEmptyState
-        variant={variant}
-        hasAgents={hasAgents}
-        loading={loading}
-        errorMessage={errorMessage}
-        filteredCount={agents.length}
-        searchQuery={searchQuery}
-      />
+    nextRows.push({
+      key: 'gallery:empty',
+      content: (
+        <AgentEmptyState
+          variant={variant}
+          hasAgents={hasAgents}
+          loading={loading}
+          errorMessage={errorMessage}
+          filteredCount={agents.length}
+          searchQuery={searchQuery}
+        />
+      ),
+    })
 
-      {showFavoritesSection ? (
-        <section className="agent-gallery-section" data-variant={variant}>
-          <AgentListSectionHeader variant={variant} label="Favorites" count={favoriteAgents.length} />
-          <div className={joinClassNames('agent-gallery-grid', variant === 'drawer' && 'agent-gallery-grid--drawer')} role="list">
-            {favoriteAgents.map((agent) => (
-              <GalleryCard
-                key={agent.id}
-                agent={agent}
-                variant={variant}
-                isActive={agent.id === activeAgentId}
-                isSwitching={agent.id === switchingAgentId}
-                isFavorite={true}
-                onSelectAgent={onSelectAgent}
-                onConfigureAgent={onConfigureAgent}
-                onToggleAgentFavorite={onToggleAgentFavorite}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
+    const pushSection = (key: string, label: string, sectionAgents: AgentRosterEntry[], favorite: boolean) => {
+      if (!sectionAgents.length) return
+      nextRows.push({
+        key: `gallery:${key}:header`,
+        content: <AgentListSectionHeader variant={variant} label={label} count={sectionAgents.length} />,
+      })
+      for (let index = 0; index < sectionAgents.length; index += columnCount) {
+        const rowAgents = sectionAgents.slice(index, index + columnCount)
+        nextRows.push({
+          key: `gallery:${key}:${rowAgents.map((agent) => agent.id).join(':')}`,
+          agentIds: rowAgents.map((agent) => agent.id),
+          content: (
+            <div
+              className={joinClassNames('agent-gallery-grid', variant === 'drawer' && 'agent-gallery-grid--drawer')}
+              style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+              role="list"
+            >
+              {rowAgents.map((agent) => (
+                <GalleryCard
+                  key={agent.id}
+                  agent={agent}
+                  variant={variant}
+                  isActive={agent.id === activeAgentId}
+                  isSwitching={agent.id === switchingAgentId}
+                  isFavorite={favorite}
+                  onSelectAgent={onSelectAgent}
+                  onConfigureAgent={onConfigureAgent}
+                  onToggleAgentFavorite={onToggleAgentFavorite}
+                />
+              ))}
+            </div>
+          ),
+        })
+      }
+    }
+    if (showFavoritesSection) {
+      pushSection('favorites', 'Favorites', favoriteAgents, true)
+    }
+    if (showAllSection) {
+      pushSection('all', showFavoritesSection ? 'All agents' : 'Agents', allAgents, false)
+    }
+    return nextRows
+  }, [activeAgentId, agents, columnCount, createAgentButtonDisabled, createAgentDisabled, createAgentDisabledReason, errorMessage, favoriteAgentIds, hasAgents, loading, onConfigureAgent, onCreateAgent, onSelectAgent, onToggleAgentFavorite, searchQuery, switchingAgentId, teamTemplateMenu, variant])
 
-      {showAllSection && allAgents.length > 0 ? (
-        <section className="agent-gallery-section" data-variant={variant}>
-          <AgentListSectionHeader
-            variant={variant}
-            label={showFavoritesSection ? 'All agents' : 'Agents'}
-            count={allAgents.length}
-          />
-          <div className={joinClassNames('agent-gallery-grid', variant === 'drawer' && 'agent-gallery-grid--drawer')} role="list">
-            {allAgents.map((agent) => (
-              <GalleryCard
-                key={agent.id}
-                agent={agent}
-                variant={variant}
-                isActive={agent.id === activeAgentId}
-                isSwitching={agent.id === switchingAgentId}
-                isFavorite={false}
-                onSelectAgent={onSelectAgent}
-                onConfigureAgent={onConfigureAgent}
-                onToggleAgentFavorite={onToggleAgentFavorite}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-    </div>
+  return (
+    <VirtualizedRosterSurface
+      rows={rows}
+      className="agent-gallery-scroll"
+      estimateSize={260}
+      gap={14}
+      overscan={3}
+      variant={variant}
+      enabled={enabled}
+      scrollToAgentId={scrollToAgentId}
+      onScrolledToAgent={onScrolledToAgent}
+      onViewportWidthChange={handleViewportWidthChange}
+    />
   )
 }

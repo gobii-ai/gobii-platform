@@ -1211,6 +1211,46 @@ class AgentChatAPITests(TestCase):
         self.assertIn("enabled_system_skills", payload)
 
     @tag("batch_agent_chat")
+    def test_roster_query_count_is_bounded_as_agents_grow(self):
+        organization, org_agent = self._create_org_owned_agent_for_other_creator()
+        creator = org_agent.user
+        browser_agents = BrowserUseAgent.objects.bulk_create([
+            BrowserUseAgent(
+                user=creator,
+                name=f"Roster Browser {index}",
+            )
+            for index in range(100)
+        ])
+        PersistentAgent.objects.bulk_create([
+            PersistentAgent(
+                user=creator,
+                organization=organization,
+                name=f"Roster Agent {index}",
+                charter="Test bulk roster access",
+                browser_use_agent=browser_agent,
+            )
+            for index, browser_agent in enumerate(browser_agents)
+        ])
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
+        with (
+            patch(
+                "console.api_views.user_has_natural_agent_chat_access",
+                side_effect=AssertionError("per-agent access lookup"),
+            ),
+            CaptureQueriesContext(connection) as captured,
+        ):
+            response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json()["agents"]), 101)
+        self.assertLessEqual(len(captured), 40)
+
+    @tag("batch_agent_chat")
     @override_settings(GOBII_RELEASE_ENV="staging")
     def test_timeline_includes_schedule_next_run_from_loaded_agent(self):
         self.agent.schedule = "@hourly"

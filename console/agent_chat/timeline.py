@@ -1788,12 +1788,22 @@ def fetch_timeline_window_around_message(
 
 
 def serialize_message_event(message: PersistentAgentMessage, *, viewer_user=None) -> dict:
-    envelope = _envelop_messages([message])[0]
-    return _serialize_message(
-        envelope,
-        _build_web_user_lookup([message]),
-        _build_viewer_message_feedback_lookup([message], viewer_user),
-    )
+    return serialize_message_events([message], viewer_user=viewer_user)[0]
+
+
+def serialize_message_events(
+    messages: Iterable[PersistentAgentMessage],
+    *,
+    viewer_user=None,
+) -> list[dict]:
+    message_list = list(messages)
+    envelopes = _envelop_messages(message_list)
+    user_lookup = _build_web_user_lookup(message_list)
+    feedback_lookup = _build_viewer_message_feedback_lookup(message_list, viewer_user)
+    return [
+        _serialize_message(envelope, user_lookup, feedback_lookup)
+        for envelope in envelopes
+    ]
 
 
 def serialize_user_action_event(event: PersistentAgentUserActionEvent, *, viewer_user=None) -> dict:

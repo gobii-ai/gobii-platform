@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
+from django.test.utils import CaptureQueriesContext
+from django.db import connection
 from django.utils import timezone
 
 from api.agent.comms.message_reads import build_latest_agent_message_read_state
@@ -122,3 +124,17 @@ class LatestAgentMessageReadStateTests(TestCase):
         )
 
         self.assertEqual(set(state), {str(self.agent.id), str(self.other_agent.id)})
+
+    def test_query_count_does_not_grow_with_message_volume(self):
+        for index in range(10):
+            self._message(self.agent, minutes_ago=index + 1, body=f"alpha-{index}")
+            self._message(self.other_agent, minutes_ago=index + 1, body=f"bravo-{index}")
+
+        with CaptureQueriesContext(connection) as captured:
+            state = build_latest_agent_message_read_state(
+                [self.agent.id, self.other_agent.id],
+                self.user,
+            )
+
+        self.assertEqual(set(state), {str(self.agent.id), str(self.other_agent.id)})
+        self.assertLessEqual(len(captured), 2)

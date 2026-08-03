@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from email.utils import parseaddr
 
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -72,26 +72,10 @@ def build_latest_agent_message_read_state(
     if not normalized_ids:
         return {}
 
-    # One ordered pass over the candidate messages, rather than a correlated subquery per agent.
-    # The visibility predicates -- a JSONB flag and a joined conversation column -- stop the planner
-    # using the (owner_agent_id, timestamp DESC) index, so each correlated lookup degraded into a
-    # bitmap scan plus sort over that agent's messages. Measured against production-scale data:
-    # 8154ms for 144 agents, against 897ms for a single ordered pass, and the old code paid that
-    # cost twice because id and timestamp were separate subqueries. DISTINCT ON would be the
-    # natural form but is PostgreSQL only, and tests and evals run on SQLite, so the first row per
-    # agent is taken while streaming the ordered result instead.
-    latest_by_agent_id: dict[str, tuple[object, object]] = {}
-    for row in (
-        latest_visible_outbound_message_queryset()
-        .filter(owner_agent_id__in=normalized_ids)
-        .order_by("owner_agent_id", "-timestamp", "-seq")
-        .values("owner_agent_id", "id", "timestamp")
-        .iterator()
-    ):
-        agent_key = str(row["owner_agent_id"])
-        # Ordered newest-first within each agent, so the first row seen is the one we want.
-        if agent_key not in latest_by_agent_id:
-            latest_by_agent_id[agent_key] = (row["id"], row["timestamp"])
+    if connection.vendor == "postgresql":
+        latest_by_agent_id = _postgres_latest_visible_outbound_messages(normalized_ids)
+    else:
+        latest_by_agent_id = _portable_latest_visible_outbound_messages(normalized_ids)
     rows = [
         {
             "id": agent_id,
@@ -124,6 +108,62 @@ def build_latest_agent_message_read_state(
             "has_unread_agent_message": bool(message_id and read_at is None),
         }
     return result
+
+
+def _portable_latest_visible_outbound_messages(
+    agent_ids: list[str],
+) -> dict[str, tuple[object, object]]:
+    latest_by_agent_id: dict[str, tuple[object, object]] = {}
+    rows = (
+        latest_visible_outbound_message_queryset()
+        .filter(owner_agent_id__in=agent_ids)
+        .order_by("owner_agent_id", "-timestamp", "-seq")
+        .values("owner_agent_id", "id", "timestamp")
+        .iterator()
+    )
+    for row in rows:
+        agent_key = str(row["owner_agent_id"])
+        if agent_key not in latest_by_agent_id:
+            latest_by_agent_id[agent_key] = (row["id"], row["timestamp"])
+    return latest_by_agent_id
+
+
+def _postgres_latest_visible_outbound_messages(
+    agent_ids: list[str],
+) -> dict[str, tuple[object, object]]:
+    message_table = connection.ops.quote_name(PersistentAgentMessage._meta.db_table)
+    conversation_table = connection.ops.quote_name(
+        PersistentAgentMessage._meta.get_field("conversation").related_model._meta.db_table
+    )
+    sql = f"""
+        SELECT requested.agent_id, latest.id, latest.timestamp
+        FROM unnest(%s::uuid[]) AS requested(agent_id)
+        LEFT JOIN LATERAL (
+            SELECT message.id, message.timestamp
+            FROM {message_table} message
+            LEFT JOIN {conversation_table} conversation
+                ON conversation.id = message.conversation_id
+            WHERE message.owner_agent_id = requested.agent_id
+              AND message.is_outbound = TRUE
+              AND message.peer_agent_id IS NULL
+              AND COALESCE(conversation.is_peer_dm, FALSE) = FALSE
+              AND (
+                  message.raw_payload -> 'hide_in_chat' IS NULL
+                  OR message.raw_payload -> 'hide_in_chat' = 'false'::jsonb
+              )
+              AND (message.raw_payload ->> 'source_kind') IS DISTINCT FROM 'mcp'
+            ORDER BY message.timestamp DESC, message.seq DESC
+            LIMIT 1
+        ) latest ON TRUE
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(sql, [agent_ids])
+        rows = cursor.fetchall()
+    return {
+        str(agent_id): (message_id, timestamp)
+        for agent_id, message_id, timestamp in rows
+        if message_id is not None
+    }
 
 
 def serialize_latest_agent_message_read_state(state: dict[str, object] | None) -> dict[str, object]:

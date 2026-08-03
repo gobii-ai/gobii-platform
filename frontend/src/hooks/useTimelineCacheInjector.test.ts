@@ -66,21 +66,37 @@ describe('refreshTimelineLatestInCache', () => {
     expect(fetchAgentTimelineMock).not.toHaveBeenCalled()
   })
 
-  it('does not overlap an initial timeline query', async () => {
-    const initialRequest = deferred<string>()
+  it('defers recovery behind an initial query and continues from the newest cursor', async () => {
+    const cachedTimeline: InfiniteData<TimelinePage> = {
+      pages: [{
+        ...timelineResponseToPage(emptyTimelineResponse),
+        newestCursor: '100:message:01TESTCURSOR',
+      }],
+      pageParams: [undefined],
+    }
+    queryClient.setQueryData(timelineQueryKey('agent-1'), cachedTimeline)
+    const initialRequest = deferred<InfiniteData<TimelinePage>>()
     const initial = queryClient.fetchQuery({
       queryKey: timelineQueryKey('agent-1'),
       queryFn: () => initialRequest.promise,
     })
 
-    await expect(refreshTimelineLatestInCache(queryClient, 'agent-1')).resolves.toEqual({
-      newerPagesFetched: 0,
-      remainingNewerGap: false,
+    fetchAgentTimelineMock.mockResolvedValue(emptyTimelineResponse)
+    const recovery = refreshTimelineLatestInCache(queryClient, 'agent-1', {
+      allowDuringQueryFetch: true,
     })
     expect(fetchAgentTimelineMock).not.toHaveBeenCalled()
 
-    initialRequest.resolve('loaded')
+    initialRequest.resolve(cachedTimeline)
     await initial
+    await expect(recovery).resolves.toEqual({
+      newerPagesFetched: 1,
+      remainingNewerGap: false,
+    })
+    expect(fetchAgentTimelineMock).toHaveBeenCalledWith('agent-1', expect.objectContaining({
+      direction: 'newer',
+      cursor: '100:message:01TESTCURSOR',
+    }))
   })
 
   it('refreshes and merges the staff-context developer timeline', async () => {

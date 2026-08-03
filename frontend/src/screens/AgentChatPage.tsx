@@ -949,7 +949,6 @@ export function AgentChatPage({
     selectedPipedreamAppSlugs?: string[]
     template?: CreateAgentTemplateOptions | null
   } | null>(null)
-  const googleSheetsRosterRefreshAgentsRef = useRef<Set<string>>(new Set())
   const previewEnteredAgentIdsRef = useRef<Set<string>>(new Set())
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
@@ -1536,7 +1535,7 @@ export function AgentChatPage({
     enabled: contextReady,
     context: effectiveContext,
     contextKey: rosterContextKey,
-    forAgentId: routeAgentId ?? undefined,
+    forAgentId: staffContext ? routeAgentId ?? undefined : undefined,
     staffContext,
     refetchIntervalMs: ROSTER_REFRESH_INTERVAL_MS,
   })
@@ -1784,23 +1783,42 @@ export function AgentChatPage({
   const metaAdsTabEnabled = rosterMetaAdsTabEnabled || liveMetaAdsTabEnabled
   const computerTabEnabled = rosterComputerTabEnabled || liveComputerTabEnabled
   useEffect(() => {
-    if (!activeAgentId || (!liveGoogleSheetsDriveTabEnabled && !liveApolloNativeTabEnabled && !liveHubSpotNativeTabEnabled && !liveDiscordNativeTabEnabled && !liveMetaAdsTabEnabled && !liveComputerTabEnabled)) {
+    if (!activeAgentId) {
       return
     }
-    const refreshKey = [
-      activeAgentId,
+    const liveEnabledSystemSkills = [
       liveGoogleSheetsDriveTabEnabled ? GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY : '',
       liveApolloNativeTabEnabled ? APOLLO_NATIVE_SYSTEM_SKILL_KEY : '',
       liveHubSpotNativeTabEnabled ? HUBSPOT_NATIVE_SYSTEM_SKILL_KEY : '',
       liveDiscordNativeTabEnabled ? DISCORD_NATIVE_SYSTEM_SKILL_KEY : '',
       liveMetaAdsTabEnabled ? META_ADS_SYSTEM_SKILL_KEY : '',
       liveComputerTabEnabled ? COMPUTER_SYSTEM_SKILL_KEY : '',
-    ].join(':')
-    if (googleSheetsRosterRefreshAgentsRef.current.has(refreshKey)) {
+    ].filter(Boolean)
+    if (liveEnabledSystemSkills.length === 0) {
       return
     }
-    googleSheetsRosterRefreshAgentsRef.current.add(refreshKey)
-    void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
+    queryClient.setQueriesData<AgentRosterQueryData>(
+      { queryKey: ['agent-roster'] },
+      (current) => {
+        if (!isAgentRosterQueryData(current)) {
+          return current
+        }
+        const agent = current.agents.find((entry) => entry.id === activeAgentId)
+        if (!agent) {
+          return current
+        }
+        const enabledSystemSkills = agent.enabledSystemSkills ?? []
+        const newlyEnabledSystemSkills = liveEnabledSystemSkills.filter(
+          (skillKey) => !enabledSystemSkills.includes(skillKey),
+        )
+        if (newlyEnabledSystemSkills.length === 0) {
+          return current
+        }
+        return patchRosterAgent(current, activeAgentId, {
+          enabledSystemSkills: [...enabledSystemSkills, ...newlyEnabledSystemSkills],
+        })
+      },
+    )
   }, [activeAgentId, liveApolloNativeTabEnabled, liveComputerTabEnabled, liveDiscordNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, liveHubSpotNativeTabEnabled, liveMetaAdsTabEnabled, queryClient])
   const visibleRosterAgentIds = useMemo(
     () => rosterAgents.map((agent) => agent.id),

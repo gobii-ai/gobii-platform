@@ -297,6 +297,10 @@ def _save_agent_avatar(agent: PersistentAgent, *, image_bytes: bytes, mime_type:
 
             transaction.on_commit(_delete_old_avatar)
 
+        from api.tasks.avatar_thumbnails import enqueue_agent_avatar_thumbnail
+
+        transaction.on_commit(lambda: enqueue_agent_avatar_thumbnail(agent))
+
 
 @shared_task(bind=True, name="api.agent.tasks.generate_agent_visual_description")
 def generate_agent_visual_description_task(

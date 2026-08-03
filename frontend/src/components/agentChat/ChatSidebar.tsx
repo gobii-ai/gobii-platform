@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useEffect, useMemo, useRef, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { memo, useState, useCallback, useEffect, useMemo, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { ArrowLeftRight, Bell, BellOff, Check, LayoutGrid, List, PanelLeftClose, PanelRightClose, Plus, Search, Settings, X } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
@@ -20,6 +20,7 @@ import { AgentInviteDetails, AgentInviteSidebarItem, type AgentInviteAction, typ
 import { getNextAgentChatSidebarMode, getPreviousAgentChatSidebarMode, type AgentChatSidebarMode, SIDEBAR_MOBILE_BREAKPOINT_PX, type AgentDrawerViewMode } from './sidebarMode'
 import { useMobileDrawerHistory } from './useMobileDrawerHistory'
 import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
+import { VirtualizedRosterSurface, type VirtualRosterRow } from './VirtualizedRosterSurface'
 
 type AgentContextMenuState = FixedContextMenuPosition & {
   agent: AgentRosterEntry
@@ -102,10 +103,6 @@ export const ChatSidebar = memo(function ChatSidebar({
 }: ChatSidebarProps) {
   const storeActiveAgentId = useAppSelector(selectActiveChatAgentId)
   const activeAgentId = activeAgentIdOverride !== undefined ? activeAgentIdOverride : storeActiveAgentId
-  const sidebarRootRef = useRef<HTMLElement | null>(null)
-  const setSidebarRootRef = useCallback((node: HTMLElement | null) => {
-    sidebarRootRef.current = node
-  }, [])
   const [isMobile, setIsMobile] = useState(() => {
     if (typeof window === 'undefined') {
       return false
@@ -163,48 +160,6 @@ export const ChatSidebar = memo(function ChatSidebar({
     () => hasFavoritesInRoster ? [...favoriteFilteredAgents, ...allFilteredAgents] : agents,
     [agents, allFilteredAgents, favoriteFilteredAgents, hasFavoritesInRoster],
   )
-
-  useEffect(() => {
-    if (!scrollToAgentId || typeof window === 'undefined') {
-      return
-    }
-    if (!agents.some((agent) => agent.id === scrollToAgentId)) {
-      return
-    }
-    if (isMobile && !drawerOpen) {
-      return
-    }
-    const frame = window.requestAnimationFrame(() => {
-      const root: ParentNode | null = isMobile ? document : sidebarRootRef.current
-      const selectorId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
-        ? CSS.escape(scrollToAgentId)
-        : scrollToAgentId.replace(/["\\]/g, '\\$&')
-      const rosterItem = root?.querySelector<HTMLElement>(`[data-agent-roster-item-id="${selectorId}"]`)
-      if (!rosterItem) {
-        return
-      }
-      const prefersReducedMotion = typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      rosterItem.scrollIntoView({
-        block: 'center',
-        inline: 'nearest',
-        behavior: prefersReducedMotion ? 'auto' : 'smooth',
-      })
-      onScrolledToAgent?.(scrollToAgentId)
-    })
-
-    return () => window.cancelAnimationFrame(frame)
-  }, [
-    agents,
-    desktopMode,
-    drawerOpen,
-    drawerViewMode,
-    isMobile,
-    onScrolledToAgent,
-    scrollToAgentId,
-    showCustomGalleryShellPanel,
-    showSettingsView,
-  ])
 
   useEffect(() => {
     if (isMobile && !drawerOpen) {
@@ -435,7 +390,6 @@ export const ChatSidebar = memo(function ChatSidebar({
     const hasListRows = hasAgents || showInvites
     const renderAgentItem = (agent: AgentRosterEntry, isFavorite: boolean) => (
       <AgentListItem
-        key={agent.id}
         variant={variant}
         agent={agent}
         isActive={agent.id === activeAgentId}
@@ -449,10 +403,11 @@ export const ChatSidebar = memo(function ChatSidebar({
         showFavoriteToggle={!collapsedView}
       />
     )
-
-    return (
-      <>
-        {onCreateAgent ? (
+    const rows: VirtualRosterRow[] = []
+    if (onCreateAgent) {
+      rows.push({
+        key: 'create-agent',
+        content: (
           !collapsedView && teamTemplateMenu ? (
             <AgentCreateSplitButton
               variant={variant}
@@ -481,8 +436,12 @@ export const ChatSidebar = memo(function ChatSidebar({
               ) : null}
             </button>
           )
-        ) : null}
-
+        ),
+      })
+    }
+    rows.push({
+      key: 'empty-state',
+      content: (
         <AgentEmptyState
           variant={variant}
           hasAgents={hasListRows}
@@ -491,59 +450,56 @@ export const ChatSidebar = memo(function ChatSidebar({
           filteredCount={sourceAgents.length + (showInvites ? agentInvites.length : 0)}
           searchQuery=""
         />
-
-        {collapsedView ? (
-          sourceAgents.map((agent) => renderAgentItem(agent, favoriteAgentIdSet.has(agent.id)))
-        ) : (
-          <>
-            {showInvites ? (
-              <>
-                <AgentListSectionHeader
-                  variant={variant}
-                  label="Invites"
-                  count={agentInvites.length}
-                />
-                {agentInvites.map((invite) => (
-                  <AgentInviteSidebarItem
-                    key={`${invite.kind}-${invite.id}`}
-                    variant={variant}
-                    invite={invite}
-                    disabled={!onRespondInvite || inviteBusy}
-                    onRespond={openInviteDialog}
-                  />
-                ))}
-              </>
-            ) : null}
-            {hasFavoritesInRoster ? (
-              <>
-                <AgentListSectionHeader
-                  variant={variant}
-                  label="Favorites"
-                  count={favoriteFilteredAgents.length}
-                />
-                {favoriteFilteredAgents.map((agent) => renderAgentItem(agent, true))}
-                <AgentListSectionHeader
-                  variant={variant}
-                  label="All agents"
-                  count={allFilteredAgents.length}
-                  loading={loading}
-                />
-                {allFilteredAgents.map((agent) => renderAgentItem(agent, false))}
-              </>
-            ) : (
-              <>
-                <AgentListSectionHeader
-                  variant={variant}
-                  label="All agents"
-                  count={sourceAgents.length}
-                  loading={loading}
-                />
-                {sourceAgents.map((agent) => renderAgentItem(agent, false))}
-              </>
-            )}
-          </>
-        )}
-      </>
+      ),
+    })
+    const pushAgent = (agent: AgentRosterEntry, isFavorite: boolean) => rows.push({
+      key: `agent:${agent.id}`,
+      agentId: agent.id,
+      content: renderAgentItem(agent, isFavorite),
+    })
+    const pushHeader = (key: string, label: string, count: number, headerLoading = false) => rows.push({
+      key,
+      content: <AgentListSectionHeader variant={variant} label={label} count={count} loading={headerLoading} />,
+    })
+    if (collapsedView) {
+      sourceAgents.forEach((agent) => pushAgent(agent, favoriteAgentIdSet.has(agent.id)))
+    } else {
+      if (showInvites) {
+        pushHeader('header:invites', 'Invites', agentInvites.length)
+        agentInvites.forEach((invite) => rows.push({
+          key: `invite:${invite.kind}:${invite.id}`,
+          content: (
+            <AgentInviteSidebarItem
+              variant={variant}
+              invite={invite}
+              disabled={!onRespondInvite || inviteBusy}
+              onRespond={openInviteDialog}
+            />
+          ),
+        }))
+      }
+      if (hasFavoritesInRoster) {
+        pushHeader('header:favorites', 'Favorites', favoriteFilteredAgents.length)
+        favoriteFilteredAgents.forEach((agent) => pushAgent(agent, true))
+        pushHeader('header:all', 'All agents', allFilteredAgents.length, loading)
+        allFilteredAgents.forEach((agent) => pushAgent(agent, false))
+      } else {
+        pushHeader('header:all', 'All agents', sourceAgents.length, loading)
+        sourceAgents.forEach((agent) => pushAgent(agent, false))
+      }
+    }
+    return (
+      <VirtualizedRosterSurface
+        rows={rows}
+        className={variant === 'drawer' ? 'agent-drawer-list' : 'chat-sidebar-agent-list'}
+        estimateSize={collapsedView ? 52 : 64}
+        gap={variant === 'drawer' ? 6 : 2}
+        overscan={6}
+        role="list"
+        enabled={variant === 'sidebar' || drawerOpen}
+        scrollToAgentId={scrollToAgentId}
+        onScrolledToAgent={onScrolledToAgent}
+      />
     )
   }, [
     activeAgentId,
@@ -554,6 +510,7 @@ export const ChatSidebar = memo(function ChatSidebar({
     createAgentButtonDisabled,
     createAgentDisabled,
     createAgentDisabledReason,
+    drawerOpen,
     errorMessage,
     favoriteAgentIdSet,
     favoriteFilteredAgents,
@@ -566,9 +523,11 @@ export const ChatSidebar = memo(function ChatSidebar({
     onCreateAgent,
     inviteBusy,
     onRespondInvite,
+    onScrolledToAgent,
     onToggleAgentFavorite,
     openAgentContextMenu,
     openInviteDialog,
+    scrollToAgentId,
     switchingAgentId,
     teamTemplateMenu,
   ])
@@ -599,7 +558,7 @@ export const ChatSidebar = memo(function ChatSidebar({
       : null
     return (
       <>
-      <div ref={setSidebarRootRef} className="chat-sidebar-mobile-content">
+      <div className="chat-sidebar-mobile-content">
         <AgentChatButton
           className="agent-fab"
           variant="solid"
@@ -724,12 +683,13 @@ export const ChatSidebar = memo(function ChatSidebar({
                 createAgentDisabled={createAgentDisabled}
                 createAgentDisabledReason={createAgentDisabledReason}
                 teamTemplateMenu={teamTemplateMenu}
+                enabled={drawerOpen}
+                scrollToAgentId={scrollToAgentId}
+                onScrolledToAgent={onScrolledToAgent}
               />
             )
           ) : !messageSearchOpen && !showSettingsView ? (
-            <div className="agent-drawer-list" role="list">
-              {renderListContent('drawer', false)}
-            </div>
+            renderListContent('drawer', false)
           ) : null}
           {!messageSearchOpen && !showSettingsView && settings ? (
             <SidebarSettingsMenu
@@ -749,7 +709,6 @@ export const ChatSidebar = memo(function ChatSidebar({
   return (
     <>
     <aside
-      ref={setSidebarRootRef}
       className={`chat-sidebar chat-sidebar--${messageSearchOpen ? 'list' : desktopMode}`}
       data-collapsed={messageSearchOpen ? false : collapsed}
       data-sidebar-mode={messageSearchOpen ? 'list' : desktopMode}
@@ -888,11 +847,11 @@ export const ChatSidebar = memo(function ChatSidebar({
               createAgentDisabled={createAgentDisabled}
               createAgentDisabledReason={createAgentDisabledReason}
               teamTemplateMenu={teamTemplateMenu}
+              scrollToAgentId={scrollToAgentId}
+              onScrolledToAgent={onScrolledToAgent}
             />
           ) : (
-            <div className="chat-sidebar-agent-list" role="list">
-              {renderListContent('sidebar', collapsed)}
-            </div>
+            renderListContent('sidebar', collapsed)
           )}
         </div>}
 
