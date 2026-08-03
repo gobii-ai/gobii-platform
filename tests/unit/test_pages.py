@@ -484,7 +484,35 @@ class HomePageTests(TestCase):
             response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "gobii-cta-signup-modal-config")
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertIsNotNone(soup.find(id="gobii-cta-signup-modal-config"))
+        deferred_loader = soup.find(
+            "script",
+            id="gobii-deferred-auth-modal-loader",
+        )
+        self.assertIsNotNone(deferred_loader)
+        self.assertEqual(
+            deferred_loader.get("src"),
+            static("js/deferred_auth_modal_loader.js"),
+        )
+        self.assertEqual(
+            deferred_loader.get("data-identity-src"),
+            static("js/account_identity_signals.js"),
+        )
+        self.assertEqual(
+            deferred_loader.get("data-auth-forms-src"),
+            static("js/account_auth_forms.js"),
+        )
+        self.assertEqual(
+            deferred_loader.get("data-modal-src"),
+            static("js/cta_signup_modal.js"),
+        )
+        for asset in (
+            "js/account_identity_signals.js",
+            "js/account_auth_forms.js",
+            "js/cta_signup_modal.js",
+        ):
+            self.assertIsNone(soup.find("script", src=static(asset)))
         self.assertNotIn(settings.CSRF_COOKIE_NAME, response.cookies)
         self.assertNotIn(
             'name="csrfmiddlewaretoken"',
@@ -618,12 +646,20 @@ class HomePageTests(TestCase):
             "login": "turnstile_signup.LoginFormWithTurnstile",
         },
     )
-    def test_home_page_includes_turnstile_api_for_signup_modal_when_enabled(self):
+    def test_home_page_defers_turnstile_api_for_signup_modal_when_enabled(self):
         with override_flag("cta_signup_modal", active=True):
             response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "turnstile/v0/api.js?render=explicit")
+        soup = BeautifulSoup(response.content, "html.parser")
+        turnstile_url = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+        self.assertIsNone(soup.find("script", src=turnstile_url))
+        deferred_loader = soup.find(
+            "script",
+            id="gobii-deferred-auth-modal-loader",
+        )
+        self.assertIsNotNone(deferred_loader)
+        self.assertEqual(deferred_loader.get("data-turnstile-src"), turnstile_url)
 
     def test_home_page_includes_perf_motion_reduction_when_switch_is_on(self):
         with override_switch("homepage_perf_motion_reduction", active=True):
@@ -1050,6 +1086,13 @@ class HomePageTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     @patch(
+        "config.vite.get_vite_asset",
+        return_value=SimpleNamespace(
+            styles=("/static/frontend/assets/home-test.css",),
+            scripts=("/static/frontend/assets/home-test.js",),
+        ),
+    )
+    @patch(
         "pages.views.get_homepage_integrations_payload",
         return_value={
             "enabled": True,
@@ -1075,11 +1118,50 @@ class HomePageTests(TestCase):
             ],
         },
     )
-    def test_home_page_uses_generic_platform_copy_in_proprietary_mode(self, _mock_integrations):
+    def test_home_page_uses_generic_platform_copy_in_proprietary_mode(
+        self,
+        _mock_integrations,
+        _mock_vite_asset,
+    ):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
 
         soup = BeautifulSoup(response.content, "html.parser")
+        stylesheet_urls = {
+            link.get("href") for link in soup.find_all("link", rel="stylesheet")
+        }
+        self.assertIn(static("css/home_tailwind.css"), stylesheet_urls)
+        self.assertNotIn(static("css/tailwind.css"), stylesheet_urls)
+        undimensioned_images = [
+            image.get("src")
+            for image in soup.select("#main-content img")
+            if not image.get("width") or not image.get("height")
+        ]
+        self.assertEqual(undimensioned_images, [])
+        deferred_section_selectors = (
+            "section.gk-pf-math.gk-render-later--platform",
+            "section[aria-labelledby='gk-night-heading'].gk-render-later--night",
+            "section.gk-int.gk-render-later--integrations",
+            "section#gk-ao.gk-render-later--always-on",
+        )
+        for selector in deferred_section_selectors:
+            self.assertIsNotNone(soup.select_one(selector))
+        for selector in ("#hire-agents", "#how-it-works", "#pricing", "#faq"):
+            self.assertNotIn("gk-render-later", soup.select_one(selector).get("class", []))
+        self.assertIsNone(
+            soup.find(
+                "script",
+                src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js",
+            )
+        )
+        self.assertIsNone(soup.find("script", src=static("js/phone_format.js")))
+        immersive_assets = response.context["immersive_app_assets"]
+        for href in immersive_assets.styles:
+            self.assertIsNone(
+                soup.find("link", rel="preload", attrs={"as": "style", "href": href})
+            )
+        for src in immersive_assets.scripts:
+            self.assertIsNone(soup.find("link", rel="modulepreload", href=src))
         page_text = soup.get_text(" ")
         normalized_page_text = re.sub(r"\s+", " ", page_text)
         normalized_page_text = (
@@ -1131,7 +1213,14 @@ class HomePageTests(TestCase):
         GOBII_RELEASE_ENV="prod",
         PUBLIC_SITE_URL="https://gobii.ai",
     )
-    def test_home_spawn_query_renders_blank_custom_agent_form(self):
+    @patch(
+        "config.vite.get_vite_asset",
+        return_value=SimpleNamespace(
+            styles=("/static/frontend/assets/home-test.css",),
+            scripts=("/static/frontend/assets/home-test.js",),
+        ),
+    )
+    def test_home_spawn_query_renders_blank_custom_agent_form(self, _mock_vite_asset):
         session = self.client.session
         session["agent_charter"] = "Stale template instructions"
         session["agent_charter_source"] = "template"
@@ -1145,12 +1234,71 @@ class HomePageTests(TestCase):
         soup = BeautifulSoup(response.content, "html.parser")
         form = soup.find("form", {"id": "create-agent-form"})
         self.assertIsNotNone(form)
+        stylesheet_urls = {
+            link.get("href") for link in soup.find_all("link", rel="stylesheet")
+        }
+        self.assertIn(static("css/tailwind.css"), stylesheet_urls)
+        self.assertNotIn(static("css/home_tailwind.css"), stylesheet_urls)
+        self.assertIsNone(
+            soup.find(
+                "script",
+                src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js",
+            )
+        )
+        self.assertIsNone(soup.find("script", src=static("js/phone_format.js")))
+        immersive_assets = response.context["immersive_app_assets"]
+        for href in immersive_assets.styles:
+            self.assertIsNotNone(
+                soup.find("link", rel="preload", attrs={"as": "style", "href": href})
+            )
+        for src in immersive_assets.scripts:
+            self.assertIsNotNone(soup.find("link", rel="modulepreload", href=src))
         self.assertEqual(form.find("textarea", {"name": "charter"}).get_text(strip=True), "")
         self.assertIsNone(soup.find("link", rel="canonical"))
         self.assertEqual(
             soup.find("meta", attrs={"name": "robots"})["content"],
             "noindex, follow",
         )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch(
+        "templatetags.vite_tags.get_vite_asset",
+        return_value=SimpleNamespace(
+            styles=(),
+            scripts=("/static/frontend/assets/homepage-integrations-test.js",),
+            inline_modules=(),
+        ),
+    )
+    @patch(
+        "config.vite.get_vite_asset",
+        return_value=SimpleNamespace(
+            styles=(),
+            scripts=("/static/frontend/assets/immersive-app-test.js",),
+        ),
+    )
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={"enabled": True, "builtins": []},
+    )
+    def test_homepage_integrations_entry_only_loads_with_picker_root(
+        self,
+        _mock_integrations,
+        _mock_immersive_asset,
+        _mock_integrations_asset,
+    ):
+        default_response = self.client.get("/")
+        spawn_response = self.client.get("/", {"spawn": "1"})
+
+        self.assertEqual(default_response.status_code, 200)
+        self.assertEqual(spawn_response.status_code, 200)
+        default_soup = BeautifulSoup(default_response.content, "html.parser")
+        spawn_soup = BeautifulSoup(spawn_response.content, "html.parser")
+        integrations_script = "/static/frontend/assets/homepage-integrations-test.js"
+
+        self.assertIsNone(default_soup.find(id="homepage-integrations-root"))
+        self.assertIsNone(default_soup.find("script", src=integrations_script))
+        self.assertIsNotNone(spawn_soup.find(id="homepage-integrations-root"))
+        self.assertIsNotNone(spawn_soup.find("script", src=integrations_script))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("pages.views.get_homepage_pretrained_payload")

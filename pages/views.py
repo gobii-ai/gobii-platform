@@ -1112,6 +1112,8 @@ class HomePage(TemplateView):
         context = super().get_context_data(**kwargs)
         context["suppress_htmx"] = True
         context["suppress_preline"] = True
+        context["suppress_phone_format_js"] = True
+        context["defer_auth_modal_assets"] = True
         context["suppress_stripe_js"] = not self._has_direct_checkout_cta()
         context["homepage_perf_motion_reduction_enabled"] = is_waffle_switch_active(
             HOMEPAGE_PERF_MOTION_REDUCTION,

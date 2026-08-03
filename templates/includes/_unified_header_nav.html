@@ -126,7 +126,7 @@
                   class="inline-flex items-center justify-center gap-x-2 rounded-full text-sm font-medium text-white/90 hover:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 transition-colors">
             {% with social_account_set=request.user.socialaccount_set.all %}
               {% if social_account_set and social_account_set.0.get_avatar_url %}
-                <img class="inline-block size-8 rounded-full object-cover ring-2 ring-white/50" src="{{ social_account_set.0.get_avatar_url }}" alt="{{ request.user.email|default:"User Profile" }}">
+                <img class="inline-block size-8 rounded-full object-cover ring-2 ring-white/50" src="{{ social_account_set.0.get_avatar_url }}" alt="{{ request.user.email|default:"User Profile" }}" width="32" height="32">
               {% else %}
                 {% firstof request.user.first_name request.user.email request.user.username as display_name_source %}
                 {% if display_name_source %}

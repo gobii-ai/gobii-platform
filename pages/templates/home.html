@@ -1,6 +1,13 @@
 {% extends "base.html" %}
-{% load vite_tags %}
+{% load static %}
 {% load cta_tags %}
+{% block tailwind_css %}
+  {% if home_use_k %}
+  <link rel="stylesheet" href="{% static 'css/home_tailwind.css' %}">
+  {% else %}
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+  {% endif %}
+{% endblock %}
 {% block title %}{{ home_meta_title }}{% endblock %}
 {% block canonical_link %}
   {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and home_canonical_url %}
@@ -39,13 +46,15 @@
   {% if home_structured_data_json %}
   <script type="application/ld+json">{{ home_structured_data_json }}</script>
   {% endif %}
-  {% if immersive_app_assets %}
-    {% for href in immersive_app_assets.styles %}
-      <link rel="preload" as="style" href="{{ href }}">
-    {% endfor %}
-    {% for src in immersive_app_assets.scripts %}
-      <link rel="modulepreload" href="{{ src }}">
-    {% endfor %}
+  {% if not home_use_k %}
+    {% if immersive_app_assets %}
+      {% for href in immersive_app_assets.styles %}
+        <link rel="preload" as="style" href="{{ href }}">
+      {% endfor %}
+      {% for src in immersive_app_assets.scripts %}
+        <link rel="modulepreload" href="{{ src }}">
+      {% endfor %}
+    {% endif %}
   {% endif %}
 {% endblock %}
 {% block early_head_styles %}
@@ -1353,12 +1362,4 @@
         initScrollAnimations();
       });
     </script>
-{% endblock %}
-
-
-{% block extra_js %}
-  {{ block.super }}
-  {% if homepage_integrations_enabled %}
-    {% vite_asset 'src/homepageIntegrations.tsx' %}
-  {% endif %}
 {% endblock %}

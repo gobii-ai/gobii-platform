@@ -1,4 +1,5 @@
 {% load cta_tags %}
+{% load vite_tags %}
       <!-- Task Usage Warning for logged in users -->
       {% if user.is_authenticated %}
         <div class="max-w-4xl mx-auto mb-4">
@@ -259,6 +260,7 @@
           id="homepage-integrations-root"
           data-props-json-id="homepage-integrations-props"
         ></div>
+        {% vite_asset 'src/homepageIntegrations.tsx' %}
       {% endif %}
 
       {% if user.is_authenticated and recent_agents_total|default:0 > 0 %}

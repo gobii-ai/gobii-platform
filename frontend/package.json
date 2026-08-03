@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "npm run build:tailwind && npm run build:app",
     "build:app": "tsc -b && vite build",
-    "build:tailwind": "tailwindcss -c tailwind.config.cjs -i ./src/styles/tailwind.css -o ../static/css/tailwind.css --minify",
+    "build:tailwind": "npm run build:tailwind:global && npm run build:tailwind:home",
+    "build:tailwind:global": "tailwindcss -c tailwind.config.cjs -i ./src/styles/tailwind.css -o ../static/css/tailwind.css --minify",
+    "build:tailwind:home": "tailwindcss -c tailwind.home.config.cjs -i ./src/styles/tailwind.css -o ../static/css/home_tailwind.css --minify",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run"
