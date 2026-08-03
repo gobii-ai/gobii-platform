@@ -3777,7 +3777,7 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(reply_tool["name"], "send_chat_message")
         self.assertIs(reply_tool["parameters"]["properties"]["will_continue_work"]["const"], True)
         self.assertIn(
-            "Execute the remaining explicit request now",
+            "If an enabled tool matches it, call that tool next",
             build_prompt.call_args_list[2].kwargs["continuation_notice"],
         )
 
@@ -3820,7 +3820,7 @@ class ImpliedSendTests(TestCase):
         }
         self.assertEqual(second_tool_names, {"sqlite_batch", "send_chat_message", "send_email"})
         self.assertIn(
-            "Execute the remaining explicit request now",
+            "If an enabled tool matches it, call that tool next",
             build_prompt.call_args_list[1].kwargs["continuation_notice"],
         )
 

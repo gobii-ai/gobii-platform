@@ -578,6 +578,14 @@ def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str)
             )
             if direct_message_source or message_cte_source is not None:
                 continue
+        direct_scalar_extract = re.search(
+            rf"\b{column}\s*=\s*\(\s*select\s+json_extract\s*\(\s*structured_payload_json\s*,\s*"
+            rf"['\"]\$.{source_field}['\"]\s*\)\s+from\s+__messages\b.*?\)",
+            lowered_statement,
+            flags=re.DOTALL,
+        )
+        if direct_scalar_extract is not None:
+            continue
         match = re.search(
             rf"\b{column}\s*=\s*(.+?)(?=,\s*(?:state|provider_message_id|sent_at|"
             rf"source_message_id)\s*=|\bfrom\b|\bwhere\b)",

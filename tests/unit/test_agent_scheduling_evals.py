@@ -172,6 +172,15 @@ class AgentSchedulingEvalTests(TestCase):
 
         self.assertEqual(_schedule_sql_strategy_failures(case, []), [])
 
+    def test_relative_timer_can_insert_from_sqlite_time_without_reading_other_rows(self):
+        case = next(case for case in AGENT_SCHEDULING_CASES if case.expected_action == "timer")
+        call = _sqlite_call(
+            "INSERT INTO __agent_schedules (schedule_key, kind, run_at) "
+            "VALUES ('maya-renewal', 'once', datetime('now', '+45 minutes'))"
+        )
+
+        self.assertEqual(_schedule_sql_strategy_failures(case, [call]), [])
+
     def test_schedule_strategy_rejects_failed_reads_not_only_failed_mutations(self):
         case = next(case for case in AGENT_SCHEDULING_CASES if case.expected_action == "bulk")
         failed_read = _sqlite_call(

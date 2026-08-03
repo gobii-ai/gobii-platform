@@ -186,3 +186,11 @@ class ImageGenerationScenarioTests(SimpleTestCase):
         self.assertTrue(args[1].startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertEqual(args[2:5], ("/Inbox/product.png", "image/png"))
         self.assertEqual(kwargs, {"extension": ".png", "overwrite": True})
+
+    def test_mock_config_mocks_delivery_without_precreating_outputs(self):
+        scenario = ScenarioRegistry.get(IMAGE_GENERATION_EXACT_TEXT)
+
+        mock_config = scenario._mock_config(scenario._case())
+
+        self.assertEqual(mock_config["create_image"]["status"], "ok")
+        self.assertTrue(mock_config["send_chat_message"]["auto_sleep_ok"])

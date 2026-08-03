@@ -265,7 +265,8 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIn("visually distinct", question)
         self.assertIn("status/value encoding", question)
-        self.assertIn("Prefer tasteful emoji", question)
+        self.assertIn("do not require a grid, table, or emoji", question)
+        self.assertIn("Tasteful icons or badges", question)
         self.assertNotIn("emoji used tastefully", question)
 
     def test_chat_judge_does_not_require_recommendation(self):

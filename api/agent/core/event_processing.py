@@ -5024,7 +5024,7 @@ def _completion_with_failover(
                 agent_id or "unknown",
             )
 
-    for provider, model, params_with_hints in ordered_configs:
+    for config_index, (provider, model, params_with_hints) in enumerate(ordered_configs):
         if stale_prompt_checker and stale_prompt_checker():
             raise OrchestratorPromptStale("Prompt became stale before completion request was sent.")
         logger.info(
@@ -5084,7 +5084,20 @@ def _completion_with_failover(
                     except StreamIdleTimeout:
                         active_stream_broadcaster.cancel()
                         active_stream_broadcaster = None
-                        raise
+                        if config_index < len(ordered_configs) - 1:
+                            raise
+                        logger.warning(
+                            "Streaming completion idled for final provider=%s model=%s; retrying without streaming",
+                            provider,
+                            model,
+                        )
+                        response = run_completion(
+                            model=model,
+                            messages=request_messages,
+                            params=params,
+                            tools=request_tools_payload,
+                            drop_params=True,
+                        )
                     except Exception:
                         if stale_prompt_checker and stale_prompt_checker():
                             raise OrchestratorPromptStale(
@@ -7192,6 +7205,8 @@ def _run_agent_loop(
                         "lasting_feedback_hint may contain only the user's edit instruction. Never store instructions about "
                         "updating, rewriting, or preserving the charter. If the charter already expresses equivalent behavior, "
                         "choose already_satisfied with both text fields empty. "
+                        "A corrected access or credential route is not setup-only and is not already satisfied merely "
+                        "because the charter names work that would use it; patch the route when it is absent. "
                         "Otherwise patch only that lasting behavior; temporary scope and immediate work must not appear in the replacement. "
                         "CURRENT CHARTER (<charter>), the only source for a nonempty target: "
                         + json.dumps(agent.charter or "")
@@ -7210,9 +7225,9 @@ def _run_agent_loop(
                     prompt_notice = "\n\n".join(filter(None, (
                         prompt_notice,
                         "Current turn: feedback scope is resolved. Do not inspect config or reconsider the feedback. "
-                        "Execute the remaining explicit request now, using its task-relevant tool directly when "
-                        "available; acknowledge the adjustment naturally within the completed result, not as a "
-                        "separate progress message.",
+                        "Now execute the remaining request. If an enabled tool matches it, call that tool next and "
+                        "trust its result; do not inspect SQLite first. Do not reply until the task call returns; "
+                        "acknowledge the adjustment inside the completed result.",
                     )))
                 try:
                     prompt_context_result = build_prompt_context(

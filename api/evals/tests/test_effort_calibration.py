@@ -1840,6 +1840,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             ),
             0,
         )
+        self.assertEqual(_question_count("## What's the latest batch?\n\nHere is the answer."), 0)
+        self.assertEqual(_question_count("Would you like a follow-up?"), 1)
 
     def test_chart_tool_description_requires_request_or_material_need(self):
         description = get_create_chart_tool()["function"]["description"]
@@ -2001,6 +2003,41 @@ class EvalStopPolicyBudgetTests(TestCase):
 
         self.assertTrue(should_stop)
         self.assertIn("relevant tool call budget reached: 1/1", reason)
+
+    def test_relevant_tool_call_budget_does_not_cancel_pending_parallel_calls(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="eval_pending_budget_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Eval Pending Budget Browser")
+        agent = PersistentAgent.objects.create(
+            name="Eval Pending Budget Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug="effort_test",
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        for tool_name in ("send_agent_message", "send_chat_message"):
+            step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name=tool_name,
+                tool_params={},
+                result="",
+                status="pending",
+            )
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(run.id),
+            {"max_relevant_tool_calls": 2},
+        )
+
+        self.assertFalse(should_stop)
+        self.assertEqual(reason, "")
 
     def test_partial_source_policy_allows_plan_before_candidate_batch(self):
         User = get_user_model()
@@ -2649,44 +2686,36 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("A skipped web send never permits switching", system_prompt)
         self.assertIn(
-            "First-run intake wins. Otherwise first matching action wins",
+            "Use the first matching rule",
             system_prompt,
         )
         self.assertIn(
-            "Owner dislikes behavior/output",
+            "Owner correction or lasting preference",
             system_prompt,
         )
         self.assertIn(
-            "Email/SMS missing a literal address/number or unique named recipient",
+            "Email/SMS without a literal address, number, or unique named recipient",
             system_prompt,
         )
         self.assertIn(
-            "Generic roles are missing",
+            "Ask all missing recipient details together",
             system_prompt,
         )
-        self.assertIn("New substantial multi-round work", system_prompt)
-        self.assertIn("Use SQLite for material row reconciliation", system_prompt)
+        self.assertIn("New substantial or explicit deep research", system_prompt)
+        self.assertIn("Use SQLite when the task needs filtering", system_prompt)
         self.assertIn("For prose, inspect once", system_prompt)
         self.assertIn("aggregate-only and SELECT-all are incomplete", system_prompt)
-        self.assertIn("Delete/update all contradicted behavior in one span", system_prompt)
-        self.assertIn("append only if no related clause", system_prompt)
-        self.assertIn("Correction plus task/recurrence: patch and complete both", system_prompt)
-        self.assertIn("batching config/task/schedules", system_prompt)
-        self.assertIn("Non-config work needs a result", system_prompt)
+        self.assertIn("Replace the related rule in one sqlite_batch charter patch", system_prompt)
+        self.assertIn("append only when no related rule exists", system_prompt)
+        self.assertIn("A correction plus a task requires both the patch and the work", system_prompt)
         self.assertIn(
-            "A named task/batch/day/run/project/case scope is finite",
+            "A named task, batch, day, run, project, or case is finite",
             system_prompt,
         )
         self.assertIn(
-            "Other critique, preference, or recurring factual refinement",
+            "A preference, critique, access correction, or recurring role instruction",
             system_prompt,
         )
-        self.assertIn(
-            "Output critique/rules default durable",
-            system_prompt,
-        )
-        self.assertIn("requires sqlite_batch charter patch before reply", system_prompt)
-        self.assertIn("Only agent_config_update proving updated/unchanged counts", system_prompt)
         self.assertIn("Set false after delivery/config; future schedules, queued conversations", system_prompt)
         self.assertIn(
             "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
@@ -2694,14 +2723,14 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
         self.assertIn("do not search for a SQLite/database tool", system_prompt)
-        self.assertIn("Named enabled tool: call it directly, never search", system_prompt)
-        self.assertIn("Use SQLite for multi-step/reusable rows; otherwise direct tools", system_prompt)
+        self.assertIn("Named enabled tool: call it directly", system_prompt)
+        self.assertIn("Use SQLite when the task needs filtering", system_prompt)
         self.assertIn("Ready routes", system_prompt)
         self.assertIn("opaque auth refs only for the requested operation", system_prompt)
         self.assertIn("no preflight", system_prompt)
         self.assertIn("credential-returning API -> search_tools('secure credential delegation') first", system_prompt)
         self.assertIn("fresh source for an existing SQLite table -> fetch once", system_prompt)
-        self.assertIn("Named tables hold truth/logic", system_prompt)
+        self.assertIn("Named tables hold keyed entities", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
         self.assertIn(
             "current price/quote -> search_tools('HTTP API request') if http_request absent",
@@ -2734,14 +2763,6 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn(
             "If substantial work continues after a meaningful evidence batch",
-            system_prompt,
-        )
-        self.assertIn(
-            "A decision-ready result ends the work",
-            system_prompt,
-        )
-        self.assertIn(
-            "with no prior plan/research/SQLite",
             system_prompt,
         )
         self.assertIn("upsert both in a normal domain-progress table", system_prompt)

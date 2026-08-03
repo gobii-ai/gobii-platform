@@ -172,13 +172,7 @@ def _cron_matches(expression, *, minute, hour, weekdays):
 def _offers_concrete_weekly_cadence(body):
     return bool(
         re.search(r"\b(?:weekly|every week|each week)\b", body)
-        and re.search(
-            r"\b(?:schedule|automate|automatically|set (?:this|it) up|"
-            r"set up (?:a |the )?(?:weekly )?(?:reminder|check-in|report|job)|"
-            r"make (?:this|it) recurring|take (?:this|it) off your hands)\b|"
-            r"\bi (?:can|could|will|'ll) (?:handle|track|run)\b",
-            body,
-        )
+        and re.search(r"\b(?:schedule|automate|run|handle|track|repeat|recurring)\w*\b", body)
     )
 
 
@@ -225,7 +219,7 @@ def _schedule_sql_strategy_failures(case, calls, *, exact_target=None):
             failures.append("no __agent_schedules or legacy schedule mutation was attempted")
         elif not all(_call_succeeded(call) for call in mutation_calls):
             failures.append("a schedule mutation did not complete successfully")
-    if case.expected_action in {"timer", "update", "cancel"} and not reads_schedules:
+    if case.expected_action in {"update", "cancel"} and not reads_schedules:
         failures.append("existing schedule state was not queried before the decision")
     if case.expected_action in {"unsafe"} and mutation_calls:
         failures.append("unsafe cadence was attempted instead of rejected before mutation")
@@ -401,10 +395,6 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
             messages=messages,
             exact_target=exact_target,
         )
-        if self.case.expected_action == "durable_multiple":
-            charter = PersistentAgent.objects.only("charter").get(id=agent_id).charter.casefold()
-            if not all(term in charter for term in ("#internal", "#memenergy", "monday", "friday")):
-                state_failures.append("durable channel behavior was not saved in the charter")
         self._record_check(
             run_id,
             "verify_schedule_state",

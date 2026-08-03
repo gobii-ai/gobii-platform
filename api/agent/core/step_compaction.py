@@ -114,8 +114,11 @@ class CronTriggerStep(_StepBase):
         if self.schedule_key:
             timing = self.scheduled_for.isoformat() if self.scheduled_for else self.cron_expression
             label = self.schedule_name or self.schedule_key
-            return f"⏰ Scheduled {label} [{self.schedule_key}] for {timing}: {self.schedule_instruction}"
-        return f"⏰ Cron: {self.cron_expression}"
+            return (
+                f"⏰ FIRED schedule trigger {label} [{self.schedule_key}] for {timing}; "
+                f"execute this occurrence now: {self.schedule_instruction}"
+            )
+        return f"⏰ FIRED cron trigger; execute this occurrence now: {self.cron_expression}"
 
 
 @dataclass(slots=True)

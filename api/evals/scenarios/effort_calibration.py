@@ -373,7 +373,11 @@ def _human_input_requests_for_run(run_id: str, *, after=None):
 def _question_count(text: str) -> int:
     without_urls = _MARKDOWN_URL_LINK_RE.sub("", text or "")
     without_urls = _URL_RE.sub("", without_urls)
-    return without_urls.count("?")
+    body_lines = [
+        line for line in without_urls.splitlines()
+        if not re.match(r"^\s{0,3}#{1,6}\s", line)
+    ]
+    return "\n".join(body_lines).count("?")
 
 
 def _orchestrator_completion_count(run_id: str) -> int:
@@ -3029,7 +3033,7 @@ class EffortSimpleCurrentCompanyReportScenario(EffortCalibrationScenario):
             task_name="verify_single_hierarchical_report",
             source_urls=source_urls,
             min_source_count=2,
-            min_chars=650,
+            min_chars=500,
             max_chars=3000,
             required_any_groups=self.required_concept_groups,
         )

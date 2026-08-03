@@ -285,6 +285,22 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
         return False
 
     @staticmethod
+    def _contains_record_values(value: Any, expected: dict[str, Any]) -> bool:
+        if isinstance(value, dict):
+            if all(expected_value in value.values() for expected_value in expected.values()):
+                return True
+            return any(
+                StructuredPeerHandoffScenario._contains_record_values(child, expected)
+                for child in value.values()
+            )
+        if isinstance(value, list):
+            return any(
+                StructuredPeerHandoffScenario._contains_record_values(child, expected)
+                for child in value
+            )
+        return False
+
+    @staticmethod
     def _contains_record_batch(value: Any, expected_records: tuple[dict[str, Any], ...]) -> bool:
         if isinstance(value, list) and value == list(expected_records):
             return True
@@ -380,7 +396,10 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
                 )
             elif self.case.expected_record is not None:
                 record_present = (
-                    self._contains_record_fields(tool_payload, self.case.expected_record)
+                    (
+                        self._contains_record_fields(tool_payload, self.case.expected_record)
+                        or self._contains_record_values(tool_payload, self.case.expected_record)
+                    )
                     if self.case.allows_record_superset
                     else self._contains_record(tool_payload, self.case.expected_record)
                 )

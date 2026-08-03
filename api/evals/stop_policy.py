@@ -243,8 +243,9 @@ def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] 
         return True, f"first relevant tool call observed: {calls[0].tool_name}"
 
     max_relevant_tool_calls = int(policy.get("max_relevant_tool_calls") or 0)
-    if max_relevant_tool_calls > 0 and len(calls) >= max_relevant_tool_calls:
-        return True, f"relevant tool call budget reached: {len(calls)}/{max_relevant_tool_calls}"
+    finished_calls = [call for call in calls if _tool_call_has_finished(call)]
+    if max_relevant_tool_calls > 0 and len(finished_calls) >= max_relevant_tool_calls:
+        return True, f"relevant tool call budget reached: {len(finished_calls)}/{max_relevant_tool_calls}"
 
     stop_on_tool_names = set(policy.get("stop_on_tool_names") or ())
     if stop_on_tool_names:

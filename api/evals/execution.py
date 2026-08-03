@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Iterable, Optional, Tuple, Dict
 import json
+import re
 import time
 import contextvars
 
@@ -162,6 +163,52 @@ def _extract_json_object_from_text(text: str) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     raise ValueError("LLM judge JSON fallback did not return a JSON object.")
+
+
+def _extract_plain_judge_option(text: str, options: Iterable[str]) -> tuple[str, str]:
+    stripped = _strip_json_code_fence(text).strip()
+    option_list = list(options)
+    labeled = re.search(
+        rf"['\"]?(?:choice|answer|selection|verdict|decision)['\"]?\s*(?::|=|is)\s*['\"]?"
+        rf"(?P<option>{'|'.join(re.escape(option) for option in option_list)})"
+        rf"(?=$|[\s:.,;!?)\]}}\-_'\"–—*])",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    if labeled:
+        choice = next(
+            option
+            for option in option_list
+            if option.casefold() == labeled.group("option").casefold()
+        )
+        reasoning = stripped[labeled.end():].lstrip("*_'\" :.,;!?)\]}\-–—\n")
+        return choice, reasoning or "The judge returned the option without reasoning."
+
+    stripped = re.sub(
+        r"^(?:choice|answer|selection|verdict|decision)\s*(?::|=|is)\s*",
+        "",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(r"^(?:[-#>*]\s*)+", "", stripped)
+    stripped = stripped.lstrip("_'*\"")
+    matches = []
+    match_ends: dict[str, int] = {}
+    for option in option_list:
+        match = re.match(
+            rf"{re.escape(option)}(?=$|[\s:.,;!?)\]}}\-_'\"–—*])",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            matches.append(option)
+            match_ends[option] = match.end()
+    if len(matches) != 1:
+        raise ValueError("LLM judge fallback did not begin with exactly one valid option.")
+    choice = matches[0]
+    reasoning = stripped[match_ends[choice]:].lstrip("*_'\" :.,;!?)\]}\-–—\n")
+    reasoning = reasoning or "The judge returned the option without reasoning."
+    return choice, reasoning
 
 
 _current_eval_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -758,7 +805,13 @@ class ScenarioExecutionTools:
                     params=params,
                     drop_params=True,
                 )
-                choice, reasoning = self._extract_unstructured_judgment(response)
+                try:
+                    choice, reasoning = self._extract_unstructured_judgment(response)
+                except ValueError:
+                    choice, reasoning = _extract_plain_judge_option(
+                        _response_message_content(response),
+                        options,
+                    )
                 if choice not in options:
                     raise ValueError(f"LLM judge returned invalid choice {choice!r}: {reasoning}")
                 return choice, f"Structured judge fallback used after structured-output failure. {reasoning}"

@@ -2410,18 +2410,21 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Domain model/logic. Reconcile once: keyed DDL, set-wise upsert, then a filtered/ranked "
-                "decision SELECT with answer rows/URLs; aggregates alone are incomplete; deliver "
-                "without reread. Structured source: every `is_current_batch=1 AND tool_name='<exact>'` row; HTTP JSON "
-                "at `$.content`; parents from result_json, children from json_each(actual array), provenance from "
-                "t.result_id/source_url; rows=[]. Never filter result_id/URL or put source facts in SQL. Prose has NULL "
-                "result_json: split repeated sections set-wise from result_text, else inspect the full set once; join "
-                "one row/result_id. Inbound writes derive all fields plus message_id from the latest non-outbound "
-                "nonnull __messages payload in the same first write—no pre-read or copied state. Never inspect messages/contacts "
-                "for a missing outbound recipient. Normalize keyed entities/relations with provenance. Bind "
-                "messy/authored text. No draft SQL, per-item writes, historical mixing, `->`, ATTACH, or SELECT-all "
-                "readback. INSERT SELECT needs WHERE 1=1 before ON CONFLICT. Rank/top with a separate SELECT/scalar "
-                "subquery, not UNION-arm ORDER BY/LIMIT."
+                "Use SQLite for reusable data. Also use one batch whenever two or more tool results must be compared, "
+                "filtered, ranked, joined, aggregated, or reconciled. Do not call it to find a missing email/SMS "
+                "recipient; ask with request_human_input first. "
+                "For QA/audits, use one call: CREATE qa_issues(issue, record, evidence); INSERT SELECT derived issues "
+                "from __tool_results/json_each; SELECT the issue rows. Do not SELECT result_json first or store raw inputs. "
+                "In one batch, create keyed tables, upsert rows set-wise, and return the filtered answer rows with "
+                "their source URLs. Do not reread those rows before delivering them. "
+                "For structured tool results, use every current row for the exact tool name. Read HTTP payloads from "
+                "$.content and expand real arrays with json_each; keep result_id and source_url as provenance. Do not "
+                "filter by result_id or URL. For prose results, split repeated sections set-wise or inspect the full "
+                "current set once, keeping one row per result_id. "
+                "For inbound-message writes, derive every field and message_id from the latest non-outbound non-null "
+                "__messages payload inside the first write; do not pre-read it. Use bound parameters for authored or "
+                "messy text. Avoid per-item writes, historical rows, ATTACH, PostgreSQL -> syntax, and SELECT-all "
+                "readbacks. INSERT SELECT needs WHERE 1=1 before ON CONFLICT. Rank after unions in a separate SELECT."
             ),
             "parameters": {
                 "type": "object",

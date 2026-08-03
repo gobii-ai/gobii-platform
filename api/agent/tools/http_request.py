@@ -358,9 +358,18 @@ def get_http_request_tool() -> Dict[str, Any]:
             "name": "http_request",
             "description": (
                 "Fetch non-secret data or call APIs. "
-                "Before any outreach PATCH, persist an SQLite QA ledger: each placeholder vs lead fields, every "
-                "recipient's identity/qualification, and why the named timezone is not a fixed offset. Final must report "
-                "every gap after receipts. Patch only independent safe fields; stop on retryable=false. "
+                "Campaign/bulk PATCH prerequisite: the full preflight must first be processed by sqlite_batch into "
+                "returned qa_issues rows. A raw result_json/input SELECT does not count. Without the issue rows, do not PATCH. "
+                "Before an outreach PATCH, make one SQLite gap table from the full preflight. Add one gap row for "
+                "each copy placeholder missing from available lead fields; each generic, unverified, mismatched, or "
+                "unqualified recipient; and any named timezone represented by a fixed offset. Match placeholder names "
+                "exactly. A recipient is unqualified when its role is missing or is not a decision-maker. End with a compact "
+                "SELECT of issue, affected record, and evidence—not raw JSON. Patch only fields independent of every "
+                "gap. The final reply must include every gap row and write receipt, even when a later call fails. "
+                "A 2xx response whose content says `ok:false` or `saved:false` is a "
+                "failure. Nested `retryable:false` means make no other write for that request, even with different "
+                "values. Named timezones use IANA regions such as "
+                "America/New_York; `Etc/GMT±N` is a fixed offset and never satisfies a named zone. "
                 "Never use this when a response may contain credentials/passwords/tokens/OTPs; first search for `secure credential delegation` and use its secure request tool. "
                 "This is the PREFERRED tool for non-secret programmatic data retrieval from known endpoints. "
                 "With an exact endpoint, attempt once before API/auth/docs discovery. "
@@ -377,7 +386,10 @@ def get_http_request_tool() -> Dict[str, Any]:
                     "method": {"type": "string", "description": "HTTP method e.g. GET, POST."},
                     "url": {
                         "type": "string",
-                        "description": "Raw http(s) URL or exact `$[link:id]` token.",
+                        "description": (
+                            "Raw http(s) URL or exact `$[link:id]` token. Keep a URL supplied by the user literal; "
+                            "do not replace it with a link from another tool result."
+                        ),
                     },
                     "headers": {"type": "object", "description": "Optional HTTP headers to include in the request."},
                     "body": {
@@ -394,7 +406,10 @@ def get_http_request_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true if another tool or user-facing reply must follow; false only when this request completes the turn.",
+                        "description": (
+                            "REQUIRED. true if another tool or any user-facing reply must follow. An API call does not "
+                            "deliver a reply. Use false only when the task explicitly requires no delivery."
+                        ),
                     },
                 },
                 "required": ["method", "url", "will_continue_work"],

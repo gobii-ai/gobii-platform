@@ -96,12 +96,13 @@ class OutreachCampaignSafetyScenarioTests(SimpleTestCase):
     def test_http_tool_requires_complete_campaign_qa_before_mutation(self):
         description = get_http_request_tool()["function"]["description"]
 
-        self.assertIn("Before any outreach PATCH", description)
-        self.assertIn("persist an SQLite QA ledger", description)
-        self.assertIn("each placeholder vs lead fields", description)
-        self.assertIn("every recipient's identity/qualification", description)
-        self.assertIn("Final must report every gap after receipts", description)
-        self.assertIn("stop on retryable=false", description)
+        self.assertIn("Before an outreach PATCH", description)
+        self.assertIn("SQLite gap table", description)
+        self.assertIn("copy placeholder missing", description)
+        self.assertIn("generic, unverified, mismatched, or unqualified recipient", description)
+        self.assertIn("issue, affected record, and evidence", description)
+        self.assertIn("every gap row and write receipt", description)
+        self.assertIn("`retryable:false`", description)
 
     def test_http_mocks_route_by_method_and_never_fall_through_to_network(self):
         preflight = preflight_mock_config()
@@ -139,6 +140,17 @@ class OutreachCampaignSafetyScenarioTests(SimpleTestCase):
         self.assertEqual(patch_result["status"], "ok")
         self.assertFalse(patch_result["content"]["saved"])
         self.assertFalse(patch_result["content"]["retryable"])
+        validation = patch_result["content"]["preflight_validation"]
+        self.assertFalse(validation["ready"])
+        self.assertEqual(
+            {issue["type"] for issue in validation["issues"]},
+            {
+                "missing_merge_field",
+                "unsafe_recipient",
+                "qualification_shortfall",
+                "invalid_timezone",
+            },
+        )
 
         sequence_result = _resolve_eval_mock_result(
             preflight,
@@ -159,6 +171,7 @@ class OutreachCampaignSafetyScenarioTests(SimpleTestCase):
             },
         )
         self.assertTrue(sequence_result["content"]["sequence_saved"])
+        self.assertFalse(sequence_result["content"]["preflight_validation"]["ready"])
         self.assertTrue(wrong_timezone_result["content"]["saved"])
         self.assertTrue(wrong_timezone_result["content"]["timezone_saved"])
 
@@ -309,6 +322,7 @@ class OutreachCampaignSafetyScenarioTests(SimpleTestCase):
             )
         )
         self.assertFalse(response_claims_campaign_live("It is not live or sending; status is 0."))
+        self.assertFalse(response_claims_campaign_live("The campaign is still draft, so nothing has gone live."))
         self.assertTrue(
             response_claims_campaign_live("It is not a draft; the campaign is live and sending.")
         )

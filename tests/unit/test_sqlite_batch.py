@@ -224,18 +224,16 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
     def test_tool_contract_explains_batch_and_upsert_shapes(self):
         tool = get_sqlite_batch_tool()["function"]
 
-        self.assertIn("set-wise upsert", tool["description"])
+        self.assertIn("upsert rows set-wise", tool["description"])
         self.assertIn("WHERE 1=1 before ON CONFLICT", tool["description"])
-        self.assertIn("parents from result_json", tool["description"])
-        self.assertIn("children from json_each(actual array)", tool["description"])
-        self.assertIn("Never filter result_id/URL", tool["description"])
-        self.assertIn("derive all fields plus message_id", tool["description"])
-        self.assertIn("deliver without reread", tool["description"])
-        self.assertIn("Domain model/logic", tool["description"])
-        self.assertIn("decision SELECT with answer rows/URLs", tool["description"])
-        self.assertIn("aggregates alone are incomplete", tool["description"])
-        self.assertIn("inspect the full set once", tool["description"])
-        self.assertIn("put source facts in SQL", tool["description"])
+        self.assertIn("expand real arrays with json_each", tool["description"])
+        self.assertIn("Do not filter by result_id or URL", tool["description"])
+        self.assertIn("derive every field and message_id", tool["description"])
+        self.assertIn("Do not reread those rows before delivering", tool["description"])
+        self.assertIn("Use SQLite for reusable data", tool["description"])
+        self.assertIn("filtered answer rows", tool["description"])
+        self.assertIn("inspect the full current set once", tool["description"])
+        self.assertIn("source_url as provenance", tool["description"])
         self.assertEqual(tool["parameters"]["properties"]["rows"]["type"], "array")
         self.assertEqual(tool["parameters"]["properties"]["bindings"]["type"], "object")
 
@@ -243,7 +241,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         function = get_sqlite_batch_tool()["function"]
         sql_description = function["parameters"]["properties"]["sql"]["description"]
 
-        self.assertIn("Bind messy/authored text", function["description"])
+        self.assertIn("bound parameters for authored or messy text", function["description"])
         self.assertIn("patch_text(charter,:old,:new)", sql_description)
         self.assertIn(
             "config old/new",
@@ -871,26 +869,21 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         description = definition["function"]["description"]
 
         for expected in (
-            "keyed DDL",
-            "set-wise upsert",
-            "filtered/ranked decision SELECT",
-            "rows=[]",
-            "is_current_batch=1",
-            "tool_name='<exact>'",
-            "t.result_id/source_url",
-            "inspect the full set once",
+            "create keyed tables",
+            "upsert rows set-wise",
+            "filtered answer rows",
+            "every current row for the exact tool name",
+            "result_id and source_url as provenance",
+            "inspect the full current set once",
             "split repeated sections set-wise",
-            "Prose has NULL result_json",
-            "one row/result_id",
-            "latest non-outbound nonnull __messages payload",
-            "no pre-read or copied state",
+            "one row per result_id",
+            "latest non-outbound non-null __messages payload",
+            "do not pre-read it",
             "INSERT SELECT needs WHERE 1=1 before ON CONFLICT",
-            "per-item",
-            "historical mixing",
-            "Normalize keyed entities/relations",
-            "SELECT-all readback",
-            "No draft SQL",
-            "Never inspect messages/contacts for a missing outbound recipient",
+            "per-item writes",
+            "historical rows",
+            "SELECT-all readbacks",
+            "Do not call it to find a missing email/SMS recipient",
         ):
             self.assertIn(expected, description)
         continuation_description = (
@@ -923,8 +916,8 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertIn("json_each(:rows)", sql_description)
         self.assertIn("$.fields.*", sql_description)
         self.assertIn("Message writes derive payload/message_id from __messages", sql_description)
-        self.assertIn("latest non-outbound nonnull __messages payload", description)
-        self.assertIn("derive all fields plus message_id", description)
+        self.assertIn("latest non-outbound non-null __messages payload", description)
+        self.assertIn("derive every field and message_id", description)
         self.assertIn("requested decision/evidence SELECT", sql_description)
         bindings_description = definition["function"]["parameters"]["properties"]["bindings"]["description"]
         self.assertIn("one complete payload unavailable in __messages", bindings_description)

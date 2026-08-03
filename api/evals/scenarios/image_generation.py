@@ -267,8 +267,12 @@ def _candidate_response_bodies(run_id: str, agent_id: str, inbound) -> list[tupl
     ):
         params = call.tool_params or {}
         body = str(params.get("body") or params.get("message") or "")
-        if body:
-            bodies.append((body, call))
+        attachments = params.get("attachments") or []
+        if isinstance(attachments, str):
+            attachments = [attachments]
+        response_text = "\n".join((body, *(str(item) for item in attachments))).strip()
+        if response_text:
+            bodies.append((response_text, call))
 
     for request in (
         PersistentAgentHumanInputRequest.objects
@@ -341,6 +345,16 @@ class ImageGenerationScenario(EvalScenario, ScenarioExecutionTools):
             )
             if result.get("status") != "ok":
                 raise ValueError(f"Failed to seed image-generation eval source {path}: {result}")
+
+    @staticmethod
+    def _mock_config(case: ImageGenerationCase) -> dict[str, Any]:
+        config = dict(case.mock_config)
+        # Generated files are represented by deterministic placeholders, not real
+        # files. Mock delivery too so attachment validation does not distort the
+        # create_image contract being evaluated.
+        for tool_name in MESSAGE_TOOL_NAMES:
+            config.setdefault(tool_name, {"status": "ok", "auto_sleep_ok": True})
+        return config
 
     def _record_tool_calls(self, run_id: str, inbound) -> None:
         case = self._case()
@@ -518,7 +532,7 @@ class ImageGenerationScenario(EvalScenario, ScenarioExecutionTools):
                 case.prompt,
                 trigger_processing=True,
                 eval_run_id=run_id,
-                mock_config=case.mock_config,
+                mock_config=self._mock_config(case),
                 eval_stop_policy=case.eval_stop_policy(),
             )
         self.record_task_result(

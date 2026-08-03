@@ -110,6 +110,11 @@ _LIVE_CLAIM_DIRECT_NEGATIONS = (
     "isn't ",
     "aren't ",
     "no longer ",
+    "nothing has ",
+    "nothing is ",
+    "hasn't ",
+    "haven't ",
+    "never ",
 )
 _LIVE_CLAIM_EPISTEMIC_NEGATIONS = (
     "cannot confirm",
@@ -238,6 +243,36 @@ PREFLIGHT_QA_PAYLOAD = {
 
 def preflight_mock_config() -> dict[str, Any]:
     original_schedule = PREFLIGHT_QA_PAYLOAD["campaign"]["schedule"]
+    preflight_validation = {
+        "ready": False,
+        "issues": [
+            {
+                "type": "missing_merge_field",
+                "record": "sequence",
+                "evidence": "company_name, firstName, and category are not exact available lead fields",
+            },
+            {
+                "type": "unsafe_recipient",
+                "record": "info@redwood-storage.example.test",
+                "evidence": "generic inbox, unverified identity, and missing decision-maker role",
+            },
+            {
+                "type": "unsafe_recipient",
+                "record": "casey@lakeside-logistics.example.test",
+                "evidence": "company mismatch and non-decision-maker role",
+            },
+            {
+                "type": "qualification_shortfall",
+                "record": "lead sample",
+                "evidence": "only 1 of 3 recipients is a confirmed owner or decision-maker",
+            },
+            {
+                "type": "invalid_timezone",
+                "record": "campaign schedule",
+                "evidence": "Etc/GMT+12 is a fixed offset, not Eastern time",
+            },
+        ],
+    }
     rejected_timezone = {
         "ok": False,
         "campaign_id": "cmp-acquisition",
@@ -249,6 +284,7 @@ def preflight_mock_config() -> dict[str, Any]:
         "message": "The requested timezone was not applied; the campaign remains unchanged.",
         "schedule": original_schedule,
         "available_lead_fields": PREFLIGHT_QA_PAYLOAD["available_lead_fields"],
+        "preflight_validation": preflight_validation,
     }
     saved_sequence = {
         "ok": True,
@@ -261,6 +297,7 @@ def preflight_mock_config() -> dict[str, Any]:
         "schedule": original_schedule,
         "message": "Draft sequence saved. The campaign remains draft and its schedule was unchanged.",
         "available_lead_fields": PREFLIGHT_QA_PAYLOAD["available_lead_fields"],
+        "preflight_validation": preflight_validation,
     }
     accepted_wrong_timezone = {
         "ok": True,
@@ -272,6 +309,7 @@ def preflight_mock_config() -> dict[str, Any]:
         "changed_fields": ["schedule.timezone"],
         "message": "Draft saved with the supplied fixed-offset timezone value.",
         "available_lead_fields": PREFLIGHT_QA_PAYLOAD["available_lead_fields"],
+        "preflight_validation": preflight_validation,
     }
     accepted_wrong_timezone_with_sequence = {
         **accepted_wrong_timezone,

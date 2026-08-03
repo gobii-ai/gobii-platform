@@ -967,24 +967,20 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
         "function": {
             "name": CREATE_CUSTOM_TOOL_NAME,
             "description": (
-                "Create/update a sandboxed Python custom tool. "
-                "Use for 3+ repeated steps, API/MCP fan-out, pagination, sync/import, transforms, validation/dedupe, or bulk SQLite writes; err early. "
-                "Before the first call, verify: Exact import `from _gobii_ctx import main`; exact final line `if __name__ == '__main__': main(run)`; imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`; `parameters_schema.required` requires real source inputs plus destinations/filters/limits/dates; SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`; batch/limit tools return `remaining_work`/`next_cursor`. "
-                "Use PEP 723 for third-party deps such as `# dependencies = [\"requests[socks]\"]`; never list stdlib deps. "
-                "For one-shot creation call create_custom_tool with source_path='/tools/my_tool.py' + source_code; do not pass only `source_path` unless you already wrote that file; if rejected, fix every listed issue and retry create_custom_tool, not create_file. "
-                "For tool-to-tool calls use ctx.call_tool(name, params). Write durable data to the agent SQLite DB; do not ATTACH sandbox file paths. "
-                "Keep DB work inside the `with ctx.sqlite() as db:` block; after the block exits the DB is closed. Use cursor.rowcount/SELECT changes(). Canonical SQLite read: "
-                'row = db.execute("SELECT value FROM items WHERE id = ?", (item_id,)).fetchone(). '
-                "Call `fetchone()`/`fetchall()` on the cursor returned by `db.execute()`, not on `db`; set db.row_factory = sqlite3.Row before SELECT/fetchall because later changes do not convert tuples and rows are not row.get(...). "
-                "For UTC timestamps use datetime.now(timezone.utc), not datetime.timezone. Expose runtime params for tables, filters, URLs, limits, cursors, or destinations; do not invoke custom_* with empty params unless it intentionally reads verified state. "
-                "Avoid manual MCP/tool/API loops. Slow batches should be chunkable: include `limit`/`batch_size`, filters, progress, and patch for smaller resumable batches. "
-                "Every success or error return dict should include `next_action`; keep returns concise with status, summary, what changed or which outputs are ready, counts/side effects, skipped duplicates, remaining work, and verification guidance. "
-                "Name ready outputs specifically (`direct_post_urls`, `scrape_ready_urls`, `rows_written`, `records_to_sync`). Validators return accepted ready-to-use values and rejected reasons; require source params like `urls`, `domains`, `candidates`, `source_table`, or `input_table`. "
-                "Secrets are in os.environ; if missing, request `secret_type='env_var'`, not a domain-scoped credential. "
-                "Network code needs SOCKS5 proxy support: use requests[socks]/httpx[socks], declare `dependencies = [\"requests[socks]\"]`, read ALL_PROXY/HTTP_PROXY/HTTPS_PROXY/NO_PROXY, and prefer ctx.requests_proxies() or ctx.proxy_url(); not bare `requests`/`httpx` or direct HTTPS tunneling. "
-                "Filespace paths like `/tools/my_tool.py` and `/exports/report.txt` are Gobii tool args; if using create_file first, pass file_path='/tools/my_tool.py' and content=<python source>. "
-                "Latest workspace edits are synced automatically; use apply_patch on the same file instead of creating near-duplicates. "
-                "Saved tool id like `custom_my_tool`; enabled by default."
+                "Create or update one sandboxed Python custom tool for repeated calls, pagination, transforms, "
+                "validation, syncs, or bulk SQLite work. Call this once with source_path and source_code. After a "
+                "successful creation, invoke the returned custom_* tool. If that runtime call fails, apply_patch to "
+                "the same source file and invoke custom_* again; do not register it again. Retry create_custom_tool "
+                "only when creation itself is rejected.\n"
+                "Source must import `from _gobii_ctx import main`, define `run(params, ctx)`, and end with "
+                "`if __name__ == '__main__': main(run)`. The schema should require real runtime inputs such as URLs, "
+                "filters, limits, cursors, tables, or destinations. Use `ctx.call_tool(name, params)` for enabled tools. "
+                "Use `with ctx.sqlite() as db:` for durable data; set `db.row_factory = sqlite3.Row` before reads and "
+                "fetch from the cursor returned by db.execute. Add PEP 723 third-party dependencies; network clients "
+                "must use the provided SOCKS proxy helpers.\n"
+                "Return a concise dict with status, summary, counts/outputs, next_action, and when applicable "
+                "remaining_work/next_cursor. Make slow work bounded with limit or batch_size. Secrets come from "
+                "os.environ; final files belong under /workspace/exports and are referenced as $[/exports/...]."
             ),
             "parameters": {
                 "type": "object",

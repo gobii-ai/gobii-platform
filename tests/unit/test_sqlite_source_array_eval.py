@@ -400,6 +400,22 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             )
         )
 
+    def test_structured_peer_import_accepts_extraction_inside_scalar_subqueries(self):
+        fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
+        sql = (
+            "UPDATE outreach_threads SET "
+            "state=(SELECT json_extract(structured_payload_json,'$.delivery_status') FROM __messages "
+            "WHERE is_outbound=0 ORDER BY seq DESC LIMIT 1), "
+            "provider_message_id=(SELECT json_extract(structured_payload_json,'$.provider_message_id') "
+            "FROM __messages WHERE is_outbound=0 ORDER BY seq DESC LIMIT 1), "
+            "sent_at=(SELECT json_extract(structured_payload_json,'$.sent_at') FROM __messages "
+            "WHERE is_outbound=0 ORDER BY seq DESC LIMIT 1) "
+            "WHERE recipient=(SELECT json_extract(structured_payload_json,'$.recipient') FROM __messages "
+            "WHERE is_outbound=0 ORDER BY seq DESC LIMIT 1)"
+        )
+
+        self.assertTrue(_derives_structured_message_fields(sql, fields))
+
     def test_bound_structured_peer_import_derives_every_field(self):
         payload = {
             "recipient": "jordan@northstar.example.test",

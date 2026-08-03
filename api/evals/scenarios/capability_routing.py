@@ -216,6 +216,8 @@ class CapabilityRoutingScenario(EvalScenario, ScenarioExecutionTools):
                 and first_params.get("credential_file_path") == CREDENTIAL_FILE_PATH
             )
         route_state_used = len(route_reads) == 1 or (
+            not self.case.should_query_metric and not route_calls
+        ) or (
             self.case.should_query_metric and exact_direct_params and not route_reads
         )
         self.record_task_result(
@@ -227,8 +229,8 @@ class CapabilityRoutingScenario(EvalScenario, ScenarioExecutionTools):
                 "Used exact durable route state without a redundant or partial lookup."
                 if route_state_used
                 else (
-                    "Expected one complete pre-action integration_routes read, or exact direct parameters for the "
-                    f"clear metric request; observed reads={len(route_reads)}, exact_direct_params={exact_direct_params}."
+                    "Expected the prompt-visible route state, one complete integration_routes read, or exact direct "
+                    f"parameters; observed reads={len(route_reads)}, exact_direct_params={exact_direct_params}."
                 )
             ),
             artifacts={"step": (route_reads or sqlite_calls)[0].step} if route_reads or sqlite_calls else {},

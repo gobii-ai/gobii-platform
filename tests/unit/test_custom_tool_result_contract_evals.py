@@ -165,9 +165,9 @@ class CustomToolResultContractEvalTests(TestCase):
         prompt = CustomToolResultContractScenario._agent_prompt(case)
 
         self.assertIn("custom_sheets_final_sync", prompt)
-        self.assertIn(case.real_world_basis, prompt)
         self.assertIn(case.user_task, prompt)
         self.assertIn(case.custom_tool_job, prompt)
+        self.assertNotIn(case.real_world_basis, prompt)
         self.assertNotIn("create_custom_tool", prompt)
         self.assertNotIn("source_code", prompt)
         self.assertNotIn("parameters_schema", prompt)

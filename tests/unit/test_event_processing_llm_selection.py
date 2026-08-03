@@ -212,6 +212,36 @@ class TestEventProcessingLLMSelection(TestCase):
         broadcaster.finish.assert_not_called()
 
     @patch('api.agent.core.event_processing.run_completion')
+    def test_stream_idle_timeout_retries_final_provider_without_streaming(self, mock_run_completion):
+        fallback_response = make_completion_response(content="recovered")
+        mock_run_completion.side_effect = [
+            StreamIdleTimeout(
+                "LLM stream produced no additional data",
+                model="model-stalled",
+                llm_provider="provider-stalled",
+            ),
+            fallback_response,
+        ]
+        broadcaster = Mock()
+
+        response, token_usage = _completion_with_failover(
+            [{"role": "user", "content": "hello"}],
+            [],
+            failover_configs=[("provider-stalled", "model-stalled", {})],
+            agent_id="agent-1",
+            stream_broadcaster=broadcaster,
+            defer_stream_finish=True,
+        )
+
+        self.assertIs(response, fallback_response)
+        self.assertEqual(mock_run_completion.call_count, 2)
+        self.assertTrue(mock_run_completion.call_args_list[0].kwargs["stream"])
+        self.assertNotIn("stream", mock_run_completion.call_args_list[1].kwargs)
+        self.assertEqual(token_usage["provider"], "provider-stalled")
+        broadcaster.cancel.assert_called_once()
+        broadcaster.finish.assert_not_called()
+
+    @patch('api.agent.core.event_processing.run_completion')
     def test_completion_with_failover_prefers_explicit_provider(self, mock_run_completion):
         """Preferred provider should be attempted before standard ordering."""
         failover_configs = [

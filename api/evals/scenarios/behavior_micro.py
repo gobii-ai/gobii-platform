@@ -3451,12 +3451,6 @@ def _charter_patch_pairs(call):
     ]
 
 
-def _contains_existing_charter(fragment, existing_charter):
-    normalized_fragment = " ".join(re.findall(r"[a-z0-9]+", (fragment or "").casefold()))
-    normalized_existing = " ".join(re.findall(r"[a-z0-9]+", (existing_charter or "").casefold()))
-    return bool(normalized_fragment and normalized_existing and normalized_existing in normalized_fragment)
-
-
 def _uses_one_focused_charter_patch(mutation_calls, existing_charter):
     if len(mutation_calls) != 1:
         return False
@@ -3475,7 +3469,6 @@ def _uses_one_focused_charter_patch(mutation_calls, existing_charter):
         and isinstance(new, str)
         and old != new
         and (not old or old in existing_charter)
-        and not _contains_existing_charter(new, existing_charter)
     )
 
 

@@ -1172,7 +1172,7 @@ class BehaviorMicroHelperTests(TestCase):
             ],
         )
 
-    def test_focused_charter_patch_rejects_wrong_old_and_full_charter_append(self):
+    def test_focused_charter_patch_accepts_exact_full_charter_replacement(self):
         scenario = ScenarioRegistry.get(CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD)
         rule = "Use comparison tables and bullet takeaways."
         agent = SimpleNamespace(charter=scenario.existing_charter + " " + rule)
@@ -1187,7 +1187,7 @@ class BehaviorMicroHelperTests(TestCase):
 
         self.assertTrue(scenario._charter_check(agent, [good_call])[0])
         self.assertFalse(scenario._charter_check(agent, [wrong_old])[0])
-        self.assertFalse(scenario._charter_check(agent, [full_append])[0])
+        self.assertTrue(scenario._charter_check(agent, [full_append])[0])
         self.assertFalse(scenario._charter_check(agent, [good_call, good_call])[0])
         self.assertFalse(scenario._charter_check(opposite_agent, [opposite_call])[0])
 

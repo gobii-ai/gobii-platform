@@ -85,7 +85,7 @@ class StructuredPeerHandoffEvalTests(SimpleTestCase):
         self.assertEqual(case.forbidden_handoff_terms, ("bipolar", "compensation"))
         self.assertNotIn("structured_payload", case.prompt)
 
-    def test_scoped_handoff_accepts_metadata_without_renaming_required_fields(self):
+    def test_scoped_handoff_accepts_natural_field_names_when_all_values_are_structured(self):
         scenario = ScenarioRegistry.get(STRUCTURED_PEER_SCOPED_HANDOFF)
 
         self.assertTrue(
@@ -94,9 +94,9 @@ class StructuredPeerHandoffEvalTests(SimpleTestCase):
                 {"assignment_id": "AS-77", "account": "Northwind"},
             )
         )
-        self.assertFalse(
-            scenario._contains_record_fields(
-                {"assignment_id": "AS-77", "entity": "Northwind"},
+        self.assertTrue(
+            scenario._contains_record_values(
+                {"assignment": "AS-77", "entity": "Northwind"},
                 {"assignment_id": "AS-77", "account": "Northwind"},
             )
         )

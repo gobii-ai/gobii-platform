@@ -707,8 +707,9 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 "Does this email meet a high bar for formatting quality? Pass only if it is body-only HTML "
                 "that would look polished in an inbox: clear hierarchy, good spacing, visually distinct "
                 "report sections, tables or metric blocks where useful, and visible inline color for "
-                "accents/status/table styling. Prefer tasteful emoji, icons, badges, or other status markers "
-                "for section labels and important values. Fail if it is plain, cramped, Markdown-like, "
+                "accents/status/table styling. A colored inline-styled div containing a key number is a metric block; "
+                "do not require a grid, table, or emoji when clear metric and status blocks are present. Tasteful "
+                "icons or badges can also mark status. Fail if it is plain, cramped, Markdown-like, "
                 "mostly generic headings/lists, lacks visual status/value encoding, or does not feel like a "
                 "rich report."
             )

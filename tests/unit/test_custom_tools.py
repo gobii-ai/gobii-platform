@@ -214,39 +214,17 @@ class CustomToolsTests(TestCase):
         )
         skill_instructions = CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.prompt_instructions
 
-        canonical_sqlite_pattern = (
-            'row = db.execute("SELECT value FROM items WHERE id = ?", (item_id,)).fetchone()'
-        )
-        self.assertIn(canonical_sqlite_pattern, create_tool_description)
-        self.assertIn(canonical_sqlite_pattern, skill_instructions)
-
         for text in (
-            "source_path='/tools/my_tool.py'",
+            "Call this once",
             "source_code",
-            "do not pass only `source_path` unless you already wrote that file",
-            "if rejected, fix every listed issue and retry create_custom_tool, not create_file",
-            "Before the first call, verify",
-            "Exact import `from _gobii_ctx import main`",
-            "`parameters_schema.required` requires real source inputs",
-            "imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`",
-            "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
-            "batch/limit tools return `remaining_work`/`next_cursor`",
-            "exact final line `if __name__ == '__main__': main(run)`",
-            "file_path='/tools/my_tool.py'",
+            "invoke the returned custom_* tool",
+            "do not register it again",
+            "Retry create_custom_tool only when creation itself is rejected",
+            "from _gobii_ctx import main",
+            "with ctx.sqlite() as db:",
             "db.row_factory = sqlite3.Row",
-            "after the block exits the DB is closed",
-            "`fetchone()`/`fetchall()` on the cursor returned by `db.execute()`",
-            "before SELECT/fetchall",
-            "datetime.now(timezone.utc)",
-            "not datetime.timezone",
-            "Every success or error return dict should include `next_action`",
-            "what changed or which outputs are ready",
-            "remaining work",
-            "verification guidance",
-            "direct_post_urls",
-            "scrape_ready_urls",
-            "accepted ready-to-use values",
-            "require source params like `urls`, `domains`, `candidates`, `source_table`, or `input_table`",
+            "remaining_work/next_cursor",
+            "next_action",
         ):
             self.assertIn(text, create_tool_description)
 
@@ -255,32 +233,21 @@ class CustomToolsTests(TestCase):
         self.assertIn("not JSON-encoded text", parameters_schema_description)
 
         for text in (
-            "exact import `from _gobii_ctx import main`",
-            "exact final line `if __name__ == '__main__': main(run)`",
-            "imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`",
-            "`parameters_schema.required` requires real source inputs",
-            "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
-            "batch/limit tools return `remaining_work`/`next_cursor`",
-            "Do not pass only `source_path` unless that file already exists",
-            "If rejected, fix every listed issue and retry create_custom_tool, not create_file",
+            "Call create_custom_tool once",
+            "Invoke the returned custom_* tool",
+            "Do not call create_custom_tool again after successful registration",
+            "Retry creation only when creation was rejected",
+            "from _gobii_ctx import main",
+            "with ctx.sqlite() as db:",
             "db.row_factory = sqlite3.Row",
-            "later changes do not convert tuples",
-            "not `row.get(...)`",
-            "after the block exits the DB is closed",
-            "`fetchone()`/`fetchall()` on the cursor returned by `db.execute()`",
-            "target resource ids/names",
-            "source filters/date ranges",
-            "Never invoke a custom tool with empty params",
-            "validation/dedupe",
-            "Every success or error return dict should include `next_action`",
-            "what changed or which outputs are ready",
-            "remaining work or cursor",
-            "verification guidance",
-            "direct_post_urls",
-            "scrape_ready_urls",
-            "accepted ready-to-use values",
+            "remaining_work",
+            "next_cursor",
+            "next_action",
         ):
             self.assertIn(text, skill_instructions)
+
+        self.assertLess(len(create_tool_description), 2200)
+        self.assertLess(len(skill_instructions), 2600)
 
     def test_side_effect_source_accepts_next_action_without_replay_prevention(self):
         source = self._build_runnable_tool_source(

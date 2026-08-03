@@ -179,10 +179,8 @@ def _create_local_llms_rule() -> dict[str, Any]:
 
 def _local_llms_values_update_rule() -> dict[str, Any]:
     return {
-        "url_contains": (
-            f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
-            "models",
-        ),
+        # A1 notation may omit the sheet name to address the first visible tab.
+        "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
         **_method_equals("PUT"),
         "result": _http_result(
             f"https://sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values/Models!A1:F10",
@@ -430,7 +428,6 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                 method="PUT",
                 url_terms=(
                     f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
-                    "models",
                     "valueinputoption=user_entered",
                 ),
                 body_terms=("name", "license", "link"),
