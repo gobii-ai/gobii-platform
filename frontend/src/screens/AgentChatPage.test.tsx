@@ -1498,6 +1498,12 @@ describe('AgentChatPage trial onboarding', () => {
 
   it('passes native tab enablement from live tool search results', async () => {
     rosterState.agents = [buildRosterAgent('agent-1', 'Agent One')]
+    const rosterQueryKey = ['agent-roster', 'personal:user-1:normal', null] as const
+    queryClient.setQueryData(rosterQueryKey, {
+      context: rosterContext,
+      agents: rosterState.agents,
+    })
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries')
     timelineState.flatEvents = [
       {
         kind: 'steps',
@@ -1535,6 +1541,20 @@ describe('AgentChatPage trial onboarding', () => {
     expect(screen.getByTestId('hubspot-native-tab-enabled')).toHaveTextContent('true')
     expect(screen.getByTestId('discord-native-tab-enabled')).toHaveTextContent('true')
     expect(screen.getByTestId('meta-ads-tab-enabled')).toHaveTextContent('true')
+    await waitFor(() => {
+      const cachedRoster = queryClient.getQueryData<{
+        agents: Array<{ enabledSystemSkills?: string[] }>
+      }>(rosterQueryKey)
+      expect(cachedRoster?.agents[0]?.enabledSystemSkills).toEqual([
+        'apollo_native',
+        'hubspot_native',
+        'discord_native',
+        'meta_ads_platform',
+      ])
+    })
+    expect(invalidateQueries).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['agent-roster'] }),
+    )
   })
 
   it('opens embedded settings from the direct console shell settings route', async () => {
