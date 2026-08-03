@@ -10,7 +10,9 @@ import zstandard as zstd
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.db import connection
 from django.test import Client, TestCase, tag
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from api.models import (
@@ -32,6 +34,7 @@ from api.models import (
 )
 from api.agent.core.agent_judge import NO_ACTION, REPORT_TOOL_NAME
 from console.agent_audit.serializers import serialize_completion
+from console.agent_audit.events import fetch_event_page
 
 
 def _judge_response(payload: dict):
@@ -441,11 +444,12 @@ class StaffAgentAuditAPITests(TestCase):
             agent=self.agent,
             completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
         )
-        tool_step = PersistentAgentStep.objects.create(
+        tool_step = PersistentAgentStep(
             agent=self.agent,
             completion=completion,
             description="Tool call: raw_test_tool",
         )
+        PersistentAgentStep.objects.bulk_create([tool_step])
         PersistentAgentToolCall.objects.create(
             step=tool_step,
             tool_name="raw_test_tool",
@@ -501,10 +505,11 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(tool_event["result"], json.dumps({"ok": True}))
 
     def test_developer_timeline_hides_queued_tool_calls(self):
-        queued_step = PersistentAgentStep.objects.create(
+        queued_step = PersistentAgentStep(
             agent=self.agent,
             description="",
         )
+        PersistentAgentStep.objects.bulk_create([queued_step])
         PersistentAgentToolCall.objects.create(
             step=queued_step,
             tool_name="queued_tool",
@@ -541,6 +546,22 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertIn("<strong>there</strong>", event["message"]["bodyHtml"])
         self.assertNotIn("&lt;strong&gt;", event["message"]["bodyHtml"])
         self.assertEqual(event["message"]["bodyText"], "Hello there.")
+
+    def test_developer_timeline_message_queries_do_not_grow_per_event(self):
+        for index in range(5):
+            self._create_agent_message(f"small-{index}")
+        with CaptureQueriesContext(connection) as small_queries:
+            small_events, _ = fetch_event_page(self.agent, limit=50, developer=True)
+
+        for index in range(45):
+            self._create_agent_message(f"large-{index}")
+        with CaptureQueriesContext(connection) as large_queries:
+            large_events, _ = fetch_event_page(self.agent, limit=50, developer=True)
+
+        self.assertEqual(len(small_events), 5)
+        self.assertEqual(len(large_events), 50)
+        self.assertEqual(len(large_queries), len(small_queries))
+        self.assertLessEqual(len(large_queries), 10)
 
     def test_developer_timeline_rejects_mismatched_staff_context(self):
         response = self.client.get(

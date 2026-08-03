@@ -70,7 +70,12 @@ def _add_pending_counts(counts: dict[str, int], queryset) -> None:
         counts[str(row["agent_id"])] = counts.get(str(row["agent_id"]), 0) + int(row["total"] or 0)
 
 
-def count_pending_action_requests_for_agents(agents: list[PersistentAgent], viewer_user) -> dict[str, int]:
+def count_pending_action_requests_for_agents(
+    agents: list[PersistentAgent],
+    viewer_user,
+    *,
+    manageable_agent_ids: list[object] | set[object] | None = None,
+) -> dict[str, int]:
     agent_ids = [agent.id for agent in agents]
     counts = {str(agent_id): 0 for agent_id in agent_ids}
     if not agent_ids:
@@ -86,15 +91,18 @@ def count_pending_action_requests_for_agents(agents: list[PersistentAgent], view
         ).filter(active_expiry_filter),
     )
 
-    manageable_agent_ids = [
-        agent.id
-        for agent in agents
-        if viewer_user is not None and user_can_manage_agent_settings(
-            viewer_user,
-            agent,
-            allow_delinquent_personal_chat=True,
-        )
-    ]
+    if manageable_agent_ids is None:
+        manageable_agent_ids = [
+            agent.id
+            for agent in agents
+            if viewer_user is not None and user_can_manage_agent_settings(
+                viewer_user,
+                agent,
+                allow_delinquent_personal_chat=True,
+            )
+        ]
+    else:
+        manageable_agent_ids = list(manageable_agent_ids)
     if not manageable_agent_ids:
         return counts
 

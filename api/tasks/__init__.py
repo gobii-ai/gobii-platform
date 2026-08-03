@@ -48,6 +48,7 @@ from .trial_activation import assess_trial_user_activation_task  # noqa: F401
 
 # Avatar backfill scheduler
 from .avatar_backfill import schedule_agent_avatar_backfill_task  # noqa: F401
+from .avatar_thumbnails import generate_agent_avatar_thumbnail_task  # noqa: F401
 from .mcp_catalogs import refresh_mcp_catalog  # noqa: F401
 from .mcp_tasks import poll_mcp_task, reconcile_mcp_tasks  # noqa: F401
 from .computer_relay import cleanup_computer_relay_records  # noqa: F401

@@ -13,6 +13,7 @@ from PIL import Image
 
 from api.models import BrowserUseAgent, PersistentAgent
 from api.services.agent_avatar_public import build_public_agent_avatar_thumbnail_url
+from api.tasks.avatar_thumbnails import generate_agent_avatar_thumbnail_task
 from console.views import AGENT_AVATAR_THUMBNAIL_SIZE, _agent_avatar_thumbnail_name
 
 
@@ -86,12 +87,32 @@ class AgentAvatarThumbnailTests(TestCase):
         thumbnail_name = _agent_avatar_thumbnail_name(self.agent.id, self.agent.get_avatar_thumbnail_version())
         self.assertTrue(default_storage.exists(thumbnail_name))
 
-        with patch("console.views.Image.open", side_effect=AssertionError("thumbnail regenerated")):
+        with (
+            patch("api.services.agent_avatar_thumbnails.Image.open", side_effect=AssertionError("thumbnail regenerated")),
+            patch.object(default_storage, "exists", side_effect=AssertionError("storage existence check")),
+        ):
             cached_response = self.client.get(reverse("agent_avatar_thumbnail", kwargs={"pk": self.agent.id}))
 
         self.assertEqual(cached_response.status_code, 200)
         self.assertEqual(cached_response["Content-Type"], "image/png")
+        self.assertEqual(cached_response["Cache-Control"], "private, max-age=86400, immutable")
         self.assertTrue(_response_bytes(cached_response))
+
+    def test_thumbnail_task_is_idempotent_and_rejects_stale_version(self):
+        self._save_avatar()
+        version = self.agent.get_avatar_thumbnail_version()
+
+        self.assertTrue(generate_agent_avatar_thumbnail_task(str(self.agent.id), version))
+        with patch(
+            "api.services.agent_avatar_thumbnails.Image.open",
+            side_effect=AssertionError("thumbnail regenerated"),
+        ):
+            self.assertTrue(generate_agent_avatar_thumbnail_task(str(self.agent.id), version))
+
+        PersistentAgent.objects.filter(id=self.agent.id).update(
+            updated_at=timezone.now() + timedelta(minutes=1)
+        )
+        self.assertFalse(generate_agent_avatar_thumbnail_task(str(self.agent.id), version))
 
     def test_thumbnail_url_and_cache_key_change_when_avatar_timestamp_changes(self):
         self._save_avatar()

@@ -1,6 +1,8 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone as dt_timezone
 import uuid
 
+from django.db import connection
 from django.db.models import Q
 from django.utils import timezone
 
@@ -20,11 +22,26 @@ from console.agent_audit.serializers import (
     serialize_system_message,
     serialize_tool_call,
 )
-from console.agent_chat.timeline import serialize_message_event, visible_tool_steps_queryset
+from console.agent_chat.timeline import serialize_message_events, visible_tool_steps_queryset
 
 DEFAULT_LIMIT = 30
 MAX_LIMIT = 100
 EVENT_KINDS = frozenset({"completion", "tool_call", "message", "step", "system_message", "error", "pivot"})
+
+
+@dataclass(slots=True)
+class TimelineEventCandidate:
+    timestamp: datetime
+    kind: str
+    identifier: object
+
+    @property
+    def sort_key(self):
+        return (
+            _microsecond_epoch(self.timestamp),
+            self.kind,
+            _sort_identifier(self.kind, self.identifier),
+        )
 
 
 def _normalize_datetime(value: datetime | None) -> datetime | None:
@@ -115,13 +132,6 @@ def _apply_cursor(queryset, cursor: Cursor | None, *, direction: str, kind: str,
     )
 
 
-def _ordered(queryset, *, direction: str, dt_field: str, id_field: str, limit: int, at: datetime | None):
-    if at is not None:
-        queryset = queryset.filter(**{f"{dt_field}__lt": _normalize_datetime(at)})
-    prefix = "" if direction == "newer" else "-"
-    return list(queryset.order_by(f"{prefix}{dt_field}", f"{prefix}{id_field}")[: limit + 1])
-
-
 def _sort_identifier(kind: str, identifier):
     if kind == "message":
         try:
@@ -141,109 +151,318 @@ def _event(payload: dict, *, timestamp: datetime, kind: str, identifier, develop
     }
 
 
-def _completion_events(agent, cursor, direction, limit, at, developer):
+def _candidate_queryset_rows(
+    queryset,
+    cursor: Cursor | None,
+    *,
+    direction: str,
+    kind: str,
+    dt_field: str,
+    id_field: str,
+    limit: int,
+    at: datetime | None,
+) -> list[TimelineEventCandidate]:
     queryset = _apply_cursor(
-        PersistentAgentCompletion.objects.filter(agent=agent).select_related("prompt_archive"),
+        queryset,
         cursor,
         direction=direction,
-        kind="completion",
-        dt_field="created_at",
-        id_field="id",
+        kind=kind,
+        dt_field=dt_field,
+        id_field=id_field,
     )
-    completions = _ordered(queryset, direction=direction, dt_field="created_at", id_field="id", limit=limit, at=at)
-    prompt_archives = {
-        step.completion_id: step.llm_prompt_archive
-        for step in (
-            PersistentAgentStep.objects
-            .filter(completion_id__in=[completion.id for completion in completions], llm_prompt_archive__isnull=False)
-            .select_related("llm_prompt_archive")
-            .order_by("created_at")
-        )
-    }
-    return [
-        _event(
-            serialize_completion(
-                completion,
-                prompt_archive=completion.prompt_archive or prompt_archives.get(completion.id),
-                tool_calls=[],
+    if at is not None:
+        queryset = queryset.filter(**{f"{dt_field}__lt": _normalize_datetime(at)})
+    prefix = "" if direction == "newer" else "-"
+    rows = queryset.order_by(f"{prefix}{dt_field}", f"{prefix}{id_field}").values_list(
+        dt_field,
+        id_field,
+    )[: limit + 1]
+    return [TimelineEventCandidate(timestamp, kind, identifier) for timestamp, identifier in rows]
+
+
+def _portable_candidates(
+    agent: PersistentAgent,
+    cursor: Cursor | None,
+    direction: str,
+    limit: int,
+    at: datetime | None,
+) -> list[TimelineEventCandidate]:
+    definitions = (
+        (PersistentAgentCompletion.objects.filter(agent=agent), "completion", "created_at", "id"),
+        (visible_tool_steps_queryset(agent), "tool_call", "created_at", "id"),
+        (PersistentAgentMessage.objects.filter(owner_agent=agent), "message", "timestamp", "seq"),
+        (
+            PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=True).exclude(
+                description__startswith="Tool call"
             ),
-            timestamp=completion.created_at,
-            kind="completion",
-            identifier=completion.id,
-            developer=developer,
-        )
-        for completion in completions
-    ]
-
-
-def _tool_events(agent, cursor, direction, limit, at, developer):
-    queryset = (
-        visible_tool_steps_queryset(agent)
-        .select_related("tool_call", "completion", "llm_prompt_archive")
-        .prefetch_related("human_input_requests")
+            "step",
+            "created_at",
+            "id",
+        ),
+        (PersistentAgentSystemMessage.objects.filter(agent=agent), "system_message", "created_at", "id"),
+        (PersistentAgentError.objects.filter(agent=agent), "error", "created_at", "id"),
     )
-    queryset = _apply_cursor(queryset, cursor, direction=direction, kind="tool_call", dt_field="created_at", id_field="id")
-    steps = _ordered(queryset, direction=direction, dt_field="created_at", id_field="id", limit=limit, at=at)
-    return [
-        _event(serialize_tool_call(step), timestamp=step.created_at, kind="tool_call", identifier=step.id, developer=developer)
-        for step in steps
-    ]
-
-
-def _message_events(agent, cursor, direction, limit, at, developer):
-    queryset = (
-        PersistentAgentMessage.objects
-        .filter(owner_agent=agent)
-        .select_related("from_endpoint", "to_endpoint", "conversation__peer_link", "peer_agent", "owner_agent")
-        .prefetch_related("attachments__filespace_node", "cc_endpoints", "bcc_endpoints")
-    )
-    queryset = _apply_cursor(queryset, cursor, direction=direction, kind="message", dt_field="timestamp", id_field="seq")
-    messages = _ordered(queryset, direction=direction, dt_field="timestamp", id_field="seq", limit=limit, at=at)
-    events = []
-    for message in messages:
-        if developer:
-            payload = serialize_message_event(message)
-            payload["_sort_key"] = (_microsecond_epoch(message.timestamp), "message", message.seq)
-            events.append(payload)
-        else:
-            events.append(
-                _event(serialize_message(message), timestamp=message.timestamp, kind="message", identifier=message.seq, developer=False)
+    candidates = []
+    for queryset, kind, dt_field, id_field in definitions:
+        candidates.extend(
+            _candidate_queryset_rows(
+                queryset,
+                cursor,
+                direction=direction,
+                kind=kind,
+                dt_field=dt_field,
+                id_field=id_field,
+                limit=limit,
+                at=at,
             )
-    return events
+        )
+    candidates.sort(key=lambda candidate: candidate.sort_key)
+    return candidates
 
 
-def _step_events(agent, cursor, direction, limit, at, developer):
-    queryset = (
-        PersistentAgentStep.objects
-        .filter(agent=agent, tool_call__isnull=True)
-        .select_related("completion", "system_step")
+def _postgres_cursor_clause(
+    *,
+    cursor: Cursor | None,
+    direction: str,
+    kind: str,
+    timestamp_sql: str,
+    identifier_sql: str,
+    identifier_cast: str,
+) -> tuple[str, list[object]]:
+    if cursor is None:
+        return "", []
+    pivot = _cursor_datetime(cursor)
+    if direction == "older":
+        if kind < cursor.kind:
+            return f" AND {timestamp_sql} <= %s", [pivot]
+        if kind > cursor.kind:
+            return f" AND {timestamp_sql} < %s", [pivot]
+        operator = "<"
+    else:
+        if kind > cursor.kind:
+            return f" AND {timestamp_sql} >= %s", [pivot]
+        if kind < cursor.kind:
+            return f" AND {timestamp_sql} > %s", [pivot]
+        operator = ">"
+    identifier = _coerce_identifier(cursor.identifier, "seq" if kind == "message" else "id")
+    return (
+        f" AND ({timestamp_sql} {operator} %s OR "
+        f"({timestamp_sql} = %s AND {identifier_sql} {operator} %s::{identifier_cast}))",
+        [pivot, pivot, identifier],
     )
-    queryset = _apply_cursor(queryset, cursor, direction=direction, kind="step", dt_field="created_at", id_field="id")
-    steps = _ordered(queryset, direction=direction, dt_field="created_at", id_field="id", limit=limit, at=at)
+
+
+def _postgres_candidates(
+    agent: PersistentAgent,
+    cursor: Cursor | None,
+    direction: str,
+    limit: int,
+    at: datetime | None,
+) -> list[TimelineEventCandidate]:
+    quote = connection.ops.quote_name
+    completion_table = quote(PersistentAgentCompletion._meta.db_table)
+    step_table = quote(PersistentAgentStep._meta.db_table)
+    tool_table = quote(PersistentAgentStep._meta.get_field("tool_call").related_model._meta.db_table)
+    message_table = quote(PersistentAgentMessage._meta.db_table)
+    system_message_table = quote(PersistentAgentSystemMessage._meta.db_table)
+    error_table = quote(PersistentAgentError._meta.db_table)
+    branch_specs = (
+        ("completion", completion_table, "e.created_at", "e.id", "uuid", "e.agent_id = %s", ""),
+        (
+            "tool_call",
+            f"{step_table} e JOIN {tool_table} tc ON tc.step_id = e.id",
+            "e.created_at",
+            "e.id",
+            "uuid",
+            "e.agent_id = %s",
+            " AND (tc.status IS NULL OR tc.status <> 'queued')",
+        ),
+        ("message", message_table, "e.timestamp", "e.seq", "varchar", "e.owner_agent_id = %s", ""),
+        (
+            "step",
+            f"{step_table} e LEFT JOIN {tool_table} tc ON tc.step_id = e.id",
+            "e.created_at",
+            "e.id",
+            "uuid",
+            "e.agent_id = %s",
+            " AND tc.step_id IS NULL AND (e.description IS NULL OR e.description NOT LIKE 'Tool call%')",
+        ),
+        ("system_message", system_message_table, "e.created_at", "e.id", "uuid", "e.agent_id = %s", ""),
+        ("error", error_table, "e.created_at", "e.id", "uuid", "e.agent_id = %s", ""),
+    )
+    order = "ASC" if direction == "newer" else "DESC"
+    branches = []
+    params: list[object] = []
+    for kind, table_sql, timestamp_sql, identifier_sql, identifier_cast, owner_clause, extra_clause in branch_specs:
+        cursor_clause, cursor_params = _postgres_cursor_clause(
+            cursor=cursor,
+            direction=direction,
+            kind=kind,
+            timestamp_sql=timestamp_sql,
+            identifier_sql=identifier_sql,
+            identifier_cast=identifier_cast,
+        )
+        at_clause = f" AND {timestamp_sql} < %s" if at is not None else ""
+        sort_identifier = f"{identifier_sql}::text"
+        branches.append(
+            "(SELECT "
+            f"{timestamp_sql} AS event_timestamp, %s AS kind, "
+            f"{identifier_sql}::text AS identifier, {sort_identifier} AS sort_identifier "
+            f"FROM {table_sql} WHERE {owner_clause}{extra_clause}{cursor_clause}{at_clause} "
+            f"ORDER BY {timestamp_sql} {order}, {identifier_sql} {order} LIMIT %s)"
+        )
+        params.extend([kind, agent.id, *cursor_params])
+        if at is not None:
+            params.append(_normalize_datetime(at))
+        params.append(limit + 1)
+    sql = (
+        "SELECT event_timestamp, kind, identifier FROM ("
+        + " UNION ALL ".join(branches)
+        + f") candidates ORDER BY event_timestamp {order}, kind {order}, sort_identifier {order} LIMIT %s"
+    )
+    params.append(limit + 1)
+    with connection.cursor() as db_cursor:
+        db_cursor.execute(sql, params)
+        rows = db_cursor.fetchall()
+    return [TimelineEventCandidate(timestamp, kind, identifier) for timestamp, kind, identifier in rows]
+
+
+def _select_candidates(
+    agent: PersistentAgent,
+    cursor: Cursor | None,
+    direction: str,
+    limit: int,
+    at: datetime | None,
+) -> list[TimelineEventCandidate]:
+    if connection.vendor == "postgresql":
+        return _postgres_candidates(agent, cursor, direction, limit, at)
+    return _portable_candidates(agent, cursor, direction, limit, at)
+
+
+def _hydrate_candidates(
+    agent: PersistentAgent,
+    candidates: list[TimelineEventCandidate],
+    *,
+    developer: bool,
+) -> list[dict]:
+    identifiers_by_kind: dict[str, list[object]] = {}
+    for candidate in candidates:
+        identifiers_by_kind.setdefault(candidate.kind, []).append(candidate.identifier)
+
+    event_by_key: dict[tuple[str, str], dict] = {}
+    completion_ids = identifiers_by_kind.get("completion", [])
+    if completion_ids:
+        completions = list(
+            PersistentAgentCompletion.objects.filter(
+                agent=agent,
+                id__in=completion_ids,
+            ).select_related("prompt_archive")
+        )
+        prompt_archives = {
+            step.completion_id: step.llm_prompt_archive
+            for step in PersistentAgentStep.objects.filter(
+                completion_id__in=completion_ids,
+                llm_prompt_archive__isnull=False,
+            ).select_related("llm_prompt_archive").order_by("created_at")
+        }
+        for completion in completions:
+            event_by_key[("completion", str(completion.id))] = _event(
+                serialize_completion(
+                    completion,
+                    prompt_archive=completion.prompt_archive or prompt_archives.get(completion.id),
+                    tool_calls=[],
+                ),
+                timestamp=completion.created_at,
+                kind="completion",
+                identifier=completion.id,
+                developer=developer,
+            )
+
+    tool_ids = identifiers_by_kind.get("tool_call", [])
+    if tool_ids:
+        steps = visible_tool_steps_queryset(agent).filter(id__in=tool_ids).select_related(
+            "tool_call", "completion", "llm_prompt_archive"
+        ).prefetch_related("human_input_requests")
+        for step in steps:
+            event_by_key[("tool_call", str(step.id))] = _event(
+                serialize_tool_call(step),
+                timestamp=step.created_at,
+                kind="tool_call",
+                identifier=step.id,
+                developer=developer,
+            )
+
+    message_seqs = identifiers_by_kind.get("message", [])
+    if message_seqs:
+        messages = list(
+            PersistentAgentMessage.objects.filter(owner_agent=agent, seq__in=message_seqs)
+            .select_related(
+                "from_endpoint",
+                "to_endpoint",
+                "conversation__peer_link",
+                "peer_agent",
+                "owner_agent",
+                "outbound_email_review",
+            )
+            .prefetch_related("attachments__filespace_node", "cc_endpoints", "bcc_endpoints")
+        )
+        developer_payloads = serialize_message_events(messages) if developer else []
+        for index, message in enumerate(messages):
+            payload = developer_payloads[index] if developer else _event(
+                serialize_message(message),
+                timestamp=message.timestamp,
+                kind="message",
+                identifier=message.seq,
+                developer=False,
+            )
+            event_by_key[("message", str(message.seq))] = payload
+
+    step_ids = identifiers_by_kind.get("step", [])
+    if step_ids:
+        steps = PersistentAgentStep.objects.filter(
+            agent=agent,
+            id__in=step_ids,
+            tool_call__isnull=True,
+        ).select_related("completion", "system_step")
+        for step in steps:
+            event_by_key[("step", str(step.id))] = _event(
+                serialize_step(step),
+                timestamp=step.created_at,
+                kind="step",
+                identifier=step.id,
+                developer=developer,
+            )
+
+    system_message_ids = identifiers_by_kind.get("system_message", [])
+    if system_message_ids:
+        messages = PersistentAgentSystemMessage.objects.filter(
+            agent=agent,
+            id__in=system_message_ids,
+        ).select_related("created_by")
+        for message in messages:
+            event_by_key[("system_message", str(message.id))] = _event(
+                serialize_system_message(message),
+                timestamp=message.created_at,
+                kind="system_message",
+                identifier=message.id,
+                developer=developer,
+            )
+
+    error_ids = identifiers_by_kind.get("error", [])
+    if error_ids:
+        for error in PersistentAgentError.objects.filter(agent=agent, id__in=error_ids):
+            event_by_key[("error", str(error.id))] = _event(
+                serialize_error(error),
+                timestamp=error.created_at,
+                kind="error",
+                identifier=error.id,
+                developer=developer,
+            )
+
     return [
-        _event(serialize_step(step), timestamp=step.created_at, kind="step", identifier=step.id, developer=developer)
-        for step in steps
-        if not (step.description or "").startswith("Tool call")
-    ]
-
-
-def _system_message_events(agent, cursor, direction, limit, at, developer):
-    queryset = PersistentAgentSystemMessage.objects.filter(agent=agent).select_related("created_by")
-    queryset = _apply_cursor(queryset, cursor, direction=direction, kind="system_message", dt_field="created_at", id_field="id")
-    messages = _ordered(queryset, direction=direction, dt_field="created_at", id_field="id", limit=limit, at=at)
-    return [
-        _event(serialize_system_message(message), timestamp=message.created_at, kind="system_message", identifier=message.id, developer=developer)
-        for message in messages
-    ]
-
-
-def _error_events(agent, cursor, direction, limit, at, developer):
-    queryset = PersistentAgentError.objects.filter(agent=agent)
-    queryset = _apply_cursor(queryset, cursor, direction=direction, kind="error", dt_field="created_at", id_field="id")
-    errors = _ordered(queryset, direction=direction, dt_field="created_at", id_field="id", limit=limit, at=at)
-    return [
-        _event(serialize_error(error), timestamp=error.created_at, kind="error", identifier=error.id, developer=developer)
-        for error in errors
+        event_by_key[(candidate.kind, str(candidate.identifier))]
+        for candidate in candidates
+        if (candidate.kind, str(candidate.identifier)) in event_by_key
     ]
 
 
@@ -260,18 +479,15 @@ def fetch_event_page(
     cursor_payload = Cursor.decode(cursor)
     query_direction = "newer" if direction == "newer" else "older"
     upper_bound = at if cursor_payload is None else None
-    args = (agent, cursor_payload, query_direction, limit, upper_bound, developer)
-    events = [
-        *_completion_events(*args),
-        *_tool_events(*args),
-        *_message_events(*args),
-        *_step_events(*args),
-        *_system_message_events(*args),
-        *_error_events(*args),
-    ]
-    events.sort(key=lambda event: event["_sort_key"])
-    has_more = len(events) > limit
-    events = events[:limit] if query_direction == "newer" else events[-limit:]
+    candidates = _select_candidates(agent, cursor_payload, query_direction, limit, upper_bound)
+    has_more = len(candidates) > limit
+    if connection.vendor == "postgresql":
+        candidates = candidates[:limit]
+        if query_direction == "older":
+            candidates.reverse()
+    else:
+        candidates = candidates[:limit] if query_direction == "newer" else candidates[-limit:]
+    events = _hydrate_candidates(agent, candidates, developer=developer)
     for event in events:
         event.pop("_sort_key", None)
     return events, has_more

@@ -6578,6 +6578,25 @@
             transparent 100%
     );
 }
+.chat-sidebar-agent-list[data-virtualized='true'],
+.agent-drawer-list[data-virtualized='true'],
+.agent-gallery-scroll[data-virtualized='true'] {
+    display: block;
+}
+.agent-roster-virtual-canvas {
+    position: relative;
+    width: 100%;
+    flex: 0 0 auto;
+}
+.agent-roster-virtual-row {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+}
+.agent-roster-virtual-row > * {
+    width: 100%;
+}
 .chat-sidebar-agent-list::before,
 .chat-sidebar-agent-list::after {
     content: '';

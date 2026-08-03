@@ -24,6 +24,7 @@ export type RefreshTimelineOptions = {
   developerMode?: boolean
   staffContext?: StaffViewContext | null
   allowDuringQueryFetch?: boolean
+  preferNewerFromCache?: boolean
 }
 
 export type RefreshTimelineResult = {
@@ -651,7 +652,7 @@ async function performTimelineLatestRefresh(
   const key = timelineQueryKey(agentId, developerMode, staffContext)
   const queryState = queryClient.getQueryState(key)
   if (
-    (!options?.allowDuringQueryFetch && queryState?.fetchStatus === 'fetching')
+    (queryState?.fetchStatus === 'fetching')
     || (options?.minimumUpdatedAt && queryState?.dataUpdatedAt && queryState.dataUpdatedAt >= options.minimumUpdatedAt)
   ) {
     return { newerPagesFetched: 0, remainingNewerGap: false }
@@ -660,17 +661,36 @@ async function performTimelineLatestRefresh(
   let remainingNewerGap = false
 
   try {
-    const initialRequestStartedOrder = nextClientStateOrder()
-    const response = await fetchAgentTimeline(agentId, {
-      direction: 'initial',
-      limit: TIMELINE_PAGE_SIZE,
-      developerMode,
-      staffContext,
-    })
-    const latestPage = timelineResponseToPage(response, initialRequestStartedOrder)
-    const latestMerge = mergeLatestPageIntoTailAndDetectGap(queryClient, key, latestPage)
-    remainingNewerGap = latestMerge.hasNewerGap
-    let cursor: string | null = latestMerge.newestCursor
+    const cached = queryClient.getQueryData<InfiniteData<TimelinePage>>(key)
+    const cachedNewestCursor = cached?.pages.at(-1)?.newestCursor ?? null
+    let cursor: string | null
+    if (options?.preferNewerFromCache && cachedNewestCursor) {
+      const requestStartedOrder = nextClientStateOrder()
+      const response = await fetchAgentTimeline(agentId, {
+        direction: 'newer',
+        cursor: cachedNewestCursor,
+        limit: TIMELINE_PAGE_SIZE,
+        developerMode,
+        staffContext,
+      })
+      const newerPage = timelineResponseToPage(response, requestStartedOrder)
+      const newerMerge = mergeNewerPageIntoTail(queryClient, key, newerPage)
+      newerPagesFetched = 1
+      remainingNewerGap = newerPage.hasMoreNewer
+      cursor = newerMerge.newestCursor
+    } else {
+      const initialRequestStartedOrder = nextClientStateOrder()
+      const response = await fetchAgentTimeline(agentId, {
+        direction: 'initial',
+        limit: TIMELINE_PAGE_SIZE,
+        developerMode,
+        staffContext,
+      })
+      const latestPage = timelineResponseToPage(response, initialRequestStartedOrder)
+      const latestMerge = mergeLatestPageIntoTailAndDetectGap(queryClient, key, latestPage)
+      remainingNewerGap = latestMerge.hasNewerGap
+      cursor = latestMerge.newestCursor
+    }
 
     if (mode === 'contiguous' && remainingNewerGap && cursor) {
       while (remainingNewerGap && cursor && newerPagesFetched < maxNewerPages) {
@@ -709,16 +729,36 @@ async function performTimelineLatestRefresh(
   }
 }
 
+function waitForTimelineQueryIdle(queryClient: QueryClient, queryKey: readonly unknown[]): Promise<void> {
+  const target = queryClient.getQueryCache().find({ queryKey, exact: true })
+  if (!target || target.state.fetchStatus !== 'fetching') {
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (event.query === target && event.query.state.fetchStatus !== 'fetching') {
+        unsubscribe()
+        resolve()
+      }
+    })
+    if (target.state.fetchStatus !== 'fetching') {
+      unsubscribe()
+      resolve()
+    }
+  })
+}
+
 export async function refreshTimelineLatestInCache(
   queryClient: QueryClient,
   agentId: string,
   options?: RefreshTimelineOptions,
 ): Promise<RefreshTimelineResult> {
-  const refreshKey = JSON.stringify(timelineQueryKey(
+  const queryKey = timelineQueryKey(
     agentId,
     options?.developerMode === true,
     options?.staffContext ?? null,
-  ))
+  )
+  const refreshKey = JSON.stringify(queryKey)
   const existing = timelineRefreshesInFlight.get(refreshKey)
   if (existing) {
     const result = await existing.promise
@@ -727,7 +767,15 @@ export async function refreshTimelineLatestInCache(
     }
   }
 
-  const promise = performTimelineLatestRefresh(queryClient, agentId, options)
+  const shouldDefer = options?.allowDuringQueryFetch === true
+    && queryClient.getQueryState(queryKey)?.fetchStatus === 'fetching'
+  const promise = shouldDefer
+    ? waitForTimelineQueryIdle(queryClient, queryKey).then(() => performTimelineLatestRefresh(
+      queryClient,
+      agentId,
+      { ...options, allowDuringQueryFetch: false, preferNewerFromCache: true },
+    ))
+    : performTimelineLatestRefresh(queryClient, agentId, options)
   timelineRefreshesInFlight.set(refreshKey, { mode: options?.mode ?? 'fast', promise })
   return promise.finally(() => {
     const current = timelineRefreshesInFlight.get(refreshKey)

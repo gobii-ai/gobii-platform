@@ -1536,7 +1536,6 @@ export function AgentChatPage({
     enabled: contextReady,
     context: effectiveContext,
     contextKey: rosterContextKey,
-    forAgentId: routeAgentId ?? undefined,
     staffContext,
     refetchIntervalMs: ROSTER_REFRESH_INTERVAL_MS,
   })

@@ -2072,6 +2072,10 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                         transaction.on_commit(lambda name=old_avatar_name: default_storage.delete(name))
                     if old_avatar_thumbnail_name:
                         transaction.on_commit(lambda name=old_avatar_thumbnail_name: default_storage.delete(name))
+                    if new_avatar_name:
+                        from api.tasks.avatar_thumbnails import enqueue_agent_avatar_thumbnail
+
+                        transaction.on_commit(lambda: enqueue_agent_avatar_thumbnail(agent))
         except ValidationError as e:
             message = _format_validation_error(e)
             if is_ajax:

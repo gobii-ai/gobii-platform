@@ -58,6 +58,8 @@ export function AgentInviteSidebarItem({
             className="agent-roster-item__avatar"
             imageClassName="agent-roster-item__avatar-image"
             textClassName="agent-roster-item__avatar-text"
+            loading="lazy"
+            decoding="async"
           />
         </span>
       </span>

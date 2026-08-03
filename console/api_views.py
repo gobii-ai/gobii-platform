@@ -285,7 +285,7 @@ from tasks.services import TaskCreditService
 from util.integrations import stripe_status
 from util.subscription_helper import get_active_subscription, get_stripe_customer, get_organization_plan, reconcile_user_plan_from_stripe, get_user_plan
 from util.constants.task_constants import TASKS_UNLIMITED
-from console.role_constants import BILLING_MANAGE_ROLES
+from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
 
 
 logger = logging.getLogger(__name__)
@@ -2876,6 +2876,9 @@ def _serialize_agent_profile_payload(
     admin_org_ids: set | None = None,
     is_admin_user: bool | None = None,
     can_reactivate_agent: bool | None = None,
+    can_manage_agent: bool | None = None,
+    can_manage_collaborators: bool | None = None,
+    can_send_messages: bool | None = None,
     enrich: bool = False,
 ) -> dict[str, Any]:
     user = request.user
@@ -2908,6 +2911,20 @@ def _serialize_agent_profile_payload(
             agent,
             allow_delinquent_personal_chat=True,
         )
+    if can_manage_agent is None:
+        can_manage_agent = bool(
+            is_admin_user
+            or agent.user_id == user.id
+            or (agent.organization_id and agent.organization_id in org_ids)
+        )
+    if can_manage_collaborators is None:
+        can_manage_collaborators = bool(
+            is_admin_user
+            or agent.user_id == user.id
+            or (agent.organization_id and agent.organization_id in admin_org_ids)
+        )
+    if can_send_messages is None:
+        can_send_messages = user_has_natural_agent_chat_access(user, agent)
 
     card_payload = serialize_agent_card_payload(
         request,
@@ -2937,18 +2954,10 @@ def _serialize_agent_profile_payload(
         "last_24h_credit_burn": card_payload["last24hCreditBurn"],
         "is_org_owned": agent.organization_id is not None,
         "is_collaborator": bool(is_collaborator),
-        "can_manage_agent": bool(
-            is_admin_user
-            or agent.user_id == user.id
-            or (agent.organization_id and agent.organization_id in org_ids)
-        ),
+        "can_manage_agent": can_manage_agent,
         "can_reactivate_agent": can_reactivate_agent,
-        "can_manage_collaborators": bool(
-            is_admin_user
-            or agent.user_id == user.id
-            or (agent.organization_id and agent.organization_id in admin_org_ids)
-        ),
-        "can_send_messages": user_has_natural_agent_chat_access(user, agent),
+        "can_manage_collaborators": can_manage_collaborators,
+        "can_send_messages": can_send_messages,
         "developer_live_chat_url": card_payload["developerChatUrl"],
         "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
         "email": card_payload["primaryEmail"],
@@ -3217,18 +3226,34 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     agents.append(requested_agent)
         enrich_agents_for_card_surface(agents, owner)
         user = request.user
+        membership_rows = list(OrganizationMembership.objects.filter(
+            user=user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).values_list("org_id", "role"))
+        org_ids = {org_id for org_id, _role in membership_rows}
+        billing_manage_org_ids = {
+            org_id for org_id, role in membership_rows if role in BILLING_MANAGE_ROLES
+        }
+        admin_org_ids = {
+            org_id for org_id, role in membership_rows if role in MEMBER_MANAGE_ROLES
+        }
+        is_admin_user = bool(user.is_staff or user.is_superuser)
+        manageable_agent_ids = {
+            agent.id
+            for agent in agents
+            if is_admin_user
+            or agent.user_id == user.id
+            or (agent.organization_id and agent.organization_id in admin_org_ids)
+        }
         processing_activity_by_agent_id = build_processing_activity_map(agents)
-        pending_action_counts_by_agent_id = count_pending_action_requests_for_agents(agents, user)
+        pending_action_counts_by_agent_id = count_pending_action_requests_for_agents(
+            agents,
+            user,
+            manageable_agent_ids=manageable_agent_ids,
+        )
         message_read_state_by_agent_id = build_latest_agent_message_read_state(
             (agent.id for agent in agents),
             request.user,
-        )
-        org_memberships = OrganizationMembership.objects.filter(
-            user=user,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-        )
-        billing_manage_org_ids = set(
-            org_memberships.filter(role__in=BILLING_MANAGE_ROLES).values_list("org_id", flat=True)
         )
         can_open_billing = bool(
             owner_type == "user"
@@ -3249,21 +3274,11 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             owner,
             manage_billing_url=manage_billing_url,
         )
-        org_ids = set(org_memberships.values_list("org_id", flat=True))
-        admin_org_ids = set(
-            org_memberships.filter(
-                role__in=[
-                    OrganizationMembership.OrgRole.OWNER,
-                    OrganizationMembership.OrgRole.ADMIN,
-                    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-                ]
-            ).values_list("org_id", flat=True)
-        )
-        # Keep behavior aligned with SystemAdminRequiredMixin: superusers may not be staff.
-        is_admin_user = bool(user.is_staff or user.is_superuser)
         payload = []
         for agent in agents:
             is_collaborator = agent.id in collaborators_by_agent_id
+            has_org_membership = bool(agent.organization_id and agent.organization_id in org_ids)
+            is_personal_owner = agent.organization_id is None and agent.user_id == user.id
             payload.append(
                 _serialize_agent_profile_payload(
                     request,
@@ -3277,10 +3292,11 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     admin_org_ids=admin_org_ids,
                     is_admin_user=is_admin_user,
                     can_reactivate_agent=bool(
-                        is_admin_user
-                        or agent.user_id == user.id
-                        or (agent.organization_id and agent.organization_id in admin_org_ids)
+                        agent.id in manageable_agent_ids
                     ),
+                    can_manage_agent=bool(is_admin_user or agent.user_id == user.id or has_org_membership),
+                    can_manage_collaborators=bool(agent.id in manageable_agent_ids),
+                    can_send_messages=bool(has_org_membership or is_personal_owner or is_collaborator),
                 )
             )
         return JsonResponse(
