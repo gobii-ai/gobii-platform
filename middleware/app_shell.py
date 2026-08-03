@@ -94,6 +94,10 @@ def _format_segment_snippet() -> str:
       function buildAnalyticsSessionUrl() {{
         var sessionUrl = new URL('/console/api/session/', window.location.origin);
         var currentParams = new URLSearchParams(window.location.search);
+        var pathParts = window.location.pathname.split('/').filter(Boolean);
+        if (pathParts[0] === 'app' && pathParts[1] === 'agents' && pathParts[2] && pathParts[2] !== 'new') {{
+          sessionUrl.searchParams.set('for_agent', pathParts[2]);
+        }}
         ['context_type', 'context_id', 'staff_context_type', 'staff_context_id'].forEach(function(key) {{
           var value = currentParams.get(key);
           if (value) {{

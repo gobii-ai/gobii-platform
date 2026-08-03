@@ -300,6 +300,7 @@ def _resolve_request_context_owner(
     request: HttpRequest,
     *,
     include_staff_override: bool = False,
+    for_agent_id: str | None = None,
 ):
     try:
         staff_override = get_staff_context_override(request) if include_staff_override else None
@@ -307,12 +308,20 @@ def _resolve_request_context_owner(
             context_info = resolve_staff_console_context(request.user, staff_override)
         else:
             override = get_context_override(request)
+            if for_agent_id:
+                override, error_code = resolve_context_override_for_agent(
+                    request.user,
+                    for_agent_id,
+                    include_deleted=True,
+                )
+                if error_code == "forbidden":
+                    return None
             context_info = resolve_console_context(
                 request.user,
                 request.session,
                 override=override,
             )
-    except PermissionDenied:
+    except (PermissionDenied, ValidationError, ValueError):
         return None
 
     return resolve_console_context_owner(
@@ -481,6 +490,7 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
             billing_owner = _resolve_request_context_owner(
                 request,
                 include_staff_override=True,
+                for_agent_id=(request.GET.get("for_agent") or "").strip() or None,
             ) or request.user
             billing_context = Analytics.web_billing_context(request.user, billing_owner)
 

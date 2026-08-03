@@ -7,7 +7,14 @@ from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase, override_settings, tag
 from django.utils import timezone
 
-from api.models import Organization, OrganizationMembership, UserBilling, UserFlags
+from api.models import (
+    BrowserUseAgent,
+    Organization,
+    OrganizationMembership,
+    PersistentAgent,
+    UserBilling,
+    UserFlags,
+)
 from constants.plans import PlanNames
 from middleware.analytics_billing import AnalyticsBillingContextCacheMiddleware
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -438,12 +445,62 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(response.json()["billing_context"]["organization_id"], str(organization.pk))
         self.assertEqual(billing_context_mock.call_args.args[1].pk, organization.pk)
 
+    def test_console_session_uses_route_agent_owner_over_stale_session_context(self):
+        organization = Organization.objects.create(
+            name="Route Agent Analytics Org",
+            slug="route-agent-analytics-org",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        organization_billing = organization.billing
+        organization_billing.subscription = PlanNames.ORG_TEAM
+        organization_billing.purchased_seats = 1
+        organization_billing.save(update_fields=["subscription", "purchased_seats"])
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Route Agent Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=organization,
+            name="Route Agent",
+            charter="",
+            browser_use_agent=browser_agent,
+        )
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.user.pk)
+        session["context_name"] = self.user.username
+        session.save()
+
+        with patch(
+            "console.api_views.Analytics.web_billing_context",
+            return_value={"organization_id": str(organization.pk)},
+        ) as billing_context_mock:
+            response = self.client.get(
+                "/console/api/session/",
+                {"for_agent": str(agent.pk)},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["billing_context"]["organization_id"], str(organization.pk))
+        self.assertEqual(billing_context_mock.call_args.args[1].pk, organization.pk)
+        self.assertEqual(self.client.session["context_type"], "personal")
+        self.assertEqual(self.client.session["context_id"], str(self.user.pk))
+
     def test_immersive_app_initial_page_waits_for_billing_context(self):
         from middleware.app_shell import _format_segment_snippet
 
         snippet = _format_segment_snippet()
 
         self.assertIn("fetch(buildAnalyticsSessionUrl()", snippet)
+        self.assertIn("sessionUrl.searchParams.set('for_agent', pathParts[2])", snippet)
         self.assertIn("'context_type', 'context_id', 'staff_context_type', 'staff_context_id'", snippet)
         self.assertIn("setDefaultProperties(payload.billing_context)", snippet)
         self.assertLess(
