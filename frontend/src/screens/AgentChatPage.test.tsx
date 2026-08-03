@@ -8,6 +8,7 @@ import type { AppStore } from '../store/appStore'
 import { chatActions } from '../store/chatSlice'
 import { createTestAppStore, seedSubscriptionState, StoreProvider } from '../test/storeTestUtils'
 import { HttpError } from '../api/http'
+import { useAgentRoster } from '../hooks/useAgentRoster'
 
 class FakeNotification {
   static permission: NotificationPermission = 'granted'
@@ -1078,6 +1079,8 @@ describe('AgentChatPage trial onboarding', () => {
   })
 
   it('keeps system messaging available in an override-only developer view', async () => {
+    const useAgentRosterMock = vi.mocked(useAgentRoster)
+    useAgentRosterMock.mockClear()
     rosterState.agents = [
       {
         ...buildRosterAgent('agent-1', 'Test Agent'),
@@ -1101,6 +1104,10 @@ describe('AgentChatPage trial onboarding', () => {
     expect(screen.getByTestId('composer-action-menu-visible')).toHaveTextContent('false')
     expect(screen.getByTestId('collaborate-visible')).toHaveTextContent('false')
     expect(screen.getByTestId('public-share-visible')).toHaveTextContent('false')
+    expect(useAgentRosterMock).toHaveBeenCalledWith(expect.objectContaining({
+      forAgentId: 'agent-1',
+      staffContext: { type: 'organization', id: 'org-1' },
+    }))
 
     fireEvent.click(screen.getByTestId('send-system-message'))
     await waitFor(() => {
@@ -1483,6 +1490,8 @@ describe('AgentChatPage trial onboarding', () => {
   })
 
   it('passes native tab enablement from roster system skills', async () => {
+    const useAgentRosterMock = vi.mocked(useAgentRoster)
+    useAgentRosterMock.mockClear()
     rosterState.agents = [buildRosterAgent('agent-1', 'Agent One', ['apollo_native', 'hubspot_native', 'discord_native', 'meta_ads_platform'])]
     window.history.pushState({}, '', '/app/agents/agent-1')
 
@@ -1494,6 +1503,9 @@ describe('AgentChatPage trial onboarding', () => {
     expect(screen.getByTestId('hubspot-native-tab-enabled')).toHaveTextContent('true')
     expect(screen.getByTestId('discord-native-tab-enabled')).toHaveTextContent('true')
     expect(screen.getByTestId('meta-ads-tab-enabled')).toHaveTextContent('true')
+    expect(useAgentRosterMock).toHaveBeenCalledWith(expect.objectContaining({
+      forAgentId: undefined,
+    }))
   })
 
   it('passes native tab enablement from live tool search results', async () => {

@@ -267,7 +267,7 @@ def _postgres_candidates(
     system_message_table = quote(PersistentAgentSystemMessage._meta.db_table)
     error_table = quote(PersistentAgentError._meta.db_table)
     branch_specs = (
-        ("completion", completion_table, "e.created_at", "e.id", "uuid", "e.agent_id = %s", ""),
+        ("completion", f"{completion_table} e", "e.created_at", "e.id", "uuid", "e.agent_id = %s", ""),
         (
             "tool_call",
             f"{step_table} e JOIN {tool_table} tc ON tc.step_id = e.id",
@@ -277,7 +277,7 @@ def _postgres_candidates(
             "e.agent_id = %s",
             " AND (tc.status IS NULL OR tc.status <> 'queued')",
         ),
-        ("message", message_table, "e.timestamp", "e.seq", "varchar", "e.owner_agent_id = %s", ""),
+        ("message", f"{message_table} e", "e.timestamp", "e.seq", "varchar", "e.owner_agent_id = %s", ""),
         (
             "step",
             f"{step_table} e LEFT JOIN {tool_table} tc ON tc.step_id = e.id",
@@ -285,10 +285,10 @@ def _postgres_candidates(
             "e.id",
             "uuid",
             "e.agent_id = %s",
-            " AND tc.step_id IS NULL AND (e.description IS NULL OR e.description NOT LIKE 'Tool call%')",
+            " AND tc.step_id IS NULL AND (e.description IS NULL OR e.description NOT LIKE 'Tool call%%')",
         ),
-        ("system_message", system_message_table, "e.created_at", "e.id", "uuid", "e.agent_id = %s", ""),
-        ("error", error_table, "e.created_at", "e.id", "uuid", "e.agent_id = %s", ""),
+        ("system_message", f"{system_message_table} e", "e.created_at", "e.id", "uuid", "e.agent_id = %s", ""),
+        ("error", f"{error_table} e", "e.created_at", "e.id", "uuid", "e.agent_id = %s", ""),
     )
     order = "ASC" if direction == "newer" else "DESC"
     branches = []

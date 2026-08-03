@@ -34,7 +34,7 @@ from api.models import (
 )
 from api.agent.core.agent_judge import NO_ACTION, REPORT_TOOL_NAME
 from console.agent_audit.serializers import serialize_completion
-from console.agent_audit.events import fetch_event_page
+from console.agent_audit.events import _postgres_candidates, fetch_event_page
 
 
 def _judge_response(payload: dict):
@@ -108,6 +108,32 @@ class StaffAgentAuditAPITests(TestCase):
             owner_agent=self.agent,
             body=body,
         )
+
+    def test_postgres_candidate_query_aliases_every_simple_table_branch(self):
+        cursor_context = MagicMock()
+        db_cursor = cursor_context.__enter__.return_value
+        db_cursor.fetchall.return_value = []
+
+        with patch("console.agent_audit.events.connection.cursor", return_value=cursor_context):
+            candidates = _postgres_candidates(
+                self.agent,
+                cursor=None,
+                direction="older",
+                limit=50,
+                at=None,
+            )
+
+        self.assertEqual(candidates, [])
+        sql = db_cursor.execute.call_args.args[0]
+        for model in (
+            PersistentAgentCompletion,
+            PersistentAgentMessage,
+            PersistentAgentSystemMessage,
+            PersistentAgentError,
+        ):
+            table_name = connection.ops.quote_name(model._meta.db_table)
+            self.assertIn(f"FROM {table_name} e WHERE", sql)
+        self.assertIn("NOT LIKE 'Tool call%%'", sql)
 
     def test_process_events_endpoint_enqueues_task(self):
         with patch("console.api_views.process_agent_events_task.delay") as mock_delay:

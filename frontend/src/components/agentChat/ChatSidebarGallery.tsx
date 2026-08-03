@@ -1,5 +1,5 @@
 import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { AgentEmotionIndicator } from '../common/AgentEmotionIndicator'
@@ -207,102 +207,105 @@ export function ChatSidebarGallery({
   const handleViewportWidthChange = useCallback((width: number) => {
     setViewportWidth((current) => current === width ? current : width)
   }, [])
-  const favoriteAgentIdSet = new Set(favoriteAgentIds)
-  const favoriteAgents = agents.filter((agent) => favoriteAgentIdSet.has(agent.id))
-  const allAgents = agents.filter((agent) => !favoriteAgentIdSet.has(agent.id))
-  const showFavoritesSection = favoriteAgents.length > 0
-  const showAllSection = allAgents.length > 0 || !showFavoritesSection
   const columnCount = viewportWidth > 0
     ? variant === 'drawer' && viewportWidth < 560
       ? 1
       : Math.max(1, Math.floor((viewportWidth + 12) / (232 + 12)))
     : 1
-  const rows: VirtualRosterRow[] = []
+  const rows = useMemo<VirtualRosterRow[]>(() => {
+    const favoriteAgentIdSet = new Set(favoriteAgentIds)
+    const favoriteAgents = agents.filter((agent) => favoriteAgentIdSet.has(agent.id))
+    const allAgents = agents.filter((agent) => !favoriteAgentIdSet.has(agent.id))
+    const showFavoritesSection = favoriteAgents.length > 0
+    const showAllSection = allAgents.length > 0 || !showFavoritesSection
+    const nextRows: VirtualRosterRow[] = []
 
-  if (onCreateAgent) {
-    rows.push({
-      key: 'gallery:create',
-      content: teamTemplateMenu ? (
-        <AgentCreateSplitButton
-          variant="gallery"
-          onCreateAgent={onCreateAgent}
-          createAgentDisabled={createAgentDisabled}
-          createAgentButtonDisabled={createAgentButtonDisabled}
-          createAgentDisabledReason={createAgentDisabledReason}
-          menu={teamTemplateMenu}
-        />
-      ) : (
-        <button
-          type="button"
-          className="agent-gallery-create"
-          data-variant={variant}
-          onClick={onCreateAgent}
-          disabled={createAgentButtonDisabled}
-          aria-disabled={createAgentDisabled ? 'true' : undefined}
-          title={createAgentDisabledReason ?? undefined}
-        >
-          <Plus className="h-4 w-4" />
-          <span>New Agent</span>
-        </button>
-      ),
-    })
-  }
-
-  rows.push({
-    key: 'gallery:empty',
-    content: (
-      <AgentEmptyState
-        variant={variant}
-        hasAgents={hasAgents}
-        loading={loading}
-        errorMessage={errorMessage}
-        filteredCount={agents.length}
-        searchQuery={searchQuery}
-      />
-    ),
-  })
-
-  const pushSection = (key: string, label: string, sectionAgents: AgentRosterEntry[], favorite: boolean) => {
-    if (!sectionAgents.length) return
-    rows.push({
-      key: `gallery:${key}:header`,
-      content: <AgentListSectionHeader variant={variant} label={label} count={sectionAgents.length} />,
-    })
-    for (let index = 0; index < sectionAgents.length; index += columnCount) {
-      const rowAgents = sectionAgents.slice(index, index + columnCount)
-      rows.push({
-        key: `gallery:${key}:${rowAgents.map((agent) => agent.id).join(':')}`,
-        agentIds: rowAgents.map((agent) => agent.id),
-        content: (
-          <div
-            className={joinClassNames('agent-gallery-grid', variant === 'drawer' && 'agent-gallery-grid--drawer')}
-            style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
-            role="list"
+    if (onCreateAgent) {
+      nextRows.push({
+        key: 'gallery:create',
+        content: teamTemplateMenu ? (
+          <AgentCreateSplitButton
+            variant="gallery"
+            onCreateAgent={onCreateAgent}
+            createAgentDisabled={createAgentDisabled}
+            createAgentButtonDisabled={createAgentButtonDisabled}
+            createAgentDisabledReason={createAgentDisabledReason}
+            menu={teamTemplateMenu}
+          />
+        ) : (
+          <button
+            type="button"
+            className="agent-gallery-create"
+            data-variant={variant}
+            onClick={onCreateAgent}
+            disabled={createAgentButtonDisabled}
+            aria-disabled={createAgentDisabled ? 'true' : undefined}
+            title={createAgentDisabledReason ?? undefined}
           >
-            {rowAgents.map((agent) => (
-              <GalleryCard
-                key={agent.id}
-                agent={agent}
-                variant={variant}
-                isActive={agent.id === activeAgentId}
-                isSwitching={agent.id === switchingAgentId}
-                isFavorite={favorite}
-                onSelectAgent={onSelectAgent}
-                onConfigureAgent={onConfigureAgent}
-                onToggleAgentFavorite={onToggleAgentFavorite}
-              />
-            ))}
-          </div>
+            <Plus className="h-4 w-4" />
+            <span>New Agent</span>
+          </button>
         ),
       })
     }
-  }
-  if (showFavoritesSection) {
-    pushSection('favorites', 'Favorites', favoriteAgents, true)
-  }
-  if (showAllSection) {
-    pushSection('all', showFavoritesSection ? 'All agents' : 'Agents', allAgents, false)
-  }
+
+    nextRows.push({
+      key: 'gallery:empty',
+      content: (
+        <AgentEmptyState
+          variant={variant}
+          hasAgents={hasAgents}
+          loading={loading}
+          errorMessage={errorMessage}
+          filteredCount={agents.length}
+          searchQuery={searchQuery}
+        />
+      ),
+    })
+
+    const pushSection = (key: string, label: string, sectionAgents: AgentRosterEntry[], favorite: boolean) => {
+      if (!sectionAgents.length) return
+      nextRows.push({
+        key: `gallery:${key}:header`,
+        content: <AgentListSectionHeader variant={variant} label={label} count={sectionAgents.length} />,
+      })
+      for (let index = 0; index < sectionAgents.length; index += columnCount) {
+        const rowAgents = sectionAgents.slice(index, index + columnCount)
+        nextRows.push({
+          key: `gallery:${key}:${rowAgents.map((agent) => agent.id).join(':')}`,
+          agentIds: rowAgents.map((agent) => agent.id),
+          content: (
+            <div
+              className={joinClassNames('agent-gallery-grid', variant === 'drawer' && 'agent-gallery-grid--drawer')}
+              style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+              role="list"
+            >
+              {rowAgents.map((agent) => (
+                <GalleryCard
+                  key={agent.id}
+                  agent={agent}
+                  variant={variant}
+                  isActive={agent.id === activeAgentId}
+                  isSwitching={agent.id === switchingAgentId}
+                  isFavorite={favorite}
+                  onSelectAgent={onSelectAgent}
+                  onConfigureAgent={onConfigureAgent}
+                  onToggleAgentFavorite={onToggleAgentFavorite}
+                />
+              ))}
+            </div>
+          ),
+        })
+      }
+    }
+    if (showFavoritesSection) {
+      pushSection('favorites', 'Favorites', favoriteAgents, true)
+    }
+    if (showAllSection) {
+      pushSection('all', showFavoritesSection ? 'All agents' : 'Agents', allAgents, false)
+    }
+    return nextRows
+  }, [activeAgentId, agents, columnCount, createAgentButtonDisabled, createAgentDisabled, createAgentDisabledReason, errorMessage, favoriteAgentIds, hasAgents, loading, onConfigureAgent, onCreateAgent, onSelectAgent, onToggleAgentFavorite, searchQuery, switchingAgentId, teamTemplateMenu, variant])
 
   return (
     <VirtualizedRosterSurface
