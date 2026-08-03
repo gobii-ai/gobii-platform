@@ -195,7 +195,7 @@ class CompactionTests(TestCase):
         prompt = run_completion_mock.call_args.kwargs["messages"][1]["content"]
         body_preview, payload_block = (
             prompt.split("New messages:\nInbound message from unknown sender: ", 1)[1]
-            .split("\n\nReturn ONLY", 1)[0]
+            .split("\n\nRewrite the state", 1)[0]
             .split("\nStructured payload:\n", 1)
         )
         payload_preview = json.loads(payload_block)
@@ -246,6 +246,14 @@ class CompactionTests(TestCase):
             summary = llm_summarise_comms("", messages)
 
         self.assertEqual(summary, "summary")
-        prompt = run_completion_mock.call_args.kwargs["messages"][1]["content"]
-        self.assertIn("Inbound discord from Will in #growth:", prompt)
-        self.assertIn("Outbound email to owner@example.test:", prompt)
+        messages = run_completion_mock.call_args.kwargs["messages"]
+        system_prompt = messages[0]["content"]
+        user_prompt = messages[1]["content"]
+        self.assertIn("Inbound discord from Will in #growth:", user_prompt)
+        self.assertIn("Outbound email to owner@example.test:", user_prompt)
+        self.assertIn("Replace superseded state", system_prompt)
+        self.assertIn("never retain replaced", system_prompt)
+        self.assertIn("collapse closed batches to counts", system_prompt)
+        self.assertIn("exact identifiers", system_prompt)
+        self.assertIn("unresolved work", system_prompt)
+        self.assertIn("under 2,000 characters", system_prompt)

@@ -439,9 +439,9 @@ def llm_summarise_steps(
         {
             "role": "system",
             "content": (
-                "You are an assistant that maintains a running high-level summary of "
-                "an AI agent's execution steps. Given the *existing* summary and a "
-                "list of new raw steps, produce an updated concise summary."
+                "Maintain a compact current-state summary of an agent's execution. Preserve durable outcomes, exact "
+                "identifiers, created artifacts, source provenance, unresolved work, and active blockers. Replace superseded "
+                "state; omit repeated attempts, resolved mechanics, and transient reasoning. Default to under 2,000 characters; exceed that only when omitting unresolved facts would change a decision. Given the existing summary and new raw steps, rewrite the concise execution state rather than appending a log."
             ),
         },
         {

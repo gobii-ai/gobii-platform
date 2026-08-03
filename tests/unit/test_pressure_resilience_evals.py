@@ -52,3 +52,16 @@ class PressureResilienceEvalRegistrationTests(SimpleTestCase):
                 "verify_source_attribution",
             ],
         )
+        loaded = ScenarioRegistry.get(PRESSURE_RESILIENCE_SCENARIO_SLUGS[3])
+        self.assertIn("messy_data", loaded.tags)
+        self.assertIn("durable_recall", loaded.tags)
+        self.assertEqual(
+            [task.name for task in loaded.tasks],
+            [
+                "inject_loaded_history",
+                "verify_context_pressure",
+                "verify_compacted_current_state",
+                "verify_one_shot_convergence",
+                "verify_current_state_reply",
+            ],
+        )

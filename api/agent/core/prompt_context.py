@@ -1629,6 +1629,29 @@ def _render_prompt_context_once(
         non_shrinkable=True,
     )
 
+    if agent.charter:
+        important_group.section_text(
+            "charter",
+            agent.charter,
+            weight=5,
+            non_shrinkable=True
+        )
+        important_group.section_text(
+            "charter_note",
+            "Charter is authoritative durable role/scope. Patch authorized lasting critique/refinement first; preserve "
+            "unrelated guidance and omit finite, completed, or guessed facts. “You have/should have” access is a "
+            "lasting correction to a contrary blocker.",
+            weight=2,
+            non_shrinkable=True
+        )
+    else:
+        important_group.section_text(
+            "charter_missing",
+            "⚠️ NO CHARTER SET. Your FIRST action should be to set your charter via sqlite_batch. Without a charter, you have no persistent identity. Capture your purpose immediately based on what the user wants.",
+            weight=5,
+            non_shrinkable=True
+        )
+
     # Schedule block
     schedule_str = _format_agent_schedule_context(agent)
     # Provide the schedule details and a helpful note as separate sections so Prompt can
@@ -1749,29 +1772,6 @@ def _render_prompt_context_once(
         weight=3,
         non_shrinkable=True,
     )
-
-    if agent.charter:
-        important_group.section_text(
-            "charter",
-            agent.charter,
-            weight=5,
-            non_shrinkable=True
-        )
-        important_group.section_text(
-            "charter_note",
-            "Charter is authoritative durable role/scope. Patch authorized lasting critique/refinement first; preserve "
-            "unrelated guidance and omit finite, completed, or guessed facts. “You have/should have” access is a "
-            "lasting correction to a contrary blocker.",
-            weight=2,
-            non_shrinkable=True
-        )
-    else:
-        important_group.section_text(
-            "charter_missing",
-            "⚠️ NO CHARTER SET. Your FIRST action should be to set your charter via sqlite_batch. Without a charter, you have no persistent identity. Capture your purpose immediately based on what the user wants.",
-            weight=5,
-            non_shrinkable=True
-        )
 
     recent_skills_block = format_recent_skills_for_prompt(agent, limit=skill_prompt_limit(agent))
     if recent_skills_block:
@@ -4981,7 +4981,7 @@ def _get_unified_history_prompt(
         )
         history_group.section_text(
             "step_summary_note",
-            "The previous section is a condensed summary of all past agent tool calls and internal steps that occurred before the fully detailed history below. Use it as historical context only; you do not need to repeat any of this information back to the user.",
+            "Condensed execution state before the detailed tail. Use retained outcomes, artifacts, blockers, and unresolved work; newer detailed events override it. Do not repeat it without purpose.",
             weight=1
         )
     if comm_snap and comm_snap.summary:
@@ -4992,7 +4992,7 @@ def _get_unified_history_prompt(
         )
         history_group.section_text(
             "comms_summary_note",
-            "The previous section is a concise summary of the user-agent conversation before the fully detailed history below. Treat it purely as historical context—avoid reiterating these messages unless it helps progress the task.",
+            "Condensed conversation state before the detailed tail. Use retained decisions, commitments, owners, and open work; newer detailed messages override it. Avoid reiterating it unless useful.",
             weight=1
         )
 
