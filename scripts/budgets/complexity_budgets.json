@@ -1,28 +1,28 @@
 {
-  "baseline_sha": "5834725cead63254f958e5c3aa9236920f398b23",
+  "baseline_sha": "41304b0ee63f69743fc58ae2cc81e16aff011390",
   "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
   "prompt_size": {
     "description": "Rendered prompt messages plus JSON tool definitions for representative send and first-run paths.",
     "limits": {
       "first_run": {
-        "fitted_tokens": 9223,
+        "fitted_tokens": 9203,
         "system_bytes": 32079,
-        "tools_bytes": 23825,
-        "total_bytes": 67656,
+        "tools_bytes": 23805,
+        "total_bytes": 67636,
         "user_bytes": 11752
       },
       "normal_explicit_send": {
-        "fitted_tokens": 8666,
+        "fitted_tokens": 8656,
         "system_bytes": 29282,
-        "tools_bytes": 23825,
-        "total_bytes": 64892,
+        "tools_bytes": 23805,
+        "total_bytes": 64872,
         "user_bytes": 11785
       },
       "web_chat_implied_send": {
         "fitted_tokens": 8804,
         "system_bytes": 29832,
-        "tools_bytes": 23825,
-        "total_bytes": 65445,
+        "tools_bytes": 23805,
+        "total_bytes": 65425,
         "user_bytes": 11788
       }
     },
@@ -149,6 +149,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 274230
+    "limit": 274381
   }
 }
