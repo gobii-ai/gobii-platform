@@ -1085,6 +1085,13 @@ class HomePageTests(TestCase):
         }
         self.assertIn(static("css/home_tailwind.css"), stylesheet_urls)
         self.assertNotIn(static("css/tailwind.css"), stylesheet_urls)
+        self.assertIsNone(
+            soup.find(
+                "script",
+                src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js",
+            )
+        )
+        self.assertIsNone(soup.find("script", src=static("js/phone_format.js")))
         immersive_assets = response.context["immersive_app_assets"]
         for href in immersive_assets.styles:
             self.assertIsNone(
@@ -1162,6 +1169,13 @@ class HomePageTests(TestCase):
         }
         self.assertIn(static("css/tailwind.css"), stylesheet_urls)
         self.assertNotIn(static("css/home_tailwind.css"), stylesheet_urls)
+        self.assertIsNone(
+            soup.find(
+                "script",
+                src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js",
+            )
+        )
+        self.assertIsNone(soup.find("script", src=static("js/phone_format.js")))
         immersive_assets = response.context["immersive_app_assets"]
         for href in immersive_assets.styles:
             self.assertIsNotNone(
