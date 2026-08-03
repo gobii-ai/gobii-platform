@@ -2410,20 +2410,18 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Domain model/logic for material row reconciliation. First shot: keyed DDL, one set-wise "
-                "upsert, then one filtered/ranked decision SELECT with both answer and supporting rows/URLs; aggregate-only "
-                "is incomplete; deliver without reread. "
-                "Structured: every `is_current_batch=1 AND tool_name='<exact>'` row. HTTP payload path: "
-                "`$.content`; parent fields from result_json, children from json_each(actual array), provenance from "
-                "t.result_id/source_url; rows=[]. Never filter result_id/URL or copy source facts into SQL. "
-                "Prose: inspect the whole set once; join rows to __tool_results, one row/result_id. Never inspect "
-                "messages/contacts for a missing outbound recipient. Structured inbound: first write SELECTs the latest "
-                "non-outbound non-null payload from __messages and json-extracts every field plus message_id; never "
-                "pre-read, bind, or quote payload state. Use normalized keyed entities/relations with provenance. "
-                "Bind messy/authored text. No draft/superseded SQL. "
-                "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. Rank/top via separate SELECT/scalar subquery; "
-                "no ORDER BY/LIMIT in a UNION arm. No `->`, ATTACH, per-item writes, historical "
-                "mixing, or SELECT-all readback."
+                "Domain model/logic. Reconcile once: keyed DDL, set-wise upsert, then a filtered/ranked "
+                "decision SELECT with answer rows/URLs; aggregates alone are incomplete; deliver "
+                "without reread. Structured source: every `is_current_batch=1 AND tool_name='<exact>'` row; HTTP JSON "
+                "at `$.content`; parents from result_json, children from json_each(actual array), provenance from "
+                "t.result_id/source_url; rows=[]. Never filter result_id/URL or put source facts in SQL. Prose has NULL "
+                "result_json: split repeated sections set-wise from result_text, else inspect the full set once; join "
+                "one row/result_id. Inbound writes derive all fields plus message_id from the latest non-outbound "
+                "nonnull __messages payload in the same first write—no pre-read or copied state. Never inspect messages/contacts "
+                "for a missing outbound recipient. Normalize keyed entities/relations with provenance. Bind "
+                "messy/authored text. No draft SQL, per-item writes, historical mixing, `->`, ATTACH, or SELECT-all "
+                "readback. INSERT SELECT needs WHERE 1=1 before ON CONFLICT. Rank/top with a separate SELECT/scalar "
+                "subquery, not UNION-arm ORDER BY/LIMIT."
             ),
             "parameters": {
                 "type": "object",
@@ -2453,8 +2451,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                             "additionalProperties": True,
                         },
                         "description": (
-                            "Use [] for structured/inspection/model-only work. Prose writes are REQUIRED and non-empty: "
-                            "include each exact result_id with fields; never invent IDs. SQL receives :rows."
+                            "Use [] for structured, inspection, model-only, and SQL-derived prose work. Transcribed "
+                            "prose writes need nonempty exact result_id/fields; never invent IDs. SQL receives :rows."
                         ),
                     },
                     "sql": {
@@ -2477,8 +2475,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. True for action-producing reads (all queue reads); false for answer SELECTs. "
-                            "Never true merely to reread SQLite."
+                            "REQUIRED. True for action-producing queue reads; false for answer SELECTs before replying "
+                            "because returned rows continue the turn. Never reread SQLite."
                         ),
                     },
                 },

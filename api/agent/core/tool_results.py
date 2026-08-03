@@ -76,10 +76,67 @@ MAX_OPTIONAL_SOURCE_HINT_CHARS = 900
 PROSE_INSPECTION_TOTAL_CHARS = 8_000
 PROSE_INSPECTION_MIN_CHARS = 400
 PROSE_INSPECTION_MAX_CHARS = 2_000
+EXPLICIT_SECTION_DELIMITERS = {
+    "\n---\n": "char(10)||'---'||char(10)",
+    "\n===\n": "char(10)||'==='||char(10)",
+}
+_LABELED_SECTION_DELIMITER_RE = re.compile(
+    r"\n((?:-{3,}|={3,})[ A-Za-z0-9_.:/]{1,64}(?:-{3,}|={3,}))\n"
+)
+
+
+@dataclass(frozen=True)
+class ExplicitSectionShape:
+    count: int
+    delimiter_sql: str
+    fields: tuple[str, ...]
+    stable_key: str
 
 
 def _is_scrape_as_markdown_tool(tool_name: str) -> bool:
     return tool_name.endswith("scrape_as_markdown")
+
+
+def _explicit_section_shape(text: str | None) -> ExplicitSectionShape | None:
+    if not text:
+        return None
+    delimiters = dict(EXPLICIT_SECTION_DELIMITERS)
+    for label in _LABELED_SECTION_DELIMITER_RE.findall(text):
+        delimiter = f"\n{label}\n"
+        delimiters[delimiter] = f"char(10)||'{label.replace(chr(39), chr(39) * 2)}'||char(10)"
+    matches = []
+    for delimiter, sql_expression in delimiters.items():
+        delimiter_count = text.count(delimiter)
+        if delimiter_count >= 2:
+            matches.append((delimiter_count + 1, delimiter, sql_expression))
+    if not matches:
+        return None
+    count, delimiter, delimiter_sql = max(matches)
+    sections = text.split(delimiter)[:32]
+    field_counts: dict[str, int] = {}
+    field_order: list[str] = []
+    for section in sections:
+        for field in dict.fromkeys(re.findall(r"(?m)^([A-Za-z_][\w-]{0,63}):[ \t]*", section)):
+            if field not in field_counts:
+                field_order.append(field)
+            field_counts[field] = field_counts.get(field, 0) + 1
+    minimum_count = max(2, len(sections) // 4)
+    fields = tuple(field for field in field_order if field_counts[field] >= minimum_count)
+    stable_key = next(
+        (
+            field for field in fields
+            if field.casefold() == "id" or field.casefold().endswith("_id")
+        ),
+        fields[0] if fields else "",
+    )
+    if not stable_key:
+        return None
+    return ExplicitSectionShape(
+        count=count,
+        delimiter_sql=delimiter_sql,
+        fields=fields,
+        stable_key=stable_key,
+    )
 
 
 def _mark_missing_item_links(text: str) -> str:
@@ -625,8 +682,9 @@ def prepare_tool_results_for_prompt(
             emitted_link_guidance.add(link_guidance_key)
             preview_text = (
                 "[VERIFIED LINK PRESENTATION: when presenting these sourced items, anchor each token on its exact "
-                "entity name using the active "
-                "surface syntax ([entity](token) or <a href='token'>entity</a>), never a host, URL, generic "
+                "entity name using the active surface syntax ([entity]($[link:ID]) or "
+                "<a href='$[link:ID]'>entity</a>). Copy the complete `$[link:ID]` destination verbatim, including "
+                "`$[link:` and `]`; never use the bare ID, a host, URL, generic "
                 "'link/page', or related entity. No separate URL/link column unless requested. "
                 "For an owner report with 4+ items, say "
                 "Covered N/N and use one channel-appropriate table for every item/requested field. Say Not returned "
@@ -637,12 +695,26 @@ def prepare_tool_results_for_prompt(
                 f"{preview_text}"
             )
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
+        explicit_section_shape = (
+            _explicit_section_shape(stored_text)
+            if is_fresh_tool_call and stored_text
+            else None
+        )
         is_prose_work_set = (
             stored_in_db
             and is_current_source_batch
             and _record_is_source_bearing(record)
             and not _entity_arrays(analysis)
-            and (is_scrape_markdown or len(work_set) > 1)
+            and (not has_focus or explicit_section_shape is not None)
+            and (
+                is_scrape_markdown
+                or len(work_set) > 1
+                or (
+                    is_fresh_tool_call
+                    and not is_inline
+                    and meta["bytes"] > FRESH_RESULT_INLINE_THRESHOLD
+                )
+            )
         )
         if is_scrape_markdown:
             # The page preview is the useful context; a repeated title digest competes
@@ -710,6 +782,11 @@ def prepare_tool_results_for_prompt(
                     len(candidate.result_text.encode("utf-8")) <= SMALL_RESULT_ALWAYS_INLINE
                     for candidate in work_set_records
                 )
+                section_shape = (
+                    explicit_section_shape
+                    if len(work_set) == 1 and not previews_are_complete
+                    else None
+                )
                 evidence_chars = max(
                     PROSE_INSPECTION_MIN_CHARS,
                     min(
@@ -733,7 +810,36 @@ def prepare_tool_results_for_prompt(
                     "do not look either up again. The next SQLite call is the final import/decision call; set "
                     "will_continue_work=false unless a specific non-SQLite action remains. "
                 )
-                if len(work_set) > 1:
+                direct_import_guidance = ""
+                if section_shape:
+                    field_list = ",".join(section_shape.fields[:12])
+                    stable_key_pattern = f"'(?m)^{section_shape.stable_key}:[ ]*(.*)$'"
+                    extraction_sql = ", ".join(
+                        (
+                            "regexp_extract(s.value,"
+                            f"'(?m)^{re.escape(field)}:[ ]*(.*)$',1) AS \"{field}\""
+                        )
+                        for field in section_shape.fields[:12]
+                    )
+                    inspection_guidance = (
+                        f"The stored source has about {section_shape.count} explicit repeated sections with recurring "
+                        f"labels `{field_list}` and stable key `{section_shape.stable_key}`. PROSE CONTRACT: "
+                        "`result_json` is NULL; never use `json_each/json_extract` on it. Do not inspect or return the "
+                        "raw blob first. Make one terminal sqlite_batch with "
+                        "`rows=[],bindings={}`: create/evolve the keyed domain model; INSERT ... SELECT requested "
+                        "records from `__tool_results t,json_each(split_sections(t.result_text,"
+                        f"{section_shape.delimiter_sql})) s WHERE t.is_current_batch=1 AND "
+                        f"t.tool_name='{escaped_tool_name}'`; keep records where "
+                        f"`regexp_extract(s.value,{stable_key_pattern},1) IS NOT NULL`, apply that expression shape "
+                        f"using these ready source-derived columns: `{extraction_sql}`. Missing fields stay NULL; never "
+                        "construct one from another identifier. Upsert provenance, end with the decision SELECT in "
+                        "that same call, and set `will_continue_work=false` because its returned rows are the answer. "
+                    )
+                    direct_import_guidance = (
+                        "The split-section SELECT is the final import path; do not transcribe records into `rows`, "
+                        "copy source facts into SQL literals, pre-read, refetch, or later reread. "
+                    )
+                elif len(work_set) > 1:
                     inspection_guidance = (
                         "Before any multi-source prose model write, make exactly one compact set-wide evidence "
                         "inspection; do not import from memory or previews alone. Use it even when previews look "
@@ -751,14 +857,20 @@ def prepare_tool_results_for_prompt(
                         "Otherwise make exactly one compact inspection with one output row and at most "
                         f"{evidence_chars} evidence characters: {inspection_query} {inspection_contract}"
                     )
+                manual_import_guidance = (
+                    "Final import: top-level `rows=[{\"result_id\":\"exact ID\",\"fields\":{...}},...]`, one non-empty "
+                    "record per source; INSERT SELECT from `json_each(:rows) r JOIN __tool_results t ON "
+                    "t.result_id=json_extract(r.value,'$.result_id')`, reading facts at $.fields.<name> and provenance "
+                    "from t. "
+                    if not direct_import_guidance
+                    else direct_import_guidance
+                )
                 meta_text += (
                     f"\n{work_set_label} ({len(work_set)} {result_label}; exact source result IDs: "
                     f"`{source_ids}`): unstructured prose; this is the complete set. "
                     f"{inspection_guidance}"
-                    "Final import: top-level `rows=[{\"result_id\":\"exact ID\",\"fields\":{...}},...]`, one non-empty "
-                    "record per source; INSERT SELECT from `json_each(:rows) r JOIN __tool_results t ON "
-                    "t.result_id=json_extract(r.value,'$.result_id')`, reading facts at $.fields.<name> and provenance "
-                    "from t. End with decision-ready SELECTs. Upsert stable keys; no sourced SQL literals, ID-only "
+                    f"{manual_import_guidance}"
+                    "End with decision-ready SELECTs. Upsert stable keys; no sourced SQL literals, ID-only "
                     "rows, destructive rebuild, dump, or later reread. `fields` is evidence transcription, not "
                     "enrichment: preserve each source's specificity and omit unsupported fields. Never turn a "
                     "qualitative claim into a number, feature variant, certification level, integration, or "
@@ -835,7 +947,14 @@ def _should_add_barbell_hint(
     if meta.get("is_binary"):
         return False
     text_analysis = analysis.text_analysis
-    if not text_analysis or text_analysis.format not in BARBELL_TEXT_FORMATS:
+    if not text_analysis:
+        return False
+    is_headerless_csv = bool(
+        text_analysis.format == "csv"
+        and text_analysis.csv_info
+        and not text_analysis.csv_info.has_header
+    )
+    if text_analysis.format not in BARBELL_TEXT_FORMATS and not is_headerless_csv:
         return False
     if text_analysis.text_digest and text_analysis.text_digest.action == "skip":
         return False
@@ -1098,11 +1217,23 @@ def _maybe_auto_load_csv(
         return None
 
 
+def _unwrap_http_text_body(result_text: str, tool_name: str) -> str:
+    if tool_name != "http_request":
+        return result_text
+    try:
+        payload = json.loads(result_text)
+    except json.JSONDecodeError:
+        return result_text
+    content = payload.get("content") if isinstance(payload, dict) else None
+    return content if isinstance(content, str) else result_text
+
+
 def _summarize_result(
     result_text: str,
     result_id: str,
     tool_name: str = "",
 ) -> Tuple[Dict[str, object], Optional[str], Optional[str], Optional[ResultAnalysis]]:
+    result_text = _unwrap_http_text_body(result_text, tool_name)
     analysis: Optional[ResultAnalysis] = None
     try:
         analysis = analyze_result(result_text, result_id)
@@ -1164,13 +1295,12 @@ def _summarize_result(
 
             if isinstance(content, str):
                 result_text_store = content
-                if _is_scrape_as_markdown_tool(tool_name):
-                    # The wrapper is transport metadata, not a structured domain
-                    # payload. Keeping both shapes invites guessed JSON paths.
-                    result_json = None
-                    is_json = False
-                    json_type = ""
-                    top_keys = []
+                # Scrape previews have their own barbell path and deliberately
+                # keep the wrapper analysis used by that established contract.
+                result_json = None
+                is_json = False
+                json_type = ""
+                top_keys = []
             elif content is not None:
                 if (
                     tool_name == "http_request"
