@@ -784,11 +784,17 @@ button.gklib-like:disabled {
 .gklib-more {
   display: flex;
   justify-content: center;
+  gap: 10px;
   padding-top: clamp(14px, 2vw, 20px);
 }
 
 .gklib-more .gklib-quiet {
   margin-top: 0;
+}
+
+.gklib-more .gklib-quiet[aria-disabled='true'] {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .gklib-spin {

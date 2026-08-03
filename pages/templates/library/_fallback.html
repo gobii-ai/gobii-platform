@@ -40,6 +40,10 @@
   .gklibf-pill .n { opacity: .6; font-variant-numeric: tabular-nums; }
   .gklibf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 248px), 1fr));
                  gap: clamp(11px,1.5vw,15px); align-items: stretch; }
+  .gklibf-pagination { display: flex; align-items: center; justify-content: center; gap: 12px;
+                       margin-top: clamp(14px,2vw,20px); color: #8b7fb8; font-size: 12.5px; }
+  .gklibf-pagination a { color: #c4b5fd; text-decoration: none; }
+  .gklibf-pagination a:hover { color: #fff; }
   .gklibf-card { position: relative; display: flex; flex-direction: column; border-radius: 16px; overflow: hidden;
                  border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); }
   .gklibf-top { display: flex; align-items: flex-start; gap: 11px; padding: 15px 15px 11px; }
@@ -93,7 +97,7 @@
 
   <nav class="gklibf-pills" aria-label="Filter templates">
     <a class="gklibf-pill{% if not selected_category %} is-on{% endif %}"
-       href="{% url 'pages:library' %}{% if official_only %}?official=true{% endif %}"{% if official_only %} rel="nofollow"{% endif %}>
+       href="{% url 'pages:library' %}{% if official_only %}?official=true{% endif %}"{% if not selected_category %} aria-current="page"{% endif %}{% if official_only %} rel="nofollow"{% endif %}>
       All<span class="n">{{ payload.libraryTotalAgents }}</span>
     </a>
     <a class="gklibf-pill{% if official_only %} is-on{% endif %}"
@@ -107,7 +111,7 @@
     </a>
     {% for category in payload.topCategories %}
       <a class="gklibf-pill{% if category.name == selected_category %} is-on{% endif %}"
-         href="{% url 'pages:library_category' category_slug=category.slug %}{% if official_only %}?official=true{% endif %}"{% if official_only %} rel="nofollow"{% endif %}>
+         href="{% url 'pages:library_category' category_slug=category.slug %}{% if official_only %}?official=true{% endif %}"{% if category.name == selected_category %} aria-current="page"{% endif %}{% if official_only %} rel="nofollow"{% endif %}>
         {{ category.name }}<span class="n">{{ category.count }}</span>
       </a>
     {% endfor %}
@@ -146,6 +150,17 @@
         </article>
       {% endfor %}
     </div>
+    {% if library_previous_page_url or library_next_page_url %}
+      <nav class="gklibf-pagination" aria-label="Library pages">
+        {% if library_previous_page_url %}
+          <a href="{{ library_previous_page_url }}"{% if official_only %} rel="nofollow"{% endif %}>&larr; Previous</a>
+        {% endif %}
+        <span aria-current="page">Page {{ library_current_page }} of {{ library_total_pages }}</span>
+        {% if library_next_page_url %}
+          <a href="{{ library_next_page_url }}"{% if official_only %} rel="nofollow"{% endif %}>Next &rarr;</a>
+        {% endif %}
+      </nav>
+    {% endif %}
   {% else %}
     <div class="gklibf-notice">
       <p>{% if official_only and selected_category %}No official templates found in this category.{% elif official_only %}No official templates found right now.{% elif selected_category %}No shared templates found in this category.{% else %}No shared templates found right now.{% endif %}</p>

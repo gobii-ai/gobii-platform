@@ -29,9 +29,17 @@ type LibraryHistoryFilters = {
   officialOnly: boolean
 }
 
-function buildLibraryUrl(categorySlug: string, officialOnly: boolean): string {
+function buildLibraryUrl(categorySlug: string, officialOnly: boolean, pageNumber = 1): string {
   const pathname = categorySlug ? `/library/${encodeURIComponent(categorySlug)}/` : '/library/'
-  return officialOnly ? `${pathname}?official=true` : pathname
+  const params = new URLSearchParams()
+  if (officialOnly) {
+    params.set('official', 'true')
+  }
+  if (pageNumber > 1) {
+    params.set('page', String(pageNumber))
+  }
+  const query = params.toString()
+  return query ? `${pathname}?${query}` : pathname
 }
 
 function readLibraryHistoryFilters(state: unknown): LibraryHistoryFilters | null {
@@ -768,7 +776,7 @@ export function LibraryScreen({
     }
     return {
       pages: [initialData],
-      pageParams: [0],
+      pageParams: [initialData.offset],
     }
   }, [initialData, shouldUseInitialData])
 
@@ -888,6 +896,10 @@ export function LibraryScreen({
   const libraryTotalLikes = firstPage?.libraryTotalLikes ?? 0
   const officialTotalLikes = firstPage?.officialTotalLikes ?? 0
   const hasMore = Boolean(libraryQuery.hasNextPage)
+  const firstPageNumber = firstPage ? Math.floor(firstPage.offset / firstPage.limit) + 1 : 1
+  const previousPageNumber = firstPageNumber > 1 ? firstPageNumber - 1 : null
+  const lastPage = pages[pages.length - 1]
+  const nextPageNumber = lastPage ? Math.floor(lastPage.offset / lastPage.limit) + 2 : firstPageNumber + 1
   const displayedAgentCount = selectedCategory || normalizedSearchQuery || officialOnly ? totalAgents : libraryTotalAgents
   const displayedLikeCount = officialOnly ? officialTotalLikes : libraryTotalLikes
   const mostPopularCount = officialOnly ? officialTotalAgents : libraryTotalAgents
@@ -1059,7 +1071,7 @@ export function LibraryScreen({
           href={buildLibraryUrl('', officialOnly)}
           onClick={(event) => handleFilterClick(event, { category: null, categorySlug: '', officialOnly })}
           className={`gklib-pill${isMostPopularSelected ? ' is-on' : ''}`}
-          aria-current={isMostPopularSelected ? 'true' : undefined}
+          aria-current={isMostPopularSelected ? 'page' : undefined}
           rel={officialOnly ? 'nofollow' : undefined}
         >
           {MOST_POPULAR_LABEL}
@@ -1096,7 +1108,7 @@ export function LibraryScreen({
                 })
               }
               className={`gklib-pill${isActive ? ' is-on' : ''}`}
-              aria-current={isActive ? 'true' : undefined}
+              aria-current={isActive ? 'page' : undefined}
               rel={officialOnly ? 'nofollow' : undefined}
             >
               {category.name}
@@ -1175,20 +1187,40 @@ export function LibraryScreen({
               ))}
             </div>
 
-            {hasMore ? (
-              <div className="gklib-more">
-                <button
-                  type="button"
-                  className="gklib-quiet"
-                  onClick={() => void libraryQuery.fetchNextPage()}
-                  disabled={libraryQuery.isFetchingNextPage}
-                >
-                  {libraryQuery.isFetchingNextPage ? (
-                    <Loader2 className="size-4 gklib-spin" aria-hidden="true" />
-                  ) : null}
-                  {libraryQuery.isFetchingNextPage ? 'Loading more...' : 'Load more'}
-                </button>
-              </div>
+            {previousPageNumber || hasMore ? (
+              <nav className="gklib-more" aria-label="Library pages">
+                {previousPageNumber ? (
+                  <a
+                    className="gklib-quiet"
+                    href={buildLibraryUrl(selectedCategorySlug, officialOnly, previousPageNumber)}
+                    rel={officialOnly ? 'nofollow' : undefined}
+                  >
+                    Previous page
+                  </a>
+                ) : null}
+                {hasMore ? (
+                  <a
+                    href={buildLibraryUrl(selectedCategorySlug, officialOnly, nextPageNumber)}
+                    className="gklib-quiet"
+                    rel={officialOnly ? 'nofollow' : undefined}
+                    aria-disabled={libraryQuery.isFetchingNextPage}
+                    onClick={(event) => {
+                      if (!shouldNavigateInPlace(event)) {
+                        return
+                      }
+                      event.preventDefault()
+                      if (!libraryQuery.isFetchingNextPage) {
+                        void libraryQuery.fetchNextPage()
+                      }
+                    }}
+                  >
+                    {libraryQuery.isFetchingNextPage ? (
+                      <Loader2 className="size-4 gklib-spin" aria-hidden="true" />
+                    ) : null}
+                    {libraryQuery.isFetchingNextPage ? 'Loading more...' : 'Load more'}
+                  </a>
+                ) : null}
+              </nav>
             ) : null}
           </div>
 

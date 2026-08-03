@@ -39,7 +39,7 @@
           {% for agent in library_initial_payload.agents %}
             {
               "@type": "ListItem",
-              "position": {{ forloop.counter }},
+              "position": {{ library_initial_payload.offset|add:forloop.counter }},
               "item": {
                 "@type": "SoftwareApplication",
                 "name": "{{ agent.name|escapejs }}",
@@ -73,7 +73,13 @@
           "position": 2,
           "name": "AI Employee Template Library",
           "item": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:library' %}"
-        }
+        }{% if library_initial_category %},
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "{{ library_initial_category|escapejs }}",
+          "item": "{{ canonical_url|escapejs }}"
+        }{% endif %}
       ]
     }
   </script>
