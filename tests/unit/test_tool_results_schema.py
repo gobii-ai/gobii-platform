@@ -500,6 +500,28 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIn("NULL/unavailable stays unavailable", info["sqlite-step"].meta)
         self.assertIn("no more tools", info["sqlite-step"].meta)
 
+    def test_config_only_sqlite_write_is_not_labeled_as_answer_rows(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="sqlite-config",
+            tool_name="sqlite_batch",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({
+                "status": "ok",
+                "results": [{"message": "Query 0 affected 1 rows."}],
+                "agent_config_update": {"updated_fields": ["charter"]},
+            }),
+            will_continue_work=False,
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="sqlite-config",
+        )
+
+        self.assertNotIn("terminal answer rows", info["sqlite-config"].meta)
+        self.assertNotIn("use returned rows directly", info["sqlite-config"].meta)
+
     def test_scrape_as_markdown_preview_uses_plain_markdown_and_meta_guidance(self):
         markdown = "# Gemma 4\n\nBenchmark table"
         record = tool_results.ToolCallResultRecord(

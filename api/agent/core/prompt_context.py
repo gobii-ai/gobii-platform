@@ -127,7 +127,7 @@ from ..tools.sqlite_query_quality import (
 from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
-from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, build_short_result_id_map, entity_name_stem, prepare_tool_results_for_prompt, source_array_entity_groups
+from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, build_short_result_id_map, entity_name_stem, prepare_tool_results_for_prompt, source_array_entity_groups, sqlite_result_has_query_result
 from .link_references import (
     LinkReferenceResolutionError,
     extract_http_urls,
@@ -4932,6 +4932,7 @@ def _is_terminal_sqlite_handoff(
         newest_record.tool_name != "sqlite_batch"
         or newest_record.will_continue_work is not False
         or not _tool_result_status_is_ok(newest_record.result_text)
+        or not sqlite_result_has_query_result(newest_record.result_text)
     ):
         return False
     newest_message_at = max(

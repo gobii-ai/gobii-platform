@@ -737,7 +737,7 @@ def prepare_tool_results_for_prompt(
         terminal_directive = _terminal_result_directive(result_text)
         if terminal_directive:
             meta_text += f"\n{terminal_directive}"
-        if record.tool_name == "sqlite_batch":
+        if record.tool_name == "sqlite_batch" and sqlite_result_has_query_result(result_text):
             if record.will_continue_work is False and _tool_result_succeeded(result_text):
                 meta_text += (
                     "\nSQLITE RESULT: terminal answer rows. Deliver now; no more tools. Preserve returned values and "
@@ -1344,6 +1344,18 @@ def _tool_result_succeeded(result_text: str) -> bool:
     except (json.JSONDecodeError, TypeError):
         return False
     return isinstance(payload, dict) and payload.get("status") == "ok"
+
+
+def sqlite_result_has_query_result(result_text: str) -> bool:
+    try:
+        payload = json.loads(result_text)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    results = payload.get("results") if isinstance(payload, dict) else None
+    return isinstance(results, list) and any(
+        isinstance(item, dict) and "result" in item
+        for item in results
+    )
 
 
 def _terminal_result_directive(result_text: str) -> str:

@@ -28,13 +28,27 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
             step_id="sqlite-terminal",
             tool_name="sqlite_batch",
             created_at=started_at + timedelta(seconds=1),
-            result_text='{"status": "ok", "results": [{"rows": [{"id": 1}]}]}',
+            result_text='{"status": "ok", "results": [{"result": [{"id": 1}]}]}',
             will_continue_work=False,
         )
 
         self.assertTrue(
             prompt_context._is_terminal_sqlite_handoff([result], [inbound])
         )
+
+    def test_config_only_terminal_sqlite_write_keeps_model_guidance(self):
+        result = prompt_context.ToolCallResultRecord(
+            step_id="sqlite-config",
+            tool_name="sqlite_batch",
+            created_at=datetime(2026, 8, 3, 1, 0, tzinfo=timezone.utc),
+            result_text=(
+                '{"status": "ok", "results": [{"message": "Query 0 affected 1 rows."}], '
+                '"agent_config_update": {"updated_fields": ["charter"]}}'
+            ),
+            will_continue_work=False,
+        )
+
+        self.assertFalse(prompt_context._is_terminal_sqlite_handoff([result], []))
 
     def test_terminal_sqlite_handoff_requires_the_newest_successful_event(self):
         started_at = datetime(2026, 8, 3, 1, 0, tzinfo=timezone.utc)
