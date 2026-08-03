@@ -792,6 +792,7 @@ describe('AgentChatPage trial onboarding', () => {
   it('keeps the Insights panel preference scoped to the active agent', async () => {
     const firstAgentId = '11111111-1111-4111-8111-111111111111'
     const secondAgentId = '22222222-2222-4222-8222-222222222222'
+    const cancelQueries = vi.spyOn(queryClient, 'cancelQueries')
     rosterState.agents = [
       buildRosterAgent(firstAgentId, 'First Agent'),
       buildRosterAgent(secondAgentId, 'Second Agent'),
@@ -813,6 +814,10 @@ describe('AgentChatPage trial onboarding', () => {
     await waitFor(() => {
       expect(screen.getByTestId('active-agent-id')).toHaveTextContent(secondAgentId)
       expect(screen.getByTestId('insights-panel-expanded-preference')).toHaveTextContent('true')
+    })
+    expect(cancelQueries).toHaveBeenCalledWith({
+      queryKey: ['agent-timeline', firstAgentId],
+      exact: false,
     })
 
     fireEvent.click(screen.getByTestId('toggle-insights-panel'))
