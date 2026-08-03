@@ -54,17 +54,6 @@ INACTIVE_BILLING_STATUSES = frozenset(
     }
 )
 
-EVENT_SNAPSHOT_PROPERTY_NAMES = frozenset(
-    {
-        "organization_id",
-        "plan_at_event",
-        "access_type_at_event",
-        "billing_status_at_event",
-        "is_internal",
-        "event_schema_version",
-    }
-)
-
 # These values are not needed for product analytics. Removing them at the
 # centralized boundary prevents message/contact PII from reaching Mixpanel even
 # when an older call site still supplies it.
@@ -406,3 +395,29 @@ def resolve_analytics_billing_context(
         billing_status_at_event=billing_status,
         is_internal=is_internal,
     )
+
+
+def resolve_analytics_billing_context_safely(
+    user_id: object,
+    *,
+    actor_user: object | None = None,
+    billing_owner: object | None = None,
+    organization_id: object | None = None,
+) -> AnalyticsBillingContext:
+    try:
+        return resolve_analytics_billing_context(
+            user_id,
+            actor_user=actor_user,
+            billing_owner=billing_owner,
+            organization_id=organization_id,
+        )
+    except Exception:
+        # This boundary is intentionally broad: analytics must not interrupt the
+        # product action or page load that triggered enrichment.
+        logger.exception("Failed to resolve analytics billing context for user %s", user_id)
+        return unknown_billing_context(
+            user_id,
+            actor_user=actor_user,
+            billing_owner=billing_owner,
+            organization_id=organization_id,
+        )

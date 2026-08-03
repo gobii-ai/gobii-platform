@@ -130,7 +130,7 @@ def sms_webhook(request):
             source=AnalyticsSource.SMS,
             properties=props.copy(),
             user=agent.user,
-            billing_owner=agent.organization if agent.organization_id else agent.user,
+            billing_owner=agent.owner,
         )
 
         # Return a 200 OK response to Twilio
@@ -428,9 +428,7 @@ def inbound_agent_webhook(request, webhook_id):
         source=AnalyticsSource.API,
         properties=inbound_props.copy(),
         user=webhook.agent.user,
-        billing_owner=(
-            webhook.agent.organization if webhook.agent.organization_id else webhook.agent.user
-        ),
+        billing_owner=webhook.agent.owner,
     )
 
     return JsonResponse(
@@ -710,7 +708,7 @@ def _handle_inbound_email(
                 source=AnalyticsSource.AGENT,
                 properties=email_props.copy(),
                 user=agent.user,
-                billing_owner=agent.organization if agent.organization_id else agent.user,
+                billing_owner=agent.owner,
             )
 
             logger.info(

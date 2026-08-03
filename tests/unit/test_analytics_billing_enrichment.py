@@ -18,14 +18,6 @@ from util.analytics_billing import (
 )
 
 
-class _FakeSubscriptions:
-    def __init__(self, subscriptions):
-        self._subscriptions = subscriptions
-
-    def all(self):
-        return list(self._subscriptions)
-
-
 class _FakeCustomer:
     def __init__(self, status: str, *, subscription_id: str = "sub_test"):
         subscription = SimpleNamespace(
@@ -37,11 +29,15 @@ class _FakeCustomer:
                 "current_period_end": 4_102_444_800,
             },
         )
-        self.subscriptions = _FakeSubscriptions([subscription])
+        self.subscriptions = SimpleNamespace(all=lambda: [subscription])
 
 
 @tag("batch_analytics_billing")
-@override_settings(SEGMENT_WRITE_KEY="segment-test")
+@override_settings(
+    SEGMENT_WRITE_KEY="segment-test",
+    SEGMENT_WEB_WRITE_KEY="web-segment-test",
+    SEGMENT_WEB_ENABLE_IN_DEBUG=True,
+)
 class AnalyticsBillingEnrichmentTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(
@@ -83,6 +79,15 @@ class AnalyticsBillingEnrichmentTests(TestCase):
             )
         self.assertEqual(track_mock.call_count, 1)
         return track_mock.call_args.args[2]
+
+    def _paid_context(self):
+        return AnalyticsBillingContext(
+            organization_id=f"user:{self.user.pk}",
+            plan_at_event="startup",
+            access_type_at_event=AnalyticsAccessType.PAID,
+            billing_status_at_event=AnalyticsBillingStatus.ACTIVE,
+            is_internal=False,
+        )
 
     def test_active_paid_startup_and_scale_accounts(self):
         cases = (
@@ -201,30 +206,16 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(paid_properties["access_type_at_event"], AnalyticsAccessType.PAID)
 
     def test_mixpanel_failure_does_not_interrupt_tracking_caller(self):
-        context = AnalyticsBillingContext(
-            organization_id=f"user:{self.user.pk}",
-            plan_at_event="startup",
-            access_type_at_event=AnalyticsAccessType.PAID,
-            billing_status_at_event=AnalyticsBillingStatus.ACTIVE,
-            is_internal=False,
-        )
         with patch("util.analytics.analytics.track", side_effect=RuntimeError("Mixpanel unavailable")):
             result = Analytics.track_event(
                 user_id=self.user.pk,
                 event=AnalyticsEvent.TASK_CREATED,
                 source=AnalyticsSource.API,
-                billing_context=context,
+                billing_context=self._paid_context(),
             )
         self.assertIsNone(result)
 
     def test_enriched_event_strips_pii_and_replaces_untrusted_billing_values(self):
-        context = AnalyticsBillingContext(
-            organization_id=f"user:{self.user.pk}",
-            plan_at_event="startup",
-            access_type_at_event=AnalyticsAccessType.PAID,
-            billing_status_at_event=AnalyticsBillingStatus.ACTIVE,
-            is_internal=False,
-        )
         with patch("util.analytics.analytics.track") as track_mock:
             Analytics.track_event(
                 user_id=self.user.pk,
@@ -239,7 +230,7 @@ class AnalyticsBillingEnrichmentTests(TestCase):
                     "plan_at_event": "browser-supplied-plan",
                     "access_type_at_event": "paid",
                 },
-                billing_context=context,
+                billing_context=self._paid_context(),
             )
 
         properties = track_mock.call_args.args[2]
@@ -252,15 +243,9 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(properties["event_schema_version"], EVENT_SCHEMA_VERSION)
 
     def test_all_attributable_events_are_enriched_and_explicit_opt_out_is_unchanged(self):
-        context = AnalyticsBillingContext(
-            organization_id=f"user:{self.user.pk}",
-            plan_at_event="startup",
-            access_type_at_event=AnalyticsAccessType.PAID,
-            billing_status_at_event=AnalyticsBillingStatus.ACTIVE,
-            is_internal=False,
-        )
+        context = self._paid_context()
         with (
-            patch("util.analytics.resolve_analytics_billing_context", return_value=context) as resolver,
+            patch("util.analytics.resolve_analytics_billing_context_safely", return_value=context) as resolver,
             patch("util.analytics.analytics.track") as track_mock,
         ):
             Analytics.track_event(
@@ -273,7 +258,7 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(track_mock.call_args.args[2]["node_id"], "node-1")
 
         with (
-            patch("util.analytics.resolve_analytics_billing_context", return_value=context) as resolver,
+            patch("util.analytics.resolve_analytics_billing_context_safely", return_value=context) as resolver,
             patch("util.analytics.analytics.track") as track_mock,
         ):
             Analytics.track_event(
@@ -288,7 +273,7 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(login_properties["event_schema_version"], EVENT_SCHEMA_VERSION)
 
         with (
-            patch("util.analytics.resolve_analytics_billing_context") as resolver,
+            patch("util.analytics.resolve_analytics_billing_context_safely") as resolver,
             patch("util.analytics.analytics.track") as track_mock,
         ):
             Analytics.track_event(
@@ -324,15 +309,9 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertNotIn("recipient", properties)
 
     def test_legacy_track_enriches_user_ids_but_not_hashed_or_anonymous_ids(self):
-        context = AnalyticsBillingContext(
-            organization_id=f"user:{self.user.pk}",
-            plan_at_event="startup",
-            access_type_at_event=AnalyticsAccessType.PAID,
-            billing_status_at_event=AnalyticsBillingStatus.ACTIVE,
-            is_internal=False,
-        )
+        context = self._paid_context()
         with (
-            patch("util.analytics.resolve_analytics_billing_context", return_value=context) as resolver,
+            patch("util.analytics.resolve_analytics_billing_context_safely", return_value=context) as resolver,
             patch("util.analytics.analytics.track") as track_mock,
         ):
             Analytics.track(
@@ -346,7 +325,7 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(properties["event_schema_version"], EVENT_SCHEMA_VERSION)
 
         with (
-            patch("util.analytics.resolve_analytics_billing_context") as resolver,
+            patch("util.analytics.resolve_analytics_billing_context_safely") as resolver,
             patch("util.analytics.analytics.track") as track_mock,
         ):
             Analytics.track(
@@ -358,10 +337,6 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         resolver.assert_not_called()
         self.assertNotIn("event_schema_version", track_mock.call_args.args[2])
 
-    @override_settings(
-        SEGMENT_WEB_WRITE_KEY="web-segment-test",
-        SEGMENT_WEB_ENABLE_IN_DEBUG=True,
-    )
     def test_authenticated_web_context_exposes_server_resolved_billing_defaults(self):
         from pages.context_processors import analytics as analytics_context
 
@@ -381,10 +356,6 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(billing_context["plan_at_event"], "startup")
         self.assertEqual(billing_context["access_type_at_event"], AnalyticsAccessType.PAID)
 
-    @override_settings(
-        SEGMENT_WEB_WRITE_KEY="web-segment-test",
-        SEGMENT_WEB_ENABLE_IN_DEBUG=True,
-    )
     def test_console_session_hydrates_immersive_app_billing_defaults(self):
         actor = self._set_personal_plan(PlanNames.STARTUP)
         self.client.force_login(actor)
@@ -401,10 +372,6 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(billing_context["plan_at_event"], "startup")
         self.assertEqual(billing_context["access_type_at_event"], AnalyticsAccessType.PAID)
 
-    @override_settings(
-        SEGMENT_WEB_WRITE_KEY="web-segment-test",
-        SEGMENT_WEB_ENABLE_IN_DEBUG=True,
-    )
     def test_immersive_app_initial_page_waits_for_billing_context(self):
         from middleware.app_shell import _format_segment_snippet
 

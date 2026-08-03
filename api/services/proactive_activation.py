@@ -230,7 +230,7 @@ class ProactiveActivationService:
             if metadata.get("force_reason"):
                 properties["force_reason"] = metadata["force_reason"]
 
-            owner = agent.organization if agent.organization_id else agent.user
+            owner = agent.owner
             properties = Analytics.with_org_properties(
                 properties,
                 organization=agent.organization if agent.organization_id else None,

@@ -540,7 +540,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
                     organization=agent.organization if agent.organization_id else None,
                 ),
                 user=recipient_user,
-                billing_owner=agent.organization if agent.organization_id else agent.user,
+                billing_owner=agent.owner,
             )
         except Exception:
             # The reply is already durable and delivered; telemetry cannot change that outcome.

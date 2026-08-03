@@ -11,8 +11,8 @@ from observability import traced, trace
 from util.analytics_billing import (
     AnalyticsBillingContext,
     resolve_analytics_billing_context,
+    resolve_analytics_billing_context_safely,
     sanitize_analytics_event_properties,
-    unknown_billing_context,
 )
 
 analytics.write_key = settings.SEGMENT_WRITE_KEY
@@ -25,38 +25,21 @@ tracer = trace.get_tracer("gobii.utils")
 def _properties_with_billing_snapshot(
     *,
     user_id: object,
-    event: object,
     properties: dict | None,
     user: object | None = None,
     billing_owner: object | None = None,
     billing_context: AnalyticsBillingContext | None = None,
 ) -> dict:
     enriched_properties = sanitize_analytics_event_properties(properties)
-    try:
-        snapshot = billing_context or resolve_analytics_billing_context(
-            user_id,
-            actor_user=user,
-            billing_owner=billing_owner,
-            organization_id=enriched_properties.get("organization_id"),
-        )
-        snapshot_properties = snapshot.as_event_properties()
-    except Exception:
-        # Keep the event useful and explicitly unclassified if a malformed
-        # provider row or unexpected resolver bug occurs.
-        logger.exception(
-            "Failed to enrich analytics event %s for user %s",
-            event,
-            user_id,
-        )
-        snapshot_properties = unknown_billing_context(
-            user_id,
-            actor_user=user,
-            billing_owner=billing_owner,
-            organization_id=enriched_properties.get("organization_id"),
-        ).as_event_properties()
+    snapshot = billing_context or resolve_analytics_billing_context_safely(
+        user_id,
+        actor_user=user,
+        billing_owner=billing_owner,
+        organization_id=enriched_properties.get("organization_id"),
+    )
 
     # Snapshot fields are server-owned and replace caller-supplied values.
-    enriched_properties.update(snapshot_properties)
+    enriched_properties.update(snapshot.as_event_properties())
     return enriched_properties
 
 
@@ -434,6 +417,13 @@ class Analytics:
         return bool(settings.SEGMENT_WRITE_KEY)
 
     @staticmethod
+    def is_web_analytics_enabled() -> bool:
+        return bool(
+            settings.SEGMENT_WEB_WRITE_KEY
+            and (not settings.DEBUG or settings.SEGMENT_WEB_ENABLE_IN_DEBUG)
+        )
+
+    @staticmethod
     def _build_user_flag_traits(user_id) -> dict[str, Any]:
         if user_id in (None, ""):
             return {}
@@ -517,7 +507,6 @@ class Analytics:
                 if should_enrich:
                     properties = _properties_with_billing_snapshot(
                         user_id=user_id,
-                        event=event,
                         properties=properties,
                         user=user,
                         billing_owner=billing_owner,
@@ -549,7 +538,6 @@ class Analytics:
                 if billing_enrichment:
                     properties = _properties_with_billing_snapshot(
                         user_id=user_id,
-                        event=event,
                         properties=properties,
                         user=user,
                         billing_owner=billing_owner,

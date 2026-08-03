@@ -100,7 +100,7 @@ def _track_file_event(
         source=AnalyticsSource.AGENT,
         properties=props.copy(),
         user=agent.user,
-        billing_owner=agent.organization if agent.organization_id else agent.user,
+        billing_owner=agent.owner,
     )
 
 

@@ -757,7 +757,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             source=AnalyticsSource.API,
             properties=props.copy(),
             user=self.request.user,
-            billing_owner=agent.organization if agent.organization_id else agent.user,
+            billing_owner=agent.owner,
         )
         if organization_event and org is not None:
             Analytics.track_event(
