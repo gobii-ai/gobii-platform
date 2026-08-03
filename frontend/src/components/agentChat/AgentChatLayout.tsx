@@ -302,6 +302,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
     decision: 'approve' | 'deny',
     expectedVersion: number,
   ) => Promise<PendingActionMutationResult | void>
+  onOpenOutbox?: () => void
 }
 
 type PlanPanelMode = 'docked' | 'hidden'
@@ -417,6 +418,7 @@ export function AgentChatLayout({
   onResolveContactRequests,
   onViewAllContactRequests,
   onResolveOutboxReview,
+  onOpenOutbox,
 }: AgentChatLayoutProps) {
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
@@ -1687,6 +1689,7 @@ export function AgentChatLayout({
               onResolveContactRequests={onResolveContactRequests}
               onViewAllContactRequests={onViewAllContactRequests}
               onResolveOutboxReview={onResolveOutboxReview}
+              onOpenOutbox={onOpenOutbox}
               onFocus={onComposerFocus}
               onRequestScrollToBottom={onComposerRequestScrollToBottom}
               externalShellRef={composerShellRef}

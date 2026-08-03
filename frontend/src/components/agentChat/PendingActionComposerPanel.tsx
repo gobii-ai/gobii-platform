@@ -48,6 +48,7 @@ type PendingActionComposerPanelProps = {
     decision: 'approve' | 'deny',
     expectedVersion: number,
   ) => Promise<PendingActionMutationResult | void>
+  onOpenOutbox?: () => void
   compact?: boolean
 }
 
@@ -155,6 +156,7 @@ export function PendingActionComposerPanel({
   onResolveContactRequests,
   onViewAllContactRequests,
   onResolveOutboxReview,
+  onOpenOutbox,
   compact = false,
 }: PendingActionComposerPanelProps) {
   const [busySpawnDecision, setBusySpawnDecision] = useState<'approve' | 'decline' | null>(null)
@@ -379,12 +381,22 @@ export function PendingActionComposerPanel({
             </button>
           ) : null}
           {activeAction.kind === 'outbox_reviews' ? (
-            <a
-              href={activeAction.outboxUrl}
-              className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 hover:text-blue-800"
-            >
-              Review in Outbox
-            </a>
+            onOpenOutbox ? (
+              <button
+                type="button"
+                onClick={onOpenOutbox}
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 hover:text-blue-800"
+              >
+                Review in Outbox
+              </button>
+            ) : (
+              <a
+                href={activeAction.outboxUrl}
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 hover:text-blue-800"
+              >
+                Review in Outbox
+              </a>
+            )
           ) : null}
         </div>
 

@@ -563,6 +563,7 @@ type AgentComposerProps = {
     decision: 'approve' | 'deny',
     expectedVersion: number,
   ) => Promise<PendingActionMutationResult | void>
+  onOpenOutbox?: () => void
   disabled?: boolean
   disabledReason?: string | null
   autoFocus?: boolean
@@ -612,6 +613,7 @@ export const AgentComposer = memo(function AgentComposer({
   onResolveContactRequests,
   onViewAllContactRequests,
   onResolveOutboxReview,
+  onOpenOutbox,
   disabled = false,
   disabledReason = null,
   autoFocus = false,
@@ -2348,6 +2350,7 @@ export const AgentComposer = memo(function AgentComposer({
                       onResolveContactRequests={onResolveContactRequests}
                       onViewAllContactRequests={onViewAllContactRequests}
                       onResolveOutboxReview={onResolveOutboxReview}
+                      onOpenOutbox={onOpenOutbox}
                       compact={compact}
                     />
                   </div>

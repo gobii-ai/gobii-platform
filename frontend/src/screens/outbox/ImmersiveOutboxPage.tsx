@@ -16,6 +16,7 @@ import {
 import { HttpError } from '../../api/http'
 import { ImmersivePageFrame } from '../../components/common/ImmersivePageFrame'
 import { EMAIL_SENDING_MODE_OPTIONS } from '../../constants/emailSendingModes'
+import { OutboxMessageEditor } from './OutboxMessageEditor'
 
 
 type ImmersiveOutboxPageProps = {
@@ -31,6 +32,20 @@ const FILTERS: Array<{ key: OutboxFilter; label: string; countKey: 'needsReview'
   { key: 'failed', label: 'Failed', countKey: 'failed' },
   { key: 'recent', label: 'Recent', countKey: 'recent' },
 ]
+
+type OutboxDraft = {
+  subject: string
+  body: string
+  attachmentNodeIds: string[]
+}
+
+function draftFromItem(item: OutboxItem): OutboxDraft {
+  return {
+    subject: item.subject,
+    body: item.bodyEditorHtml || item.body || '',
+    attachmentNodeIds: item.attachments?.flatMap((attachment) => attachment.nodeId ? [attachment.nodeId] : []) ?? [],
+  }
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof HttpError && error.body && typeof error.body === 'object') {
@@ -108,18 +123,14 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
   const detailQuery = useQuery({ queryKey: ['outbox-item', itemId], queryFn: () => fetchOutboxItem(itemId) })
   const item = detailQuery.data
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState({ subject: '', body: '', attachmentNodeIds: [] as string[] })
+  const [draft, setDraft] = useState<OutboxDraft>({ subject: '', body: '', attachmentNodeIds: [] })
   const [attachmentsChanged, setAttachmentsChanged] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [threadAcknowledged, setThreadAcknowledged] = useState(false)
 
   useEffect(() => {
     if (!item) return
-    setDraft({
-      subject: item.subject,
-      body: item.body || '',
-      attachmentNodeIds: item.attachments?.flatMap((attachment) => attachment.nodeId ? [attachment.nodeId] : []) ?? [],
-    })
+    setDraft(draftFromItem(item))
     setAttachmentsChanged(false)
     setThreadAcknowledged(false)
   }, [item])
@@ -151,9 +162,12 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
         acknowledgeThreadChanged: threadAcknowledged,
       })
     },
-    onSuccess: async (updated) => {
+    onSuccess: async (updated, variables) => {
       setError(null)
       setEditing(false)
+      if (!variables.saveOnly) {
+        onClose()
+      }
       await refresh(updated)
     },
     onError: (mutationError) => {
@@ -163,6 +177,22 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
       }
     },
   })
+
+  const beginEditing = () => {
+    if (!item) return
+    setDraft(draftFromItem(item))
+    setAttachmentsChanged(false)
+    setError(null)
+    setEditing(true)
+  }
+
+  const cancelEditing = () => {
+    if (!item) return
+    setDraft(draftFromItem(item))
+    setAttachmentsChanged(false)
+    setError(null)
+    setEditing(false)
+  }
 
   if (detailQuery.isLoading) return <div className="flex min-h-96 items-center justify-center text-sm text-slate-400">Loading message…</div>
   if (!item) return <div className="p-6 text-sm text-rose-300">{errorMessage(detailQuery.error)}</div>
@@ -192,7 +222,12 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
         {editing ? (
           <>
             <label className="grid gap-1 text-xs text-slate-400">Subject<input value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 text-sm text-slate-100" /></label>
-            <label className="grid gap-1 text-xs text-slate-400">Message body<textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} rows={14} className="rounded-lg border border-slate-700 bg-transparent px-3 py-2 font-mono text-sm text-slate-100" /></label>
+            <OutboxMessageEditor
+              key={`${item.id}:${item.version}`}
+              initialHtml={item.bodyEditorHtml || item.body || ''}
+              disabled={mutation.isPending}
+              onChange={(body) => setDraft((current) => ({ ...current, body }))}
+            />
             <fieldset className="rounded-xl border border-slate-700 px-3 py-3">
               <legend className="px-1 text-xs font-medium text-slate-400">Attachments from agent files</legend>
               {filesQuery.isLoading ? <p className="text-xs text-slate-500">Loading files…</p> : null}
@@ -237,10 +272,15 @@ function ReviewDetail({ itemId, onClose }: { itemId: string; onClose: () => void
         </label>
       ) : null}
       <div className="mt-5 flex flex-wrap gap-2">
-        {item.allowedActions.edit ? <button type="button" onClick={() => setEditing((value) => !value)} className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm font-semibold hover:bg-slate-800"><Pencil className="size-4" />{editing ? 'Cancel edit' : 'Edit'}</button> : null}
-        {editing ? <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate({ saveOnly: true })} className="rounded-lg border border-blue-400/50 px-3 py-2 text-sm font-semibold text-blue-200 hover:bg-blue-500/10">Save changes</button> : null}
+        {!editing && item.allowedActions.edit ? <button type="button" onClick={beginEditing} className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm font-semibold hover:bg-slate-800"><Pencil className="size-4" />Edit</button> : null}
+        {editing ? (
+          <>
+            <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate({ saveOnly: true })} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"><Check className="size-4" />{mutation.isPending ? 'Saving…' : 'Save changes'}</button>
+            <button type="button" disabled={mutation.isPending} onClick={cancelEditing} className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-50"><X className="size-4" />Cancel</button>
+          </>
+        ) : null}
         {!editing && item.allowedActions.approve ? <button type="button" disabled={mutation.isPending || (threadChanged && !threadAcknowledged)} onClick={() => mutation.mutate({ action: 'approve' })} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"><Send className="size-4" />Approve & send</button> : null}
-        {item.allowedActions.discard ? <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate({ action: 'discard' })} className="inline-flex items-center gap-2 rounded-lg border border-rose-400/50 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/10"><Trash2 className="size-4" />Discard</button> : null}
+        {!editing && item.allowedActions.discard ? <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate({ action: 'discard' })} className="inline-flex items-center gap-2 rounded-lg border border-rose-400/50 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/10"><Trash2 className="size-4" />Discard</button> : null}
         {item.allowedActions.retry ? <button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate({ action: 'retry' })} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"><RotateCcw className="size-4" />Retry unchanged email</button> : null}
       </div>
     </section>
@@ -275,6 +315,17 @@ export function ImmersiveOutboxPage({ layout = 'main', refreshKey = 0 }: Immersi
   const available = listQuery.data?.available
   const featureEnabled = listQuery.data?.featureEnabled === true
   const selectedCount = Object.keys(selected).length
+  const activeSelectedId = selectedId && items.some((item) => item.id === selectedId) ? selectedId : null
+  const changeFilter = (nextFilter: OutboxFilter) => {
+    setFilter(nextFilter)
+    setSelectedId(null)
+    setSelected({})
+  }
+  const changeSearch = (nextSearch: string) => {
+    setSearch(nextSearch)
+    setSelectedId(null)
+    setSelected({})
+  }
   return (
     <ImmersivePageFrame layout={layout} maxWidthClass="max-w-7xl" error={listQuery.error}>
       <div className="space-y-4 text-slate-100">
@@ -297,21 +348,21 @@ export function ImmersiveOutboxPage({ layout = 'main', refreshKey = 0 }: Immersi
         <div className="overflow-hidden rounded-2xl border border-slate-700/70 bg-slate-950/35">
           <div className="flex flex-wrap items-center gap-2 px-4 py-3">
             {FILTERS.map((item) => (
-              <button key={item.key} type="button" onClick={() => setFilter(item.key)} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${filter === item.key ? 'bg-blue-600 text-white' : 'border border-slate-700 text-slate-300 hover:bg-slate-800'}`}>
+              <button key={item.key} type="button" onClick={() => changeFilter(item.key)} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${filter === item.key ? 'bg-blue-600 text-white' : 'border border-slate-700 text-slate-300 hover:bg-slate-800'}`}>
                 {item.label} <span className="ml-1 opacity-80">{counts?.[item.countKey] ?? 0}</span>
               </button>
             ))}
-            <label className="ml-auto flex min-w-52 items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-slate-400">
-              <Search className="size-4" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Recipient or subject" className="w-full bg-transparent text-sm text-white outline-none" />
+            <label className="ml-auto flex h-10 min-w-52 items-center gap-2 rounded-lg border border-slate-700 px-3 text-slate-400 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+              <Search className="size-4 shrink-0" />
+              <input value={search} onChange={(event) => changeSearch(event.target.value)} placeholder="Recipient or subject" className="w-full !border-0 !bg-transparent !p-0 text-sm text-white !shadow-none !outline-none !ring-0 placeholder:text-slate-500 focus:!border-0 focus:!outline-none focus:!ring-0" />
             </label>
           </div>
           <div className="grid min-h-[34rem] lg:grid-cols-[minmax(19rem,0.8fr)_minmax(0,1.5fr)]">
-            <div className={`border-slate-700/70 lg:border-r ${selectedId ? 'hidden lg:block' : ''}`}>
+            <div className={`border-slate-700/70 lg:border-r ${activeSelectedId ? 'hidden lg:block' : ''}`}>
               {listQuery.isLoading ? <p className="p-5 text-sm text-slate-400">Loading Outbox…</p> : null}
               {!listQuery.isLoading && !items.length ? <div className="flex min-h-80 flex-col items-center justify-center px-6 text-center"><Check className="size-8 text-emerald-300" /><p className="mt-3 text-sm font-semibold">Nothing here</p><p className="mt-1 text-xs text-slate-400">This queue is clear.</p></div> : null}
               {items.map((item) => (
-                <article key={item.id} className={`flex gap-3 px-4 py-4 transition ${selectedId === item.id ? 'bg-blue-500/10' : 'hover:bg-slate-800/60'}`}>
+                <article key={item.id} className={`flex gap-3 px-4 py-4 transition ${activeSelectedId === item.id ? 'bg-blue-500/10' : 'hover:bg-slate-800/60'}`}>
                   {item.reviewStatus === 'pending' ? <input type="checkbox" checked={item.id in selected} onChange={(event) => setSelected((current) => { const next = { ...current }; if (event.target.checked) next[item.id] = item.version; else delete next[item.id]; return next })} className="mt-1 size-4 accent-blue-500" aria-label={`Select ${item.subject}`} /> : null}
                   <button type="button" onClick={() => setSelectedId(item.id)} className="min-w-0 flex-1 text-left">
                     <div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-semibold">{item.subject || '(No subject)'}</span><span className="shrink-0 text-[11px] text-slate-500">{formatTimestamp(item.queuedAt)}</span></div>
@@ -322,7 +373,7 @@ export function ImmersiveOutboxPage({ layout = 'main', refreshKey = 0 }: Immersi
                 </article>
               ))}
             </div>
-            {selectedId ? <ReviewDetail itemId={selectedId} onClose={() => setSelectedId(null)} /> : <div className="hidden min-h-96 items-center justify-center text-sm text-slate-500 lg:flex"><div className="text-center"><Clock3 className="mx-auto size-8" /><p className="mt-3">Select an email to review its exact contents.</p></div></div>}
+            {activeSelectedId ? <ReviewDetail itemId={activeSelectedId} onClose={() => setSelectedId(null)} /> : <div className="hidden min-h-96 items-center justify-center text-sm text-slate-500 lg:flex"><div className="text-center"><Clock3 className="mx-auto size-8" /><p className="mt-3">Select an email to review its exact contents.</p></div></div>}
           </div>
         </div>
         ) : null}

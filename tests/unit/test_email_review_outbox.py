@@ -490,8 +490,23 @@ class EmailReviewOutboxTests(TestCase):
         payload = serialize_outbox_review(review, detail=True)
 
         self.assertEqual(payload["body"], "First line\nSecond & line")
+        self.assertEqual(payload["bodyPreview"], "First line\nSecond & line")
+        self.assertEqual(payload["bodyEditorHtml"], "<p>First line<br />Second &amp; line</p>")
         self.assertIn("<p>First line<br />Second &amp; line</p>", payload["bodyHtml"])
         self.assertIn('class="email-body"', payload["bodyHtml"])
+
+    def test_outbox_list_preview_converts_html_body_to_plaintext(self):
+        message = self._message()
+        message.body = "<p>Hey <strong>Matt</strong>,</p><p>Just another test note.</p>"
+        message.save(update_fields=["body"])
+        review = queue_message_for_review(message)
+
+        preview = serialize_outbox_review(review)["bodyPreview"]
+
+        self.assertNotIn("<p>", preview)
+        self.assertNotIn("<strong>", preview)
+        self.assertIn("Hey Matt,", preview)
+        self.assertIn("Just another test note.", preview)
 
     @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
     def test_approval_reuses_the_exact_reviewed_transport_content(self, _delay_mock):
