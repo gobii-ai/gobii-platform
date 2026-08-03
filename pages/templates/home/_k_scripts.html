@@ -22,6 +22,20 @@
     var GREENHOUSE_LOGO = "{% static 'images/integration-logos/greenhouse.svg' %}";
     var HUBSPOT_LOGO = "{% static 'images/integration-logos/hubspot.svg' %}";
     var GMAIL_LOGO = "{% static 'images/integration-logos/gmail.svg' %}";
+    var PEOPLE = {
+      mk: {
+        src: "{% static 'images/people/face-mk-28.webp' %}",
+        srcset: "{% static 'images/people/face-mk-28.webp' %} 28w, {% static 'images/people/face-mk-56.webp' %} 56w, {% static 'images/people/face-mk-84.webp' %} 84w"
+      },
+      rs: {
+        src: "{% static 'images/people/face-rs-28.webp' %}",
+        srcset: "{% static 'images/people/face-rs-28.webp' %} 28w, {% static 'images/people/face-rs-56.webp' %} 56w, {% static 'images/people/face-rs-84.webp' %} 84w"
+      },
+      al: {
+        src: "{% static 'images/people/face-al-28.webp' %}",
+        srcset: "{% static 'images/people/face-al-28.webp' %} 28w, {% static 'images/people/face-al-56.webp' %} 56w, {% static 'images/people/face-al-84.webp' %} 84w"
+      }
+    };
 
     var DEMOS = {
       recruiting: {
@@ -36,9 +50,9 @@
           ['📤', 'Delivering to Greenhouse', '20 candidates, with screening notes']
         ],
         out: [
-          ['MK', 'M. Kessler', 'Go, K8s, 7 yrs · ex-Plaid', '94% fit', "{% static 'images/people/face-mk.jpg' %}"],
-          ['RS', 'R. Santos', 'distributed systems · Stripe', '91% fit', "{% static 'images/people/face-rs.jpg' %}"],
-          ['AL', 'A. Liu', 'platform lead · Brex', '89% fit', "{% static 'images/people/face-al.jpg' %}"],
+          ['MK', 'M. Kessler', 'Go, K8s, 7 yrs · ex-Plaid', '94% fit', PEOPLE.mk],
+          ['RS', 'R. Santos', 'distributed systems · Stripe', '91% fit', PEOPLE.rs],
+          ['AL', 'A. Liu', 'platform lead · Brex', '89% fit', PEOPLE.al],
           ['+17', '17 more this week', 'full list waiting in Greenhouse', '']
         ]
       },
@@ -146,7 +160,12 @@
           /* real people get real photos (.gk-face); companies/findings keep text avatars */
           avatar.className = 'gk-face';
           var photo = document.createElement('img');
-          photo.src = item[4];
+          photo.src = item[4].src;
+          photo.srcset = item[4].srcset;
+          photo.sizes = '28px';
+          photo.width = 28;
+          photo.height = 28;
+          photo.decoding = 'async';
           photo.alt = '';
           avatar.appendChild(photo);
         } else {
