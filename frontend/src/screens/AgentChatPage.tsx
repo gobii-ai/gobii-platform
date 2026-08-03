@@ -1146,14 +1146,21 @@ export function AgentChatPage({
   const autoScrollPinned = activeChatSession.timelineUi.autoScrollPinned
   const setAgentId = useCallback(
     (nextAgentId: string | null, options?: Parameters<typeof chatActions.agentSelected>[0]['options']) => {
+      const previousAgentId = activeAgentIdRef.current
+      if (previousAgentId && previousAgentId !== nextAgentId) {
+        void queryClient.cancelQueries({
+          queryKey: ['agent-timeline', previousAgentId],
+          exact: false,
+        })
+      }
+      activeAgentIdRef.current = nextAgentId
       dispatch(chatActions.agentSelected({ agentId: nextAgentId, options }))
     },
-    [dispatch],
+    [dispatch, queryClient],
   )
 
   useLayoutEffect(() => {
     const routeAgentId = agentId ?? null
-    activeAgentIdRef.current = routeAgentId
     setAgentId(routeAgentId)
   }, [agentId, setAgentId])
 

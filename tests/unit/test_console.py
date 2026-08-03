@@ -3428,22 +3428,28 @@ class ConsoleViewsTest(TestCase):
         )
 
         with override_settings(MEDIA_ROOT=tmp_media, MEDIA_URL="/media/"):
-            response = self.client.post(
-                reverse("console_agent_settings", kwargs={"agent_id": organization_agent.id}),
-                {
-                    "name": organization_agent.name,
-                    "charter": organization_agent.charter,
-                    "is_active": "on",
-                    "avatar": SimpleUploadedFile("avatar.png", png_bytes, content_type="image/png"),
-                },
-                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
-            )
+            with patch(
+                "api.tasks.avatar_thumbnails.enqueue_agent_avatar_thumbnail"
+            ) as mocked_enqueue_thumbnail:
+                with self.captureOnCommitCallbacks(execute=True):
+                    response = self.client.post(
+                        reverse("console_agent_settings", kwargs={"agent_id": organization_agent.id}),
+                        {
+                            "name": organization_agent.name,
+                            "charter": organization_agent.charter,
+                            "is_active": "on",
+                            "avatar": SimpleUploadedFile("avatar.png", png_bytes, content_type="image/png"),
+                        },
+                        HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+                    )
 
             self.assertEqual(response.status_code, 200, response.content)
             self.assertTrue(response.json()["success"])
             organization_agent.refresh_from_db()
             self.assertTrue(organization_agent.avatar)
             self.assertTrue(default_storage.exists(organization_agent.avatar.name))
+            mocked_enqueue_thumbnail.assert_called_once()
+            self.assertEqual(mocked_enqueue_thumbnail.call_args.args[0].id, organization_agent.id)
 
     @tag("batch_console_agents_management")
     def test_org_agent_settings_reject_active_name_conflict_in_same_org(self):
