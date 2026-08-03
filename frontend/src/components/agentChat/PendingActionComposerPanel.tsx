@@ -80,6 +80,9 @@ function parseOutboxInlineError(error: unknown): string {
     if (body.error === 'thread_changed') {
       return 'The conversation changed after this message was prepared. Review it in Outbox before sending.'
     }
+    if (typeof body.message === 'string' && body.message.trim()) {
+      return body.message
+    }
   }
   return parseInlineError(error)
 }

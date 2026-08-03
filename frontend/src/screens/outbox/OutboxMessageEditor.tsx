@@ -1,6 +1,6 @@
 import { useMemo, type FormEvent } from 'react'
 
-import { sanitizeHtml } from '../../util/sanitize'
+import { sanitizeEmailEditorHtml } from '../../util/sanitize'
 
 
 type OutboxMessageEditorProps = {
@@ -14,10 +14,10 @@ export function OutboxMessageEditor({
   disabled = false,
   onChange,
 }: OutboxMessageEditorProps) {
-  const sanitizedInitialHtml = useMemo(() => sanitizeHtml(initialHtml), [initialHtml])
+  const sanitizedInitialHtml = useMemo(() => sanitizeEmailEditorHtml(initialHtml), [initialHtml])
 
   const handleInput = (event: FormEvent<HTMLDivElement>) => {
-    onChange(sanitizeHtml(event.currentTarget.innerHTML))
+    onChange(sanitizeEmailEditorHtml(event.currentTarget.innerHTML))
   }
 
   return (
