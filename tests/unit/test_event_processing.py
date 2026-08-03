@@ -1621,10 +1621,10 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("end_planning", system_message["content"])
         self.assertNotIn("## Signup Preview Handoff", system_message["content"])
         self.assertIn(
-            "No concrete task: send one concise welcome.",
+            "No task: send one short, natural welcome.",
             system_message["content"],
         )
-        self.assertIn("Broad substantial work missing a material audience", system_message["content"])
+        self.assertIn("Broad task missing a material scope", system_message["content"])
         self.assertNotIn("## Signup Preview First-Run Override", system_message["content"])
         self.assertNotIn("limited preview", system_message["content"])
         self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
@@ -5568,6 +5568,30 @@ class EventProcessingRuntimeGuardTests(TestCase):
         self.assertIsNone(updated_tools)
         self.assertEqual(result["status"], "error")
         self.assertIn("intelligence tier", result["message"])
+
+    @patch("api.agent.core.event_processing.get_agent_tools")
+    @patch("api.agent.core.event_processing.execute_apply_patch")
+    def test_successful_patch_refreshes_available_tools(self, mock_apply_patch, mock_get_tools):
+        refreshed_tools = [
+            {"type": "function", "function": {"name": "repaired_custom_tool"}},
+        ]
+        mock_apply_patch.return_value = {
+            "status": "ok",
+            "updated_paths": ["/tools/repaired_custom_tool.py"],
+        }
+        mock_get_tools.return_value = refreshed_tools
+
+        result, updated_tools = _execute_tool_call_runtime(
+            self.agent,
+            tool_name="apply_patch",
+            exec_params={"patch": "*** Begin Patch\n*** End Patch"},
+            budget_ctx=None,
+            eval_run_id=None,
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(updated_tools, refreshed_tools)
+        mock_get_tools.assert_called_once_with(self.agent)
 
     @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")

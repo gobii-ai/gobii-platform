@@ -45,6 +45,14 @@ _NOTIFICATION_TOOLS = ("send_email",)
 _DEPENDENCY_HOLD_MARKER = "Tool dependency: held outbound send"
 
 
+def _tool_call_was_executed(call) -> bool:
+    try:
+        payload = json.loads(call.result or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return True
+    return not isinstance(payload, dict) or payload.get("executed") is not False
+
+
 @dataclass(frozen=True)
 class NotificationTerminalityCase:
     slug: str
@@ -555,6 +563,7 @@ class NonRetryableSourceTerminalityScenario(EvalScenario, ScenarioExecutionTools
                 "mcp_brightdata_scrape_as_markdown",
                 "http_request",
             }
+            and _tool_call_was_executed(call)
         ]
         reply_calls = [call for call in calls if call.tool_name == "send_chat_message"]
         reply = (

@@ -232,15 +232,16 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("Never transcribe visible preview facts into SQL", guidance)
         self.assertIn("Submit no draft/superseded statements", guidance)
 
-        self.assertIn("Named tables hold truth/logic", guidance)
-        self.assertIn("keyed entities/relations/provenance", guidance)
-        self.assertIn("Results do not update them", guidance)
+        self.assertIn("Named tables hold keyed entities", guidance)
+        self.assertIn("tool results never update them", guidance)
         self.assertIn("Ready routes", guidance)
         self.assertIn("opaque auth refs only for the requested operation", guidance)
         self.assertIn("no preflight", guidance)
-        self.assertIn("current source set", guidance)
-        self.assertIn("one set-wise upsert", guidance)
-        self.assertIn("request-specific decision SELECT", guidance)
+        self.assertIn("current sources", guidance)
+        self.assertIn("one sqlite_batch upserts all relevant rows", guidance)
+        self.assertIn("exact answer SELECTs", guidance)
+        self.assertIn("never combine separate results in prose", guidance)
+        self.assertIn("Follow-ups query named tables", guidance)
         self.assertIn(
             "is_current_batch=1 AND tool_name='exact visible name'",
             guidance,
@@ -266,7 +267,8 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("LIVE SCHEMA is authoritative", guidance)
         self.assertIn("do not rediscover them", guidance)
         self.assertIn("shown durable domain table", guidance)
-        self.assertIn("aggregate-only and SELECT-all are incomplete", guidance)
+        self.assertIn("compute task filters/grouping/ranking", guidance)
+        self.assertIn("do not SELECT whole tables and assemble the answer yourself", guidance)
         self.assertIn("first sqlite_batch", guidance)
         self.assertIn("call 1 only targeted sqlite_master", guidance)
         self.assertIn("meaningful domain noun from the request", guidance)
@@ -713,8 +715,8 @@ class PromptContextContactsGuidanceTests(TestCase):
             "For clear ongoing/monitoring intent, first write one safe default __agent_schedules cadence",
             content,
         )
-        self.assertIn("Recurring work is highest priority", content)
-        self.assertIn("Emotions are autonomous", content)
+        self.assertIn("Clear ongoing requests such as monitor", content)
+        self.assertIn("Emotion is one SQLite update", content)
         self.assertNotIn("Without a schedule, you die", content)
 
     def test_runtime_schedule_note_keeps_temporary_scope_from_changing_cadence(self):

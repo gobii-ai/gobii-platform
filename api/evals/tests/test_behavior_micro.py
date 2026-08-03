@@ -101,7 +101,7 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
                 rows = conn.execute("SELECT company, status FROM leads ORDER BY company;").fetchall()
 
         self.assertEqual(rows, [("Acme", "open"), ("Globex", "open"), ("Initech", "contacted")])
-        self.assertIn("populated SQLite leads table", scenario.case.prompt)
+        self.assertIn("Export the open rows", scenario.case.prompt)
 
     def test_sqlite_export_uses_real_tools_without_changing_generic_mocks(self):
         scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
@@ -111,36 +111,21 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
         self.assertNotIn("create_csv", scenario._build_mock_config())
         self.assertIn("sqlite_batch", generic_sqlite_scenario._build_mock_config())
 
-    def test_sqlite_export_stop_policy_waits_for_both_executed_tools(self):
+    def test_sqlite_export_stop_policy_waits_for_query_backed_csv(self):
         scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
 
         self.assertEqual(
             scenario._build_eval_stop_policy()["stop_when_all_seen"],
-            [
-                {"tool_name": "sqlite_batch", "after_execution": True},
-                {"tool_name": "create_csv", "after_execution": True},
-            ],
+            [{"tool_name": "create_csv", "after_execution": True}],
         )
 
     def test_sqlite_export_rejects_failed_or_incomplete_tool_results(self):
         scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
-        successful_sqlite = SimpleNamespace(
-            tool_name="sqlite_batch",
-            tool_params={},
-            status="complete",
-            result=json.dumps({"status": "ok", "results": [{"result": [{"company": "Acme"}]}]}),
-        )
         successful_csv = SimpleNamespace(
             tool_name="create_csv",
             tool_params={},
             status="complete",
             result=json.dumps({"status": "ok", "file": "$[/exports/open-leads.csv]", "attach": "$[/exports/open-leads.csv]"}),
-        )
-        failed_sqlite = SimpleNamespace(
-            tool_name="sqlite_batch",
-            tool_params={},
-            status="error",
-            result=json.dumps({"status": "error", "message": "query failed"}),
         )
         incomplete_csv = SimpleNamespace(
             tool_name="create_csv",
@@ -149,10 +134,16 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
             result=json.dumps({"status": "ok"}),
         )
 
-        self.assertTrue(scenario._call_satisfies_expected_tool(successful_sqlite, "sqlite_batch"))
         self.assertTrue(scenario._call_satisfies_expected_tool(successful_csv, "create_csv"))
-        self.assertFalse(scenario._call_satisfies_expected_tool(failed_sqlite, "sqlite_batch"))
         self.assertFalse(scenario._call_satisfies_expected_tool(incomplete_csv, "create_csv"))
+
+    def test_weekly_trend_http_mock_contains_rows_for_sqlite(self):
+        scenario = ScenarioRegistry.get("common_use_case_126_http_sqlite_weekly_trend")
+
+        result = scenario._mock_for_tool("http_request")
+
+        self.assertEqual(len(result["content"]["signups"]), 5)
+        self.assertIn("call sqlite_batch next", result["content"]["next_step"])
 
     def test_monitoring_scope_chat_alternative_is_relevant_and_satisfies_expectation(self):
         scenario = ScenarioRegistry.get(MONITORING_SCOPE_QUESTION)

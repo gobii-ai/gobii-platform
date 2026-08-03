@@ -5,8 +5,9 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
 from waffle.models import Flag
 
+from api.agent.tools.custom_tool_names import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.evals.scenarios.custom_tool_result_contract import CustomToolResultContractScenario
-from api.models import BrowserUseAgent, PersistentAgent
+from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemSkillState
 
 
 User = get_user_model()
@@ -53,6 +54,30 @@ class CustomToolResultContractEvaluatorTests(SimpleTestCase):
 
         self.assertEqual(CustomToolResultContractScenario._successful_create_calls(calls), calls)
 
+    def test_stop_policy_stops_after_successful_result_and_allows_failed_repairs(self):
+        policy = CustomToolResultContractScenario._eval_stop_policy(
+            SimpleNamespace(requires_batching=False),
+            "custom_example",
+        )
+
+        self.assertEqual(
+            policy["stop_on_tool_names_after_execution"],
+            ["custom_example"],
+        )
+        self.assertNotIn("stop_when_all_seen", policy)
+
+    def test_prompt_asks_for_an_obvious_expected_result_and_retest(self):
+        prompt = CustomToolResultContractScenario._agent_prompt(
+            SimpleNamespace(
+                slug="example",
+                user_task="Classify records.",
+                custom_tool_job="Keep valid records.",
+            )
+        )
+
+        self.assertIn("whose correct result is clear", prompt)
+        self.assertIn("fix the same source file and retest it", prompt)
+
 
 @tag("eval_sim")
 class CustomToolResultContractSetupTests(TestCase):
@@ -79,4 +104,11 @@ class CustomToolResultContractSetupTests(TestCase):
         self.assertEqual(agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
         self.assertTrue(
             Flag.objects.get(name="sandbox_compute").users.filter(id=user.id).exists()
+        )
+        self.assertTrue(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=agent,
+                skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists()
         )

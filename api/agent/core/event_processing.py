@@ -2413,6 +2413,7 @@ def _cancel_unstarted_tool_calls(
             "status": "error",
             "message": reason,
             "retryable": retryable,
+            "executed": False,
         }
     )
     for prepared in prepared_calls:
@@ -3347,12 +3348,12 @@ _DIRECT_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "secure_credentials_request": lambda: execute_secure_credentials_request,
     "request_contact_permission": lambda: execute_request_contact_permission,
     "request_human_input": lambda: execute_request_human_input,
-    "apply_patch": lambda: execute_apply_patch,
 }
 
 _REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "search_tools": lambda: execute_search_tools,
     CREATE_CUSTOM_TOOL_NAME: lambda: execute_create_custom_tool,
+    "apply_patch": lambda: execute_apply_patch,
     "end_planning": lambda: execute_end_planning,
 }
 

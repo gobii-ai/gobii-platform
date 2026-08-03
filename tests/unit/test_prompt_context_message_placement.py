@@ -48,11 +48,11 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertEqual(all_contents.count(sqlite_guidance), 1)
         self.assertIn("<sqlite_guidance>", system_message["content"])
         self.assertIn("</sqlite_guidance>", system_message["content"])
-        self.assertIn("Named tables hold truth/logic", sqlite_guidance)
-        self.assertIn("Results do not update them", sqlite_guidance)
-        self.assertIn("counts, joins, gaps, ranks", sqlite_guidance)
+        self.assertIn("Named tables hold keyed entities", sqlite_guidance)
+        self.assertIn("tool results never update them", sqlite_guidance)
+        self.assertIn("filter, join, count, rank", sqlite_guidance)
         self.assertIn("never dump history or requery their IDs", sqlite_guidance)
-        self.assertIn("Named enabled tool: call it directly, never search", system_message["content"])
+        self.assertIn("Named enabled tool: call it directly", system_message["content"])
         self.assertIn("Keep chat/outreach light. For finite sets", system_message["content"])
         self.assertIn("## Link References (CRITICAL)", system_message["content"])
         self.assertIn("Use one supplied destination", system_message["content"])
@@ -70,6 +70,8 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("deep/exhaustive research and finite-set coverage", system_message["content"])
         self.assertIn("batch gaps, follow up misses, and reconcile coverage", system_message["content"])
         self.assertIn("never repeat a successful URL/query", system_message["content"])
+        self.assertIn("For an FYI that asks for no action", system_message["content"])
+        self.assertIn("Do not repeat details", system_message["content"])
 
     def test_active_plan_precedes_charter_and_charter_precedes_schedule(self):
         self.agent.charter = "DURABLE CHARTER CACHE ANCHOR"

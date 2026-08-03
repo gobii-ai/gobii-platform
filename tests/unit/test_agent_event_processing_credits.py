@@ -617,6 +617,7 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(tool_call.status, PersistentAgentToolCall.Status.ERROR)
         self.assertEqual(tool_call.execution_duration_ms, 0)
         self.assertTrue(result["retryable"])
+        self.assertFalse(result["executed"])
         self.assertEqual(credit.credits_used, Decimal("0.000"))
         self.assertIsNone(step.credits_cost)
         self.assertIsNone(step.task_credit_id)

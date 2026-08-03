@@ -331,7 +331,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_083_sqlite_query_counts", "category": "database", "prompt": "Query SQLite for lead counts grouped by priority.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
     {"slug": "common_use_case_084_sqlite_update_status", "category": "database", "prompt": "Update SQLite lead Acme to status contacted.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-row"], "plan_expected": False},
     {"slug": "common_use_case_085_sqlite_join_tables", "category": "database", "prompt": "The SQLite database already has accounts and contacts tables. Run a join query by account_id and summarize the rows.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
-    {"slug": "common_use_case_086_sqlite_export_query_csv", "category": "database", "prompt": "The populated SQLite leads table has company and status columns. Query its open leads, then create a CSV export.", "expected_tools": ["sqlite_batch", "create_csv"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
+    {"slug": "common_use_case_086_sqlite_export_query_csv", "category": "database", "prompt": "Export the open rows from the SQLite leads table to CSV. It has company and status columns.", "expected_tools": ["create_csv"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
     {"slug": "common_use_case_087_sqlite_clean_duplicates", "category": "database", "prompt": "Remove duplicate emails from the SQLite contacts table.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-multiple-rows"], "plan_expected": False},
     {"slug": "common_use_case_088_sqlite_add_index", "category": "database", "prompt": "Add a SQLite index on contacts email for faster lookup.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-cell"], "plan_expected": False},
     {"slug": "common_use_case_089_sqlite_database_setup", "category": "database", "prompt": "Set up the SQLite database so you can store a lead tracker for this agent.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-create-spreadsheet"], "plan_expected": False},
@@ -4705,6 +4705,21 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                     "This markdown is persisted in __tool_results.result_text for SQLite extraction."
                 ),
                 "content": {"ok": True},
+            }
+        if tool_name == "http_request" and self.case.slug == "common_use_case_126_http_sqlite_weekly_trend":
+            return {
+                "status": "ok",
+                "status_code": 200,
+                "url": "https://api.example.test/signups.json",
+                "content": {
+                    "signups": [
+                        {"created_at": "2026-07-13T09:00:00Z"},
+                        {"created_at": "2026-07-14T11:00:00Z"},
+                        {"created_at": "2026-07-21T10:00:00Z"},
+                        {"created_at": "2026-07-22T15:00:00Z"},
+                        {"created_at": "2026-07-23T16:00:00Z"},
+                    ],
+                },
             }
         if tool_name == "mcp_brightdata_search_engine" and self.case.category == "lead_sourcing":
             return {

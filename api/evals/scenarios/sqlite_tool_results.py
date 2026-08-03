@@ -3301,7 +3301,7 @@ class SqliteIncrementalDomainModelScenario(SqliteDomainModelScenario):
                 "modeled entities lacked source provenance",
             ),
             (
-                not any(re.search(r"\b(?:left\s+join|not\s+exists|having)\b", statement, re.I)
+                not any(_uses_negative_set_logic(statement)
                         for statement in decision_reads),
                 "model was not queried for missing ownership with set logic",
             ),
@@ -3317,6 +3317,14 @@ class SqliteIncrementalDomainModelScenario(SqliteDomainModelScenario):
             failures,
             f"Incrementally modeled and queried related operating tables: {sorted(all_targets)}.",
         )
+
+
+def _uses_negative_set_logic(statement: str) -> bool:
+    return bool(re.search(
+        r"\b(?:left\s+join|not\s+exists|not\s+in|except|having)\b",
+        statement,
+        re.I,
+    ))
 
 
 @register_scenario

@@ -19,7 +19,12 @@ from api.agent.comms.routing import (
     reset_inbound_routing_scope,
 )
 from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
-from api.agent.core.prompt_context import _get_implied_send_context, _get_queued_workload_context
+from api.agent.core.prompt_context import (
+    _get_implied_send_context,
+    _get_queued_workload_context,
+    _interrupted_tool_result_step_ids,
+)
+from api.agent.core.tool_results import ToolCallResultRecord
 from api.agent.core.web_streaming import resolve_web_stream_target
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.models import (
@@ -2809,6 +2814,10 @@ class ImpliedSendTests(TestCase):
             self.assertNotIn("park", workload)
             self.assertEqual(advance_inbound_routing_scope(self.agent, scope), scope)
 
+            interrupted_step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Completed source call before same-conversation follow-up.",
+            )
             follow_up = PersistentAgentMessage.objects.create(
                 owner_agent=self.agent,
                 is_outbound=False,
@@ -2823,14 +2832,24 @@ class ImpliedSendTests(TestCase):
             advanced_token = bind_inbound_routing_scope(advanced)
             try:
                 same_conversation_workload = _get_queued_workload_context(self.agent)
+                retained_step_ids = _interrupted_tool_result_step_ids(
+                    self.agent,
+                    [requester_message, follow_up],
+                    [
+                        ToolCallResultRecord(
+                            step_id=str(interrupted_step.id),
+                            tool_name="http_request",
+                            created_at=interrupted_step.created_at,
+                            result_text='{"status":"ok"}',
+                        )
+                    ],
+                )
             finally:
                 reset_inbound_routing_scope(advanced_token)
-            self.assertIn("newer input in this same conversation", same_conversation_workload)
-            self.assertIn("completed but not yet delivered", same_conversation_workload)
-            self.assertIn("correction or cancellation", same_conversation_workload)
-            self.assertIn("imports them set-wise from current __tool_results", same_conversation_workload)
-            self.assertIn("do not pre-read them", same_conversation_workload)
-            self.assertIn("once with its stated method", same_conversation_workload)
+            self.assertIn("New input arrived while a tool ran", same_conversation_workload)
+            self.assertIn("completed result in history is final", same_conversation_workload)
+            self.assertIn("new action once", same_conversation_workload)
+            self.assertEqual(retained_step_ids, {str(interrupted_step.id)})
         finally:
             reset_inbound_routing_scope(token)
 

@@ -14,6 +14,7 @@ from api.evals.scenarios.notification_terminality import (
     NOTIFICATION_TERMINALITY_SUITE_SLUG,
     NotificationTerminalityScenario,
     _CASES,
+    _tool_call_was_executed,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -36,6 +37,13 @@ class NotificationTerminalityEvalTests(SimpleTestCase):
         self.assertIn(EXTERNAL_ACTION_EVIDENCE_INTEGRITY, suite.scenario_slugs)
         self.assertIn(INTERRUPTED_COMPLETED_OUTCOME, suite.scenario_slugs)
         self.assertIn(CUSTOM_TOOL_IDLE_RESULT_SLEEPS, suite.scenario_slugs)
+
+    def test_preexecution_skip_is_not_counted_as_a_source_attempt(self):
+        skipped = SimpleNamespace(result='{"status":"error","executed":false}')
+        attempted = SimpleNamespace(result='{"status":"error","retryable":false}')
+
+        self.assertFalse(_tool_call_was_executed(skipped))
+        self.assertTrue(_tool_call_was_executed(attempted))
 
     def test_completed_side_effects_reject_direct_notification_repeats(self):
         case = next(case for case in _CASES if case.slug == NOTIFICATION_TERMINALITY_COMPLETED)

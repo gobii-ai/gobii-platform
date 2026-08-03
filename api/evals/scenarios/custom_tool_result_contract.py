@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from api.agent.system_skills.service import enable_system_skills
+from api.agent.tools.custom_tool_names import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.custom_tools import normalize_custom_tool_name
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
@@ -226,6 +228,10 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             planning_state=PersistentAgent.PlanningState.SKIPPED,
         )
         self.enable_sandbox_tool_visibility(agent_id)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        result = enable_system_skills(agent, [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
+        if result.get("invalid"):
+            raise ValueError(f"Could not enable custom-tool development for eval: {result}")
 
     def run(self, run_id: str, agent_id: str) -> None:
         if self.case is None:
@@ -454,33 +460,23 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _eval_stop_policy(case: CustomToolResultContractCase, custom_tool_name: str) -> dict[str, Any]:
-        policy: dict[str, Any] = {
+        return {
             "max_relevant_tool_calls": 24,
             "ignored_tool_names": ["update_plan", "end_planning"],
+            "stop_on_tool_names_after_execution": [custom_tool_name],
         }
-        if case.requires_batching:
-            policy["stop_when_all_seen"] = [
-                {
-                    "tool_name": custom_tool_name,
-                    "after_execution": True,
-                    "required_params_any": list(PARAM_NAME_ALIASES["batch_size"]),
-                }
-            ]
-        else:
-            policy["stop_on_tool_names_after_execution"] = [custom_tool_name]
-        return policy
 
     @classmethod
     def _agent_prompt(cls, case: CustomToolResultContractCase) -> str:
         custom_tool_name = cls._custom_tool_name(case)
         return (
-            f"Build a reusable Python custom tool named `{custom_tool_name}`, then run it once with synthetic, "
-            "representative inputs. Do not make live external writes.\n\n"
+            f"Build a reusable Python custom tool named `{custom_tool_name}`, then test it with a small synthetic "
+            "sample whose correct result is clear. If the result is wrong, fix the same source file and retest it. "
+            "Do not make live external writes.\n\n"
             f"Task: {case.user_task}\n\n"
             f"Tool job: {case.custom_tool_job}\n\n"
-            "Expose source/destination tables, URLs, filters, dates, limits, and cursors as required runtime inputs "
-            "when relevant; do not hide sample rows in the tool. Return remaining_work or next_cursor for bounded work, "
-            "and make completed simulated side effects clear."
+            "Make real inputs parameters instead of hard-coding sample rows. For bounded work, return remaining_work "
+            "or next_cursor. Make completed simulated side effects clear."
         )
 
     @staticmethod
@@ -699,6 +695,10 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 "rows_",
                 "items_",
                 "accepted",
+                "attempted",
+                "succeeded",
+                "failed",
+                "processed",
                 "rejected",
                 "skipped",
                 "duplicate",

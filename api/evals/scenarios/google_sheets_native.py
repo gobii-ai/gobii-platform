@@ -482,7 +482,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
     GoogleSheetsNativeCase(
         slug=GOOGLE_SHEETS_NATIVE_FORMAT_EXISTING_IDEMPOTENT,
         description="Inspect existing formatting before adding banding to avoid duplicate banded ranges.",
-        prompt="Format Google spreadsheet sheet-123 so it looks polished. Avoid breaking existing alternating row colors.",
+        prompt="Format the Google spreadsheet with ID `sheet-123` so it looks polished. Keep its existing alternating row colors.",
         http_rules=(
             {
                 "url_contains": (

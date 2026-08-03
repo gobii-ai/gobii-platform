@@ -39,6 +39,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     _sqlite_attempt_failures,
     _source_array_first_write_failures,
     _uses_bound_source_values,
+    _uses_negative_set_logic,
     _uses_queryable_source_model,
 )
 from api.evals.suites import SuiteRegistry
@@ -631,6 +632,17 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
         prompt = SqliteIncrementalDomainModelScenario.prompt.casefold()
         for leaked_term in ("sqlite", "__tool_results", "json_each", "insert", "select", "table"):
             self.assertNotIn(leaked_term, prompt)
+
+    def test_incremental_domain_model_accepts_standard_negative_set_queries(self):
+        self.assertTrue(_uses_negative_set_logic(
+            "SELECT * FROM initiatives WHERE initiative_id NOT IN (SELECT initiative_id FROM assignments)"
+        ))
+        self.assertTrue(_uses_negative_set_logic(
+            "SELECT initiative_id FROM initiatives EXCEPT SELECT initiative_id FROM assignments"
+        ))
+        self.assertFalse(_uses_negative_set_logic(
+            "SELECT * FROM initiatives WHERE initiative_id = 'init-search'"
+        ))
 
     def test_pressure_refresh_case_is_registered_without_teaching_sql(self):
         suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)

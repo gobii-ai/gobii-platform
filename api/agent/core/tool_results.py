@@ -421,6 +421,7 @@ def prepare_tool_results_for_prompt(
     url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
     paired_url_rewriter: Optional[Callable[[str, ToolCallResultRecord], str]] = None,
     paired_url_step_ids: Optional[Set[str]] = None,
+    preserved_historical_step_ids: Optional[Set[str]] = None,
     named_model_tables: Optional[Set[str]] = None,
     named_model_columns: Optional[Mapping[str, Set[str]]] = None,
 ) -> Dict[str, ToolResultPromptInfo]:
@@ -431,6 +432,7 @@ def prepare_tool_results_for_prompt(
     if fresh_tool_call_step_id:
         fresh_step_ids.add(fresh_tool_call_step_id)
     paired_step_ids = set(paired_url_step_ids or ())
+    preserved_historical_ids = set(preserved_historical_step_ids or ())
     model_tables = {table.casefold() for table in (named_model_tables or ())}
     model_columns = {
         table.casefold(): {column.casefold() for column in columns}
@@ -571,6 +573,7 @@ def prepare_tool_results_for_prompt(
             and not is_current_source_batch
             and record.tool_name == current_source_tool_name
             and _record_is_source_bearing(record)
+            and record.step_id not in preserved_historical_ids
         )
         if is_historical_same_tool_source:
             context_hint = None

@@ -184,11 +184,11 @@ class CustomToolResultContractEvalTests(TestCase):
         )
 
         self.assertEqual(policy["max_relevant_tool_calls"], 24)
-        self.assertNotIn("stop_on_tool_names_after_execution", policy)
         self.assertEqual(
-            policy["stop_when_all_seen"][0]["required_params_any"],
-            list(("batch_size", "batch_limit", "limit", "max_items", "max_rows", "row_limit")),
+            policy["stop_on_tool_names_after_execution"],
+            ["custom_sheets_backlog_sync"],
         )
+        self.assertNotIn("stop_when_all_seen", policy)
 
     def test_local_create_tool_check_requires_good_params_and_result_fields(self):
         case = _case("sheets_final_sync")
@@ -338,6 +338,33 @@ if __name__ == "__main__":
             case,
             _create_call(case, source_code=source),
             "custom_sheets_backlog_sync",
+        )
+
+        self.assertTrue(ok, reason)
+
+    def test_local_create_tool_check_accepts_processed_as_a_count_signal(self):
+        case = _case("chunked_mcp_fanout")
+        source = """
+from _gobii_ctx import main
+
+def run(params, ctx):
+    processed = min(params.get("batch_size", 1), 1)
+    return {
+        "status": "ok",
+        "summary": "Processed one company.",
+        "processed": processed,
+        "output_table": "company_findings",
+        "remaining_work": 0,
+    }
+
+if __name__ == "__main__":
+    main(run)
+"""
+
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, source_code=source),
+            "custom_chunked_mcp_fanout",
         )
 
         self.assertTrue(ok, reason)

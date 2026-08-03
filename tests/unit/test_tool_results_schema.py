@@ -1608,6 +1608,14 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertEqual(modeled_preview.count("[SOURCE ARRAYS"), 1)
         self.assertNotIn("Example company", modeled_preview)
         self.assertIn("Never delete/clear the model", modeled_preview)
+
+        retained = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={record.step_id: index for index, record in enumerate(reversed(records))},
+            preserved_historical_step_ids={historical.step_id},
+        )
+        self.assertFalse(retained[historical.step_id].suppress_from_prompt)
+        self.assertIn("Example company", retained[historical.step_id].preview_text)
         self.assertEqual(
             sum(bool(item.source_reconciliation_directive) for item in modeled.values()),
             1,

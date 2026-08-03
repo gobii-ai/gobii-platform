@@ -49,6 +49,7 @@ _EXEC_SOURCE_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_EXEC_SOURCE_PATH"
 _UV_CACHE_DIR_ENV_KEY = "SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR"
 _UV_INSTALL_DIR_ENV_KEY = "SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR"
 _SQLITE_DB_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"
+_EVAL_SYNTHETIC_RESULTS_ENV_KEY = "SANDBOX_CUSTOM_TOOL_EVAL_RESULTS_B64"
 _RUNTIME_CACHE_ROOT_ENV_KEY = "SANDBOX_RUNTIME_CACHE_ROOT"
 
 _GOBII_CTX_MODULE = textwrap.dedent(
@@ -76,6 +77,7 @@ _GOBII_CTX_MODULE = textwrap.dedent(
             self.bridge_url = os.environ.get({_BRIDGE_URL_ENV_KEY!r}, "")
             self.token = os.environ.get({_TOKEN_ENV_KEY!r}, "")
             self.sqlite_db_path = os.environ.get({_SQLITE_DB_PATH_ENV_KEY!r}, "")
+            self.eval_synthetic_results = _decode_json_env({_EVAL_SYNTHETIC_RESULTS_ENV_KEY!r}, {{}})
 
         def proxy_url(self):
             for key in ("ALL_PROXY", "all_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
@@ -143,6 +145,8 @@ _GOBII_CTX_MODULE = textwrap.dedent(
             return raw
 
         def call_tool(self, tool_name, params=None, **kwargs):
+            if tool_name in self.eval_synthetic_results:
+                return self.eval_synthetic_results[tool_name]
             payload = {{
                 "tool_name": tool_name,
                 "params": params if params is not None else kwargs,
@@ -893,6 +897,26 @@ def _resolve_bridge_base_url() -> str:
     return f"{scheme}://{domain}"
 
 
+def _eval_synthetic_results_for_custom_tool(agent: PersistentAgent) -> Dict[str, Any]:
+    from api.agent.eval_agents import is_eval_agent
+    from api.agent.tools.eval_synthetic_tools import (
+        get_eval_synthetic_tool_fallback_result,
+        is_eval_synthetic_tool_name,
+    )
+
+    if not is_eval_agent(agent):
+        return {}
+    enabled_names = PersistentAgentEnabledTool.objects.filter(agent=agent).values_list(
+        "tool_full_name",
+        flat=True,
+    )
+    return {
+        tool_name: get_eval_synthetic_tool_fallback_result(tool_name)
+        for tool_name in enabled_names
+        if is_eval_synthetic_tool_name(tool_name)
+    }
+
+
 def build_custom_tool_bridge_token(
     agent: PersistentAgent,
     tool: PersistentAgentCustomTool,
@@ -1229,6 +1253,9 @@ def execute_custom_tool(
         _TOOL_NAME_ENV_KEY: tool.tool_name,
         _SOURCE_PATH_ENV_KEY: tool.source_path,
     }
+    eval_synthetic_results = _eval_synthetic_results_for_custom_tool(agent)
+    if eval_synthetic_results:
+        env[_EVAL_SYNTHETIC_RESULTS_ENV_KEY] = _encode_env_json(eval_synthetic_results)
 
     try:
         service = SandboxComputeService()

@@ -234,9 +234,9 @@ class CustomToolsTests(TestCase):
 
         for text in (
             "Call create_custom_tool once",
-            "Invoke the returned custom_* tool",
-            "Do not call create_custom_tool again after successful registration",
-            "Retry creation only when creation was rejected",
+            "Invoke it with a small sample whose correct result is obvious",
+            "Do not call create_custom_tool again after registration",
+            "retry creation only if rejected",
             "from _gobii_ctx import main",
             "with ctx.sqlite() as db:",
             "db.row_factory = sqlite3.Row",
@@ -1595,6 +1595,68 @@ def run(params, ctx):
         )
         self.assertIn('export PATH="$UV_INSTALL_DIR:$PATH"', call.args[1])
         self.assertIn('uv run --no-project "$SOURCE_EXEC_PATH"', call.args[1])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    def test_eval_custom_tool_receives_enabled_synthetic_child_results(
+        self,
+        mock_service_cls,
+        _mock_bridge_url,
+        _mock_sandbox,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    result = ctx.call_tool('mcp_brightdata_search_engine', {'query': 'test'})\n"
+            "    return {'status': 'ok', 'result': result, 'next_action': 'None'}\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/eval_search.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Eval Search",
+            tool_name="custom_eval_search",
+            description="Search through a child tool.",
+            source_path="/tools/eval_search.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="mcp_brightdata_search_engine",
+            tool_server="eval",
+            tool_name="mcp_brightdata_search_engine",
+        )
+        self.agent.execution_environment = "eval"
+        self.agent.save(update_fields=["execution_environment"])
+
+        mock_service = MagicMock()
+        mock_service._sync_workspace_push.return_value = {"status": "ok"}
+        mock_service.run_custom_tool_command.return_value = {
+            "status": "ok",
+            "stdout": f'{CUSTOM_TOOL_RESULT_MARKER}{json.dumps({"result": {"status": "ok"}})}',
+            "stderr": "",
+        }
+        mock_service_cls.return_value = mock_service
+
+        result = execute_custom_tool(self.agent, tool, {})
+
+        self.assertEqual(result["status"], "ok", result)
+        encoded = mock_service.run_custom_tool_command.call_args.kwargs["env"][
+            "SANDBOX_CUSTOM_TOOL_EVAL_RESULTS_B64"
+        ]
+        synthetic_results = json.loads(base64.b64decode(encoded).decode("utf-8"))
+        self.assertEqual(
+            synthetic_results["mcp_brightdata_search_engine"]["status"],
+            "ok",
+        )
+        self.assertIn("eval_synthetic_results", _GOBII_CTX_MODULE)
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)

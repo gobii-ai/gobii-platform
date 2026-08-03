@@ -841,12 +841,12 @@ def _get_sqlite_guidance() -> str:
     """Return the compact contract for data retrieval, storage, and analysis."""
     return (
         "## SQLite Data\n\n"
-        "Use SQLite when the task needs filtering, joining, aggregation, reconciliation, or reusable rows across "
-        "results. Do not model a small set of API read/write receipts; report those directly. Named tables hold "
-        "keyed entities, relations, and provenance; tool results do not update them automatically.\n"
-        "For a current source set: keyed DDL; one set-wise upsert; one request-specific decision SELECT with "
-        "answer/rows/URLs. For QA/audits, first load issue rows—not raw input copies—then SELECT those issues. aggregate-only "
-        "and SELECT-all are incomplete; deliver without reread. "
+        "Use SQLite when SQL must filter, join, count, rank, reconcile, or keep reusable rows. Do every requested "
+        "operation in the final SELECT; never combine separate results in prose. Report small API receipts directly. "
+        "Named tables hold keyed entities, relations, and provenance; tool results never update them.\n"
+        "For current sources, one sqlite_batch upserts all relevant rows into keyed tables and ends with exact answer "
+        "SELECTs and source URLs. Do joins, filters, counts, and ranking there; do not SELECT whole tables and assemble "
+        "the answer yourself. Follow-ups query named tables. QA/audits load and SELECT issue rows, not raw copies. "
         "When refreshing an existing keyed table, use INSERT ... ON CONFLICT on the first write. "
         "JSON: all `is_current_batch=1 AND tool_name='exact visible name'` rows with no result_id/URL "
         "filter and no pre-read. Incremental schemas keep non-key fields nullable across source shapes. "
@@ -862,7 +862,8 @@ def _get_sqlite_guidance() -> str:
         "in the first query; use returned rows with context, never dump history or requery their IDs. "
         "Upsert stable keys and mutable provenance; never import siblings singly, mix old generic results, or "
         "rebuild durable tables. Affected 0 plus empty readback is failure.\n"
-        "Bind authored/messy values as :name. json_each: arrays/objects; json_extract: scalars. "
+        "Bind authored/messy values as :name. Use simple, non-keyword table and CTE names. "
+        "json_each: arrays/objects; json_extract: scalars. "
         "INSERT SELECT needs WHERE 1=1 before ON CONFLICT. UNION top-one needs a scalar subquery/CTE. "
         "group_concat(DISTINCT x) has no separator. Reads that may trigger another tool use will_continue_work=true; "
         "otherwise false. Ready routes use opaque auth refs only for the requested operation; no preflight.\n"
@@ -3529,10 +3530,9 @@ def _get_queued_workload_context(agent: PersistentAgent) -> str:
     notices = []
     if same_conversation_advanced:
         notices.append(
-            "New input arrived in this conversation while a tool ran. Keep the successful earlier result shown in "
-            "history; never call its tool or URL again. Perform only the newly added action, once, with its stated "
-            "method. Then reply once with both results. If the new input is a correction, replace only the corrected "
-            "part. Import result rows only when durable data is needed."
+            "New input arrived while a tool ran. The completed result in history is final: do not call its tool or "
+            "URL again. Do the new action once, then reply once with both results. If the new input corrects the old "
+            "request, replace only that part. Import rows only when durable data is needed."
         )
 
     conversations = {str(conversation_id) for conversation_id, _channel in competing}
@@ -3549,6 +3549,30 @@ def _get_queued_workload_context(agent: PersistentAgent) -> str:
             "A large queue is normal operational load, not an emotional setback."
         )
     return "Active turn: keep working for its bound requester and channel. " + " ".join(notices)
+
+
+def _interrupted_tool_result_step_ids(
+    agent: PersistentAgent,
+    messages: Sequence[PersistentAgentMessage],
+    records: Sequence[ToolCallResultRecord],
+) -> Set[str]:
+    """Keep completed work visible when a follow-up advances the same conversation."""
+
+    scope = get_bound_inbound_routing_scope(agent)
+    if scope is None or scope.message_id is None or scope.previous_message_id is None:
+        return set()
+
+    messages_by_id = {message.id: message for message in messages}
+    previous_message = messages_by_id.get(scope.previous_message_id)
+    current_message = messages_by_id.get(scope.message_id)
+    if previous_message is None or current_message is None:
+        return set()
+
+    return {
+        record.step_id
+        for record in records
+        if previous_message.timestamp <= record.created_at <= current_message.timestamp
+    }
 
 
 def _get_formatting_guidance() -> str:
@@ -3571,9 +3595,9 @@ def _get_formatting_guidance() -> str:
         "</discord>\n\n"
         "<email>\n"
         "Email formatting:\n"
-        "Use body-only HTML with inline styles, not Markdown. For a report or dashboard, put the key number or status "
-        "inside a small colored metric/status block; a colored title alone does not count. Then use clear section "
-        "headings and a compact table or list. "
+        "Use body-only HTML with inline styles, not Markdown. In a report or dashboard, put the key number or status in a "
+        "colored metric/status block, not just the title. Use styled tables or metric blocks for other values, never "
+        "plain metric lists. "
         "For charts, copy <img> src from create_chart result.inline_html or returned $[/path]; never construct paths/download URLs.\n"
         "</email>\n\n"
         "<sms>\n"
@@ -4048,12 +4072,12 @@ def _get_first_run_welcome_message_instruction(
         "GUIDED INTAKE\n"
         "- If useful public context exists and research is allowed, make exactly one focused read-only lookup. If "
         "history already contains that lookup, do not repeat it. A failed lookup still ends orientation.\n"
-        "- Then call request_human_input exactly once, alone, and wait. Include one card per unresolved material "
-        "decision. Each card has 2-3 distinct options with a short title and description; do not pad the list or use "
-        "a catch-all question. Evidence may clarify choices but cannot silently decide missing scope.\n"
+        "- Then call request_human_input exactly once, alone, and wait. Put every card in its `requests` array: one per "
+        "unresolved material decision, each with 2-3 distinct options and short titles/descriptions. No padding or "
+        "catch-all questions. Evidence cannot decide missing scope.\n"
         "- A named company or product is the seller, not a missing identity. Prospect target, qualification, and "
-        "quantity are separate decisions. If no useful subject/source exists or the user asks for questions first, "
-        "skip the lookup and ask immediately.\n"
+        "quantity are separate decisions. If the subject is unclear, ask whether it is a company, product, brand, or "
+        "internal project. With no useful source, or when asked for questions first, ask now.\n"
         "- Do not create a deliverable, mutate SQLite/config, or send prose after orientation. Follow the tool result "
         "when web cards must also be mirrored to email or SMS.\n"
     )
@@ -4245,8 +4269,8 @@ def _get_system_instruction(
         "## Durable Config (CRITICAL)\n\n"
         "A preference, critique, access correction, or recurring role instruction from the owner is durable even when "
         "they do not say save. A named task, batch, day, run, project, or case is finite. Ignore feedback addressed to "
-        "someone else. Replace the related rule in one sqlite_batch charter patch and preserve unrelated text; append "
-        "only when no related rule exists. Bind :old and :new instead of writing SQL literals. A correction plus a task "
+        "someone else. Use one sqlite_batch UPDATE to replace one exact span containing every related or conflicting "
+        "clause; preserve unrelated text and append only when no related rule exists. Bind :old and :new. A correction plus a task "
         "requires both the patch and the work. With no task, acknowledge briefly. Never save transient facts or mention "
         "the internal charter implementation."
     )
@@ -4292,7 +4316,7 @@ def _get_system_instruction(
         "For sales, recruiting/HR, VC, and company/person research, prefer structured people/company/social/funding sources; verify hard filters before listing prospects/candidates. "
         "For environmental or pollution/air-quality monitors, default to daily or at least six-hour checks unless the user explicitly asks for faster alerts. "
         "For reversible setup/data-entry work, use sensible names/placeholders/defaults and mention assumptions. For recurring monitors, alerts, digests, and sourcing jobs, default omitted timezone/channel/lookback/search criteria sensibly. "
-        "If the user says they will reach out later, asks you to stand by, or asks for no follow-up, send at most one brief acknowledgement with no question, plan, config update, or continued work. "
+        "For an FYI that asks for no action, reply only 'Got it, thanks.' Do not repeat details. "
 
         "Reason in thinking blocks. Chat is for content or deep-work updates. Act.\n\n"
 
@@ -4307,7 +4331,7 @@ def _get_system_instruction(
         "Do not invent work, results, preferences, or personal experiences.\n\n"
 
         "## Output Rules\n\n"
-        "Keep chat/outreach light. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial; separate sourced unavailability from research gaps. An owner report on 4+ items is unfinished without `Covered N/N` and every item/requested field in one channel-appropriate structured comparison: a table where supported, headings and bullets where not. Ground facts, numbers, units, and URLs in evidence. Use an adjacent $[link:...] exactly once on the item name; never invent/edit/substitute destinations or add a Link/Source column. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
+        "Keep chat/outreach light. For finite sets, grouped discovery isn't coverage: resolve/source each requested field. Label blockers partial and cite their source; separate sourced unavailability from research gaps. An owner report on 4+ items is unfinished without `Covered N/N` and every item/requested field in one channel-appropriate structured comparison: a table where supported, headings and bullets where not. Ground facts, numbers, units, and URLs in evidence. Use an adjacent $[link:...] exactly once on the item name; never invent/edit/substitute destinations or add a Link/Source column. Present requested data directly; omit unrelated/unavailable fields and follow-up offers after simple facts, prices, statuses, or lookups. "
         "Charts: create only when requested/materially useful. "
         "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
         "For generated images, paste create_image result.inline character-for-character. "
@@ -4345,7 +4369,7 @@ def _get_system_instruction(
         "ready route/credential -> use it; never read secret files to verify\n"
         "interactive/login/JS-only -> spawn_web_task; if active_browser_tasks >= 3 -> sleep_until_next_trigger\n"
         "bounded small visible report -> deliver directly; no SQLite\n"
-        "same URLs/items returned twice -> no new evidence; report result/shortfall, stop; no query variants\n"
+        "same URLs/items returned twice -> no new evidence; report result/shortfall, stop; never issue search-query variants together\n"
         "optional connector -> ready direct/public route wins unless user named connector\n"
         "```\n"
 
@@ -4384,7 +4408,7 @@ def _get_system_instruction(
         "exports, list-all, outreach, monitoring, or genuinely broader scope.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
-        "For explicit deep/exhaustive research and finite-set coverage, do not finalize from search results: after discovery, scrape/open at least 4 promising URLs (or every useful URL if fewer), then synthesize. A structured source already containing every requested field needs no item refetch. Snippets are leads, not sources. Start with one broad search, two if it misses an angle. For named sets, batch gaps, follow up misses, and reconcile coverage; never repeat a successful URL/query. Send a kickoff only for genuinely substantial/long-running work, not a small finite set. If sources support the memo, final next with linked evidence; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
+        "For explicit deep/exhaustive research and finite-set coverage, do not finalize from search results: after discovery, scrape/open at least 4 promising URLs (or every useful URL if fewer), then synthesize. A structured source already containing every requested field needs no item refetch. Snippets are leads, not sources. Start with one broad search, two if it misses an angle. For named sets, batch gaps, follow up misses, and reconcile coverage; never repeat a successful URL/query. Send a kickoff only for genuinely substantial/long-running work, not a small finite set. If supported, final next with links to 4 opened sources (or all if fewer); keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
         "Finished answers/briefings/charts/lookups/one-off research are not config changes; never store transient facts, results, or guesses in __agent_config or __agent_schedules. "
@@ -5238,7 +5262,12 @@ def _get_unified_history_prompt(
         mcp_task_result_record_ids[str(task.id)] = mcp_record.step_id
         tool_call_records.append(mcp_record)
 
-    paired_url_step_ids = set(fresh_tool_call_step_ids)
+    interrupted_tool_result_step_ids = _interrupted_tool_result_step_ids(
+        agent,
+        messages,
+        tool_call_records,
+    )
+    paired_url_step_ids = set(fresh_tool_call_step_ids) | interrupted_tool_result_step_ids
     if completed_tasks:
         newest_browser_result_id = browser_task_result_record_ids.get(str(completed_tasks[0].id))
         if newest_browser_result_id:
@@ -5259,6 +5288,7 @@ def _get_unified_history_prompt(
             create=is_source_bearing_tool(record.tool_name),
         ),
         paired_url_step_ids=paired_url_step_ids,
+        preserved_historical_step_ids=interrupted_tool_result_step_ids,
         named_model_tables=named_model_tables,
         named_model_columns=named_model_columns,
     )
