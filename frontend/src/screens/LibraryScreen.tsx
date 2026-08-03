@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, BadgeCheck, Heart, Loader2, Search } from 'lucide-react'
@@ -20,6 +21,45 @@ const MOST_POPULAR_KEY = '__most_popular__'
 const PAGE_SIZE = 24
 const PREVIEW_SLOTS = 4
 const PREVIEW_INTERVAL_MS = 5400
+const LIBRARY_HISTORY_STATE_KEY = '__gobiiLibraryFilters'
+
+type LibraryHistoryFilters = {
+  category: string | null
+  categorySlug: string
+  officialOnly: boolean
+}
+
+function buildLibraryUrl(categorySlug: string, officialOnly: boolean): string {
+  const pathname = categorySlug ? `/library/${encodeURIComponent(categorySlug)}/` : '/library/'
+  return officialOnly ? `${pathname}?official=true` : pathname
+}
+
+function readLibraryHistoryFilters(state: unknown): LibraryHistoryFilters | null {
+  if (!state || typeof state !== 'object') {
+    return null
+  }
+  const filters = (state as Record<string, unknown>)[LIBRARY_HISTORY_STATE_KEY]
+  if (!filters || typeof filters !== 'object') {
+    return null
+  }
+  const candidate = filters as Record<string, unknown>
+  if (
+    (candidate.category !== null && typeof candidate.category !== 'string') ||
+    typeof candidate.categorySlug !== 'string' ||
+    typeof candidate.officialOnly !== 'boolean'
+  ) {
+    return null
+  }
+  return {
+    category: candidate.category as string | null,
+    categorySlug: candidate.categorySlug,
+    officialOnly: candidate.officialOnly,
+  }
+}
+
+function shouldNavigateInPlace(event: ReactMouseEvent<HTMLAnchorElement>): boolean {
+  return !event.defaultPrevented && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+}
 
 const STATIC_LOGOS = {
   greenhouse: '/static/images/integration-logos/greenhouse.svg',
@@ -701,6 +741,7 @@ export function LibraryScreen({
   initialData,
 }: LibraryScreenProps) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(initialCategory || null)
+  const [selectedCategorySlug, setSelectedCategorySlug] = useState(initialData?.selectedCategorySlug ?? '')
   const [officialOnly, setOfficialOnly] = useState(initialOfficialOnly || Boolean(initialData?.officialOnly))
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
@@ -709,6 +750,11 @@ export function LibraryScreen({
   const normalizedSearchQuery = debouncedSearchQuery.trim()
   const queryClient = useQueryClient()
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const initialHistoryFiltersRef = useRef<LibraryHistoryFilters>({
+    category: initialCategory || null,
+    categorySlug: initialData?.selectedCategorySlug ?? '',
+    officialOnly: initialOfficialOnly || Boolean(initialData?.officialOnly),
+  })
   const reducedMotion = useReducedMotion()
   const initialSelectedCategory = initialCategory || null
   const initialSelectedOfficialOnly = initialOfficialOnly || Boolean(initialData?.officialOnly)
@@ -735,6 +781,31 @@ export function LibraryScreen({
       window.clearTimeout(timeoutId)
     }
   }, [searchQuery])
+
+  useEffect(() => {
+    const initialFilters = initialHistoryFiltersRef.current
+    window.history.replaceState(
+      {
+        ...(window.history.state ?? {}),
+        [LIBRARY_HISTORY_STATE_KEY]: initialFilters,
+      },
+      '',
+      window.location.href,
+    )
+
+    const handlePopState = (event: PopStateEvent) => {
+      const filters = readLibraryHistoryFilters(event.state)
+      if (!filters) {
+        return
+      }
+      setSelectedCategory(filters.category)
+      setSelectedCategorySlug(filters.categorySlug)
+      setOfficialOnly(filters.officialOnly)
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   // "/" focuses search, but never while the user is typing somewhere else.
   useEffect(() => {
@@ -807,10 +878,10 @@ export function LibraryScreen({
     },
   })
 
-  const pages = libraryQuery.data?.pages ?? []
+  const pages = useMemo(() => libraryQuery.data?.pages ?? [], [libraryQuery.data?.pages])
   const firstPage = pages[0]
   const agents = useMemo(() => pages.flatMap((page) => page.agents), [pages])
-  const topCategories = firstPage?.topCategories ?? []
+  const topCategories = useMemo(() => firstPage?.topCategories ?? [], [firstPage?.topCategories])
   const totalAgents = firstPage?.totalAgents ?? 0
   const libraryTotalAgents = firstPage?.libraryTotalAgents ?? totalAgents
   const officialTotalAgents = firstPage?.officialTotalAgents ?? (officialOnly ? totalAgents : 0)
@@ -825,18 +896,8 @@ export function LibraryScreen({
     if (!selectedCategory || topCategories.some((category) => category.name === selectedCategory)) {
       return topCategories
     }
-    return [{ name: selectedCategory, count: totalAgents }, ...topCategories]
-  }, [selectedCategory, topCategories, totalAgents])
-
-  useEffect(() => {
-    if (!selectedCategory || categoryFilters.length === 0) {
-      return
-    }
-    const validCategories = new Set(categoryFilters.map((item) => item.name))
-    if (!validCategories.has(selectedCategory)) {
-      setSelectedCategory(null)
-    }
-  }, [categoryFilters, selectedCategory])
+    return [{ name: selectedCategory, slug: selectedCategorySlug, count: totalAgents }, ...topCategories]
+  }, [selectedCategory, selectedCategorySlug, topCategories, totalAgents])
 
   const previewAgents = useMemo(() => agents.slice(0, PREVIEW_SLOTS), [agents])
   const activeAgent = useMemo(() => {
@@ -909,9 +970,37 @@ export function LibraryScreen({
       ? 'Browse AI employee templates maintained by Gobii for common workflows.'
       : 'Choose a role from Gobii and the community, then customize the AI employee for your workflow.'
 
+  const navigateToFilters = useCallback((filters: LibraryHistoryFilters) => {
+    const nextUrl = buildLibraryUrl(filters.categorySlug, filters.officialOnly)
+    const currentUrl = `${window.location.pathname}${window.location.search}`
+    if (nextUrl !== currentUrl) {
+      window.history.pushState(
+        {
+          ...(window.history.state ?? {}),
+          [LIBRARY_HISTORY_STATE_KEY]: filters,
+        },
+        '',
+        nextUrl,
+      )
+    }
+    setSelectedCategory(filters.category)
+    setSelectedCategorySlug(filters.categorySlug)
+    setOfficialOnly(filters.officialOnly)
+  }, [])
+
+  const handleFilterClick = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>, filters: LibraryHistoryFilters) => {
+      if (!shouldNavigateInPlace(event)) {
+        return
+      }
+      event.preventDefault()
+      navigateToFilters(filters)
+    },
+    [navigateToFilters],
+  )
+
   const clearFilters = () => {
-    setSelectedCategory(null)
-    setOfficialOnly(false)
+    navigateToFilters({ category: null, categorySlug: '', officialOnly: false })
     setSearchQuery('')
     setDebouncedSearchQuery('')
   }
@@ -966,38 +1055,55 @@ export function LibraryScreen({
       </div>
 
       <nav className="gklib-pills" aria-label="Filter templates">
-        <button
-          type="button"
-          onClick={() => setSelectedCategory(null)}
+        <a
+          href={buildLibraryUrl('', officialOnly)}
+          onClick={(event) => handleFilterClick(event, { category: null, categorySlug: '', officialOnly })}
           className={`gklib-pill${isMostPopularSelected ? ' is-on' : ''}`}
-          aria-pressed={isMostPopularSelected}
+          aria-current={isMostPopularSelected ? 'true' : undefined}
+          rel={officialOnly ? 'nofollow' : undefined}
         >
           {MOST_POPULAR_LABEL}
           <span className="gklib-n">{mostPopularCount}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setOfficialOnly(!officialOnly)}
+        </a>
+        <a
+          href={buildLibraryUrl(selectedCategorySlug, !officialOnly)}
+          onClick={(event) =>
+            handleFilterClick(event, {
+              category: selectedCategory,
+              categorySlug: selectedCategorySlug,
+              officialOnly: !officialOnly,
+            })
+          }
           className={`gklib-pill gklib-pill-official${officialOnly ? ' is-on' : ''}`}
-          aria-pressed={officialOnly}
+          aria-current={officialOnly ? 'true' : undefined}
+          rel="nofollow"
         >
           <BadgeCheck className="size-3.5" aria-hidden="true" />
           Official
           <span className="gklib-n">{officialTotalAgents}</span>
-        </button>
+        </a>
         {categoryFilters.map((category) => {
           const isActive = selectedCategory === category.name
+          const nextCategory = isActive ? null : category.name
+          const nextCategorySlug = isActive ? '' : category.slug
           return (
-            <button
+            <a
               key={category.name}
-              type="button"
-              onClick={() => setSelectedCategory(isActive ? null : category.name)}
+              href={buildLibraryUrl(nextCategorySlug, officialOnly)}
+              onClick={(event) =>
+                handleFilterClick(event, {
+                  category: nextCategory,
+                  categorySlug: nextCategorySlug,
+                  officialOnly,
+                })
+              }
               className={`gklib-pill${isActive ? ' is-on' : ''}`}
-              aria-pressed={isActive}
+              aria-current={isActive ? 'true' : undefined}
+              rel={officialOnly ? 'nofollow' : undefined}
             >
               {category.name}
               <span className="gklib-n">{category.count}</span>
-            </button>
+            </a>
           )
         })}
       </nav>

@@ -127,7 +127,11 @@ def _build_top_categories(*, official_only: bool = False) -> list[dict[str, Any]
         .order_by("-count", Lower("normalized_category"))[:10]
     )
     return [
-        {"name": row["normalized_category"], "count": row["count"]}
+        {
+            "name": row["normalized_category"],
+            "slug": public_template_category_slug_from_label(row["normalized_category"]),
+            "count": row["count"],
+        }
         for row in category_rows
     ]
 
@@ -139,6 +143,7 @@ def _get_top_categories(*, official_only: bool = False) -> list[dict[str, Any]]:
         valid_items = all(
             isinstance(item, dict)
             and isinstance(item.get("name"), str)
+            and isinstance(item.get("slug"), str)
             and isinstance(item.get("count"), int)
             for item in cached
         )
@@ -329,6 +334,11 @@ def _build_library_payload(
     return {
         "agents": page_agents,
         "topCategories": top_categories,
+        "selectedCategorySlug": (
+            public_template_category_slug_from_label(normalized_category)
+            if normalized_category
+            else ""
+        ),
         "totalAgents": total_agents,
         "libraryTotalAgents": library_total_agents,
         "officialTotalAgents": official_total_agents,

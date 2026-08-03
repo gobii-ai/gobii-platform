@@ -206,6 +206,7 @@
   cursor: pointer;
   border: 1px solid transparent;
   white-space: nowrap;
+  text-decoration: none;
   background: linear-gradient(rgba(20, 13, 38, 0.9), rgba(20, 13, 38, 0.9)) padding-box,
     linear-gradient(120deg, rgba(196, 181, 253, 0.35), rgba(255, 255, 255, 0.06)) border-box;
   transition: color 0.18s, box-shadow 0.18s;

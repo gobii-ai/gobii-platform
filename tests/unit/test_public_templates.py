@@ -1762,11 +1762,17 @@ class LibraryViewTests(TestCase):
         self.assertContains(response, public_template.display_name)
         self.assertContains(response, curated_template.display_name)
         self.assertNotContains(response, "Private Library Template")
+        soup = BeautifulSoup(response.content, "html.parser")
+        category_links = {
+            link.get_text(" ", strip=True): link.get("href")
+            for link in soup.select(".gklibf-pills a.gklibf-pill")
+        }
+        self.assertEqual(category_links["Operations 1"], "/library/operations/")
+        self.assertEqual(category_links["Team Ops 1"], "/library/team-ops/")
         self.assertContains(
             response,
             'data-analytics-cta-tracking-enabled="true"',
         )
-        soup = BeautifulSoup(response.content, "html.parser")
         self.assertEqual(len(soup.find_all("h1")), 1)
         custom_agent_link = soup.find(
             "a",
@@ -1793,7 +1799,17 @@ class LibraryViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["library_initial_category"], "HR & Recruiting")
         self.assertEqual(response.context["library_initial_payload"]["totalAgents"], 1)
+        self.assertEqual(response.context["library_initial_payload"]["selectedCategorySlug"], "recruiting")
+        recruiting_category = next(
+            category
+            for category in response.context["library_initial_payload"]["topCategories"]
+            if category["name"] == "HR & Recruiting"
+        )
+        self.assertEqual(recruiting_category["slug"], "recruiting")
         self.assertContains(response, template.display_name)
+        soup = BeautifulSoup(response.content, "html.parser")
+        active_category_link = soup.select_one(".gklibf-pills a.gklibf-pill.is-on")
+        self.assertEqual(active_category_link["href"], "/library/")
         self.assertEqual(alias_response.status_code, 301)
         self.assertEqual(alias_response["Location"], "/library/recruiting/")
 
