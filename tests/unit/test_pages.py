@@ -1085,6 +1085,13 @@ class HomePageTests(TestCase):
         }
         self.assertIn(static("css/home_tailwind.css"), stylesheet_urls)
         self.assertNotIn(static("css/tailwind.css"), stylesheet_urls)
+        immersive_assets = response.context["immersive_app_assets"]
+        for href in immersive_assets.styles:
+            self.assertIsNone(
+                soup.find("link", rel="preload", attrs={"as": "style", "href": href})
+            )
+        for src in immersive_assets.scripts:
+            self.assertIsNone(soup.find("link", rel="modulepreload", href=src))
         page_text = soup.get_text(" ")
         normalized_page_text = re.sub(r"\s+", " ", page_text)
         normalized_page_text = (
@@ -1155,6 +1162,13 @@ class HomePageTests(TestCase):
         }
         self.assertIn(static("css/tailwind.css"), stylesheet_urls)
         self.assertNotIn(static("css/home_tailwind.css"), stylesheet_urls)
+        immersive_assets = response.context["immersive_app_assets"]
+        for href in immersive_assets.styles:
+            self.assertIsNotNone(
+                soup.find("link", rel="preload", attrs={"as": "style", "href": href})
+            )
+        for src in immersive_assets.scripts:
+            self.assertIsNotNone(soup.find("link", rel="modulepreload", href=src))
         self.assertEqual(form.find("textarea", {"name": "charter"}).get_text(strip=True), "")
         self.assertIsNone(soup.find("link", rel="canonical"))
         self.assertEqual(

@@ -47,13 +47,15 @@
   {% if home_structured_data_json %}
   <script type="application/ld+json">{{ home_structured_data_json }}</script>
   {% endif %}
-  {% if immersive_app_assets %}
-    {% for href in immersive_app_assets.styles %}
-      <link rel="preload" as="style" href="{{ href }}">
-    {% endfor %}
-    {% for src in immersive_app_assets.scripts %}
-      <link rel="modulepreload" href="{{ src }}">
-    {% endfor %}
+  {% if not home_use_k %}
+    {% if immersive_app_assets %}
+      {% for href in immersive_app_assets.styles %}
+        <link rel="preload" as="style" href="{{ href }}">
+      {% endfor %}
+      {% for src in immersive_app_assets.scripts %}
+        <link rel="modulepreload" href="{{ src }}">
+      {% endfor %}
+    {% endif %}
   {% endif %}
 {% endblock %}
 {% block early_head_styles %}
