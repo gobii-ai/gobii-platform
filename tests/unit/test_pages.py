@@ -1085,6 +1085,12 @@ class HomePageTests(TestCase):
         }
         self.assertIn(static("css/home_tailwind.css"), stylesheet_urls)
         self.assertNotIn(static("css/tailwind.css"), stylesheet_urls)
+        undimensioned_images = [
+            image.get("src")
+            for image in soup.select("#main-content img")
+            if not image.get("width") or not image.get("height")
+        ]
+        self.assertEqual(undimensioned_images, [])
         self.assertIsNone(
             soup.find(
                 "script",
