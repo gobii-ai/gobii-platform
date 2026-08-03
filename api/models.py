@@ -6463,6 +6463,9 @@ class ToolFriendlyName(models.Model):
 
 
 class PersistentAgent(models.Model):
+    # Bump this whenever thumbnail encoding changes so immutable URLs and queued jobs rotate together.
+    AVATAR_THUMBNAIL_FORMAT_REVISION = "webp-q85-v1"
+
     class MiniDescriptionMode(models.TextChoices):
         AUTO = "auto", "Automatic"
         MANUAL = "manual", "Manual"
@@ -6849,7 +6852,7 @@ class PersistentAgent(models.Model):
         file_field = self.avatar
         if not self.has_avatar:
             return None
-        version_parts = [file_field.name]
+        version_parts = [file_field.name, self.AVATAR_THUMBNAIL_FORMAT_REVISION]
         if self.updated_at:
             version_parts.append(self.updated_at.isoformat())
         return self.get_avatar_version_for_name(":".join(version_parts))

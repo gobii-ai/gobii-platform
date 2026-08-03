@@ -8,7 +8,9 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 
 AGENT_AVATAR_THUMBNAIL_SIZE = 128
-AGENT_AVATAR_THUMBNAIL_CONTENT_TYPE = "image/png"
+AGENT_AVATAR_THUMBNAIL_CONTENT_TYPE = "image/webp"
+AGENT_AVATAR_THUMBNAIL_QUALITY = 85
+AGENT_AVATAR_THUMBNAIL_METHOD = 6
 
 
 class AvatarThumbnailUnavailable(Exception):
@@ -21,7 +23,7 @@ def _is_missing_s3_object(exc: ClientError) -> bool:
 
 
 def agent_avatar_thumbnail_name(agent_id, avatar_version: str) -> str:
-    return f"agent_avatar_thumbnails/{agent_id}/{avatar_version}.png"
+    return f"agent_avatar_thumbnails/{agent_id}/{avatar_version}.webp"
 
 
 def generate_agent_avatar_thumbnail(storage, original_name: str, thumbnail_name: str) -> None:
@@ -35,7 +37,12 @@ def generate_agent_avatar_thumbnail(storage, original_name: str, thumbnail_name:
                     method=Image.Resampling.LANCZOS,
                 )
                 output = io.BytesIO()
-                thumbnail.convert("RGBA").save(output, format="PNG", optimize=True)
+                thumbnail.convert("RGBA").save(
+                    output,
+                    format="WEBP",
+                    quality=AGENT_AVATAR_THUMBNAIL_QUALITY,
+                    method=AGENT_AVATAR_THUMBNAIL_METHOD,
+                )
     except (FileNotFoundError, OSError, NotFound, UnidentifiedImageError) as exc:
         raise AvatarThumbnailUnavailable("Avatar not found.") from exc
     except ClientError as exc:

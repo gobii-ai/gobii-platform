@@ -222,13 +222,18 @@ class AgentAvatarGenerationTests(TestCase):
                 model="test-model",
                 error_detail=None,
             ),
-        ):
-            generate_agent_avatar_task.run(str(agent.id), charter_hash)
+        ), patch(
+            "api.tasks.avatar_thumbnails.enqueue_agent_avatar_thumbnail"
+        ) as mocked_enqueue_thumbnail:
+            with self.captureOnCommitCallbacks(execute=True):
+                generate_agent_avatar_task.run(str(agent.id), charter_hash)
 
         agent.refresh_from_db()
         self.assertTrue(agent.avatar)
         self.assertEqual(agent.avatar_charter_hash, charter_hash)
         self.assertEqual(agent.avatar_requested_hash, "")
+        mocked_enqueue_thumbnail.assert_called_once()
+        self.assertEqual(mocked_enqueue_thumbnail.call_args.args[0].id, agent.id)
 
     def test_generate_agent_avatar_task_skips_eval_agent_and_clears_request(self):
         agent = self._create_agent(execution_environment="eval")

@@ -29,9 +29,13 @@ def _test_storages(media_root: str) -> dict:
     }
 
 
-def _image_bytes(size: tuple[int, int] = (512, 384), color: tuple[int, int, int] = (24, 96, 160)) -> bytes:
+def _image_bytes(
+    size: tuple[int, int] = (512, 384),
+    color: tuple[int, ...] = (24, 96, 160),
+    mode: str = "RGB",
+) -> bytes:
     output = io.BytesIO()
-    Image.new("RGB", size, color).save(output, format="PNG")
+    Image.new(mode, size, color).save(output, format="PNG")
     return output.getvalue()
 
 
@@ -68,8 +72,12 @@ class AgentAvatarThumbnailTests(TestCase):
         self.client = Client()
         self.client.force_login(self.user)
 
-    def _save_avatar(self, name: str = "avatar.png") -> None:
-        self.agent.avatar.save(name, ContentFile(_image_bytes()), save=True)
+    def _save_avatar(self, name: str = "avatar.png", image_bytes: bytes | None = None) -> None:
+        self.agent.avatar.save(
+            name,
+            ContentFile(image_bytes if image_bytes is not None else _image_bytes()),
+            save=True,
+        )
         self.agent.refresh_from_db()
 
     def test_thumbnail_endpoint_generates_cached_thumbnail(self):
@@ -77,14 +85,15 @@ class AgentAvatarThumbnailTests(TestCase):
 
         response = self.client.get(reverse("agent_avatar_thumbnail", kwargs={"pk": self.agent.id}))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "image/png")
+        self.assertEqual(response["Content-Type"], "image/webp")
 
         thumbnail_data = _response_bytes(response)
         with Image.open(io.BytesIO(thumbnail_data)) as image:
-            self.assertLessEqual(image.width, AGENT_AVATAR_THUMBNAIL_SIZE)
-            self.assertLessEqual(image.height, AGENT_AVATAR_THUMBNAIL_SIZE)
+            self.assertEqual(image.format, "WEBP")
+            self.assertEqual(image.size, (AGENT_AVATAR_THUMBNAIL_SIZE, AGENT_AVATAR_THUMBNAIL_SIZE))
 
         thumbnail_name = _agent_avatar_thumbnail_name(self.agent.id, self.agent.get_avatar_thumbnail_version())
+        self.assertTrue(thumbnail_name.endswith(".webp"))
         self.assertTrue(default_storage.exists(thumbnail_name))
 
         with (
@@ -94,9 +103,25 @@ class AgentAvatarThumbnailTests(TestCase):
             cached_response = self.client.get(reverse("agent_avatar_thumbnail", kwargs={"pk": self.agent.id}))
 
         self.assertEqual(cached_response.status_code, 200)
-        self.assertEqual(cached_response["Content-Type"], "image/png")
+        self.assertEqual(cached_response["Content-Type"], "image/webp")
         self.assertEqual(cached_response["Cache-Control"], "private, max-age=86400, immutable")
         self.assertTrue(_response_bytes(cached_response))
+
+    def test_thumbnail_preserves_transparency_in_webp_output(self):
+        self._save_avatar(
+            image_bytes=_image_bytes(
+                color=(24, 96, 160, 96),
+                mode="RGBA",
+            )
+        )
+
+        response = self.client.get(reverse("agent_avatar_thumbnail", kwargs={"pk": self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        with Image.open(io.BytesIO(_response_bytes(response))) as image:
+            self.assertEqual(image.format, "WEBP")
+            self.assertEqual(image.mode, "RGBA")
+            self.assertEqual(image.getpixel((64, 64))[3], 96)
 
     def test_thumbnail_task_is_idempotent_and_rejects_stale_version(self):
         self._save_avatar()
@@ -130,6 +155,17 @@ class AgentAvatarThumbnailTests(TestCase):
             original_thumbnail_name,
         )
 
+    def test_thumbnail_format_revision_rotates_private_url_and_public_token(self):
+        self._save_avatar()
+        original_version = self.agent.get_avatar_thumbnail_version()
+        original_url = self.agent.get_avatar_thumbnail_url()
+        original_public_url = build_public_agent_avatar_thumbnail_url(self.agent)
+
+        with patch.object(PersistentAgent, "AVATAR_THUMBNAIL_FORMAT_REVISION", "webp-test-next"):
+            self.assertNotEqual(self.agent.get_avatar_thumbnail_version(), original_version)
+            self.assertNotEqual(self.agent.get_avatar_thumbnail_url(), original_url)
+            self.assertNotEqual(build_public_agent_avatar_thumbnail_url(self.agent), original_public_url)
+
     def test_thumbnail_endpoint_returns_404_without_avatar(self):
         response = self.client.get(reverse("agent_avatar_thumbnail", kwargs={"pk": self.agent.id}))
 
@@ -148,7 +184,7 @@ class AgentAvatarThumbnailTests(TestCase):
         response = anonymous_client.get(public_url.removeprefix("https://app.example.test"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "image/png")
+        self.assertEqual(response["Content-Type"], "image/webp")
         self.assertEqual(response["Cache-Control"], "public, max-age=86400")
         self.assertTrue(_response_bytes(response))
 
