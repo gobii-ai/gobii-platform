@@ -237,6 +237,18 @@ class TextAnalysisTests(SimpleTestCase):
         self.assertEqual(analysis.csv_info.column_types[2], "float")  # price
         self.assertEqual(analysis.csv_info.column_types[3], "text")  # active (bool as text)
 
+    def test_repeated_comma_boilerplate_is_not_misclassified_as_csv(self):
+        text = (
+            ("Archive note, routine approvals, no source.\n" * 20)
+            + "name: Alice\nrole: Controller\nprofile_url: https://example.test/alice\n"
+            + ("Archive note, routine approvals, no source.\n" * 20)
+        )
+
+        analysis = analyze_text(text)
+
+        self.assertNotEqual(analysis.format, "csv")
+        self.assertIsNone(analysis.csv_info)
+
     def test_detects_markdown_format(self):
         text = """# Main Heading
 

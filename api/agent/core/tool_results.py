@@ -498,6 +498,11 @@ def prepare_tool_results_for_prompt(
         meta, stored_json, stored_text, analysis = _summarize_result(result_text, result_id, record.tool_name)
         stored_in_db = record.tool_name not in EXCLUDED_TOOL_NAMES
         is_analysis_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
+        is_unwrapped_http_body = (
+            record.tool_name == "http_request"
+            and stored_text is not None
+            and stored_text != result_text
+        )
 
         recency_position = recency_positions.get(record.step_id)
         is_fresh_tool_call = record.step_id in fresh_step_ids
@@ -524,7 +529,11 @@ def prepare_tool_results_for_prompt(
                     )
                 except Exception:
                     pass  # Optimistic - no hint is fine
-        elif is_analysis_eligible and is_fresh_tool_call and _should_add_barbell_hint(analysis, meta):
+        elif (
+            is_analysis_eligible
+            and (is_fresh_tool_call or is_unwrapped_http_body)
+            and _should_add_barbell_hint(analysis, meta)
+        ):
             analysis_text = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
             context_hint = hint_from_unstructured_text(analysis_text)
 

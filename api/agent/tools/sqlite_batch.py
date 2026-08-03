@@ -2475,8 +2475,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. True for action-producing queue reads; false for answer SELECTs before replying "
-                            "because returned rows continue the turn. Never reread SQLite."
+                            "REQUIRED. True for action-producing queue reads (all queue reads); false for answer SELECTs "
+                            "before replying. Never reread SQLite."
                         ),
                     },
                 },
