@@ -252,5 +252,8 @@ class CompactionTests(TestCase):
         self.assertIn("Inbound discord from Will in #growth:", user_prompt)
         self.assertIn("Outbound email to owner@example.test:", user_prompt)
         self.assertIn("Replace superseded state", system_prompt)
+        self.assertIn("never retain replaced", system_prompt)
+        self.assertIn("collapse closed batches to counts", system_prompt)
         self.assertIn("exact identifiers", system_prompt)
         self.assertIn("unresolved work", system_prompt)
+        self.assertIn("under 2,000 characters", system_prompt)

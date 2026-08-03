@@ -1622,6 +1622,13 @@ def _render_prompt_context_once(
             non_shrinkable=True,
         )
 
+    important_group.section_text(
+        "current_plan",
+        format_current_plan_for_prompt(agent),
+        weight=3,
+        non_shrinkable=True,
+    )
+
     if agent.charter:
         important_group.section_text(
             "charter",
@@ -1644,13 +1651,6 @@ def _render_prompt_context_once(
             weight=5,
             non_shrinkable=True
         )
-
-    important_group.section_text(
-        "current_plan",
-        format_current_plan_for_prompt(agent),
-        weight=3,
-        non_shrinkable=True,
-    )
 
     # Schedule block
     schedule_str = _format_agent_schedule_context(agent)

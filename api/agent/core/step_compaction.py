@@ -441,7 +441,7 @@ def llm_summarise_steps(
             "content": (
                 "Maintain a compact current-state summary of an agent's execution. Preserve durable outcomes, exact "
                 "identifiers, created artifacts, source provenance, unresolved work, and active blockers. Replace superseded "
-                "state; omit repeated attempts, resolved mechanics, and transient reasoning. Given the existing summary and new raw steps, rewrite the concise execution state rather than appending a log."
+                "state; omit repeated attempts, resolved mechanics, and transient reasoning. Default to under 2,000 characters; exceed that only when omitting unresolved facts would change a decision. Given the existing summary and new raw steps, rewrite the concise execution state rather than appending a log."
             ),
         },
         {

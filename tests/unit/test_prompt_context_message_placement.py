@@ -71,7 +71,7 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("batch gaps, follow up misses, and reconcile coverage", system_message["content"])
         self.assertIn("never repeat a successful URL/query", system_message["content"])
 
-    def test_durable_charter_precedes_volatile_runtime_state(self):
+    def test_active_plan_precedes_charter_and_charter_precedes_schedule(self):
         self.agent.charter = "DURABLE CHARTER CACHE ANCHOR"
         self.agent.schedule = "0 9 * * 1"
         self.agent.save(update_fields=["charter", "schedule", "updated_at"])
@@ -83,8 +83,8 @@ class PromptContextSqlitePlacementTests(TestCase):
 
         user_content = next(message["content"] for message in context if message["role"] == "user")
         self.assertLess(
-            user_content.index("DURABLE CHARTER CACHE ANCHOR"),
             user_content.index("<current_plan>"),
+            user_content.index("DURABLE CHARTER CACHE ANCHOR"),
         )
         self.assertLess(
             user_content.index("DURABLE CHARTER CACHE ANCHOR"),

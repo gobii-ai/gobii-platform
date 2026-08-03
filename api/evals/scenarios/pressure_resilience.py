@@ -764,7 +764,7 @@ class LoadedCurrentStatePressureScenario(EvalScenario, ScenarioExecutionTools):
             "https://evidence.example.test/cases/case-31",
         ),
     )
-    stale_terms = ("data import", "Mira", "blocked by legal review")
+    stale_terms = ("blocked by data import", "owned by Mira", "blocked by legal review")
 
     @staticmethod
     def _loaded_charter() -> str:
