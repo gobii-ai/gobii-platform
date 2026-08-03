@@ -11,6 +11,7 @@
     loaderScript.dataset.modalSrc,
   ].filter(Boolean);
   const turnstileSource = loaderScript.dataset.turnstileSrc || "";
+  const USER_ACTION_LOAD_TIMEOUT_MS = 8000;
   const loadedSources = new Set();
   const loadingSources = new Map();
   let assetsPromise = null;
@@ -179,13 +180,29 @@
     }
   }
 
+  function ensureAssetsLoadedForAction() {
+    let timeoutId = null;
+    const timeoutPromise = new Promise((_resolve, reject) => {
+      timeoutId = window.setTimeout(() => {
+        reject(new Error("Deferred authentication assets timed out."));
+      }, USER_ACTION_LOAD_TIMEOUT_MS);
+    });
+
+    return Promise.race([ensureAssetsLoaded(), timeoutPromise])
+      .finally(() => {
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+        }
+      });
+  }
+
   function runPendingAction(action) {
     if (pendingAction) {
       return;
     }
     pendingAction = action;
     showLoadingModal();
-    ensureAssetsLoaded()
+    ensureAssetsLoadedForAction()
       .then(() => {
         const completedAction = pendingAction;
         pendingAction = null;
