@@ -37,11 +37,44 @@ from ..services.task_webhooks import trigger_task_webhook
 from ..services.referral_service import ReferralService
 from ..openrouter import DEFAULT_API_BASE, get_attribution_headers
 from util import EphemeralXvfb, should_use_ephemeral_xvfb
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 tracer = trace.get_tracer('gobii.utils')
 
 _COST_PRECISION = Decimal("0.000001")
 _VALID_VISION_DETAIL_LEVELS = {"auto", "low", "high"}
+
+
+def _track_task_completion_analytics(task_obj: BrowserUseAgentTask, owner: object | None) -> None:
+    """Emit the canonical customer-value event for a real completed browser task."""
+    if (
+        task_obj.status != BrowserUseAgentTask.StatusChoices.COMPLETED
+        or task_obj.eval_run_id
+        or not task_obj.user_id
+    ):
+        return
+
+    duration_seconds = None
+    if task_obj.created_at and task_obj.updated_at:
+        duration_seconds = max((task_obj.updated_at - task_obj.created_at).total_seconds(), 0)
+
+    properties = Analytics.with_org_properties(
+        {
+            "task_id": str(task_obj.id),
+            "agent_id": str(task_obj.agent_id) if task_obj.agent_id else None,
+            "status": str(task_obj.status),
+            "duration_seconds": duration_seconds,
+        },
+        organization=owner if task_obj.organization_id else None,
+    )
+    Analytics.track_event(
+        user_id=task_obj.user_id,
+        event=AnalyticsEvent.TASK_COMPLETED,
+        source=AnalyticsSource.AGENT,
+        properties=properties,
+        user=task_obj.user,
+        billing_owner=owner,
+    )
 
 
 def _quantize_cost_value(value: Any) -> Optional[Decimal]:
@@ -2161,6 +2194,13 @@ def _process_browser_use_task_core(
                     "total_cost",
                     "filespace_artifacts",
                 ])
+
+            try:
+                _track_task_completion_analytics(task_obj, owner)
+            except Exception:
+                # Completion is durable at this point; analytics must never turn
+                # a successful task into a failed worker execution.
+                logger.exception("Failed to track completion analytics for task %s", task_obj.id)
 
             # Trigger agent event processing if this task belongs to a persistent agent
             if should_schedule_follow_up and task_obj.agent:

@@ -1012,6 +1012,8 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_SENT,
                 source=AnalyticsSource.AGENT,
                 properties=props.copy(),
+                user=message.owner_agent.user,
+                billing_owner=message.owner_agent.owner,
             )
             return
 
@@ -1364,6 +1366,8 @@ def deliver_agent_email(message: PersistentAgentMessage):
             event=AnalyticsEvent.PERSISTENT_AGENT_EMAIL_SENT,
             source=AnalyticsSource.AGENT,
             properties=success_props.copy(),
+            user=message.owner_agent.user,
+            billing_owner=message.owner_agent.owner,
         )
 
     except AnymailAPIError as e:
@@ -1555,6 +1559,8 @@ def deliver_agent_sms(message: PersistentAgentMessage):
             event=AnalyticsEvent.PERSISTENT_AGENT_SMS_SENT,
             source=AnalyticsSource.AGENT,
             properties=sms_props.copy(),
+            user=message.owner_agent.user,
+            billing_owner=message.owner_agent.owner,
         )
     else:
         logger.error("Failed to send agent SMS message %s via Twilio.", message.id)

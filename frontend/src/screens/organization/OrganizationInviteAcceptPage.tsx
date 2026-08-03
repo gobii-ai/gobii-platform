@@ -1,4 +1,5 @@
 import { acceptOrganizationInvite, type OrganizationInviteAcceptPayload } from '../../api/organization'
+import { applyAnalyticsBillingContext } from '../../util/analytics'
 import { InviteResponsePage, type InviteResponseConfig } from '../invitations/InviteResponsePage'
 
 function issueTitle(issue: OrganizationInviteAcceptPayload['issue']): string {
@@ -42,11 +43,13 @@ const ORGANIZATION_INVITE_CONFIG: InviteResponseConfig<OrganizationInviteAcceptP
   actionLabel: ({ status }) => status === 'accepted' ? 'Open organization' : 'Continue',
   onSuccess: (payload) => {
     if (!payload.organization) return
+    applyAnalyticsBillingContext(payload.billing_context)
     window.dispatchEvent(new CustomEvent('gobii:console-context-updated', {
       detail: {
         type: 'organization',
         id: payload.organization.id,
         name: payload.organization.name,
+        billingContext: payload.billing_context ?? {},
       },
     }))
   },

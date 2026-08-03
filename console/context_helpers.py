@@ -162,6 +162,24 @@ def resolve_staff_console_context(user: AbstractBaseUser, override: dict) -> Con
     )
 
 
+def resolve_console_context_owner(
+    context_info: ConsoleContextInfo,
+    actor_user: AbstractBaseUser,
+    *,
+    allow_personal_override: bool = False,
+):
+    """Return the account owner represented by a resolved console context."""
+    current_context = context_info.current_context
+    if current_context.type == "organization":
+        if context_info.current_membership is not None:
+            return context_info.current_membership.org
+        return Organization.objects.filter(id=current_context.id).first()
+
+    if allow_personal_override and str(current_context.id) != str(actor_user.id):
+        return get_user_model().objects.filter(id=current_context.id).first()
+    return actor_user
+
+
 def build_console_context(request) -> ConsoleContextInfo:
     """Resolve the active console context for a request.
 

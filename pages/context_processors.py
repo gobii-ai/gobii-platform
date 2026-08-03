@@ -204,6 +204,27 @@ def analytics(request):
     Adds analytics tokens to the context.
     This is used for Google Analytics and other tracking services.
     """
+    billing_context = {}
+    if request.user.is_authenticated and Analytics.is_web_analytics_enabled():
+        try:
+            from console.context_helpers import build_console_context
+
+            context_info = build_console_context(request)
+            billing_owner = (
+                context_info.current_membership.org
+                if context_info.current_context.type == "organization"
+                and context_info.current_membership is not None
+                else request.user
+            )
+        except Exception:
+            # Context selection is also optional analytics work.
+            logger.exception(
+                "Failed to resolve web analytics owner for user %s",
+                request.user.id,
+            )
+            billing_owner = request.user
+        billing_context = Analytics.web_billing_context(request.user, billing_owner)
+
     analyticsContext = {
         'analytics': {
             'tokens': {
@@ -224,6 +245,7 @@ def analytics(request):
                 ),
                 "ip": Analytics.get_client_ip(request),
                 "timestamp": datetime.utcnow().isoformat() + "Z",
+                "billing_context": billing_context,
             }
         }
     }

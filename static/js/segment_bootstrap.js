@@ -89,8 +89,20 @@
     return analytics;
   }
 
-  function installDefaultMiddleware(defaultProperties) {
-    if (!defaultProperties || window.__gobiiSegmentDefaultMiddlewareInstalled) {
+  function mergeDefaultProperties(defaultProperties) {
+    var storedProperties = window.__gobiiSegmentDefaultProperties || {};
+    Object.keys(defaultProperties || {}).forEach(function (key) {
+      var value = defaultProperties[key];
+      if (value !== undefined) {
+        storedProperties[key] = value;
+      }
+    });
+    window.__gobiiSegmentDefaultProperties = storedProperties;
+    return storedProperties;
+  }
+
+  function installDefaultMiddleware() {
+    if (window.__gobiiSegmentDefaultMiddlewareInstalled) {
       return;
     }
 
@@ -102,7 +114,12 @@
       var payload = _ref.payload;
       var next = _ref.next;
       var obj = payload && payload.obj ? payload.obj : {};
+      if (['track', 'page', 'screen'].indexOf(obj.type) === -1) {
+        next(payload);
+        return;
+      }
       var properties = obj.properties || {};
+      var defaultProperties = window.__gobiiSegmentDefaultProperties || {};
 
       Object.keys(defaultProperties).forEach(function (key) {
         var value = defaultProperties[key];
@@ -129,17 +146,24 @@
     }
 
     var analytics = bootstrapSnippet();
+    mergeDefaultProperties(config.defaultProperties || {});
     if (!window.__gobiiSegmentLoadedKey) {
       analytics.load(config.writeKey);
       window.__gobiiSegmentLoadedKey = config.writeKey;
     }
 
-    installDefaultMiddleware(config.defaultProperties || null);
+    installDefaultMiddleware();
     return true;
+  }
+
+  function setDefaultProperties(defaultProperties) {
+    mergeDefaultProperties(defaultProperties || {});
+    installDefaultMiddleware();
   }
 
   window.GobiiSegmentBootstrap = {
     init: init,
-    ensureStub: ensureStub
+    ensureStub: ensureStub,
+    setDefaultProperties: setDefaultProperties
   };
 })();

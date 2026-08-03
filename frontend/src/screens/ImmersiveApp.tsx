@@ -20,7 +20,7 @@ import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
 import { ImmersivePetLayer } from '../components/pets/ImmersivePetLayer'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { track } from '../util/analytics'
+import { applyAnalyticsBillingContext, track, type AnalyticsBillingContext } from '../util/analytics'
 import { APP_NAVIGATE_EVENT } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
 import { setScheduleDisplayTimeZone } from '../util/schedule'
@@ -61,6 +61,7 @@ type ConsoleSessionPayload = {
   email?: string
   timezone?: string
   is_system_admin?: boolean
+  billing_context?: AnalyticsBillingContext
 }
 
 type ImmersiveAppProps = {
@@ -722,7 +723,7 @@ export function ImmersiveApp({
     }
     return window.parent !== window
   }, [location.search])
-  const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
+  const returnTo = useMemo(() => resolveReturnTo(location.search), [location.search])
   const [viewerUserId, setViewerUserId] = useState<number | null>(null)
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
   const [viewerTimeZone, setViewerTimeZone] = useState<string | null>(null)
@@ -740,10 +741,6 @@ export function ImmersiveApp({
     upgradeModalSource,
     isProprietaryMode,
   } = useAppSelector(selectSubscriptionState)
-  useEffect(() => {
-    setReturnTo(resolveReturnTo(location.search))
-  }, [location.search])
-
   useEffect(() => {
     if (!hasUpgradeModalRequest(location.search)) {
       return
@@ -814,19 +811,11 @@ export function ImmersiveApp({
   }, [route, location.pathname, location.search, embed])
 
   useEffect(() => {
-    if (route.kind === 'agent-chat') {
-      return () => undefined
-    }
-    const controller = new AbortController()
-    void jsonFetch('/console/api/session/', { signal: controller.signal }).catch(() => undefined)
-    return () => controller.abort()
-  }, [route.kind])
-
-  useEffect(() => {
     const controller = new AbortController()
     const loadViewer = async () => {
       try {
         const payload = await jsonFetch<ConsoleSessionPayload>('/console/api/session/', { signal: controller.signal })
+        applyAnalyticsBillingContext(payload?.billing_context)
         const raw = payload?.user_id ?? null
         const numeric = raw ? Number(raw) : null
         setScheduleDisplayTimeZone(payload?.timezone)
@@ -834,7 +823,7 @@ export function ImmersiveApp({
         setViewerEmail(payload?.email ? payload.email : null)
         setViewerTimeZone(payload?.timezone?.trim() || null)
         setIsSystemAdmin(payload?.is_system_admin === true)
-      } catch (err) {
+      } catch {
         if (controller.signal.aborted) {
           return
         }

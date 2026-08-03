@@ -223,7 +223,12 @@ from console.agent_chat.user_actions import (
 from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_timeline_suggestions
 from console.agent_chat.template_recommendations import build_new_agent_template_recommendations
 from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
-from console.context_helpers import build_console_context, resolve_console_context, resolve_staff_console_context
+from console.context_helpers import (
+    build_console_context,
+    resolve_console_context,
+    resolve_console_context_owner,
+    resolve_staff_console_context,
+)
 from console.context_overrides import get_context_override, get_staff_context_override
 from console.agent_context import resolve_context_override_for_agent
 from console.billing_initial_data import build_billing_initial_data
@@ -291,20 +296,39 @@ from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
 logger = logging.getLogger(__name__)
 
 
-def _resolve_request_context_owner(request: HttpRequest):
+def _resolve_request_context_owner(
+    request: HttpRequest,
+    *,
+    include_staff_override: bool = False,
+    for_agent_id: str | None = None,
+):
     try:
-        override = get_context_override(request)
-        context_info = resolve_console_context(
-            request.user,
-            request.session,
-            override=override,
-        )
-    except PermissionDenied:
+        staff_override = get_staff_context_override(request) if include_staff_override else None
+        if staff_override:
+            context_info = resolve_staff_console_context(request.user, staff_override)
+        else:
+            override = get_context_override(request)
+            if for_agent_id:
+                override, error_code = resolve_context_override_for_agent(
+                    request.user,
+                    for_agent_id,
+                    include_deleted=True,
+                )
+                if error_code == "forbidden":
+                    return None
+            context_info = resolve_console_context(
+                request.user,
+                request.session,
+                override=override,
+            )
+    except (PermissionDenied, ValidationError, ValueError):
         return None
 
-    if context_info.current_context.type == "organization":
-        return Organization.objects.filter(id=context_info.current_context.id).first()
-    return request.user
+    return resolve_console_context_owner(
+        context_info,
+        request.user,
+        allow_personal_override=bool(staff_override),
+    )
 
 
 def _customer_account_pause_block_message(owner) -> str:
@@ -461,12 +485,22 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        billing_context = {}
+        if Analytics.is_web_analytics_enabled():
+            billing_owner = _resolve_request_context_owner(
+                request,
+                include_staff_override=True,
+                for_agent_id=(request.GET.get("for_agent") or "").strip() or None,
+            ) or request.user
+            billing_context = Analytics.web_billing_context(request.user, billing_owner)
+
         return JsonResponse(
             {
                 "user_id": str(request.user.id),
                 "email": request.user.email,
                 "timezone": UserPreference.resolve_user_timezone(request.user),
                 "is_system_admin": bool(request.user.is_staff or request.user.is_superuser),
+                "billing_context": billing_context,
             }
         )
 
@@ -5042,6 +5076,8 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
             event=AnalyticsEvent.WEB_CHAT_MESSAGE_SENT,
             source=AnalyticsSource.WEB,
             properties=_web_chat_properties(agent, props),
+            user=request.user,
+            billing_owner=agent.owner,
         )
 
         return JsonResponse({"event": event}, status=201)
@@ -5344,6 +5380,8 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
                     },
                     organization=getattr(agent, "organization", None),
                 ),
+                user=request.user,
+                billing_owner=agent.owner,
             )
         except Exception:
             logger.debug("Failed to emit download analytics for agent %s node %s", agent.id, getattr(node, "id", None), exc_info=True)
@@ -5398,6 +5436,7 @@ class SignedAgentFsNodeDownloadAPIView(View):
                     "size_bytes": node.size_bytes,
                     "download_type": "signed",
                 },
+                billing_enrichment=False,
             )
         except Exception:
             logger.debug("Failed to emit signed download analytics for node %s", getattr(node, "id", None), exc_info=True)
@@ -5591,6 +5630,8 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
                     },
                     organization=getattr(agent, "organization", None),
                 ),
+                user=request.user,
+                billing_owner=agent.owner,
             )
         except Exception:
             logger.debug("Failed to emit upload analytics for agent %s", agent.id, exc_info=True)

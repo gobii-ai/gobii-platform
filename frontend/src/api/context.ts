@@ -1,4 +1,5 @@
 import { jsonFetch, jsonRequest } from './http'
+import type { AnalyticsBillingContext } from '../util/analytics'
 
 export type ConsoleContextType = 'personal' | 'organization'
 
@@ -39,17 +40,25 @@ type ConsoleContextResponsePayload = {
   organizations: { id: string; name: string; role: string | null; canCreateAgents?: boolean }[]
   organizations_enabled: boolean
   requested_agent_status?: 'deleted' | 'missing' | null
+  billing_context?: AnalyticsBillingContext
 }
 
 type SwitchContextResponsePayload = {
   success: boolean
   context: ConsoleContextPayload
+  billing_context?: AnalyticsBillingContext
   error?: string
 }
 
 type CreateOrganizationResponsePayload = {
   organization: { id: string; name: string; role: string | null }
   context: ConsoleContextPayload
+  billing_context?: AnalyticsBillingContext
+}
+
+type ConsoleContextUpdate = {
+  context: ConsoleContext
+  billingContext: AnalyticsBillingContext
 }
 
 export type ConsoleContextData = {
@@ -58,6 +67,7 @@ export type ConsoleContextData = {
   organizations: ConsoleContextOption[]
   organizationsEnabled: boolean
   requestedAgentStatus?: 'deleted' | 'missing' | null
+  billingContext: AnalyticsBillingContext
 }
 
 export async function fetchConsoleContext(options: { forAgentId?: string; staffContext?: StaffViewContext | null } = {}): Promise<ConsoleContextData> {
@@ -84,13 +94,14 @@ export async function fetchConsoleContext(options: { forAgentId?: string; staffC
     })),
     organizationsEnabled: payload.organizations_enabled,
     requestedAgentStatus: payload.requested_agent_status ?? null,
+    billingContext: payload.billing_context ?? {},
   }
 }
 
 export async function switchConsoleContext(
   context: ConsoleContext,
   options: { persistSession?: boolean } = {},
-): Promise<ConsoleContext> {
+): Promise<ConsoleContextUpdate> {
   const persistSession = options.persistSession !== false
   const body = persistSession ? context : { ...context, persist: false }
   const payload = await jsonRequest<SwitchContextResponsePayload>('/console/switch-context/', {
@@ -101,12 +112,16 @@ export async function switchConsoleContext(
   if (!payload.success) {
     throw new Error(payload.error || 'Unable to switch context')
   }
-  return payload.context
+  return {
+    context: payload.context,
+    billingContext: payload.billing_context ?? {},
+  }
 }
 
 export async function createOrganization(name: string): Promise<{
   organization: ConsoleContextOption
   context: ConsoleContext
+  billingContext: AnalyticsBillingContext
 }> {
   const payload = await jsonRequest<CreateOrganizationResponsePayload>('/console/api/organizations/', {
     method: 'POST',
@@ -121,5 +136,6 @@ export async function createOrganization(name: string): Promise<{
       role: payload.organization.role ?? null,
     },
     context: payload.context,
+    billingContext: payload.billing_context ?? {},
   }
 }

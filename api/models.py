@@ -6827,6 +6827,10 @@ class PersistentAgent(models.Model):
                 raise ValidationError({"tags": "Tags must be 64 characters or fewer."})
 
     @property
+    def owner(self):
+        return self.organization if self.organization_id else self.user
+
+    @property
     def has_avatar(self) -> bool:
         file_field = getattr(self, "avatar", None)
         return bool(getattr(file_field, "name", None))

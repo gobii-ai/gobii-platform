@@ -2002,6 +2002,7 @@ class OrganizationInviteAcceptAPIView(OrganizationInviteAcceptView):
                 "id": str(invite.org.id),
                 "name": invite.org.name,
             },
+            "billing_context": Analytics.web_billing_context(request.user, invite.org),
             "redirectUrl": _organization_app_path(invite.org.id),
         })
 

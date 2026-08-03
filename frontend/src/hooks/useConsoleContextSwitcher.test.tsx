@@ -4,15 +4,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 
 import type { ConsoleContext, ConsoleContextData } from '../api/context'
+import type { AnalyticsBillingContext } from '../util/analytics'
 import { consoleContextQueryKey, useConsoleContextSwitcher } from './useConsoleContextSwitcher'
 
 const {
   createOrganizationMock,
   fetchConsoleContextMock,
+  setDefaultPropertiesMock,
   switchConsoleContextMock,
 } = vi.hoisted(() => ({
   createOrganizationMock: vi.fn(),
   fetchConsoleContextMock: vi.fn(),
+  setDefaultPropertiesMock: vi.fn(),
   switchConsoleContextMock: vi.fn(),
 }))
 
@@ -30,7 +33,10 @@ function makeContext(id: string, name = id): ConsoleContext {
   }
 }
 
-function makeContextData(context: ConsoleContext): ConsoleContextData {
+function makeContextData(
+  context: ConsoleContext,
+  billingContext: AnalyticsBillingContext = {},
+): ConsoleContextData {
   return {
     context,
     personal: makeContext('user-1', 'Test User'),
@@ -43,6 +49,7 @@ function makeContextData(context: ConsoleContext): ConsoleContextData {
       },
     ],
     organizationsEnabled: true,
+    billingContext,
   }
 }
 
@@ -128,8 +135,13 @@ describe('useConsoleContextSwitcher', () => {
     })
     window.localStorage.clear()
     window.sessionStorage.clear()
+    Object.defineProperty(window, 'GobiiSegmentBootstrap', {
+      configurable: true,
+      value: { setDefaultProperties: setDefaultPropertiesMock },
+    })
     createOrganizationMock.mockReset()
     fetchConsoleContextMock.mockReset()
+    setDefaultPropertiesMock.mockReset()
     switchConsoleContextMock.mockReset()
   })
 
@@ -162,7 +174,10 @@ describe('useConsoleContextSwitcher', () => {
   it('resolves the requested agent id after forAgentId changes', async () => {
     const queryClient = createTestQueryClient()
     fetchConsoleContextMock.mockImplementation(async ({ forAgentId }: { forAgentId?: string } = {}) => (
-      makeContextData(makeContext(`ctx-${forAgentId ?? 'default'}`))
+      makeContextData(
+        makeContext(`ctx-${forAgentId ?? 'default'}`),
+        { organization_id: `billing-${forAgentId ?? 'default'}` },
+      )
     ))
 
     const { rerender } = render(
@@ -185,17 +200,17 @@ describe('useConsoleContextSwitcher', () => {
       expect(screen.getByTestId('probe-resolved-agent')).toHaveTextContent('agent-2')
     })
     expect(screen.getByTestId('probe-context-id')).toHaveTextContent('ctx-agent-2')
+    expect(setDefaultPropertiesMock).toHaveBeenLastCalledWith({ organization_id: 'billing-agent-2' })
   })
 
   it('switchContext stores the updated context, notifies, and updates query data', async () => {
     const queryClient = createTestQueryClient()
     const onSwitched = vi.fn()
+    let resolveSwitch: (value: unknown) => void = () => undefined
     fetchConsoleContextMock.mockResolvedValue(makeContextData(makeContext('user-1', 'Test User')))
-    switchConsoleContextMock.mockResolvedValue({
-      type: 'organization',
-      id: 'org-2',
-      name: 'Org Two Updated',
-    })
+    switchConsoleContextMock.mockReturnValue(new Promise((resolve) => {
+      resolveSwitch = resolve
+    }))
 
     render(
       <TestProvider queryClient={queryClient}>
@@ -207,6 +222,21 @@ describe('useConsoleContextSwitcher', () => {
       expect(screen.getByTestId('probe-context-id')).toHaveTextContent('user-1')
     })
     fireEvent.click(screen.getByRole('button', { name: 'Switch' }))
+    expect(screen.getByTestId('probe-context-id')).toHaveTextContent('user-1')
+
+    await act(async () => {
+      resolveSwitch({
+        context: {
+          type: 'organization',
+          id: 'org-2',
+          name: 'Org Two Updated',
+        },
+        billingContext: {
+          organization_id: 'org-2',
+          plan_at_event: 'org_team',
+        },
+      })
+    })
 
     await waitFor(() => {
       expect(onSwitched).toHaveBeenCalledWith({
@@ -216,6 +246,13 @@ describe('useConsoleContextSwitcher', () => {
       })
     })
 
+    expect(setDefaultPropertiesMock).toHaveBeenCalledWith({
+      organization_id: 'org-2',
+      plan_at_event: 'org_team',
+    })
+    expect(setDefaultPropertiesMock.mock.invocationCallOrder[0]).toBeLessThan(
+      onSwitched.mock.invocationCallOrder[0],
+    )
     expect(window.sessionStorage.getItem('gobii:console:context-id')).toBe('org-2')
     expect(
       queryClient.getQueryData<ConsoleContextData>(consoleContextQueryKey('agent-1'))?.context,

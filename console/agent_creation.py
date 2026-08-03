@@ -588,6 +588,8 @@ def create_persistent_agent_from_charter(
                 event=AnalyticsEvent.PERSISTENT_AGENT_CREATED,
                 source=AnalyticsSource.WEB,
                 properties=props.copy(),
+                user=request.user,
+                billing_owner=organization or request.user,
             )
         )
         if preview_creation_allowed:

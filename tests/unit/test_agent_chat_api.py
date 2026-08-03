@@ -4452,6 +4452,28 @@ class AgentChatAPITests(TestCase):
 
 
     @tag("batch_agent_chat")
+    @patch("api.agent.tools.web_chat_sender.Analytics.track_event")
+    def test_web_chat_tool_tracks_message_received_after_delivery(self, mock_track_event):
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "body": "Your report is ready.",
+                "to_address": self.user_address,
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.WEB_CHAT_MESSAGE_RECEIVED)
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["properties"]["message_id"], result["message_id"])
+        self.assertEqual(kwargs["properties"]["message_length"], len("Your report is ready."))
+        self.assertEqual(kwargs["user"], self.user)
+        self.assertEqual(kwargs["billing_owner"], self.agent.user)
+
+    @tag("batch_agent_chat")
     def test_web_chat_tool_persists_current_reply_without_active_session(self):
         EmailAddress.objects.create(
             user=self.user,

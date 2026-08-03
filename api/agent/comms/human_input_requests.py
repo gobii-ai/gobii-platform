@@ -1929,6 +1929,7 @@ def submit_human_input_responses_batch(
                 event=AnalyticsEvent.HUMAN_INPUT_RESPONSE_SUBMITTED,
                 source=AnalyticsSource.WEB,
                 properties=analytics_properties,
+                billing_owner=agent.owner,
             )
         )
 

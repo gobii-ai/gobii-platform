@@ -1,5 +1,6 @@
 """Web chat sender tool for persistent agents."""
 
+import logging
 import re
 from typing import Any, Dict
 
@@ -31,7 +32,10 @@ from ...models import (
 )
 from ...services.email_verification import has_verified_email
 from ...services.web_sessions import get_deliverable_web_session, get_deliverable_web_sessions
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from .outbound_duplicate_guard import detect_recent_duplicate_message
+
+logger = logging.getLogger(__name__)
 
 WEB_CHAT_UNAVAILABLE_MESSAGE = "No active web chat session exists for this requester. Do not move this reply to email, SMS, or another channel."
 BACKGROUND_WEB_UNAVAILABLE_MESSAGE = "No active web chat session exists for this recipient. Use an available configured delivery channel."
@@ -517,6 +521,30 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         latest_error_code="",
         latest_error_message="",
     )
+
+    if not is_eval_mode:
+        try:
+            Analytics.track_event(
+                user_id=recipient_user.id,
+                event=AnalyticsEvent.WEB_CHAT_MESSAGE_RECEIVED,
+                source=AnalyticsSource.WEB,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "message_id": str(message.id),
+                        "conversation_id": str(conversation.id),
+                        "message_length": len(body),
+                        "attachment_count": len(resolved_attachments),
+                        "will_continue_work": will_continue,
+                    },
+                    organization=agent.organization if agent.organization_id else None,
+                ),
+                user=recipient_user,
+                billing_owner=agent.owner,
+            )
+        except Exception:
+            # The reply is already durable and delivered; telemetry cannot change that outcome.
+            logger.exception("Failed to track web chat delivery for message %s", message.id)
 
     return {
         "status": "ok",

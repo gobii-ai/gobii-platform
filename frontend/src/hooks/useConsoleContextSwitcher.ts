@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { createOrganization, fetchConsoleContext, switchConsoleContext, type ConsoleContext, type ConsoleContextData, type ConsoleContextOption, type StaffViewContext } from '../api/context'
+import { applyAnalyticsBillingContext, type AnalyticsBillingContext } from '../util/analytics'
 import { readStoredConsoleContext, storeConsoleContext } from '../util/consoleContextStorage'
 
 type UseConsoleContextSwitcherOptions = {
@@ -34,11 +35,20 @@ export function consoleContextQueryKey(forAgentId?: string, staffContext?: Staff
   ] as const
 }
 
-function notifyConsoleContextUpdated(context: ConsoleContext): void {
+type ConsoleContextUpdatedDetail = ConsoleContext & {
+  billingContext?: AnalyticsBillingContext
+}
+
+function notifyConsoleContextUpdated(
+  context: ConsoleContext,
+  billingContext: AnalyticsBillingContext,
+): void {
   if (typeof window === 'undefined') {
     return
   }
-  window.dispatchEvent(new CustomEvent('gobii:console-context-updated', { detail: context }))
+  window.dispatchEvent(new CustomEvent('gobii:console-context-updated', {
+    detail: { ...context, billingContext },
+  }))
 }
 
 export function useConsoleContextSwitcher({
@@ -52,6 +62,7 @@ export function useConsoleContextSwitcher({
   const [mutationError, setMutationError] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const mountedRef = useRef(true)
+  const appliedBillingContextRef = useRef<AnalyticsBillingContext | null>(null)
   const queryKey = useMemo(
     () => consoleContextQueryKey(forAgentId, staffContext),
     [forAgentId, staffContext],
@@ -70,8 +81,16 @@ export function useConsoleContextSwitcher({
   })
   const { data: queryData, error: queryError, isLoading, refetch } = contextQuery
   const data = queryData ?? null
+  const activeBillingContext = data?.billingContext
   const resolvedForAgentId = data ? forAgentId : undefined
   const loadError = queryError ? 'Unable to load workspace contexts.' : null
+  const applyBillingContext = useCallback((billingContext: AnalyticsBillingContext) => {
+    if (appliedBillingContextRef.current === billingContext) {
+      return
+    }
+    applyAnalyticsBillingContext(billingContext)
+    appliedBillingContextRef.current = billingContext
+  }, [])
 
   useEffect(() => {
     mountedRef.current = true
@@ -86,6 +105,12 @@ export function useConsoleContextSwitcher({
     }
     console.error('Failed to load context switcher data:', queryError)
   }, [queryError])
+
+  useLayoutEffect(() => {
+    if (activeBillingContext) {
+      applyBillingContext(activeBillingContext)
+    }
+  }, [activeBillingContext, applyBillingContext])
 
   useEffect(() => {
     if (!data || data.context.isStaffView) {
@@ -107,25 +132,29 @@ export function useConsoleContextSwitcher({
       return undefined
     }
     const handleContextUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<ConsoleContext>).detail
+      const detail = (event as CustomEvent<ConsoleContextUpdatedDetail>).detail
       if (!detail || !detail.type || !detail.id) {
         return
       }
+      const { billingContext, ...updatedContext } = detail
       queryClient.setQueriesData<ConsoleContextData>(
         { queryKey: CONSOLE_CONTEXT_QUERY_KEY },
-        (prev) => (
-          prev
-            ? {
-                ...prev,
-                context: detail,
-                organizations: detail.type === 'organization'
-                  ? prev.organizations.map((org) => (org.id === detail.id ? { ...org, name: detail.name } : org))
-                  : prev.organizations,
-              }
-            : prev
-        ),
+        (prev) => {
+          if (!prev) {
+            return prev
+          }
+          const contextChanged = prev.context.type !== detail.type || prev.context.id !== detail.id
+          return {
+            ...prev,
+            context: updatedContext,
+            billingContext: billingContext ?? (contextChanged ? {} : prev.billingContext),
+            organizations: detail.type === 'organization'
+              ? prev.organizations.map((org) => (org.id === detail.id ? { ...org, name: detail.name } : org))
+              : prev.organizations,
+          }
+        },
       )
-      storeConsoleContext(detail)
+      storeConsoleContext(updatedContext)
     }
     window.addEventListener('gobii:console-context-updated', handleContextUpdated)
     return () => {
@@ -146,33 +175,31 @@ export function useConsoleContextSwitcher({
       if (!data || isSwitching) {
         return
       }
-      const previousContext = data.context
       setIsSwitching(true)
       setMutationError(null)
-      queryClient.setQueryData<ConsoleContextData>(queryKey, { ...data, context })
-      storeConsoleContext(context)
       try {
-        const updated = await switchConsoleContext(context, { persistSession })
+        const result = await switchConsoleContext(context, { persistSession })
+        applyBillingContext(result.billingContext)
         if (!mountedRef.current) {
           return
         }
+        const updated = result.context
         queryClient.setQueryData<ConsoleContextData>(
           queryKey,
-          (prev) => (prev ? { ...prev, context: updated } : prev),
+          (prev) => (prev ? {
+            ...prev,
+            context: updated,
+            billingContext: result.billingContext,
+          } : prev),
         )
         storeConsoleContext(updated)
-        notifyConsoleContextUpdated(updated)
+        notifyConsoleContextUpdated(updated, result.billingContext)
         onSwitched?.(updated)
       } catch (err) {
         if (!mountedRef.current) {
           return
         }
         console.error('Failed to switch context:', err)
-        queryClient.setQueryData<ConsoleContextData>(
-          queryKey,
-          (prev) => (prev ? { ...prev, context: previousContext } : prev),
-        )
-        storeConsoleContext(previousContext)
         setMutationError('Unable to switch context.')
       } finally {
         if (mountedRef.current) {
@@ -180,7 +207,7 @@ export function useConsoleContextSwitcher({
         }
       }
     },
-    [data, isSwitching, onSwitched, persistSession, queryClient, queryKey],
+    [applyBillingContext, data, isSwitching, onSwitched, persistSession, queryClient, queryKey],
   )
 
   const createOrganizationContext = useCallback(
@@ -192,6 +219,7 @@ export function useConsoleContextSwitcher({
       setMutationError(null)
       try {
         const created = await createOrganization(name)
+        applyBillingContext(created.billingContext)
         if (!mountedRef.current) {
           return created.context
         }
@@ -207,12 +235,13 @@ export function useConsoleContextSwitcher({
           return {
             ...prev,
             context: created.context,
+            billingContext: created.billingContext,
             organizations,
             organizationsEnabled: true,
           }
         })
         storeConsoleContext(created.context)
-        notifyConsoleContextUpdated(created.context)
+        notifyConsoleContextUpdated(created.context, created.billingContext)
         onSwitched?.(created.context)
         return created.context
       } catch (err) {
@@ -227,7 +256,7 @@ export function useConsoleContextSwitcher({
         }
       }
     },
-    [isSwitching, onSwitched, queryClient, queryKey],
+    [applyBillingContext, isSwitching, onSwitched, queryClient, queryKey],
   )
 
   return {

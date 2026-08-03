@@ -1,5 +1,6 @@
 import { jsonFetch, jsonRequest } from './http'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
+import type { AnalyticsBillingContext } from '../util/analytics'
 
 export type OrganizationRole = {
   value: string
@@ -110,6 +111,7 @@ export type OrganizationInviteAcceptPayload = {
     id: string
     name: string
   }
+  billing_context?: AnalyticsBillingContext
   redirectUrl?: string
 }
 

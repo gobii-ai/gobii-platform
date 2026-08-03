@@ -88,7 +88,41 @@ def _format_segment_snippet() -> str:
       if (!segmentEnabled) {{
         return;
       }}
-      analytics.page('App', 'Immersive App');
+      function trackInitialPage() {{
+        analytics.page('App', 'Immersive App');
+      }}
+      function buildAnalyticsSessionUrl() {{
+        var sessionUrl = new URL('/console/api/session/', window.location.origin);
+        var currentParams = new URLSearchParams(window.location.search);
+        var pathParts = window.location.pathname.split('/').filter(Boolean);
+        if (pathParts[0] === 'app' && pathParts[1] === 'agents' && pathParts[2] && pathParts[2] !== 'new') {{
+          sessionUrl.searchParams.set('for_agent', pathParts[2]);
+        }}
+        ['context_type', 'context_id', 'staff_context_type', 'staff_context_id'].forEach(function(key) {{
+          var value = currentParams.get(key);
+          if (value) {{
+            sessionUrl.searchParams.set(key, value);
+          }}
+        }});
+        return sessionUrl.pathname + sessionUrl.search;
+      }}
+      fetch(buildAnalyticsSessionUrl(), {{
+        credentials: 'same-origin',
+        headers: {{'Accept': 'application/json'}}
+      }})
+        .then(function(response) {{
+          if (!response.ok) {{
+            throw new Error('Unable to load analytics context');
+          }}
+          return response.json();
+        }})
+        .then(function(payload) {{
+          if (payload && payload.billing_context) {{
+            window.GobiiSegmentBootstrap.setDefaultProperties(payload.billing_context);
+          }}
+          trackInitialPage();
+        }})
+        .catch(trackInitialPage);
     }})();
   </script>"""
 

@@ -176,7 +176,15 @@
         writeKey: "{{ settings.SEGMENT_WEB_WRITE_KEY|escapejs }}",
         defaultProperties: {
           medium: 'Web',
-          frontend: true
+          frontend: true,
+          {% if analytics.data.billing_context %}
+          organization_id: "{{ analytics.data.billing_context.organization_id|escapejs }}",
+          plan_at_event: "{{ analytics.data.billing_context.plan_at_event|escapejs }}",
+          access_type_at_event: "{{ analytics.data.billing_context.access_type_at_event|escapejs }}",
+          billing_status_at_event: "{{ analytics.data.billing_context.billing_status_at_event|escapejs }}",
+          is_internal: {{ analytics.data.billing_context.is_internal|yesno:"true,false" }},
+          event_schema_version: {{ analytics.data.billing_context.event_schema_version }},
+          {% endif %}
         }
       });
 
