@@ -45,7 +45,7 @@ def _authorize_email_contacts(
             automatically_authorized = (
                 get_effective_email_sending_mode(locked_agent)
                 == PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
-                if email_review_outbox_enabled()
+                if email_review_outbox_enabled(agent.user)
                 else locked_agent.contact_approval_mode
                 == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
             )

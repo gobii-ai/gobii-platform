@@ -17,8 +17,9 @@ from api.services.agent_webhooks import (
     AgentWebhookService,
     build_inbound_webhook_url,
 )
-from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL, EMAIL_REVIEW_OUTBOX
+from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
 from api.services.outbound_email_policy import (
+    email_review_outbox_enabled,
     email_sending_mode_for_contact_approval_mode,
     get_effective_email_sending_mode,
     get_organization_minimum_email_sending_mode,
@@ -1077,7 +1078,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         features = {
             'organizations': flag_is_active(request, 'organizations'),
             'contactAutoApproveEmail': flag_is_active(request, CONTACT_AUTO_APPROVE_EMAIL),
-            'emailReviewOutbox': flag_is_active(request, EMAIL_REVIEW_OUTBOX),
+            'emailReviewOutbox': email_review_outbox_enabled(agent.user),
         }
 
         can_reassign = bool(context.get('can_reassign'))
@@ -1660,7 +1661,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         ).strip()
         if new_email_sending_mode not in PersistentAgent.EmailSendingMode.values:
             return _general_error("Select a valid external email autonomy option.")
-        if not flag_is_active(request, EMAIL_REVIEW_OUTBOX):
+        if not email_review_outbox_enabled(agent.user):
             new_email_sending_mode = email_sending_mode_for_contact_approval_mode(
                 new_contact_approval_mode
             )

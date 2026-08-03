@@ -235,7 +235,7 @@ class OutboxListAPIView(ApiLoginRequiredMixin, View):
         )[:500]:
             expire_review_if_needed(expired_review, now=now)
         queryset = _workspace_reviews(request)
-        feature_enabled = email_review_outbox_enabled()
+        feature_enabled = email_review_outbox_enabled(request.user)
         available = feature_enabled or queryset.exists()
         recent_filter = (
             Q(status__in=[OutboundEmailReview.Status.DISCARDED, OutboundEmailReview.Status.EXPIRED])

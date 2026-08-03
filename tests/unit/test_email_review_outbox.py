@@ -160,6 +160,27 @@ class EmailReviewOutboxTests(TestCase):
         self.assertFalse(OutboundMessageAttempt.objects.filter(message=message).exists())
         deliver_mock.assert_not_called()
 
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=None)
+    @patch("django.db.close_old_connections")
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_superuser_rollout_queues_external_send(self, deliver_mock, close_mock):
+        self.owner.is_superuser = True
+        self.owner.save(update_fields=["is_superuser"])
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": "external@example.com",
+                "subject": "Superuser approval required",
+                "mobile_first_html": "<p>Hello</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "pending_approval")
+        self.assertTrue(OutboundEmailReview.objects.filter(pk=result["outbox_item_id"]).exists())
+        deliver_mock.assert_not_called()
+
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     @patch("django.db.close_old_connections")
     @patch("api.agent.tools.email_sender.deliver_agent_email")

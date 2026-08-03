@@ -304,7 +304,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
     try:
         all_recipients = [to_address] + cc_addresses + bcc_addresses
-        outbox_enabled = email_review_outbox_enabled()
+        outbox_enabled = email_review_outbox_enabled(agent.user)
         policy_decision = classify_email_recipients(agent, all_recipients) if outbox_enabled else None
         if policy_decision and policy_decision.blocked_recipients:
             blocked = policy_decision.blocked_recipients[0]
