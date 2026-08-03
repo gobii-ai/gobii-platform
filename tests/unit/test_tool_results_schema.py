@@ -496,8 +496,9 @@ class ToolResultSchemaTests(SimpleTestCase):
             fresh_tool_call_step_id="sqlite-step",
         )
 
-        self.assertIn("NEXT ACTION MUST deliver", info["sqlite-step"].meta)
-        self.assertIn("do not call SQLite", info["sqlite-step"].meta)
+        self.assertIn("terminal answer rows", info["sqlite-step"].meta)
+        self.assertIn("NULL/unavailable stays unavailable", info["sqlite-step"].meta)
+        self.assertIn("no more tools", info["sqlite-step"].meta)
 
     def test_scrape_as_markdown_preview_uses_plain_markdown_and_meta_guidance(self):
         markdown = "# Gemma 4\n\nBenchmark table"

@@ -740,8 +740,8 @@ def prepare_tool_results_for_prompt(
         if record.tool_name == "sqlite_batch":
             if record.will_continue_work is False and _tool_result_succeeded(result_text):
                 meta_text += (
-                    "\nSQLITE RESULT: you marked this query terminal. Its returned rows are the answer source. "
-                    "NEXT ACTION MUST deliver the user-facing answer; do not call SQLite or another research tool."
+                    "\nSQLITE RESULT: terminal answer rows. Deliver now; no more tools. Preserve returned values and "
+                    "associations exactly: NULL/unavailable stays unavailable, never inferred from neighboring fields."
                 )
             else:
                 meta_text += (

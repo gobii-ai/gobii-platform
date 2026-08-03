@@ -260,6 +260,12 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
             self._owner_report_call("sqlite_batch", "completion-2"),
             self._owner_report_call("send_chat_message", "completion-3", terminal=False),
         )
+        with_progress = (
+            self._owner_report_call("send_chat_message", "completion-1", terminal=True),
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call("sqlite_batch", "completion-2"),
+            self._owner_report_call("send_chat_message", "completion-3", terminal=False),
+        )
 
         self.assertEqual(
             tool_delivery_execution_failures(direct, ("completion-1", "completion-2")),
@@ -268,6 +274,13 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
         self.assertEqual(
             tool_delivery_execution_failures(
                 shaped,
+                ("completion-1", "completion-2", "completion-3"),
+            ),
+            [],
+        )
+        self.assertEqual(
+            tool_delivery_execution_failures(
+                with_progress,
                 ("completion-1", "completion-2", "completion-3"),
             ),
             [],
@@ -299,12 +312,19 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
             self._owner_report_call("http_request", "completion-1"),
             self._owner_report_call("send_chat_message", "completion-2", terminal=True),
         )
+        repeated_progress = (
+            self._owner_report_call("send_chat_message", "completion-1", terminal=True),
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call("send_chat_message", "completion-2", terminal=True),
+            self._owner_report_call("send_chat_message", "completion-3", terminal=False),
+        )
         cases = (
             (repeated_fetch, ("completion-1", "completion-2", "completion-3"), "one source fetch"),
             (repeated_shape, ("completion-1", "completion-2", "completion-3", "completion-4"), "more than once"),
             (file_detour, ("completion-1", "completion-2", "completion-3"), "recovery actions"),
             (parallel, ("completion-1", "completion-2"), "one useful action"),
             (continuing, ("completion-1", "completion-2"), "terminal web-chat"),
+            (repeated_progress, ("completion-1", "completion-2", "completion-3"), "repeated progress"),
         )
         for attempts, completion_ids, expected in cases:
             with self.subTest(expected=expected):

@@ -935,13 +935,26 @@ def tool_delivery_execution_failures(action_calls, orchestrator_completion_ids: 
     action_calls = tuple(action_calls)
     action_names = [call.tool_name for call in action_calls]
     failures = []
+    sends = [call for call in action_calls if call.tool_name == "send_chat_message"]
+    progress_sends = [
+        call for call in sends
+        if (call.tool_params or {}).get("will_continue_work") is True
+    ]
+    terminal_sends = [
+        call for call in sends
+        if (call.tool_params or {}).get("will_continue_work") is False
+    ]
 
     if action_names.count("http_request") != 1:
         failures.append(f"Tool-backed delivery required one source fetch; actions were {action_names}.")
     if action_names.count("sqlite_batch") > 1:
         failures.append(f"Tool-backed delivery reread or reshaped SQLite more than once: {action_names}.")
-    if action_names.count("send_chat_message") != 1 or action_names[-1:] != ["send_chat_message"]:
+    if len(progress_sends) > 1:
+        failures.append(f"Tool-backed delivery sent repeated progress updates: {action_names}.")
+    if len(terminal_sends) != 1 or action_calls[-1:] != tuple(terminal_sends):
         failures.append(f"Tool-backed delivery required one terminal web-chat send; actions were {action_names}.")
+    if len(sends) != len(progress_sends) + len(terminal_sends):
+        failures.append("Tool-backed delivery used a chat send without an explicit continuation state.")
 
     unexpected = [
         name for name in action_names
@@ -958,9 +971,13 @@ def tool_delivery_execution_failures(action_calls, orchestrator_completion_ids: 
     if bad_statuses:
         failures.append(f"Tool-backed delivery actions were not all successful: {bad_statuses}.")
 
+    # A model may pair one concise progress acknowledgement with the useful tool
+    # action in the same completion. Count the work path, not that communication,
+    # when proving every completion advanced the request.
+    work_calls = [call for call in action_calls if call not in progress_sends]
     action_completion_ids = [
         str(call.step.completion_id) if getattr(call.step, "completion_id", None) else None
-        for call in action_calls
+        for call in work_calls
     ]
     completion_ids = [str(completion_id) for completion_id in orchestrator_completion_ids]
     if len(set(action_completion_ids)) != len(action_completion_ids) or action_completion_ids != completion_ids:
@@ -969,9 +986,6 @@ def tool_delivery_execution_failures(action_calls, orchestrator_completion_ids: 
             f"actions={action_completion_ids}, completions={completion_ids}."
         )
 
-    sends = [call for call in action_calls if call.tool_name == "send_chat_message"]
-    if len(sends) != 1 or (sends[0].tool_params or {}).get("will_continue_work") is not False:
-        failures.append("Tool-backed delivery required exactly one successful terminal web-chat send.")
     return failures
 
 
@@ -1026,8 +1040,8 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                         "sqlite_batch",
                     ]),
                     "ignored_tool_names": ["sleep_until_next_trigger"],
-                    # Let a bad pre-work send finish so the strict action-shape check can diagnose it.
-                    "max_relevant_tool_calls": 4,
+                    # One concise progress send may accompany the fetch/import path.
+                    "max_relevant_tool_calls": 5,
                 },
             )
 
