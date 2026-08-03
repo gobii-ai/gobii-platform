@@ -71,6 +71,26 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertIn("batch gaps, follow up misses, and reconcile coverage", system_message["content"])
         self.assertIn("never repeat a successful URL/query", system_message["content"])
 
+    def test_durable_charter_precedes_volatile_runtime_state(self):
+        self.agent.charter = "DURABLE CHARTER CACHE ANCHOR"
+        self.agent.schedule = "0 9 * * 1"
+        self.agent.save(update_fields=["charter", "schedule", "updated_at"])
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_content = next(message["content"] for message in context if message["role"] == "user")
+        self.assertLess(
+            user_content.index("DURABLE CHARTER CACHE ANCHOR"),
+            user_content.index("<current_plan>"),
+        )
+        self.assertLess(
+            user_content.index("DURABLE CHARTER CACHE ANCHOR"),
+            user_content.index("<schedule>"),
+        )
+
     def test_source_model_warning_uses_only_latest_process_cycle(self):
         old_cycle = PersistentAgentStep.objects.create(agent=self.agent, description="Process events")
         PersistentAgentSystemStep.objects.create(

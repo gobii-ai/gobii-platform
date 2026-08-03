@@ -271,12 +271,12 @@ def llm_summarise_comms(
         {
             "role": "system",
             "content": (
-                "You are a summarisation assistant. Given an *existing* summary\n"
-                "of a conversation and a list of *new* messages, return an\n"
-                "updated concise summary capturing the important details. Preserve\n"
-                "who said, requested, observed, or changed each important item and\n"
-                "the source channel. Never transfer a statement to another person;\n"
-                "if attribution is uncertain, keep that uncertainty explicit."
+                "Maintain a compact current-state memory from an existing conversation summary and new messages. "
+                "Preserve exact identifiers, owners, deadlines, evidence links, durable decisions, commitments, and "
+                "unresolved work. Replace superseded state with the newest explicit correction; retain older state "
+                "only for unresolved conflict. Delete resolved/completed items, repeated chatter/status, and message "
+                "mechanics unless they constrain current work; collapse unavoidable groups so output does not grow with history. Preserve who said, requested, observed, or changed each retained item and its source "
+                "channel. Never transfer a statement to another person; keep uncertain attribution explicit."
             ),
         },
         {
@@ -284,7 +284,7 @@ def llm_summarise_comms(
             "content": (
                 f"Previous summary:\n{previous or '(none)'}\n\n"
                 f"New messages:\n{new_msgs_block}\n\n"
-                "Return ONLY the updated summary text (no markdown, no code fences)."
+                "Rewrite the state rather than appending a narrative. Return ONLY the updated concise summary text (no markdown, no code fences)."
             ),
         },
     ]
