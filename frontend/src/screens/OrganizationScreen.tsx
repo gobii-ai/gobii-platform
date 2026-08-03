@@ -36,7 +36,7 @@ import { ModalForm } from '../components/common/ModalForm'
 import { CustomInstructionsSection } from '../components/settings/CustomInstructionsSection'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
-import { applyAnalyticsBillingContext } from '../util/analytics'
+import { applyAnalyticsBillingContext, type AnalyticsBillingContext } from '../util/analytics'
 import { navigateWithinApp } from '../util/appNavigation'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 
@@ -87,10 +87,15 @@ function publishOrganizationContext(data: CurrentOrganizationPayload) {
   publishConsoleContext({ type: 'organization', id: data.organization.id, name: data.organization.name })
 }
 
-function publishConsoleContext(context: ConsoleContext) {
+function publishConsoleContext(
+  context: ConsoleContext,
+  billingContext?: AnalyticsBillingContext,
+) {
   if (typeof window === 'undefined') return
   storeConsoleContext(context)
-  window.dispatchEvent(new CustomEvent('gobii:console-context-updated', { detail: context }))
+  window.dispatchEvent(new CustomEvent('gobii:console-context-updated', {
+    detail: billingContext ? { ...context, billingContext } : context,
+  }))
 }
 
 function isNoOrganizationContextError(error: unknown): boolean {
@@ -728,7 +733,7 @@ export function OrganizationScreen() {
     try {
       const created = await createOrganization(nextName)
       applyAnalyticsBillingContext(created.billingContext)
-      publishConsoleContext(created.context)
+      publishConsoleContext(created.context, created.billingContext)
       setCreateOrganizationOpen(false)
       setCreateOrganizationName('')
       refreshOrganizationQueries()

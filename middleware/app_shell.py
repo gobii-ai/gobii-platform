@@ -91,7 +91,18 @@ def _format_segment_snippet() -> str:
       function trackInitialPage() {{
         analytics.page('App', 'Immersive App');
       }}
-      fetch('/console/api/session/', {{
+      function buildAnalyticsSessionUrl() {{
+        var sessionUrl = new URL('/console/api/session/', window.location.origin);
+        var currentParams = new URLSearchParams(window.location.search);
+        ['context_type', 'context_id', 'staff_context_type', 'staff_context_id'].forEach(function(key) {{
+          var value = currentParams.get(key);
+          if (value) {{
+            sessionUrl.searchParams.set(key, value);
+          }}
+        }});
+        return sessionUrl.pathname + sessionUrl.search;
+      }}
+      fetch(buildAnalyticsSessionUrl(), {{
         credentials: 'same-origin',
         headers: {{'Accept': 'application/json'}}
       }})

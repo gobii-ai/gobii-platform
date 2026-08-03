@@ -408,12 +408,43 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(billing_context["plan_at_event"], "startup")
         self.assertEqual(billing_context["access_type_at_event"], AnalyticsAccessType.PAID)
 
+    def test_console_session_uses_staff_view_billing_owner(self):
+        staff_user = get_user_model().objects.create_user(
+            username="analytics-staff",
+            email="analytics-staff@example.com",
+            password="password",
+            is_staff=True,
+        )
+        organization = Organization.objects.create(
+            name="Staff Analytics Org",
+            slug="staff-analytics-org",
+            created_by=self.user,
+        )
+        self.client.force_login(staff_user)
+
+        with patch(
+            "console.api_views.Analytics.web_billing_context",
+            return_value={"organization_id": str(organization.pk)},
+        ) as billing_context_mock:
+            response = self.client.get(
+                "/console/api/session/",
+                {
+                    "staff_context_type": "organization",
+                    "staff_context_id": str(organization.pk),
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["billing_context"]["organization_id"], str(organization.pk))
+        self.assertEqual(billing_context_mock.call_args.args[1].pk, organization.pk)
+
     def test_immersive_app_initial_page_waits_for_billing_context(self):
         from middleware.app_shell import _format_segment_snippet
 
         snippet = _format_segment_snippet()
 
-        self.assertIn("fetch('/console/api/session/'", snippet)
+        self.assertIn("fetch(buildAnalyticsSessionUrl()", snippet)
+        self.assertIn("'context_type', 'context_id', 'staff_context_type', 'staff_context_id'", snippet)
         self.assertIn("setDefaultProperties(payload.billing_context)", snippet)
         self.assertLess(
             snippet.index("setDefaultProperties(payload.billing_context)"),

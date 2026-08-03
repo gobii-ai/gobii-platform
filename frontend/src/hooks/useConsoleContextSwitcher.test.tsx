@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 
 import type { ConsoleContext, ConsoleContextData } from '../api/context'
+import type { AnalyticsBillingContext } from '../util/analytics'
 import { consoleContextQueryKey, useConsoleContextSwitcher } from './useConsoleContextSwitcher'
 
 const {
@@ -32,7 +33,10 @@ function makeContext(id: string, name = id): ConsoleContext {
   }
 }
 
-function makeContextData(context: ConsoleContext): ConsoleContextData {
+function makeContextData(
+  context: ConsoleContext,
+  billingContext: AnalyticsBillingContext = {},
+): ConsoleContextData {
   return {
     context,
     personal: makeContext('user-1', 'Test User'),
@@ -45,6 +49,7 @@ function makeContextData(context: ConsoleContext): ConsoleContextData {
       },
     ],
     organizationsEnabled: true,
+    billingContext,
   }
 }
 
@@ -169,7 +174,10 @@ describe('useConsoleContextSwitcher', () => {
   it('resolves the requested agent id after forAgentId changes', async () => {
     const queryClient = createTestQueryClient()
     fetchConsoleContextMock.mockImplementation(async ({ forAgentId }: { forAgentId?: string } = {}) => (
-      makeContextData(makeContext(`ctx-${forAgentId ?? 'default'}`))
+      makeContextData(
+        makeContext(`ctx-${forAgentId ?? 'default'}`),
+        { organization_id: `billing-${forAgentId ?? 'default'}` },
+      )
     ))
 
     const { rerender } = render(
@@ -192,6 +200,7 @@ describe('useConsoleContextSwitcher', () => {
       expect(screen.getByTestId('probe-resolved-agent')).toHaveTextContent('agent-2')
     })
     expect(screen.getByTestId('probe-context-id')).toHaveTextContent('ctx-agent-2')
+    expect(setDefaultPropertiesMock).toHaveBeenLastCalledWith({ organization_id: 'billing-agent-2' })
   })
 
   it('switchContext stores the updated context, notifies, and updates query data', async () => {

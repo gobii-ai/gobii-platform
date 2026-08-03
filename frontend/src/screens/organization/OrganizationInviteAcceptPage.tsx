@@ -49,6 +49,7 @@ const ORGANIZATION_INVITE_CONFIG: InviteResponseConfig<OrganizationInviteAcceptP
         type: 'organization',
         id: payload.organization.id,
         name: payload.organization.name,
+        billingContext: payload.billing_context ?? {},
       },
     }))
   },

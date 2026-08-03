@@ -11,7 +11,12 @@ from api.models import Organization, OrganizationMembership
 from api.services.organization_permissions import user_role_can_create_org_agents
 from console.forms import OrganizationForm
 from console.agent_context import resolve_context_override_for_agent
-from console.context_helpers import build_console_context, resolve_console_context, resolve_staff_console_context
+from console.context_helpers import (
+    build_console_context,
+    resolve_console_context,
+    resolve_console_context_owner,
+    resolve_staff_console_context,
+)
 from console.context_overrides import get_context_override, get_staff_context_override
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -75,6 +80,11 @@ class SwitchContextView(LoginRequiredMixin, View):
             else:
                 resolved = build_console_context(request)
         current_context = resolved.current_context
+        billing_owner = resolve_console_context_owner(
+            resolved,
+            request.user,
+            allow_personal_override=bool(staff_override),
+        ) or request.user
 
         if not override and not staff_override:
             session_context = {
@@ -126,6 +136,7 @@ class SwitchContextView(LoginRequiredMixin, View):
                 "organizations": organizations,
                 "organizations_enabled": organizations_enabled,
                 "requested_agent_status": requested_agent_status,
+                "billing_context": Analytics.web_billing_context(request.user, billing_owner),
             }
         )
 

@@ -223,7 +223,12 @@ from console.agent_chat.user_actions import (
 from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_timeline_suggestions
 from console.agent_chat.template_recommendations import build_new_agent_template_recommendations
 from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
-from console.context_helpers import build_console_context, resolve_console_context, resolve_staff_console_context
+from console.context_helpers import (
+    build_console_context,
+    resolve_console_context,
+    resolve_console_context_owner,
+    resolve_staff_console_context,
+)
 from console.context_overrides import get_context_override, get_staff_context_override
 from console.agent_context import resolve_context_override_for_agent
 from console.billing_initial_data import build_billing_initial_data
@@ -291,20 +296,30 @@ from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
 logger = logging.getLogger(__name__)
 
 
-def _resolve_request_context_owner(request: HttpRequest):
+def _resolve_request_context_owner(
+    request: HttpRequest,
+    *,
+    include_staff_override: bool = False,
+):
     try:
-        override = get_context_override(request)
-        context_info = resolve_console_context(
-            request.user,
-            request.session,
-            override=override,
-        )
+        staff_override = get_staff_context_override(request) if include_staff_override else None
+        if staff_override:
+            context_info = resolve_staff_console_context(request.user, staff_override)
+        else:
+            override = get_context_override(request)
+            context_info = resolve_console_context(
+                request.user,
+                request.session,
+                override=override,
+            )
     except PermissionDenied:
         return None
 
-    if context_info.current_context.type == "organization":
-        return Organization.objects.filter(id=context_info.current_context.id).first()
-    return request.user
+    return resolve_console_context_owner(
+        context_info,
+        request.user,
+        allow_personal_override=bool(staff_override),
+    )
 
 
 def _customer_account_pause_block_message(owner) -> str:
@@ -463,7 +478,10 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         billing_context = {}
         if Analytics.is_web_analytics_enabled():
-            billing_owner = _resolve_request_context_owner(request) or request.user
+            billing_owner = _resolve_request_context_owner(
+                request,
+                include_staff_override=True,
+            ) or request.user
             billing_context = Analytics.web_billing_context(request.user, billing_owner)
 
         return JsonResponse(

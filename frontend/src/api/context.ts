@@ -40,6 +40,7 @@ type ConsoleContextResponsePayload = {
   organizations: { id: string; name: string; role: string | null; canCreateAgents?: boolean }[]
   organizations_enabled: boolean
   requested_agent_status?: 'deleted' | 'missing' | null
+  billing_context?: AnalyticsBillingContext
 }
 
 type SwitchContextResponsePayload = {
@@ -66,6 +67,7 @@ export type ConsoleContextData = {
   organizations: ConsoleContextOption[]
   organizationsEnabled: boolean
   requestedAgentStatus?: 'deleted' | 'missing' | null
+  billingContext: AnalyticsBillingContext
 }
 
 export async function fetchConsoleContext(options: { forAgentId?: string; staffContext?: StaffViewContext | null } = {}): Promise<ConsoleContextData> {
@@ -92,6 +94,7 @@ export async function fetchConsoleContext(options: { forAgentId?: string; staffC
     })),
     organizationsEnabled: payload.organizations_enabled,
     requestedAgentStatus: payload.requested_agent_status ?? null,
+    billingContext: payload.billing_context ?? {},
   }
 }
 
