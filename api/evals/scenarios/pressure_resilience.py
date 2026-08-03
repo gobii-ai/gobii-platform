@@ -18,6 +18,7 @@ from api.models import (
     CommsChannel,
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentCommsSnapshot,
     PersistentAgentCommsEndpoint,
     PersistentAgentCompletion,
     PersistentAgentConversationParticipant,
@@ -36,6 +37,7 @@ PRESSURE_RESILIENCE_SCENARIO_SLUGS = (
     "pressure_resilience_competing_channels",
     "pressure_resilience_advisory_after_delivery",
     "pressure_resilience_compacted_source_attribution",
+    "pressure_resilience_loaded_current_state",
 )
 
 
@@ -716,4 +718,293 @@ class AdvisoryAfterDeliveryPressureScenario(EvalScenario, ScenarioExecutionTools
                     f"outbound_messages={len(outbound)}."
                 )
             ),
+        )
+
+
+@register_scenario
+class LoadedCurrentStatePressureScenario(EvalScenario, ScenarioExecutionTools):
+    slug = PRESSURE_RESILIENCE_SCENARIO_SLUGS[3]
+    version = "1.0"
+    description = "A heavily loaded agent should retain corrected current state without reviving stale thread facts."
+    tier = "core"
+    category = "agent_behavior"
+    expected_runtime = "medium"
+    cost_class = "medium"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = (
+        "agent_behavior",
+        "pressure",
+        "context_limit",
+        "compaction",
+        "messy_data",
+        "durable_recall",
+        "llm_judge",
+        "real_harness",
+    )
+    tasks = [
+        ScenarioTask(name="inject_loaded_history", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_context_pressure", assertion_type="token_usage"),
+        ScenarioTask(name="verify_compacted_current_state", assertion_type="persisted_state"),
+        ScenarioTask(name="verify_one_shot_convergence", assertion_type="tool_call"),
+        ScenarioTask(name="verify_current_state_reply", assertion_type="llm_judge"),
+    ]
+
+    current_facts = (
+        (
+            "CASE-17",
+            "SSO certificate rotation",
+            "Rowan",
+            "https://evidence.example.test/cases/case-17",
+        ),
+        (
+            "CASE-31",
+            "budget approval",
+            "Zora",
+            "https://evidence.example.test/cases/case-31",
+        ),
+    )
+    stale_terms = ("data import", "Mira", "blocked by legal review")
+
+    @staticmethod
+    def _loaded_charter() -> str:
+        operating_notes = "\n".join(
+            (
+                f"Reference policy {index:03d}: retain exact case identity, source, owner, deadline, and current "
+                "status for operational work; unrelated completed work is context, not a new assignment."
+            )
+            for index in range(640)
+        )
+        return (
+            "Own decision-ready operational status for the owner. Current explicit corrections supersede stale "
+            "tentative state. Report only currently open items with exact IDs, owners, and known evidence links.\n"
+            f"{operating_notes}"
+        )
+
+    @staticmethod
+    def _seed_prior_snapshot(agent: PersistentAgent) -> None:
+        old_cases = "\n".join(
+            f"Historical case OLD-{index:03d}: routine migration check owned by Team {index % 9}; closed."
+            for index in range(80)
+        )
+        PersistentAgentCommsSnapshot.objects.create(
+            agent=agent,
+            snapshot_until=timezone.now() - timedelta(hours=3),
+            summary=(
+                "Current launch state from the earlier thread:\n"
+                "- CASE-17 is blocked by data import and owned by Mira.\n"
+                "- CASE-22 is blocked by legal review and owned by Dana.\n"
+                f"{old_cases}"
+            ),
+        )
+
+    @staticmethod
+    def _seed_corrections(agent: PersistentAgent) -> None:
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.DISCORD,
+            address=f"discord://eval/loaded-state/{agent.id}",
+        )
+        conversation = _get_or_create_conversation(
+            CommsChannel.DISCORD,
+            endpoint.address,
+            owner_agent=agent,
+        )
+        _ensure_participant(
+            conversation,
+            endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+        )
+        messages = [
+            (
+                f"Ops teammate {index}",
+                f"Routine note {index}: OLD-{index:03d} remains closed with its existing owner.",
+            )
+            for index in range(1, 12)
+        ]
+        messages.extend(
+            [
+                (
+                    "Nadia in #launch",
+                    "Correction: CASE-17's data import issue is resolved. Its current blocker is SSO certificate "
+                    "rotation, now owned by Rowan. Evidence: https://evidence.example.test/cases/case-17",
+                ),
+                (
+                    "Leo in #launch",
+                    "Final update: CASE-22 cleared legal review and is closed. Do not include it in the open list.",
+                ),
+                (
+                    "Nadia in #launch",
+                    "New current blocker: CASE-31 is waiting on budget approval, owned by Zora. Evidence: "
+                    "https://evidence.example.test/cases/case-31",
+                ),
+            ]
+        )
+        messages.extend(
+            (
+                f"Ops teammate {index}",
+                f"Routine note {index}: handoff OLD-{index:03d} is complete; no action is requested.",
+            )
+            for index in range(12, 21)
+        )
+        for source_label, body in messages:
+            PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                is_outbound=False,
+                from_endpoint=endpoint,
+                conversation=conversation,
+                body=body,
+                raw_payload={
+                    "source_kind": "discord",
+                    "source_label": source_label,
+                },
+            )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        agent = PersistentAgent.objects.get(id=agent_id)
+        agent.name = f"Loaded Operations Lead {str(agent.id)[:8]}"
+        agent.charter = self._loaded_charter()
+        agent.planning_state = PersistentAgent.PlanningState.SKIPPED
+        agent.save(update_fields=["name", "charter", "planning_state", "updated_at"])
+        mark_tool_enabled_without_discovery(agent, "send_chat_message")
+        self._seed_prior_snapshot(agent)
+        self._seed_corrections(agent)
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="inject_loaded_history",
+        )
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "I am walking into the launch review. From the messy thread, give me only the current open "
+                    "blockers with case ID, present owner, and evidence link. Do not revive resolved or superseded "
+                    "items."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                eval_stop_policy={
+                    "stop_on_tool_names_after_execution": ["send_chat_message"],
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["send_chat_message", "sqlite_batch"],
+                    "ignored_tool_names": ["sqlite_batch"],
+                    "max_relevant_tool_calls": 6,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_loaded_history",
+            observed_summary="A large charter and rolling summary were combined with compacted corrections and noise.",
+            artifacts={"message": inbound},
+        )
+
+        usage = PersistentAgentCompletion.objects.filter(
+            eval_run_id=run_id,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+        ).aggregate(max_prompt_tokens=Max("prompt_tokens"))
+        max_prompt_tokens = int(usage["max_prompt_tokens"] or 0)
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if max_prompt_tokens >= 32_000 else EvalRunTask.Status.FAILED,
+            task_name="verify_context_pressure",
+            expected_summary="The regression should exercise a genuinely loaded prompt.",
+            observed_summary=f"max_prompt_tokens={max_prompt_tokens}.",
+        )
+
+        latest_snapshot = (
+            PersistentAgentCommsSnapshot.objects.filter(agent=agent)
+            .order_by("-snapshot_until")
+            .first()
+        )
+        summary = latest_snapshot.summary if latest_snapshot else ""
+        folded_summary = summary.casefold()
+        summary_has_current = all(
+            all(value.casefold() in folded_summary for value in fact)
+            for fact in self.current_facts
+        )
+        summary_dropped_stale = all(term.casefold() not in folded_summary for term in self.stale_terms)
+        summary_is_compact = len(summary) <= 2_500
+        self.record_task_result(
+            run_id,
+            None,
+            (
+                EvalRunTask.Status.PASSED
+                if summary_has_current and summary_dropped_stale and summary_is_compact
+                else EvalRunTask.Status.FAILED
+            ),
+            task_name="verify_compacted_current_state",
+            expected_summary="The rolling summary should retain current facts and remove superseded blockers.",
+            observed_summary=(
+                "The compacted state retained both current cases without stale blockers."
+                if summary_has_current and summary_dropped_stale and summary_is_compact
+                else (
+                    f"current_facts_complete={summary_has_current}, "
+                    "stale_terms_present="
+                    f"{[term for term in self.stale_terms if term.casefold() in folded_summary]}, "
+                    f"summary_chars={len(summary)}."
+                )
+            ),
+        )
+
+        calls = get_tool_calls_for_run(run_id, after=inbound.timestamp)
+        sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
+        chat_calls = [call for call in calls if call.tool_name == "send_chat_message"]
+        rejected_calls = [
+            call for call in calls
+            if call.status == PersistentAgentToolCall.Status.ERROR
+        ]
+        one_shot = (
+            len(sqlite_calls) <= 1
+            and len(chat_calls) == 1
+            and not rejected_calls
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if one_shot else EvalRunTask.Status.FAILED,
+            task_name="verify_one_shot_convergence",
+            expected_summary="Current compacted state should yield one clean reply with at most one bounded lookup.",
+            observed_summary=(
+                "The loaded request converged without progress chatter or recovery."
+                if one_shot
+                else (
+                    f"sqlite_calls={len(sqlite_calls)}, chat_calls={len(chat_calls)}, "
+                    f"rejected_calls={len(rejected_calls)}."
+                )
+            ),
+            artifacts={"tool_calls": calls},
+        )
+
+        outbound = (
+            PersistentAgentMessage.objects.filter(
+                owner_agent=agent,
+                is_outbound=True,
+                timestamp__gt=inbound.timestamp,
+            )
+            .order_by("timestamp", "seq")
+            .first()
+        )
+        body = outbound.body if outbound else ""
+        choice, reasoning = self.llm_judge(
+            question=(
+                "Does the reply include exactly the two current open blockers—CASE-17, SSO certificate rotation, "
+                "Rowan, and its evidence link; plus CASE-31, budget approval, Zora, and its evidence link—while "
+                "excluding the superseded data-import/Mira state and closed CASE-22?"
+            ),
+            context=f"Owner request:\n{inbound.body}\n\nAgent reply:\n{body}",
+            options=["Pass", "Fail"],
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if outbound and choice == "Pass" else EvalRunTask.Status.FAILED,
+            task_name="verify_current_state_reply",
+            expected_summary="The first reply should be complete, current, sourced, and free of stale state.",
+            observed_summary=f"{choice}: {reasoning}",
+            artifacts={"message": outbound} if outbound else {},
         )
