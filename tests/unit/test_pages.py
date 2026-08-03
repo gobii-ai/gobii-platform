@@ -1102,6 +1102,16 @@ class HomePageTests(TestCase):
             if not image.get("width") or not image.get("height")
         ]
         self.assertEqual(undimensioned_images, [])
+        deferred_section_selectors = (
+            "section.gk-pf-math.gk-render-later--platform",
+            "section[aria-labelledby='gk-night-heading'].gk-render-later--night",
+            "section.gk-int.gk-render-later--integrations",
+            "section#gk-ao.gk-render-later--always-on",
+        )
+        for selector in deferred_section_selectors:
+            self.assertIsNotNone(soup.select_one(selector))
+        for selector in ("#hire-agents", "#how-it-works", "#pricing", "#faq"):
+            self.assertNotIn("gk-render-later", soup.select_one(selector).get("class", []))
         self.assertIsNone(
             soup.find(
                 "script",

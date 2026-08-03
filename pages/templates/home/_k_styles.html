@@ -309,6 +309,31 @@
   #build-your-own .gk-spawn .bg-white\/50 { background-color: #fff !important; border-color: #e9e4f6 !important;
     box-shadow: 0 6px 24px rgba(109, 40, 217, 0.08); }
 
+  /* Skip layout and paint for the heaviest off-screen sections. The intrinsic
+     block sizes keep the scroll range stable until the browser renders each section. */
+  @supports (content-visibility: auto) {
+    .gk-render-later {
+      content-visibility: auto;
+      contain-intrinsic-block-size: auto var(--gk-deferred-block-size, 900px);
+    }
+    .gk-render-later--platform { --gk-deferred-block-size: 900px; }
+    .gk-render-later--night { --gk-deferred-block-size: 1050px; }
+    .gk-render-later--integrations { --gk-deferred-block-size: 520px; }
+    .gk-render-later--always-on { --gk-deferred-block-size: 1050px; }
+
+    @media (max-width: 900px) {
+      .gk-render-later--platform { --gk-deferred-block-size: 1180px; }
+      .gk-render-later--night { --gk-deferred-block-size: 1900px; }
+      .gk-render-later--integrations { --gk-deferred-block-size: 820px; }
+      .gk-render-later--always-on { --gk-deferred-block-size: 1700px; }
+    }
+
+    @media (max-width: 599px) {
+      /* Four of the five simulated tool panes are hidden at this breakpoint. */
+      .gk-render-later--night { --gk-deferred-block-size: 1350px; }
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .gk-livedot, .gk-ring { animation: none !important; }
     .gk-hswap, .gk-hgroup, .gk-astep, .gk-cand, .gk-check, .gk-card-edge, .gk-dcard { transition: none !important; }
