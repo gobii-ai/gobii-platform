@@ -484,7 +484,35 @@ class HomePageTests(TestCase):
             response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "gobii-cta-signup-modal-config")
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertIsNotNone(soup.find(id="gobii-cta-signup-modal-config"))
+        deferred_loader = soup.find(
+            "script",
+            id="gobii-deferred-auth-modal-loader",
+        )
+        self.assertIsNotNone(deferred_loader)
+        self.assertEqual(
+            deferred_loader.get("src"),
+            static("js/deferred_auth_modal_loader.js"),
+        )
+        self.assertEqual(
+            deferred_loader.get("data-identity-src"),
+            static("js/account_identity_signals.js"),
+        )
+        self.assertEqual(
+            deferred_loader.get("data-auth-forms-src"),
+            static("js/account_auth_forms.js"),
+        )
+        self.assertEqual(
+            deferred_loader.get("data-modal-src"),
+            static("js/cta_signup_modal.js"),
+        )
+        for asset in (
+            "js/account_identity_signals.js",
+            "js/account_auth_forms.js",
+            "js/cta_signup_modal.js",
+        ):
+            self.assertIsNone(soup.find("script", src=static(asset)))
         self.assertNotIn(settings.CSRF_COOKIE_NAME, response.cookies)
         self.assertNotIn(
             'name="csrfmiddlewaretoken"',
@@ -618,12 +646,20 @@ class HomePageTests(TestCase):
             "login": "turnstile_signup.LoginFormWithTurnstile",
         },
     )
-    def test_home_page_includes_turnstile_api_for_signup_modal_when_enabled(self):
+    def test_home_page_defers_turnstile_api_for_signup_modal_when_enabled(self):
         with override_flag("cta_signup_modal", active=True):
             response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "turnstile/v0/api.js?render=explicit")
+        soup = BeautifulSoup(response.content, "html.parser")
+        turnstile_url = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+        self.assertIsNone(soup.find("script", src=turnstile_url))
+        deferred_loader = soup.find(
+            "script",
+            id="gobii-deferred-auth-modal-loader",
+        )
+        self.assertIsNotNone(deferred_loader)
+        self.assertEqual(deferred_loader.get("data-turnstile-src"), turnstile_url)
 
     def test_home_page_includes_perf_motion_reduction_when_switch_is_on(self):
         with override_switch("homepage_perf_motion_reduction", active=True):

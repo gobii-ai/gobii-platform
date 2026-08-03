@@ -395,15 +395,28 @@
   <script src="{% static 'js/gobii_analytics.js' %}" defer></script>
   {% if settings.TURNSTILE_ENABLED and not suppress_public_conversion_assets %}
     {% if cta_signup_modal_config.enabled or request.resolver_match.url_name == 'account_login' or request.resolver_match.url_name == 'account_signup' %}
+      {% if not defer_auth_modal_assets %}
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+      {% endif %}
     {% endif %}
   {% endif %}
   {% if not suppress_public_conversion_assets %}
+    {% if not defer_auth_modal_assets %}
   <script src="{% static 'js/account_identity_signals.js' %}" defer></script>
   <script src="{% static 'js/account_auth_forms.js' %}" defer></script>
   <script src="{% static 'js/cta_signup_modal.js' %}" defer></script>
+    {% endif %}
   <script src="{% static 'js/cta_tracking.js' %}" defer></script>
   <script src="{% static 'js/signup_tracking.js' %}" defer></script>
+    {% if defer_auth_modal_assets and cta_signup_modal_config.enabled %}
+  <script id="gobii-deferred-auth-modal-loader"
+          src="{% static 'js/deferred_auth_modal_loader.js' %}"
+          data-identity-src="{% static 'js/account_identity_signals.js' %}"
+          data-auth-forms-src="{% static 'js/account_auth_forms.js' %}"
+          data-modal-src="{% static 'js/cta_signup_modal.js' %}"
+          {% if settings.TURNSTILE_ENABLED %}data-turnstile-src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"{% endif %}
+          defer></script>
+    {% endif %}
   {% endif %}
   <style type="text/css">
     .htmx-indicator {
