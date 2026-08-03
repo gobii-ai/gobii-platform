@@ -1734,6 +1734,14 @@ MIXPANEL_PROJECT_TOKEN = env(
     "MIXPANEL_PROJECT_TOKEN",
     default=_proprietary_default("analytics", "MIXPANEL_PROJECT_TOKEN"),
 )
+ANALYTICS_INTERNAL_EMAIL_DOMAINS = tuple(
+    domain.strip().lower().lstrip("@")
+    for domain in env.list(
+        "ANALYTICS_INTERNAL_EMAIL_DOMAINS",
+        default=["gobii.ai", "forwardbounding.com"],
+    )
+    if domain.strip()
+)
 
 TWILIO_INCOMING_WEBHOOK_TOKEN = env("TWILIO_INCOMING_WEBHOOK_TOKEN", default="dummy-twilio-incoming-webhook-token")
 

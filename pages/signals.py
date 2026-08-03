@@ -30,6 +30,7 @@ from dateutil.relativedelta import relativedelta
 from tasks.services import TaskCreditService
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.analytics_billing import build_current_billing_profile_traits
 from util.attribution_referrers import clean_acquisition_referrer, decode_attribution_value
 from marketing_events.api import capi
 from marketing_events.constants import AD_CAPI_PROVIDER_TARGETS
@@ -3635,10 +3636,11 @@ def handle_subscription_event(event, **kwargs):
                 try:
                     Analytics.identify(
                         owner.id,
-                        {
-                            'plan': PlanNames.FREE,
-                            'is_trial': False,
-                        },
+                        build_current_billing_profile_traits(
+                            owner,
+                            plan=PlanNames.FREE,
+                            billing_status="canceled",
+                        ),
                     )
                 except Exception:
                     logger.exception("Failed to update user subscription in analytics for user %s", owner.id)
@@ -4004,10 +4006,14 @@ def handle_subscription_event(event, **kwargs):
                     logger.exception("Failed to align billing anchor with Stripe period for user %s: %s", owner.id, e)
 
                 try:
-                    Analytics.identify(owner.id, {
-                        'plan': plan_value,
-                        'is_trial': sub.status == "trialing",
-                    })
+                    Analytics.identify(
+                        owner.id,
+                        build_current_billing_profile_traits(
+                            owner,
+                            plan=plan_value,
+                            billing_status=sub.status,
+                        ),
+                    )
                 except Exception:
                     logger.exception(
                         "Failed to identify subscription analytics state for user %s during webhook",

@@ -351,6 +351,8 @@ def write_bytes_to_dir(
             event=AnalyticsEvent.AGENT_FILE_EXPORTED,
             source=AnalyticsSource.AGENT,
             properties=props.copy(),
+            user=agent.user,
+            billing_owner=agent.organization if agent.organization_id else agent.user,
         )
     except Exception:
         logger.debug("Failed to emit file exported analytics for agent %s", getattr(agent, "id", None), exc_info=True)
@@ -463,6 +465,8 @@ def import_message_attachments_to_filespace(message_id: str) -> List[ImportedNod
                 event=AnalyticsEvent.AGENT_ATTACHMENT_IMPORTED,
                 source=AnalyticsSource.AGENT,
                 properties=props.copy(),
+                user=agent.user,
+                billing_owner=agent.organization if agent.organization_id else agent.user,
             )
         except Exception:
             logger.debug("Failed to emit attachment import analytics for message %s", message_id, exc_info=True)

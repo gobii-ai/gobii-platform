@@ -5042,6 +5042,8 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
             event=AnalyticsEvent.WEB_CHAT_MESSAGE_SENT,
             source=AnalyticsSource.WEB,
             properties=_web_chat_properties(agent, props),
+            user=request.user,
+            billing_owner=agent.organization if agent.organization_id else agent.user,
         )
 
         return JsonResponse({"event": event}, status=201)
@@ -5344,6 +5346,8 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
                     },
                     organization=getattr(agent, "organization", None),
                 ),
+                user=request.user,
+                billing_owner=agent.organization if agent.organization_id else agent.user,
             )
         except Exception:
             logger.debug("Failed to emit download analytics for agent %s node %s", agent.id, getattr(node, "id", None), exc_info=True)
@@ -5398,6 +5402,7 @@ class SignedAgentFsNodeDownloadAPIView(View):
                     "size_bytes": node.size_bytes,
                     "download_type": "signed",
                 },
+                meaningful_activity=False,
             )
         except Exception:
             logger.debug("Failed to emit signed download analytics for node %s", getattr(node, "id", None), exc_info=True)
@@ -5591,6 +5596,8 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
                     },
                     organization=getattr(agent, "organization", None),
                 ),
+                user=request.user,
+                billing_owner=agent.organization if agent.organization_id else agent.user,
             )
         except Exception:
             logger.debug("Failed to emit upload analytics for agent %s", agent.id, exc_info=True)

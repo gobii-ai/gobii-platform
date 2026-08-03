@@ -8,6 +8,13 @@ from django.conf import settings
 from django.contrib.auth.models import User
 
 from observability import traced, trace
+from util.analytics_billing import (
+    AnalyticsBillingContext,
+    is_meaningful_activity_event,
+    resolve_analytics_billing_context,
+    sanitize_meaningful_event_properties,
+    unknown_billing_context,
+)
 
 analytics.write_key = settings.SEGMENT_WRITE_KEY
 
@@ -423,26 +430,78 @@ class Analytics:
                         traits['date_joined'] = int(traits['date_joined'].timestamp())
                     elif not isinstance(traits['date_joined'], str):
                         traits['date_joined'] = ''
-                except Exception as e:
+                except (OSError, OverflowError, TypeError, ValueError):
                     del traits['date_joined']
 
-            analytics.identify(user_id, traits, context)
+            try:
+                analytics.identify(user_id, traits, context)
+            except Exception:
+                # Analytics is diagnostic infrastructure; it must not break the
+                # authentication or billing action that triggered identification.
+                logger.exception("Failed to identify analytics user %s", user_id)
 
     @staticmethod
     @tracer.start_as_current_span("ANALYTICS Track")
     def track(user_id, event, properties, context: dict | None = None, ip: str = None, message_id: str = None, timestamp = None):
-        context = context or {}
+        context = dict(context or {})
         if Analytics._is_analytics_enabled():
             with traced("ANALYTICS Track"):
                 context['ip'] = '0'
-                analytics.track(user_id, event, properties, context, timestamp, None, None, message_id)
+                try:
+                    analytics.track(user_id, event, properties, context, timestamp, None, None, message_id)
+                except Exception:
+                    logger.exception("Failed to track analytics event %s for user %s", event, user_id)
 
     @staticmethod
     @tracer.start_as_current_span("ANALYTICS Track Event")
-    def track_event(user_id, event: AnalyticsEvent, source: AnalyticsSource, properties: dict | None = None, ip: str = None):
-        properties = properties or {}
+    def track_event(
+        user_id,
+        event: AnalyticsEvent,
+        source: AnalyticsSource,
+        properties: dict | None = None,
+        ip: str = None,
+        *,
+        user: object | None = None,
+        billing_owner: object | None = None,
+        billing_context: AnalyticsBillingContext | None = None,
+        meaningful_activity: bool | None = None,
+    ):
+        properties = dict(properties or {})
         if Analytics._is_analytics_enabled():
             with traced("ANALYTICS Track Event"):
+                should_enrich = (
+                    is_meaningful_activity_event(event)
+                    if meaningful_activity is None
+                    else meaningful_activity
+                )
+                if should_enrich:
+                    properties = sanitize_meaningful_event_properties(properties)
+                    try:
+                        snapshot = billing_context or resolve_analytics_billing_context(
+                            user_id,
+                            actor_user=user,
+                            billing_owner=billing_owner,
+                            organization_id=properties.get("organization_id"),
+                        )
+                        snapshot_properties = snapshot.as_event_properties()
+                    except Exception:
+                        # Keep the event useful and explicitly unclassified if a
+                        # malformed provider row or unexpected resolver bug occurs.
+                        logger.exception(
+                            "Failed to enrich meaningful analytics event %s for user %s",
+                            event,
+                            user_id,
+                        )
+                        snapshot_properties = unknown_billing_context(
+                            user_id,
+                            actor_user=user,
+                            billing_owner=billing_owner,
+                            organization_id=properties.get("organization_id"),
+                        ).as_event_properties()
+                    # Snapshot fields are server-owned. They intentionally replace
+                    # any browser/caller-supplied values with authoritative state.
+                    properties.update(snapshot_properties)
+
                 properties['medium'] = str(source)
                 context = {
                     'ip': '0',
@@ -451,6 +510,28 @@ class Analytics:
                     analytics.track(user_id, event, properties, context)
                 except Exception:
                     logger.exception(f"Failed to track event {event} for user {user_id}")
+
+    @staticmethod
+    def sync_billing_profile(user) -> None:
+        """Best-effort sync of current personal billing state to the user profile.
+
+        Organization state remains event-scoped because a user may belong to more
+        than one organization.
+        """
+        if user is None or getattr(user, "pk", None) is None:
+            return
+        try:
+            context = resolve_analytics_billing_context(
+                user.pk,
+                actor_user=user,
+                billing_owner=user,
+            )
+            Analytics.identify(user.pk, context.as_profile_traits())
+        except Exception:
+            logger.exception(
+                "Failed to sync billing analytics profile for user %s",
+                getattr(user, "pk", None),
+            )
 
     @staticmethod
     @tracer.start_as_current_span("ANALYTICS Track Event Anonymous")
@@ -474,12 +555,15 @@ class Analytics:
                     'ip': '0',
                 }
 
-                analytics.track(
-                    anonymous_id=anonymous_id,
-                    event=event,
-                    properties=properties,
-                    context=context
-                )
+                try:
+                    analytics.track(
+                        anonymous_id=anonymous_id,
+                        event=event,
+                        properties=properties,
+                        context=context
+                    )
+                except Exception:
+                    logger.exception("Failed to track anonymous analytics event %s", event)
 
     @staticmethod
     def with_org_properties(

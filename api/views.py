@@ -190,7 +190,13 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
 
         try:
             serializer.save(user=self.request.user)
-            Analytics.track_event(user_id=self.request.user.id, event=AnalyticsEvent.AGENT_CREATED, source=AnalyticsSource.API)
+            Analytics.track_event(
+                user_id=self.request.user.id,
+                event=AnalyticsEvent.AGENT_CREATED,
+                source=AnalyticsSource.API,
+                user=self.request.user,
+                billing_owner=self.request.user,
+            )
         except DjangoValidationError as e:
             raise DRFValidationError(detail=e.message_dict if hasattr(e, 'message_dict') else e.messages)
 
@@ -538,7 +544,9 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                     event=AnalyticsEvent.TASK_CREATED,
                     source=AnalyticsSource.API,
                     properties=properties.copy(),
-                    ip="0"
+                    ip="0",
+                    user=task.user,
+                    billing_owner=org or task.user,
                 )
                 if properties.get('organization'):
                     Analytics.track_event(
@@ -645,6 +653,8 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                 event=AnalyticsEvent.TASK_RESULT_VIEWED,
                 source=AnalyticsSource.API,
                 properties=view_props.copy(),
+                user=task.user,
+                billing_owner=task.organization if task.organization_id else task.user,
             )
             if task.status == BrowserUseAgentTask.StatusChoices.COMPLETED:
                 with traced("DB-FETCH Task Steps"):
@@ -746,6 +756,8 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             event=event,
             source=AnalyticsSource.API,
             properties=props.copy(),
+            user=self.request.user,
+            billing_owner=agent.organization if agent.organization_id else agent.user,
         )
         if organization_event and org is not None:
             Analytics.track_event(

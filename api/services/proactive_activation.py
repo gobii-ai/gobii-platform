@@ -230,12 +230,20 @@ class ProactiveActivationService:
             if metadata.get("force_reason"):
                 properties["force_reason"] = metadata["force_reason"]
 
+            owner = agent.organization if agent.organization_id else agent.user
+            properties = Analytics.with_org_properties(
+                properties,
+                organization=agent.organization if agent.organization_id else None,
+            )
+
             def _track():
                 Analytics.track_event(
                     user_id=agent.user_id,
                     event=AnalyticsEvent.PERSISTENT_AGENT_PROACTIVE_TRIGGERED,
                     source=AnalyticsSource.AGENT,
                     properties=properties,
+                    user=agent.user,
+                    billing_owner=owner,
                 )
 
             transaction.on_commit(_track)
