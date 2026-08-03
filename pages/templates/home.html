@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% load static %}
-{% load vite_tags %}
 {% load cta_tags %}
 {% block tailwind_css %}
   {% if home_use_k %}
@@ -1363,12 +1362,4 @@
         initScrollAnimations();
       });
     </script>
-{% endblock %}
-
-
-{% block extra_js %}
-  {{ block.super }}
-  {% if homepage_integrations_enabled %}
-    {% vite_asset 'src/homepageIntegrations.tsx' %}
-  {% endif %}
 {% endblock %}

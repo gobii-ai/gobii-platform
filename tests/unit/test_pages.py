@@ -1261,6 +1261,46 @@ class HomePageTests(TestCase):
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch(
+        "templatetags.vite_tags.get_vite_asset",
+        return_value=SimpleNamespace(
+            styles=(),
+            scripts=("/static/frontend/assets/homepage-integrations-test.js",),
+            inline_modules=(),
+        ),
+    )
+    @patch(
+        "config.vite.get_vite_asset",
+        return_value=SimpleNamespace(
+            styles=(),
+            scripts=("/static/frontend/assets/immersive-app-test.js",),
+        ),
+    )
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={"enabled": True, "builtins": []},
+    )
+    def test_homepage_integrations_entry_only_loads_with_picker_root(
+        self,
+        _mock_integrations,
+        _mock_immersive_asset,
+        _mock_integrations_asset,
+    ):
+        default_response = self.client.get("/")
+        spawn_response = self.client.get("/", {"spawn": "1"})
+
+        self.assertEqual(default_response.status_code, 200)
+        self.assertEqual(spawn_response.status_code, 200)
+        default_soup = BeautifulSoup(default_response.content, "html.parser")
+        spawn_soup = BeautifulSoup(spawn_response.content, "html.parser")
+        integrations_script = "/static/frontend/assets/homepage-integrations-test.js"
+
+        self.assertIsNone(default_soup.find(id="homepage-integrations-root"))
+        self.assertIsNone(default_soup.find("script", src=integrations_script))
+        self.assertIsNotNone(spawn_soup.find(id="homepage-integrations-root"))
+        self.assertIsNotNone(spawn_soup.find("script", src=integrations_script))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("pages.views.get_homepage_pretrained_payload")
     def test_home_category_ctas_deploy_templates_matching_each_promise(self, mock_payload):
         def template(
