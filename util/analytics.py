@@ -10,9 +10,8 @@ from django.contrib.auth.models import User
 from observability import traced, trace
 from util.analytics_billing import (
     AnalyticsBillingContext,
-    is_meaningful_activity_event,
     resolve_analytics_billing_context,
-    sanitize_meaningful_event_properties,
+    sanitize_analytics_event_properties,
     unknown_billing_context,
 )
 
@@ -21,6 +20,51 @@ analytics.write_key = settings.SEGMENT_WRITE_KEY
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+
+
+def _properties_with_billing_snapshot(
+    *,
+    user_id: object,
+    event: object,
+    properties: dict | None,
+    user: object | None = None,
+    billing_owner: object | None = None,
+    billing_context: AnalyticsBillingContext | None = None,
+) -> dict:
+    enriched_properties = sanitize_analytics_event_properties(properties)
+    try:
+        snapshot = billing_context or resolve_analytics_billing_context(
+            user_id,
+            actor_user=user,
+            billing_owner=billing_owner,
+            organization_id=enriched_properties.get("organization_id"),
+        )
+        snapshot_properties = snapshot.as_event_properties()
+    except Exception:
+        # Keep the event useful and explicitly unclassified if a malformed
+        # provider row or unexpected resolver bug occurs.
+        logger.exception(
+            "Failed to enrich analytics event %s for user %s",
+            event,
+            user_id,
+        )
+        snapshot_properties = unknown_billing_context(
+            user_id,
+            actor_user=user,
+            billing_owner=billing_owner,
+            organization_id=enriched_properties.get("organization_id"),
+        ).as_event_properties()
+
+    # Snapshot fields are server-owned and replace caller-supplied values.
+    enriched_properties.update(snapshot_properties)
+    return enriched_properties
+
+
+def _is_resolvable_user_identifier(user_id: object) -> bool:
+    if isinstance(user_id, bool):
+        return False
+    return isinstance(user_id, int) or str(user_id or "").strip().isdigit()
+
 
 GOOGLE_TRUSTED = [
     ipaddress.ip_network("35.184.0.0/13"),  # your existing (keep if you know you use it)
@@ -124,6 +168,7 @@ class AnalyticsEvent(StrEnum):
     WEB_CHAT_SESSION_STARTED = 'Web Chat Session Started'
     WEB_CHAT_SESSION_ENDED = 'Web Chat Session Ended'
     WEB_CHAT_MESSAGE_SENT = 'Web Chat Message Sent'
+    WEB_CHAT_MESSAGE_RECEIVED = 'Web Chat Message Received'
     AGENT_MESSAGE_COPIED = 'Agent Message Copied'
     AGENT_MESSAGE_FEEDBACK_UPDATED = 'Agent Message Feedback Updated'
     AGENT_MESSAGE_ISSUE_REPORTED = 'Agent Message Issue Reported'
@@ -442,10 +487,42 @@ class Analytics:
 
     @staticmethod
     @tracer.start_as_current_span("ANALYTICS Track")
-    def track(user_id, event, properties, context: dict | None = None, ip: str = None, message_id: str = None, timestamp = None):
+    def track(
+        user_id,
+        event,
+        properties,
+        context: dict | None = None,
+        ip: str = None,
+        message_id: str = None,
+        timestamp=None,
+        *,
+        user: object | None = None,
+        billing_owner: object | None = None,
+        billing_context: AnalyticsBillingContext | None = None,
+        billing_enrichment: bool | None = None,
+    ):
         context = dict(context or {})
         if Analytics._is_analytics_enabled():
             with traced("ANALYTICS Track"):
+                should_enrich = (
+                    billing_enrichment
+                    if billing_enrichment is not None
+                    else bool(
+                        user is not None
+                        or billing_owner is not None
+                        or billing_context is not None
+                        or _is_resolvable_user_identifier(user_id)
+                    )
+                )
+                if should_enrich:
+                    properties = _properties_with_billing_snapshot(
+                        user_id=user_id,
+                        event=event,
+                        properties=properties,
+                        user=user,
+                        billing_owner=billing_owner,
+                        billing_context=billing_context,
+                    )
                 context['ip'] = '0'
                 try:
                     analytics.track(user_id, event, properties, context, timestamp, None, None, message_id)
@@ -464,43 +541,20 @@ class Analytics:
         user: object | None = None,
         billing_owner: object | None = None,
         billing_context: AnalyticsBillingContext | None = None,
-        meaningful_activity: bool | None = None,
+        billing_enrichment: bool = True,
     ):
         properties = dict(properties or {})
         if Analytics._is_analytics_enabled():
             with traced("ANALYTICS Track Event"):
-                should_enrich = (
-                    is_meaningful_activity_event(event)
-                    if meaningful_activity is None
-                    else meaningful_activity
-                )
-                if should_enrich:
-                    properties = sanitize_meaningful_event_properties(properties)
-                    try:
-                        snapshot = billing_context or resolve_analytics_billing_context(
-                            user_id,
-                            actor_user=user,
-                            billing_owner=billing_owner,
-                            organization_id=properties.get("organization_id"),
-                        )
-                        snapshot_properties = snapshot.as_event_properties()
-                    except Exception:
-                        # Keep the event useful and explicitly unclassified if a
-                        # malformed provider row or unexpected resolver bug occurs.
-                        logger.exception(
-                            "Failed to enrich meaningful analytics event %s for user %s",
-                            event,
-                            user_id,
-                        )
-                        snapshot_properties = unknown_billing_context(
-                            user_id,
-                            actor_user=user,
-                            billing_owner=billing_owner,
-                            organization_id=properties.get("organization_id"),
-                        ).as_event_properties()
-                    # Snapshot fields are server-owned. They intentionally replace
-                    # any browser/caller-supplied values with authoritative state.
-                    properties.update(snapshot_properties)
+                if billing_enrichment:
+                    properties = _properties_with_billing_snapshot(
+                        user_id=user_id,
+                        event=event,
+                        properties=properties,
+                        user=user,
+                        billing_owner=billing_owner,
+                        billing_context=billing_context,
+                    )
 
                 properties['medium'] = str(source)
                 context = {

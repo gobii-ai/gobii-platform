@@ -54,32 +54,6 @@ INACTIVE_BILLING_STATUSES = frozenset(
     }
 )
 
-# This is the canonical classification used for paid-account activity reporting.
-# Events outside this allowlist remain unchanged and do not perform billing lookups.
-MEANINGFUL_ACTIVITY_EVENTS = frozenset(
-    {
-        "Agent Created",
-        "Task Created",
-        "Task Completed",
-        "Task Result Viewed",
-        "Task Result Downloaded",
-        "Persistent Agent Created",
-        "Persistent Agent Proactively Triggered",
-        "Persistent Agent Message Sent",
-        "Persistent Agent Message Received",
-        "Persistent Agent SMS Sent",
-        "Persistent Agent SMS Received",
-        "Web Chat Message Sent",
-        "Human Input Response Submitted",
-        "Persistent Agent Inbound Webhook Triggered",
-        "Agent File Sent",
-        "Agent File Downloaded",
-        "Agent File Exported",
-        "Agent Files Uploaded",
-        "Agent Attachment Imported",
-    }
-)
-
 EVENT_SNAPSHOT_PROPERTY_NAMES = frozenset(
     {
         "organization_id",
@@ -91,7 +65,7 @@ EVENT_SNAPSHOT_PROPERTY_NAMES = frozenset(
     }
 )
 
-# These values are not needed to measure account activity. Removing them at the
+# These values are not needed for product analytics. Removing them at the
 # centralized boundary prevents message/contact PII from reaching Mixpanel even
 # when an older call site still supplies it.
 SENSITIVE_EVENT_PROPERTY_NAMES = frozenset(
@@ -148,25 +122,21 @@ class AnalyticsBillingContext:
         }
 
 
-def is_meaningful_activity_event(event: object) -> bool:
-    return str(event) in MEANINGFUL_ACTIVITY_EVENTS
-
-
 def _is_sensitive_property_name(key: object) -> bool:
     normalized = str(key).strip().lower().replace("-", "_").replace(".", "_")
     return normalized in SENSITIVE_EVENT_PROPERTY_NAMES or normalized == "email" or normalized.endswith("_email")
 
 
-def sanitize_meaningful_event_properties(properties: Mapping[str, Any] | None) -> dict[str, Any]:
+def sanitize_analytics_event_properties(properties: Mapping[str, Any] | None) -> dict[str, Any]:
     sanitized: dict[str, Any] = {}
     for key, value in dict(properties or {}).items():
         if _is_sensitive_property_name(key):
             continue
         if isinstance(value, Mapping):
-            sanitized[key] = sanitize_meaningful_event_properties(value)
+            sanitized[key] = sanitize_analytics_event_properties(value)
         elif isinstance(value, list):
             sanitized[key] = [
-                sanitize_meaningful_event_properties(item) if isinstance(item, Mapping) else item
+                sanitize_analytics_event_properties(item) if isinstance(item, Mapping) else item
                 for item in value
             ]
         else:

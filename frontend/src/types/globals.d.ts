@@ -36,6 +36,10 @@ interface SegmentAnalytics {
   ready(callback: () => void): void
 }
 
+type GobiiSegmentBootstrap = {
+  setDefaultProperties?: (properties: Record<string, unknown>) => void
+}
+
 type GtagParams = Record<string, string | number | boolean | undefined>
 type GtagCommand = 'config' | 'event' | 'js' | 'set' | 'consent'
 type Gtag = (command: GtagCommand, targetOrValue: string | Date, params?: GtagParams) => void
@@ -126,6 +130,7 @@ type LibPhoneNumberGlobal = {
 declare global {
   interface Window {
     analytics?: SegmentAnalytics
+    GobiiSegmentBootstrap?: GobiiSegmentBootstrap
     gtag?: Gtag
     gobiiTrackCta?: GobiiTrackCta
     churnkey?: ChurnKeyGlobal

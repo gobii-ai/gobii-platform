@@ -167,6 +167,10 @@ from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, end_web_session, 
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.analytics_billing import (
+    resolve_analytics_billing_context,
+    unknown_billing_context,
+)
 from util.onboarding import TRIAL_ONBOARDING_TARGET_AGENT_UI, set_trial_onboarding_intent, set_trial_onboarding_requires_plan_selection
 from util.personal_signup_preview import resolve_personal_signup_preview, resolve_personal_signup_preview_onboarding_state
 from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE, TrialRequiredValidationError, can_user_send_personal_agent_chat_message
@@ -461,12 +465,37 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        billing_context = {}
+        segment_web_enabled = bool(
+            settings.SEGMENT_WEB_WRITE_KEY
+            and (not settings.DEBUG or settings.SEGMENT_WEB_ENABLE_IN_DEBUG)
+        )
+        if segment_web_enabled:
+            billing_owner = _resolve_request_context_owner(request) or request.user
+            try:
+                billing_context = resolve_analytics_billing_context(
+                    request.user.id,
+                    actor_user=request.user,
+                    billing_owner=billing_owner,
+                ).as_event_properties()
+            except Exception:
+                # Session hydration is product-critical; analytics context is not.
+                logger.exception(
+                    "Failed to resolve console analytics billing context for user %s",
+                    request.user.id,
+                )
+                billing_context = unknown_billing_context(
+                    request.user.id,
+                    actor_user=request.user,
+                ).as_event_properties()
+
         return JsonResponse(
             {
                 "user_id": str(request.user.id),
                 "email": request.user.email,
                 "timezone": UserPreference.resolve_user_timezone(request.user),
                 "is_system_admin": bool(request.user.is_staff or request.user.is_superuser),
+                "billing_context": billing_context,
             }
         )
 
@@ -5402,7 +5431,7 @@ class SignedAgentFsNodeDownloadAPIView(View):
                     "size_bytes": node.size_bytes,
                     "download_type": "signed",
                 },
-                meaningful_activity=False,
+                billing_enrichment=False,
             )
         except Exception:
             logger.debug("Failed to emit signed download analytics for node %s", getattr(node, "id", None), exc_info=True)

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings, tag
+from django.test import RequestFactory, TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.models import Organization, OrganizationMembership, UserBilling, UserFlags
@@ -217,7 +217,7 @@ class AnalyticsBillingEnrichmentTests(TestCase):
             )
         self.assertIsNone(result)
 
-    def test_meaningful_event_strips_pii_and_replaces_untrusted_billing_values(self):
+    def test_enriched_event_strips_pii_and_replaces_untrusted_billing_values(self):
         context = AnalyticsBillingContext(
             organization_id=f"user:{self.user.pk}",
             plan_at_event="startup",
@@ -251,7 +251,7 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(properties["plan_at_event"], "startup")
         self.assertEqual(properties["event_schema_version"], EVENT_SCHEMA_VERSION)
 
-    def test_representative_event_is_enriched_once_and_excluded_event_is_unchanged(self):
+    def test_all_attributable_events_are_enriched_and_explicit_opt_out_is_unchanged(self):
         context = AnalyticsBillingContext(
             organization_id=f"user:{self.user.pk}",
             plan_at_event="startup",
@@ -273,7 +273,7 @@ class AnalyticsBillingEnrichmentTests(TestCase):
         self.assertEqual(track_mock.call_args.args[2]["node_id"], "node-1")
 
         with (
-            patch("util.analytics.resolve_analytics_billing_context") as resolver,
+            patch("util.analytics.resolve_analytics_billing_context", return_value=context) as resolver,
             patch("util.analytics.analytics.track") as track_mock,
         ):
             Analytics.track_event(
@@ -282,10 +282,140 @@ class AnalyticsBillingEnrichmentTests(TestCase):
                 source=AnalyticsSource.WEB,
                 properties={"safe": "kept"},
             )
+        resolver.assert_called_once()
+        login_properties = track_mock.call_args.args[2]
+        self.assertEqual(login_properties["safe"], "kept")
+        self.assertEqual(login_properties["event_schema_version"], EVENT_SCHEMA_VERSION)
+
+        with (
+            patch("util.analytics.resolve_analytics_billing_context") as resolver,
+            patch("util.analytics.analytics.track") as track_mock,
+        ):
+            Analytics.track_event(
+                user_id=self.user.pk,
+                event=AnalyticsEvent.AGENT_FILE_DOWNLOADED,
+                source=AnalyticsSource.WEB,
+                properties={"download_type": "signed"},
+                billing_enrichment=False,
+            )
         resolver.assert_not_called()
-        excluded_properties = track_mock.call_args.args[2]
-        self.assertEqual(excluded_properties["safe"], "kept")
-        self.assertNotIn("event_schema_version", excluded_properties)
+        opted_out_properties = track_mock.call_args.args[2]
+        self.assertEqual(opted_out_properties["download_type"], "signed")
+        self.assertNotIn("event_schema_version", opted_out_properties)
+
+    def test_email_open_event_receives_billing_snapshot_and_strips_recipient(self):
+        actor = self._set_personal_plan(PlanNames.STARTUP)
+        with (
+            patch("util.analytics_billing.get_stripe_customer", return_value=_FakeCustomer("active")),
+            patch("util.analytics.analytics.track") as track_mock,
+        ):
+            Analytics.track_agent_email_opened(
+                {
+                    "Recipient": actor.email,
+                    "FirstOpen": True,
+                    "MessageID": "message-1",
+                    "Geo": {},
+                }
+            )
+
+        properties = track_mock.call_args.args[2]
+        self.assertEqual(properties["plan_at_event"], "startup")
+        self.assertEqual(properties["access_type_at_event"], AnalyticsAccessType.PAID)
+        self.assertNotIn("recipient", properties)
+
+    def test_legacy_track_enriches_user_ids_but_not_hashed_or_anonymous_ids(self):
+        context = AnalyticsBillingContext(
+            organization_id=f"user:{self.user.pk}",
+            plan_at_event="startup",
+            access_type_at_event=AnalyticsAccessType.PAID,
+            billing_status_at_event=AnalyticsBillingStatus.ACTIVE,
+            is_internal=False,
+        )
+        with (
+            patch("util.analytics.resolve_analytics_billing_context", return_value=context) as resolver,
+            patch("util.analytics.analytics.track") as track_mock,
+        ):
+            Analytics.track(
+                user_id=self.user.pk,
+                event=AnalyticsEvent.SIGNUP,
+                properties={"safe": "kept"},
+            )
+
+        resolver.assert_called_once()
+        properties = track_mock.call_args.args[2]
+        self.assertEqual(properties["event_schema_version"], EVENT_SCHEMA_VERSION)
+
+        with (
+            patch("util.analytics.resolve_analytics_billing_context") as resolver,
+            patch("util.analytics.analytics.track") as track_mock,
+        ):
+            Analytics.track(
+                user_id="hashed-external-id",
+                event=AnalyticsEvent.CAPI_EVENT_SENT,
+                properties={"safe": "kept"},
+            )
+
+        resolver.assert_not_called()
+        self.assertNotIn("event_schema_version", track_mock.call_args.args[2])
+
+    @override_settings(
+        SEGMENT_WEB_WRITE_KEY="web-segment-test",
+        SEGMENT_WEB_ENABLE_IN_DEBUG=True,
+    )
+    def test_authenticated_web_context_exposes_server_resolved_billing_defaults(self):
+        from pages.context_processors import analytics as analytics_context
+
+        actor = self._set_personal_plan(PlanNames.STARTUP)
+        request = RequestFactory().get("/pricing/")
+        request.user = actor
+        request.session = {}
+
+        with patch(
+            "util.analytics_billing.get_stripe_customer",
+            return_value=_FakeCustomer("active"),
+        ):
+            context = analytics_context(request)
+
+        billing_context = context["analytics"]["data"]["billing_context"]
+        self.assertEqual(billing_context["organization_id"], f"user:{actor.pk}")
+        self.assertEqual(billing_context["plan_at_event"], "startup")
+        self.assertEqual(billing_context["access_type_at_event"], AnalyticsAccessType.PAID)
+
+    @override_settings(
+        SEGMENT_WEB_WRITE_KEY="web-segment-test",
+        SEGMENT_WEB_ENABLE_IN_DEBUG=True,
+    )
+    def test_console_session_hydrates_immersive_app_billing_defaults(self):
+        actor = self._set_personal_plan(PlanNames.STARTUP)
+        self.client.force_login(actor)
+
+        with patch(
+            "util.analytics_billing.get_stripe_customer",
+            return_value=_FakeCustomer("active"),
+        ):
+            response = self.client.get("/console/api/session/")
+
+        self.assertEqual(response.status_code, 200)
+        billing_context = response.json()["billing_context"]
+        self.assertEqual(billing_context["organization_id"], f"user:{actor.pk}")
+        self.assertEqual(billing_context["plan_at_event"], "startup")
+        self.assertEqual(billing_context["access_type_at_event"], AnalyticsAccessType.PAID)
+
+    @override_settings(
+        SEGMENT_WEB_WRITE_KEY="web-segment-test",
+        SEGMENT_WEB_ENABLE_IN_DEBUG=True,
+    )
+    def test_immersive_app_initial_page_waits_for_billing_context(self):
+        from middleware.app_shell import _format_segment_snippet
+
+        snippet = _format_segment_snippet()
+
+        self.assertIn("fetch('/console/api/session/'", snippet)
+        self.assertIn("setDefaultProperties(payload.billing_context)", snippet)
+        self.assertLess(
+            snippet.index("setDefaultProperties(payload.billing_context)"),
+            snippet.index("trackInitialPage();"),
+        )
 
     def test_current_profile_traits_are_separate_from_event_snapshot(self):
         actor = self._set_personal_plan(PlanNames.STARTUP)

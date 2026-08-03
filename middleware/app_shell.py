@@ -88,7 +88,26 @@ def _format_segment_snippet() -> str:
       if (!segmentEnabled) {{
         return;
       }}
-      analytics.page('App', 'Immersive App');
+      function trackInitialPage() {{
+        analytics.page('App', 'Immersive App');
+      }}
+      fetch('/console/api/session/', {{
+        credentials: 'same-origin',
+        headers: {{'Accept': 'application/json'}}
+      }})
+        .then(function(response) {{
+          if (!response.ok) {{
+            throw new Error('Unable to load analytics context');
+          }}
+          return response.json();
+        }})
+        .then(function(payload) {{
+          if (payload && payload.billing_context) {{
+            window.GobiiSegmentBootstrap.setDefaultProperties(payload.billing_context);
+          }}
+          trackInitialPage();
+        }})
+        .catch(trackInitialPage);
     }})();
   </script>"""
 

@@ -105,10 +105,22 @@
 
     // Add source middleware for web events
     analytics.addSourceMiddleware(({ payload, next }) => {
+      if (!['track', 'page', 'screen'].includes(payload.obj.type)) {
+        next(payload);
+        return;
+      }
       const { properties } = payload.obj;
       if (!properties) payload.obj.properties = {};
       payload.obj.properties.medium = 'Web';
       payload.obj.properties.frontend = true;
+      {% if analytics.data.billing_context %}
+      payload.obj.properties.organization_id = "{{ analytics.data.billing_context.organization_id|escapejs }}";
+      payload.obj.properties.plan_at_event = "{{ analytics.data.billing_context.plan_at_event|escapejs }}";
+      payload.obj.properties.access_type_at_event = "{{ analytics.data.billing_context.access_type_at_event|escapejs }}";
+      payload.obj.properties.billing_status_at_event = "{{ analytics.data.billing_context.billing_status_at_event|escapejs }}";
+      payload.obj.properties.is_internal = {{ analytics.data.billing_context.is_internal|yesno:"true,false" }};
+      payload.obj.properties.event_schema_version = {{ analytics.data.billing_context.event_schema_version }};
+      {% endif %}
       next(payload);
     });
 

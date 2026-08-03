@@ -18,6 +18,10 @@ from pages.account_info_cache import account_info_cache_key, account_info_cache_
 from pages.mini_mode import is_mini_mode_enabled
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics
+from util.analytics_billing import (
+    resolve_analytics_billing_context,
+    unknown_billing_context,
+)
 from util.subscription_helper import (
     reconcile_user_plan_from_stripe,
     get_user_api_rate_limit,
@@ -204,6 +208,41 @@ def analytics(request):
     Adds analytics tokens to the context.
     This is used for Google Analytics and other tracking services.
     """
+    billing_context = {}
+    segment_web_enabled = bool(
+        django_settings.SEGMENT_WEB_WRITE_KEY
+        and (
+            not django_settings.DEBUG
+            or django_settings.SEGMENT_WEB_ENABLE_IN_DEBUG
+        )
+    )
+    if request.user.is_authenticated and segment_web_enabled:
+        try:
+            from console.context_helpers import build_console_context
+
+            context_info = build_console_context(request)
+            billing_owner = (
+                context_info.current_membership.org
+                if context_info.current_context.type == "organization"
+                and context_info.current_membership is not None
+                else request.user
+            )
+            billing_context = resolve_analytics_billing_context(
+                request.user.id,
+                actor_user=request.user,
+                billing_owner=billing_owner,
+            ).as_event_properties()
+        except Exception:
+            # Analytics context must never prevent an application page from rendering.
+            logger.exception(
+                "Failed to resolve web analytics billing context for user %s",
+                request.user.id,
+            )
+            billing_context = unknown_billing_context(
+                request.user.id,
+                actor_user=request.user,
+            ).as_event_properties()
+
     analyticsContext = {
         'analytics': {
             'tokens': {
@@ -224,6 +263,7 @@ def analytics(request):
                 ),
                 "ip": Analytics.get_client_ip(request),
                 "timestamp": datetime.utcnow().isoformat() + "Z",
+                "billing_context": billing_context,
             }
         }
     }
