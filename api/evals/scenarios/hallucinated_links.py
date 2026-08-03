@@ -931,6 +931,64 @@ def owner_report_execution_failures(action_calls, orchestrator_completion_ids: I
     return failures
 
 
+def tool_delivery_execution_failures(action_calls, orchestrator_completion_ids: Iterable[object]) -> list[str]:
+    action_calls = tuple(action_calls)
+    action_names = [call.tool_name for call in action_calls]
+    failures = []
+    sends = [call for call in action_calls if call.tool_name == "send_chat_message"]
+    progress_sends = [
+        call for call in sends
+        if (call.tool_params or {}).get("will_continue_work") is True
+    ]
+    terminal_sends = [
+        call for call in sends
+        if (call.tool_params or {}).get("will_continue_work") is False
+    ]
+
+    if action_names.count("http_request") != 1:
+        failures.append(f"Tool-backed delivery required one source fetch; actions were {action_names}.")
+    if action_names.count("sqlite_batch") > 1:
+        failures.append(f"Tool-backed delivery reread or reshaped SQLite more than once: {action_names}.")
+    if len(progress_sends) > 1:
+        failures.append(f"Tool-backed delivery sent repeated progress updates: {action_names}.")
+    if len(terminal_sends) != 1 or action_calls[-1:] != tuple(terminal_sends):
+        failures.append(f"Tool-backed delivery required one terminal web-chat send; actions were {action_names}.")
+    if len(sends) != len(progress_sends) + len(terminal_sends):
+        failures.append("Tool-backed delivery used a chat send without an explicit continuation state.")
+
+    unexpected = [
+        name for name in action_names
+        if name not in {"http_request", "sqlite_batch", "send_chat_message"}
+    ]
+    if unexpected:
+        failures.append(f"Tool-backed delivery used unrelated recovery actions: {unexpected}.")
+
+    bad_statuses = [
+        (call.tool_name, str(call.status or "").casefold(), _tool_result_status(call))
+        for call in action_calls
+        if str(call.status or "").casefold() != "complete" or _tool_result_status(call) != "ok"
+    ]
+    if bad_statuses:
+        failures.append(f"Tool-backed delivery actions were not all successful: {bad_statuses}.")
+
+    # A model may pair one concise progress acknowledgement with the useful tool
+    # action in the same completion. Count the work path, not that communication,
+    # when proving every completion advanced the request.
+    work_calls = [call for call in action_calls if call not in progress_sends]
+    action_completion_ids = [
+        str(call.step.completion_id) if getattr(call.step, "completion_id", None) else None
+        for call in work_calls
+    ]
+    completion_ids = [str(completion_id) for completion_id in orchestrator_completion_ids]
+    if len(set(action_completion_ids)) != len(action_completion_ids) or action_completion_ids != completion_ids:
+        failures.append(
+            "Tool-backed delivery did not take exactly one useful action in every completion: "
+            f"actions={action_completion_ids}, completions={completion_ids}."
+        )
+
+    return failures
+
+
 class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
     tier = "extended"
     category = "link_grounding"
@@ -941,6 +999,7 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
     tags = ("hallucinated_links", "url_provenance", "real_harness", "llm_judge")
     tasks = [
         ScenarioTask(name="inject_context_and_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_first_shot_delivery", assertion_type="exact_match"),
         ScenarioTask(name="verify_single_final_answer", assertion_type="manual"),
         ScenarioTask(name="verify_url_provenance", assertion_type="exact_match"),
         ScenarioTask(name="judge_link_grounding", assertion_type="llm_judge"),
@@ -977,17 +1036,12 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                         "send_chat_message",
                     ] if owner_report else [
                         "http_request",
-                        "mcp_brightdata_scrape_as_markdown",
-                        "mcp_brightdata_search_engine",
-                        "read_file",
-                        "search_tools",
                         "send_chat_message",
                         "sqlite_batch",
-                        "update_plan",
                     ]),
                     "ignored_tool_names": ["sleep_until_next_trigger"],
-                    # Let a bad pre-work send finish so the strict action-shape check can diagnose it.
-                    "max_relevant_tool_calls": 4 if owner_report else 32 if case.is_long else 16,
+                    # One concise progress send may accompany the fetch/import path.
+                    "max_relevant_tool_calls": 5,
                 },
             )
 
@@ -1007,6 +1061,7 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
             artifacts={"message": inbound},
         )
 
+        self._record_first_shot_delivery(run_id, case, agent_id=agent_id, after=inbound.timestamp)
         message = self._record_single_answer(run_id, agent_id=agent_id, after=inbound.timestamp)
         if message is None:
             self._record_missing_answer_tasks(run_id)
@@ -1119,6 +1174,7 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
             artifacts={"message": inbound, "pending_tool_calls": pending_calls},
         )
         for task_name in (
+            "verify_first_shot_delivery",
             "verify_single_final_answer",
             "verify_url_provenance",
             "judge_link_grounding",
@@ -1130,6 +1186,68 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                 task_name=task_name,
                 observed_summary="Skipped because agent processing timed out.",
             )
+
+    def _record_first_shot_delivery(
+        self,
+        run_id: str,
+        case: LinkGroundingCase,
+        *,
+        agent_id: str,
+        after,
+    ) -> None:
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_first_shot_delivery",
+        )
+        if case.pattern.context_source != "tool":
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_first_shot_delivery",
+                observed_summary="History-backed case required no external source execution contract.",
+            )
+            return
+
+        action_calls = list(PersistentAgentToolCall.objects.filter(
+            step__eval_run_id=run_id,
+            step__agent_id=agent_id,
+            step__created_at__gt=after,
+        ).exclude(
+            tool_name="sleep_until_next_trigger",
+        ).order_by("step__created_at", "step_id"))
+        orchestrator_completion_ids = PersistentAgentCompletion.objects.filter(
+            eval_run_id=run_id,
+            agent_id=agent_id,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            created_at__gt=after,
+        ).order_by("created_at", "id").values_list("id", flat=True)
+        failures = tool_delivery_execution_failures(action_calls, orchestrator_completion_ids)
+        status = EvalRunTask.Status.FAILED if failures else EvalRunTask.Status.PASSED
+        self.record_task_result(
+            run_id,
+            None,
+            status,
+            task_name="verify_first_shot_delivery",
+            observed_summary=(
+                "; ".join(failures)
+                if failures
+                else "Agent fetched once, used at most one SQLite shaping pass, and delivered terminally."
+            ),
+            artifacts={
+                "actions": [
+                    {
+                        "tool_name": call.tool_name,
+                        "status": call.status,
+                        "result_status": _tool_result_status(call),
+                        "completion_id": str(call.step.completion_id),
+                    }
+                    for call in action_calls
+                ],
+            },
+        )
 
     def _record_single_answer(self, run_id: str, *, agent_id: str, after) -> PersistentAgentMessage | None:
         self.record_task_result(

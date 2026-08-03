@@ -1576,6 +1576,10 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
         for row in rows[data_start_idx:data_start_idx + 3]
         if any(cell.strip() for cell in row)
     ]
+    if looks_like_header and sum(row == header_row for row in data_rows) >= 2:
+        # Repeated prose boilerplate containing commas can fool the dialect
+        # sniffer. A real header should not also be most of its first data rows.
+        return False, CsvInfo()
     info.sample_rows = [dialect.delimiter.join(row)[:300] for row in data_rows]
 
     # Infer column types from sample data

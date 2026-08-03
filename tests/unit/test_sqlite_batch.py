@@ -224,18 +224,18 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
     def test_tool_contract_explains_batch_and_upsert_shapes(self):
         tool = get_sqlite_batch_tool()["function"]
 
-        self.assertIn("one set-wise upsert", tool["description"])
+        self.assertIn("set-wise upsert", tool["description"])
         self.assertIn("WHERE 1=1 before ON CONFLICT", tool["description"])
-        self.assertIn("parent fields from result_json", tool["description"])
+        self.assertIn("parents from result_json", tool["description"])
         self.assertIn("children from json_each(actual array)", tool["description"])
         self.assertIn("Never filter result_id/URL", tool["description"])
-        self.assertIn("json-extracts every field plus message_id", tool["description"])
+        self.assertIn("derive all fields plus message_id", tool["description"])
         self.assertIn("deliver without reread", tool["description"])
-        self.assertIn("material row reconciliation", tool["description"])
-        self.assertIn("both answer and supporting rows/URLs", tool["description"])
-        self.assertIn("aggregate-only is incomplete", tool["description"])
-        self.assertIn("inspect the whole set once", tool["description"])
-        self.assertIn("copy source facts into SQL", tool["description"])
+        self.assertIn("Domain model/logic", tool["description"])
+        self.assertIn("decision SELECT with answer rows/URLs", tool["description"])
+        self.assertIn("aggregates alone are incomplete", tool["description"])
+        self.assertIn("inspect the full set once", tool["description"])
+        self.assertIn("put source facts in SQL", tool["description"])
         self.assertEqual(tool["parameters"]["properties"]["rows"]["type"], "array")
         self.assertEqual(tool["parameters"]["properties"]["bindings"]["type"], "object")
 
@@ -872,37 +872,41 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         for expected in (
             "keyed DDL",
-            "one set-wise upsert",
+            "set-wise upsert",
             "filtered/ranked decision SELECT",
             "rows=[]",
             "is_current_batch=1",
             "tool_name='<exact>'",
             "t.result_id/source_url",
-            "inspect the whole set once",
-            "join rows to __tool_results",
-            "latest non-outbound non-null payload",
-            "json-extracts every field plus message_id",
-            "never pre-read, bind",
+            "inspect the full set once",
+            "split repeated sections set-wise",
+            "Prose has NULL result_json",
+            "one row/result_id",
+            "latest non-outbound nonnull __messages payload",
+            "no pre-read or copied state",
             "INSERT SELECT needs WHERE 1=1 before ON CONFLICT",
             "per-item",
             "historical mixing",
-            "normalized keyed entities/relations",
+            "Normalize keyed entities/relations",
             "SELECT-all readback",
-            "No draft/superseded SQL",
+            "No draft SQL",
             "Never inspect messages/contacts for a missing outbound recipient",
         ):
             self.assertIn(expected, description)
         continuation_description = (
             definition["function"]["parameters"]["properties"]["will_continue_work"]["description"]
         )
-        self.assertIn("True for action-producing reads", continuation_description)
-        self.assertIn("all queue reads", continuation_description)
+        self.assertIn("True for action-producing queue reads", continuation_description)
         self.assertIn("false for answer SELECTs", continuation_description)
-        self.assertIn("Never true merely to reread SQLite", continuation_description)
+        self.assertIn(
+            "before replying",
+            continuation_description,
+        )
+        self.assertIn("Never reread SQLite", continuation_description)
         rows_schema = definition["function"]["parameters"]["properties"]["rows"]
         self.assertEqual(rows_schema["type"], "array")
-        self.assertIn("REQUIRED and non-empty", rows_schema["description"])
-        self.assertIn("Use [] for structured/inspection/model-only work", rows_schema["description"])
+        self.assertIn("need nonempty exact result_id/fields", rows_schema["description"])
+        self.assertIn("SQL-derived prose work", rows_schema["description"])
         self.assertIn("SQL receives :rows", rows_schema["description"])
         self.assertEqual(rows_schema["items"]["required"], ["result_id", "fields"])
         self.assertEqual(
@@ -919,8 +923,8 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertIn("json_each(:rows)", sql_description)
         self.assertIn("$.fields.*", sql_description)
         self.assertIn("Message writes derive payload/message_id from __messages", sql_description)
-        self.assertIn("latest non-outbound non-null payload", description)
-        self.assertIn("json-extracts every field", description)
+        self.assertIn("latest non-outbound nonnull __messages payload", description)
+        self.assertIn("derive all fields plus message_id", description)
         self.assertIn("requested decision/evidence SELECT", sql_description)
         bindings_description = definition["function"]["parameters"]["properties"]["bindings"]["description"]
         self.assertIn("one complete payload unavailable in __messages", bindings_description)

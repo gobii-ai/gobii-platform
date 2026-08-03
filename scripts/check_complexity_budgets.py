@@ -14,6 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+from uuid import NAMESPACE_URL, uuid5
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -291,11 +292,14 @@ def _create_agent(*, scenario: str):
         verified=True,
         primary=True,
     )
+    fixture_namespace = uuid5(NAMESPACE_URL, f"gobii-prompt-budget:{scenario}")
     browser_agent = BrowserUseAgent.objects.create(
+        id=uuid5(fixture_namespace, "browser-agent"),
         user=user,
         name=f"{scenario} Browser Agent",
     )
     agent = PersistentAgent.objects.create(
+        id=uuid5(fixture_namespace, "agent"),
         user=user,
         name=f"{scenario} Agent",
         charter="Track exact-source updates and report concise findings.",
@@ -303,12 +307,14 @@ def _create_agent(*, scenario: str):
         planning_state=PersistentAgent.PlanningState.SKIPPED,
     )
     endpoint = PersistentAgentCommsEndpoint.objects.create(
+        id=uuid5(fixture_namespace, "owned-endpoint"),
         owner_agent=agent,
         channel=CommsChannel.EMAIL,
         address=f"{scenario}-agent@example.com",
         is_primary=True,
     )
     external_endpoint = PersistentAgentCommsEndpoint.objects.create(
+        id=uuid5(fixture_namespace, "external-endpoint"),
         channel=CommsChannel.EMAIL,
         address=f"{scenario}-recipient@example.com",
     )

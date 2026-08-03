@@ -21,6 +21,86 @@ from api.models import (
 
 @tag("batch_promptree")
 class PromptContextSqliteGuidanceTests(SimpleTestCase):
+    def test_successful_terminal_sqlite_result_suppresses_immediate_model_guidance(self):
+        started_at = datetime(2026, 8, 3, 1, 0, tzinfo=timezone.utc)
+        inbound = SimpleNamespace(timestamp=started_at)
+        result = prompt_context.ToolCallResultRecord(
+            step_id="sqlite-terminal",
+            tool_name="sqlite_batch",
+            created_at=started_at + timedelta(seconds=1),
+            result_text='{"status": "ok", "results": [{"result": [{"id": 1}]}]}',
+            will_continue_work=False,
+        )
+
+        self.assertTrue(
+            prompt_context._is_terminal_sqlite_handoff([result], [inbound])
+        )
+
+    def test_config_only_terminal_sqlite_write_keeps_model_guidance(self):
+        result = prompt_context.ToolCallResultRecord(
+            step_id="sqlite-config",
+            tool_name="sqlite_batch",
+            created_at=datetime(2026, 8, 3, 1, 0, tzinfo=timezone.utc),
+            result_text=(
+                '{"status": "ok", "results": [{"message": "Query 0 affected 1 rows."}], '
+                '"agent_config_update": {"updated_fields": ["charter"]}}'
+            ),
+            will_continue_work=False,
+        )
+
+        self.assertFalse(prompt_context._is_terminal_sqlite_handoff([result], []))
+
+    def test_terminal_sqlite_handoff_requires_the_newest_successful_event(self):
+        started_at = datetime(2026, 8, 3, 1, 0, tzinfo=timezone.utc)
+        terminal = prompt_context.ToolCallResultRecord(
+            step_id="sqlite-terminal",
+            tool_name="sqlite_batch",
+            created_at=started_at + timedelta(seconds=1),
+            result_text='{"status": "ok"}',
+            will_continue_work=False,
+        )
+        continuing = prompt_context.ToolCallResultRecord(
+            step_id="sqlite-continuing",
+            tool_name="sqlite_batch",
+            created_at=started_at + timedelta(seconds=2),
+            result_text='{"status": "ok"}',
+            will_continue_work=True,
+        )
+        failed = prompt_context.ToolCallResultRecord(
+            step_id="sqlite-failed",
+            tool_name="sqlite_batch",
+            created_at=started_at + timedelta(seconds=2),
+            result_text='{"status": "error"}',
+            will_continue_work=False,
+        )
+        source = prompt_context.ToolCallResultRecord(
+            step_id="source",
+            tool_name="http_request",
+            created_at=started_at + timedelta(seconds=2),
+            result_text='{"status": "ok"}',
+            will_continue_work=False,
+        )
+        newer_message = SimpleNamespace(timestamp=started_at + timedelta(seconds=2))
+
+        self.assertFalse(
+            prompt_context._is_terminal_sqlite_handoff(
+                [terminal, continuing],
+                [],
+            )
+        )
+        self.assertFalse(
+            prompt_context._is_terminal_sqlite_handoff([terminal, failed], [])
+        )
+        self.assertFalse(
+            prompt_context._is_terminal_sqlite_handoff([terminal, source], [])
+        )
+        self.assertFalse(
+            prompt_context._is_terminal_sqlite_handoff(
+                [terminal],
+                [newer_message],
+            )
+        )
+
     def test_active_source_batch_spans_completions_for_one_request(self):
         process_started = datetime(2026, 7, 27, 9, 0, tzinfo=timezone.utc)
         process_step = SimpleNamespace(

@@ -127,7 +127,7 @@ from ..tools.sqlite_query_quality import (
 from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, ensure_skill_tools_enabled, get_enabled_tool_definitions
 from ..system_skills.discovery import format_system_skill_discovery_prompt
-from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, build_short_result_id_map, entity_name_stem, prepare_tool_results_for_prompt, source_array_entity_groups
+from .tool_results import PREVIEW_TIER_COUNT, SPAWN_WEB_TASK_RESULT_TOOL_NAME, ToolCallResultRecord, ToolResultPromptInfo, build_short_result_id_map, entity_name_stem, prepare_tool_results_for_prompt, source_array_entity_groups, sqlite_result_has_query_result
 from .link_references import (
     LinkReferenceResolutionError,
     extract_http_urls,
@@ -1803,7 +1803,12 @@ def _render_prompt_context_once(
 
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
-    fresh_tool_call_step_ids, has_link_references, source_reconciliation_directives = _get_unified_history_prompt(
+    (
+        fresh_tool_call_step_ids,
+        has_link_references,
+        source_reconciliation_directives,
+        terminal_sqlite_handoff,
+    ) = _get_unified_history_prompt(
         agent,
         unified_history_group,
         config_authority,
@@ -1816,19 +1821,20 @@ def _render_prompt_context_once(
 
     variable_group = prompt.group("variable", weight=4)
 
-    variable_group.section_text(
-        "sqlite_schema",
-        sqlite_schema_block,
-        weight=1,
-        shrinker="hmt"
-    )
-    sqlite_digest_block = get_sqlite_digest_prompt()
-    variable_group.section_text(
-        "sqlite_digest",
-        sqlite_digest_block,
-        weight=1,
-        shrinker="hmt"
-    )
+    if not terminal_sqlite_handoff:
+        variable_group.section_text(
+            "sqlite_schema",
+            sqlite_schema_block,
+            weight=1,
+            shrinker="hmt"
+        )
+        sqlite_digest_block = get_sqlite_digest_prompt()
+        variable_group.section_text(
+            "sqlite_digest",
+            sqlite_digest_block,
+            weight=1,
+            shrinker="hmt"
+        )
 
     # Agent filesystem listing - recent metadata-only list from the same snapshot used for __files
     files_listing_block = format_agent_filesystem_prompt(
@@ -4915,6 +4921,27 @@ def _build_sqlite_files_snapshot(agent: PersistentAgent) -> _FileSnapshotBundle:
     return _FileSnapshotBundle(has_filespace=True, records=records)
 
 
+def _is_terminal_sqlite_handoff(
+    tool_call_records: Sequence[ToolCallResultRecord],
+    messages: Sequence[PersistentAgentMessage],
+) -> bool:
+    if not tool_call_records:
+        return False
+    newest_record = max(tool_call_records, key=lambda record: record.created_at)
+    if (
+        newest_record.tool_name != "sqlite_batch"
+        or newest_record.will_continue_work is not False
+        or not _tool_result_status_is_ok(newest_record.result_text)
+        or not sqlite_result_has_query_result(newest_record.result_text)
+    ):
+        return False
+    newest_message_at = max(
+        (message.timestamp for message in messages),
+        default=None,
+    )
+    return newest_message_at is None or newest_record.created_at >= newest_message_at
+
+
 @tracer.start_as_current_span("Prompt Unified History")
 def _get_unified_history_prompt(
     agent: PersistentAgent,
@@ -4926,7 +4953,7 @@ def _get_unified_history_prompt(
     named_model_tables: Set[str] | None = None,
     named_model_columns: Mapping[str, Set[str]] | None = None,
     has_peer_links: bool = False,
-) -> Tuple[Set[str], bool, Tuple[str, ...]]:
+) -> Tuple[Set[str], bool, Tuple[str, ...], bool]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
@@ -5706,7 +5733,12 @@ def _get_unified_history_prompt(
         for info in tool_result_prompt_info.values()
         if info.source_reconciliation_directive
     )
-    return fresh_tool_call_step_ids, has_link_references, source_reconciliation_directives
+    return (
+        fresh_tool_call_step_ids,
+        has_link_references,
+        source_reconciliation_directives,
+        _is_terminal_sqlite_handoff(tool_call_records, messages),
+    )
 
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:

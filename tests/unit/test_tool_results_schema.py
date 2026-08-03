@@ -439,6 +439,45 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIsNotNone(stored_json)
         self.assertEqual(stored_text, markdown)
 
+    def test_http_string_content_is_analyzed_as_payload_not_transport_wrapper(self):
+        content = (
+            "account_id: account_001\nname: Northstar\n---\n"
+            "account_id: account_002\nname: Beacon"
+        )
+        payload = {
+            "status": "ok",
+            "url": "https://example.test/accounts",
+            "content": content,
+        }
+
+        meta, stored_json, stored_text, analysis = tool_results._summarize_result(
+            json.dumps(payload), "test-id", "http_request"
+        )
+
+        self.assertFalse(meta["is_json"])
+        self.assertIsNone(meta["result_json_path"])
+        self.assertIsNone(stored_json)
+        self.assertEqual(stored_text, content)
+        self.assertFalse(analysis.is_json)
+
+    def test_http_json_string_content_keeps_inner_json_without_wrapper_path(self):
+        content = json.dumps({"accounts": [{"account_id": "account_001", "name": "Northstar"}]})
+        payload = {
+            "status": "ok",
+            "url": "https://example.test/accounts",
+            "content": content,
+        }
+
+        meta, stored_json, stored_text, analysis = tool_results._summarize_result(
+            json.dumps(payload), "test-id", "http_request"
+        )
+
+        self.assertTrue(meta["is_json"])
+        self.assertIsNone(meta["result_json_path"])
+        self.assertEqual(json.loads(stored_json), json.loads(content))
+        self.assertEqual(json.loads(stored_text), json.loads(content))
+        self.assertEqual(analysis.json_analysis.primary_array.path, "$.accounts")
+
     def test_terminal_sqlite_result_requires_delivery_next(self):
         record = tool_results.ToolCallResultRecord(
             step_id="sqlite-step",
@@ -457,8 +496,31 @@ class ToolResultSchemaTests(SimpleTestCase):
             fresh_tool_call_step_id="sqlite-step",
         )
 
-        self.assertIn("NEXT ACTION MUST deliver", info["sqlite-step"].meta)
-        self.assertIn("do not call SQLite", info["sqlite-step"].meta)
+        self.assertIn("terminal answer rows", info["sqlite-step"].meta)
+        self.assertIn("NULL/unavailable stays unavailable", info["sqlite-step"].meta)
+        self.assertIn("no more tools", info["sqlite-step"].meta)
+
+    def test_config_only_sqlite_write_is_not_labeled_as_answer_rows(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="sqlite-config",
+            tool_name="sqlite_batch",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({
+                "status": "ok",
+                "results": [{"message": "Query 0 affected 1 rows."}],
+                "agent_config_update": {"updated_fields": ["charter"]},
+            }),
+            will_continue_work=False,
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="sqlite-config",
+        )
+
+        self.assertNotIn("terminal answer rows", info["sqlite-config"].meta)
+        self.assertNotIn("use returned rows directly", info["sqlite-config"].meta)
 
     def test_scrape_as_markdown_preview_uses_plain_markdown_and_meta_guidance(self):
         markdown = "# Gemma 4\n\nBenchmark table"
@@ -609,6 +671,111 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIn('["profile-0","profile-1","profile-2"]', combined_meta)
         self.assertIn("top-level `rows=[", combined_meta)
         self.assertIn("no sourced SQL literals", combined_meta)
+
+    def test_large_record_delimited_http_prose_gets_one_shot_modeling_path(self):
+        records = [
+            "\n".join((
+                f"account_id: account_{index:03d}",
+                f"name: Account {index}",
+                f"owner: Owner {index}",
+                f"source_url: https://accounts.example.test/{index}",
+            ))
+            for index in range(24)
+        ]
+        appendices = [
+            f"archive_note: historical routing observation {index}\nstatus: superseded"
+            for index in range(700)
+        ]
+        record = tool_results.ToolCallResultRecord(
+            step_id="large-directory",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({
+                "status": "ok",
+                "url": "https://api.example.test/accounts",
+                "content": "\n---\n".join((*records, *appendices)),
+            }),
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="large-directory",
+        )["large-directory"]
+
+        self.assertIn("PROSE SOURCE WORK SET", info.meta)
+        self.assertIn("explicit repeated sections", info.meta)
+        self.assertIn("stable key `account_id`", info.meta)
+        self.assertIn("`result_json` is NULL", info.meta)
+        self.assertIn("json_each(split_sections(t.result_text", info.meta)
+        self.assertIn("regexp_extract(s.value,'(?m)^account_id:[ ]*(.*)$',1)", info.meta)
+        self.assertIn('AS "source_url"', info.meta)
+        self.assertIn("Missing fields stay NULL", info.meta)
+        self.assertIn("set `will_continue_work=false`", info.meta)
+        self.assertIn("one terminal sqlite_batch", info.meta)
+        self.assertIn("create/evolve the keyed domain model", info.meta)
+        self.assertIn("decision SELECT in that same call", info.meta)
+        self.assertIn("Do not inspect or return the raw blob first", info.meta)
+        self.assertNotIn("instr(result_text,'keyword')", info.meta)
+
+    def test_labeled_record_delimiter_is_detected_after_large_prefix(self):
+        records = [
+            "\n".join((
+                f"candidate_id: candidate_{index:03d}",
+                f"name: Candidate {index}",
+                f"market: Market {index % 3}",
+            ))
+            for index in range(18)
+        ]
+        text = (
+            ("Archive note without source fields.\n" * 2_000)
+            + "\n--- candidate record ---\n".join(records)
+        )
+
+        shape = tool_results._explicit_section_shape(text)
+
+        self.assertIsNotNone(shape)
+        self.assertEqual(shape.count, 18)
+        self.assertEqual(shape.stable_key, "candidate_id")
+        self.assertIn("candidate record", shape.delimiter_sql)
+        self.assertEqual(shape.fields[:3], ("candidate_id", "name", "market"))
+
+    def test_large_focused_http_prose_does_not_require_redundant_sqlite_read(self):
+        filler = "".join(
+            f"Archive note {index:04d}: the operating review covered staffing assumptions, escalation ownership, "
+            "quarterly checkpoints, routine approvals, regional dependencies, and follow-up timing. "
+            "The note contains no additional source reference.\n"
+            for index in range(1, 2_401)
+        )
+        source = (
+            "Current cohort company API response:\n"
+            "company=Atlas Forge | founders=Mina Shah, Leon Wu | "
+            "company_url=https://atlas.example.test/team\n"
+            "company=Beacon Labs | founder=Elena Ruiz | "
+            "company_url=https://beacon.example.test/about\n"
+        )
+        midpoint = len(filler) // 2
+        content = filler[:midpoint] + source + filler[midpoint:]
+        record = tool_results.ToolCallResultRecord(
+            step_id="focused-owner-report",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({
+                "status": "ok",
+                "url": "https://api.example.test/cohort",
+                "content": content,
+            }),
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="focused-owner-report",
+        )["focused-owner-report"]
+
+        self.assertIn("FOCUS:", info.meta)
+        self.assertIn("Atlas Forge", info.meta)
+        self.assertNotIn("PROSE SOURCE WORK SET", info.meta)
 
     def test_http_mutation_outcomes_do_not_expand_the_source_work_set(self):
         records = [
@@ -1052,7 +1219,8 @@ class PreviewByteLimitTests(SimpleTestCase):
         )["step-http"]
         for expected in (
             "VERIFIED LINK PRESENTATION", "anchor each token on its exact entity name",
-            "<a href='token'>entity</a>", "No separate URL/link column unless requested", "owner report with 4+ items",
+            "<a href='$[link:ID]'>entity</a>", "complete `$[link:ID]` destination verbatim",
+            "never use the bare ID", "No separate URL/link column unless requested", "owner report with 4+ items",
             "Say Not returned where a requested URL is absent", "Follow any preceding source-write directive",
             "does not change the requested audience or action",
         ):
