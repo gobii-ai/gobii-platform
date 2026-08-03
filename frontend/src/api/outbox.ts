@@ -20,6 +20,7 @@ export type OutboxItem = {
   subject: string
   bodyPreview: string
   body?: string
+  bodyEditorHtml?: string
   bodyHtml?: string
   status: OutboxStatus
   reviewStatus: 'pending' | 'approved' | 'discarded' | 'expired'

@@ -131,6 +131,7 @@ def _render_outbox_body_html(review: OutboundEmailReview) -> str:
 def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False) -> dict[str, Any]:
     expire_review_if_needed(review)
     message = review.message
+    editor_html, body_plaintext = convert_body_to_html_and_plaintext(message.body or "", emit_logs=False)
     raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
     to_address = get_message_contact_address(message)
     cc_addresses = list(message.cc_endpoints.values_list("address", flat=True))
@@ -153,7 +154,7 @@ def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False
         "cc": cc_addresses,
         "bcc": bcc_addresses,
         "subject": str(raw_payload.get("subject") or ""),
-        "bodyPreview": (message.body or "")[:240],
+        "bodyPreview": body_plaintext[:240],
         "status": _display_status(review),
         "reviewStatus": review.status,
         "version": review.content_version,
@@ -178,6 +179,7 @@ def serialize_outbox_review(review: OutboundEmailReview, *, detail: bool = False
         payload.update(
             {
                 "body": message.body or "",
+                "bodyEditorHtml": editor_html,
                 "bodyHtml": _render_outbox_body_html(review),
                 "attachments": [
                     {
@@ -233,7 +235,7 @@ class OutboxListAPIView(ApiLoginRequiredMixin, View):
         )[:500]:
             expire_review_if_needed(expired_review, now=now)
         queryset = _workspace_reviews(request)
-        feature_enabled = email_review_outbox_enabled()
+        feature_enabled = email_review_outbox_enabled(request.user)
         available = feature_enabled or queryset.exists()
         recent_filter = (
             Q(status__in=[OutboundEmailReview.Status.DISCARDED, OutboundEmailReview.Status.EXPIRED])
@@ -366,7 +368,15 @@ class OutboxDecisionAPIView(ApiLoginRequiredMixin, View):
                 )
             else:
                 review = retry_review(review, actor=request.user)
-            return JsonResponse({"item": serialize_outbox_review(review, detail=True)})
+            response_payload = {"item": serialize_outbox_review(review, detail=True)}
+            if payload.get("includePendingActions") is True:
+                from console.agent_chat.pending_actions import list_pending_action_requests
+
+                response_payload["pending_action_requests"] = list_pending_action_requests(
+                    review.agent,
+                    request.user,
+                )
+            return JsonResponse(response_payload)
         except StaleOutboxVersionError:
             return _stale_response(review)
         except (OutboundEmailReviewError, TypeError, ValueError) as exc:

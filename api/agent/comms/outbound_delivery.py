@@ -798,7 +798,12 @@ def _claim_email_for_delivery(message: PersistentAgentMessage) -> bool:
         # Nullable policy joins cannot be FOR UPDATE targets in PostgreSQL.
         locked = (
             PersistentAgentMessage.objects.select_for_update(of=("self",))
-            .select_related("from_endpoint", "owner_agent", "owner_agent__organization")
+            .select_related(
+                "from_endpoint",
+                "owner_agent",
+                "owner_agent__organization",
+                "owner_agent__user",
+            )
             .get(pk=message.pk)
         )
         if locked.latest_status != DeliveryStatus.QUEUED:
@@ -854,7 +859,7 @@ def _claim_email_for_delivery(message: PersistentAgentMessage) -> bool:
                 track_outbox_bypass_denied(locked, reason="contact_access_changed")
                 return False
             message._verified_outbox_attachment_snapshots = verified_attachments
-        elif email_review_outbox_enabled():
+        elif email_review_outbox_enabled(locked.owner_agent.user):
             decision = classify_email_recipients(locked.owner_agent, get_message_email_recipients(locked))
             if decision.blocked_recipients or decision.requires_review:
                 _deny_email_delivery(

@@ -12,6 +12,7 @@ import {
   fulfillRequestedSecrets,
   removeRequestedSecrets,
   resolveContactRequests,
+  resolveOutboxReview,
   resolveSpawnRequest,
   dismissHumanInputRequest,
   respondToHumanInputRequest,
@@ -4101,6 +4102,24 @@ export function AgentChatPage({
     return result
   }, [activeAgentId, receiveRealtimeEvent, replacePendingActionState])
 
+  const handleResolveOutboxReview = useCallback(async (
+    reviewId: string,
+    decision: 'approve' | 'deny',
+    expectedVersion: number,
+  ) => {
+    if (!activeAgentId) {
+      return
+    }
+    const result = await resolveOutboxReview(reviewId, decision, expectedVersion)
+    replacePendingActionState(activeAgentId, result.pendingActionRequests)
+    void queryClient.invalidateQueries({ queryKey: ['outbox'] })
+    return result
+  }, [activeAgentId, queryClient, replacePendingActionState])
+
+  const handleOpenOutbox = useCallback(() => {
+    onSelectionPageChange?.('outbox')
+  }, [onSelectionPageChange])
+
   useEffect(() => {
     if (!isNewAgent || !spawnFlow || !requiresTrialPlanSelection) {
       return
@@ -4623,6 +4642,8 @@ export function AgentChatPage({
         onOpenAgentFiles={handleOpenEmbeddedFiles}
         onResolveContactRequests={handleResolveContactRequests}
         onViewAllContactRequests={handleOpenEmbeddedContactRequests}
+        onResolveOutboxReview={handleResolveOutboxReview}
+        onOpenOutbox={onSelectionPageChange ? handleOpenOutbox : undefined}
         onJumpToLatest={handleJumpToLatest}
         autoFocusComposer
         isNearBottom={isNearBottom}

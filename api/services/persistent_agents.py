@@ -144,7 +144,7 @@ class PersistentAgentProvisioningService:
             )
             if contact_approval_mode is not None:
                 persistent_agent.contact_approval_mode = contact_approval_mode
-            if email_review_outbox_enabled():
+            if email_review_outbox_enabled(user):
                 persistent_agent.email_sending_mode = get_workspace_default_email_sending_mode(
                     user=user,
                     organization=organization,

@@ -55,6 +55,7 @@ from api.services.outbound_email_review import (
 )
 from api.services.persistent_agents import PersistentAgentProvisioningService
 from api.tasks.outbox import reconcile_approved_outbox_emails
+from console.agent_chat.pending_actions import list_pending_action_requests
 from console.outbox_api_views import serialize_outbox_review
 from config.redis_client import _FakeRedis
 from constants.feature_flags import EMAIL_REVIEW_OUTBOX
@@ -157,6 +158,27 @@ class EmailReviewOutboxTests(TestCase):
         self.assertEqual(message.latest_status, DeliveryStatus.PENDING_APPROVAL)
         self.assertEqual(review.content_hash, compute_message_content_hash(message))
         self.assertFalse(OutboundMessageAttempt.objects.filter(message=message).exists())
+        deliver_mock.assert_not_called()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=None)
+    @patch("django.db.close_old_connections")
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_superuser_rollout_queues_external_send(self, deliver_mock, close_mock):
+        self.owner.is_superuser = True
+        self.owner.save(update_fields=["is_superuser"])
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": "external@example.com",
+                "subject": "Superuser approval required",
+                "mobile_first_html": "<p>Hello</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "pending_approval")
+        self.assertTrue(OutboundEmailReview.objects.filter(pk=result["outbox_item_id"]).exists())
         deliver_mock.assert_not_called()
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
@@ -489,8 +511,23 @@ class EmailReviewOutboxTests(TestCase):
         payload = serialize_outbox_review(review, detail=True)
 
         self.assertEqual(payload["body"], "First line\nSecond & line")
+        self.assertEqual(payload["bodyPreview"], "First line\nSecond & line")
+        self.assertEqual(payload["bodyEditorHtml"], "<p>First line<br />Second &amp; line</p>")
         self.assertIn("<p>First line<br />Second &amp; line</p>", payload["bodyHtml"])
         self.assertIn('class="email-body"', payload["bodyHtml"])
+
+    def test_outbox_list_preview_converts_html_body_to_plaintext(self):
+        message = self._message()
+        message.body = "<p>Hey <strong>Matt</strong>,</p><p>Just another test note.</p>"
+        message.save(update_fields=["body"])
+        review = queue_message_for_review(message)
+
+        preview = serialize_outbox_review(review)["bodyPreview"]
+
+        self.assertNotIn("<p>", preview)
+        self.assertNotIn("<strong>", preview)
+        self.assertIn("Hey Matt,", preview)
+        self.assertIn("Just another test note.", preview)
 
     @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
     def test_approval_reuses_the_exact_reviewed_transport_content(self, _delay_mock):
@@ -731,6 +768,7 @@ class EmailReviewOutboxTests(TestCase):
         self.agent.save(update_fields=["email_sending_mode"])
         self.assertFalse(classify_email_recipients(self.agent, ["unknown@example.com"]).requires_review)
 
+    @patch("util.urls.settings.PUBLIC_SITE_URL", "https://app.gobii.test")
     @patch("api.services.outbox_notifications.send_mail", return_value=1)
     def test_notification_cycle_sends_only_on_zero_to_one_transition(self, send_mail_mock):
         with self.captureOnCommitCallbacks(execute=True):
@@ -739,6 +777,12 @@ class EmailReviewOutboxTests(TestCase):
             queue_message_for_review(self._message("second-pending@example.com"))
 
         self.assertEqual(send_mail_mock.call_count, 1)
+        message = send_mail_mock.call_args.kwargs["message"]
+        recipients = send_mail_mock.call_args.kwargs["recipient_list"]
+        html_message = send_mail_mock.call_args.kwargs["html_message"]
+        self.assertEqual(recipients, [self.owner.email])
+        self.assertIn("Review in Outbox: https://app.gobii.test/app/outbox", message)
+        self.assertIn('href="https://app.gobii.test/app/outbox"', html_message)
 
     def test_updating_org_default_does_not_clear_minimum(self):
         organization = Organization.objects.create(
@@ -816,6 +860,8 @@ class EmailReviewOutboxTests(TestCase):
     def test_outbox_api_uses_versions_and_creates_outbound_only_contact(self, delay_mock):
         message = self._message("new-contact@example.com")
         review = queue_message_for_review(message)
+        pending_actions = list_pending_action_requests(self.agent, self.owner)
+        self.assertEqual(pending_actions[-1]["items"][0]["version"], 1)
         self.client.force_login(self.owner)
         detail_url = reverse("console_outbox_detail", kwargs={"outbox_id": review.id})
 
@@ -837,10 +883,11 @@ class EmailReviewOutboxTests(TestCase):
 
         approve_response = self.client.post(
             reverse("console_outbox_approve", kwargs={"outbox_id": review.id}),
-            data={"expectedVersion": 2},
+            data={"expectedVersion": 2, "includePendingActions": True},
             content_type="application/json",
         )
         self.assertEqual(approve_response.status_code, 200, approve_response.content.decode())
+        self.assertEqual(approve_response.json()["pending_action_requests"], [])
         review.refresh_from_db()
         message.refresh_from_db()
         self.assertEqual(review.status, OutboundEmailReview.Status.APPROVED)

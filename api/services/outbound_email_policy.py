@@ -3,7 +3,7 @@ from email.utils import parseaddr
 
 from allauth.account.models import EmailAddress
 from django.db import transaction
-from waffle import flag_is_active
+from waffle import get_waffle_flag_model
 
 from api.models import (
     CommsAllowlistEntry,
@@ -36,8 +36,20 @@ class RecipientPolicyDecision:
     effective_mode: str
 
 
-def email_review_outbox_enabled() -> bool:
-    return flag_is_active(None, EMAIL_REVIEW_OUTBOX)
+def email_review_outbox_enabled(user) -> bool:
+    """Evaluate the requestless Outbox rollout for an agent owner."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+
+    flag = get_waffle_flag_model().get(EMAIL_REVIEW_OUTBOX)
+    if not flag.pk:
+        return False
+
+    # Background delivery has no request or rollout cookie, so use the stable
+    # user assignments that also govern whether the policy is configurable.
+    if flag.everyone is not None:
+        return flag.everyone
+    return bool(flag.is_active_for_user(user))
 
 
 def normalize_email_address(address: str | None) -> str:

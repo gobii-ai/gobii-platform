@@ -241,6 +241,7 @@ export type PendingOutboxReviewsAction = {
   count: number
   items: Array<{
     id: string
+    version: number
     subject: string
     recipient: string
   }>

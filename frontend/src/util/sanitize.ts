@@ -17,9 +17,44 @@ const ALLOWED_INLINE_STYLE_PROPERTIES = new Set([
   'padding',
   'padding-bottom',
 ])
+
+// Email drafts can contain formatting emitted by our renderer. Keep that policy
+// local to the editor so other HTML surfaces retain their narrower style set.
+const EMAIL_EDITOR_ALLOWED_INLINE_STYLE_PROPERTIES = new Set([
+  ...ALLOWED_INLINE_STYLE_PROPERTIES,
+  'background-color',
+  'border',
+  'border-collapse',
+  'border-color',
+  'border-right',
+  'border-spacing',
+  'border-style',
+  'border-top',
+  'border-width',
+  'font-family',
+  'font-style',
+  'font-weight',
+  'height',
+  'letter-spacing',
+  'margin-left',
+  'margin-right',
+  'max-width',
+  'min-width',
+  'overflow-wrap',
+  'padding-left',
+  'padding-right',
+  'padding-top',
+  'text-align',
+  'text-decoration',
+  'text-transform',
+  'vertical-align',
+  'white-space',
+  'width',
+  'word-break',
+])
 const DISALLOWED_STYLE_VALUE_PATTERN = /(?:url\s*\(|expression\s*\(|@import|javascript:)/i
 
-function sanitizeStyleAttribute(styleValue: string): string {
+function sanitizeStyleAttribute(styleValue: string, allowedProperties: ReadonlySet<string>): string {
   const declarations: string[] = []
 
   for (const declaration of styleValue.split(';')) {
@@ -32,7 +67,7 @@ function sanitizeStyleAttribute(styleValue: string): string {
     const property = trimmed.slice(0, separatorIndex).trim().toLowerCase()
     const value = trimmed.slice(separatorIndex + 1).trim()
 
-    if (!ALLOWED_INLINE_STYLE_PROPERTIES.has(property) || !value || DISALLOWED_STYLE_VALUE_PATTERN.test(value)) {
+    if (!allowedProperties.has(property) || !value || DISALLOWED_STYLE_VALUE_PATTERN.test(value)) {
       continue
     }
 
@@ -42,12 +77,12 @@ function sanitizeStyleAttribute(styleValue: string): string {
   return declarations.join('; ')
 }
 
-function preserveSafeInlineStyles(value: string): string {
+function preserveSafeInlineStyles(value: string, allowedProperties: ReadonlySet<string>): string {
   const parser = new DOMParser()
   const document = parser.parseFromString(value, 'text/html')
 
   document.body.querySelectorAll<HTMLElement>('[style]').forEach((node) => {
-    const sanitizedStyle = sanitizeStyleAttribute(node.getAttribute('style') || '')
+    const sanitizedStyle = sanitizeStyleAttribute(node.getAttribute('style') || '', allowedProperties)
     if (sanitizedStyle) {
       node.setAttribute('style', sanitizedStyle)
       return
@@ -58,7 +93,7 @@ function preserveSafeInlineStyles(value: string): string {
   return document.body.innerHTML
 }
 
-export function sanitizeHtml(value: string): string {
+function sanitizeHtmlWithStyleProperties(value: string, allowedProperties: ReadonlySet<string>): string {
   if (!value) return ''
   if (typeof window === 'undefined') {
     return value
@@ -69,7 +104,15 @@ export function sanitizeHtml(value: string): string {
     ADD_TAGS: ['table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col', 'img'],
     ADD_ATTR: ['colspan', 'rowspan', 'scope', 'headers', 'src', 'alt', 'width', 'height', 'style'],
   })
-  return preserveSafeInlineStyles(sanitized)
+  return preserveSafeInlineStyles(sanitized, allowedProperties)
+}
+
+export function sanitizeHtml(value: string): string {
+  return sanitizeHtmlWithStyleProperties(value, ALLOWED_INLINE_STYLE_PROPERTIES)
+}
+
+export function sanitizeEmailEditorHtml(value: string): string {
+  return sanitizeHtmlWithStyleProperties(value, EMAIL_EDITOR_ALLOWED_INLINE_STYLE_PROPERTIES)
 }
 
 const HTML_DOCUMENT_PREFIX_PATTERN = /^<(?:!doctype\s+html|html|body)\b/i

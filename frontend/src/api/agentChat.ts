@@ -432,9 +432,11 @@ export function normalizePendingActionRequests(raw: unknown): PendingActionReque
           const item = rawItem as Record<string, unknown>
           const itemId = asNonEmptyString(item.id)
           const recipient = asNonEmptyString(item.recipient)
-          if (!itemId || !recipient) return []
+          const version = asPositiveInteger(item.version)
+          if (!itemId || !recipient || !version) return []
           return [{
             id: itemId,
+            version,
             subject: asNonEmptyString(item.subject) ?? '(No subject)',
             recipient,
           }]
@@ -727,6 +729,18 @@ export function resolveContactRequests(
   payload: ContactRequestResolvePayload,
 ): Promise<PendingActionMutationResult> {
   return postPendingActionMutation(`/console/api/agents/${agentId}/contact-requests/resolve/`, payload)
+}
+
+export function resolveOutboxReview(
+  reviewId: string,
+  decision: 'approve' | 'deny',
+  expectedVersion: number,
+): Promise<PendingActionMutationResult> {
+  const action = decision === 'approve' ? 'approve' : 'discard'
+  return postPendingActionMutation(`/console/api/outbox/${reviewId}/${action}/`, {
+    expectedVersion,
+    includePendingActions: true,
+  })
 }
 
 export async function fetchContactRequests(agentId: string): Promise<ContactRequestsListResult> {

@@ -260,6 +260,7 @@ def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[di
                 "items": [
                     {
                         "id": str(review.id),
+                        "version": review.content_version,
                         "subject": str((review.message.raw_payload or {}).get("subject") or ""),
                         "recipient": (
                             review.message.conversation.address
