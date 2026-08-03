@@ -1084,16 +1084,14 @@ export function LibraryScreen({
         </a>
         {categoryFilters.map((category) => {
           const isActive = selectedCategory === category.name
-          const nextCategory = isActive ? null : category.name
-          const nextCategorySlug = isActive ? '' : category.slug
           return (
             <a
               key={category.name}
-              href={buildLibraryUrl(nextCategorySlug, officialOnly)}
+              href={buildLibraryUrl(category.slug, officialOnly)}
               onClick={(event) =>
                 handleFilterClick(event, {
-                  category: nextCategory,
-                  categorySlug: nextCategorySlug,
+                  category: category.name,
+                  categorySlug: category.slug,
                   officialOnly,
                 })
               }

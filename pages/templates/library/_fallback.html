@@ -107,7 +107,7 @@
     </a>
     {% for category in payload.topCategories %}
       <a class="gklibf-pill{% if category.name == selected_category %} is-on{% endif %}"
-         href="{% if category.name == selected_category %}{% url 'pages:library' %}{% else %}{% url 'pages:library_category' category_slug=category.slug %}{% endif %}{% if official_only %}?official=true{% endif %}"{% if official_only %} rel="nofollow"{% endif %}>
+         href="{% url 'pages:library_category' category_slug=category.slug %}{% if official_only %}?official=true{% endif %}"{% if official_only %} rel="nofollow"{% endif %}>
         {{ category.name }}<span class="n">{{ category.count }}</span>
       </a>
     {% endfor %}

@@ -957,6 +957,9 @@ class PublicTemplateRouteTests(TestCase):
             f"{template.display_name} AI Employee",
         )
         soup = BeautifulSoup(response.content, "html.parser")
+        main_landmarks = soup.find_all("main")
+        self.assertEqual(len(main_landmarks), 1)
+        self.assertEqual(main_landmarks[0].get("id"), "main")
         self.assertEqual(
             soup.body["data-analytics-cta-tracking-enabled"],
             "true",
@@ -1763,6 +1766,9 @@ class LibraryViewTests(TestCase):
         self.assertContains(response, curated_template.display_name)
         self.assertNotContains(response, "Private Library Template")
         soup = BeautifulSoup(response.content, "html.parser")
+        main_landmarks = soup.find_all("main")
+        self.assertEqual(len(main_landmarks), 1)
+        self.assertEqual(main_landmarks[0].get("id"), "main")
         category_links = {
             link.get_text(" ", strip=True): link.get("href")
             for link in soup.select(".gklibf-pills a.gklibf-pill")
@@ -1808,8 +1814,17 @@ class LibraryViewTests(TestCase):
         self.assertEqual(recruiting_category["slug"], "recruiting")
         self.assertContains(response, template.display_name)
         soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        collection_page = next(item for item in structured_data if item.get("@type") == "CollectionPage")
+        item_list = next(item for item in structured_data if item.get("@type") == "ItemList")
+        self.assertEqual(collection_page["name"], "HR & Recruiting AI Employee Templates")
+        self.assertEqual(collection_page["description"], response.context["library_page_description"])
+        self.assertEqual(item_list["name"], "Popular HR & Recruiting AI Employee Templates")
         active_category_link = soup.select_one(".gklibf-pills a.gklibf-pill.is-on")
-        self.assertEqual(active_category_link["href"], "/library/")
+        self.assertEqual(active_category_link["href"], "/library/recruiting/")
         self.assertEqual(alias_response.status_code, 301)
         self.assertEqual(alias_response["Location"], "/library/recruiting/")
 

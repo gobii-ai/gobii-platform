@@ -400,6 +400,16 @@ class LibraryView(TemplateView):
         context["library_initial_official_only"] = official_only
         context["library_page_title"] = page_title
         context["library_page_description"] = page_description
+        context["library_schema_name"] = (
+            f"{selected_category} AI Employee Templates"
+            if selected_category
+            else "Gobii AI Employee Template Library"
+        )
+        context["library_item_list_name"] = (
+            f"Popular {selected_category} AI Employee Templates"
+            if selected_category
+            else "Popular Gobii AI Employee Templates"
+        )
         context["library_initial_payload"] = _build_library_payload(
             self.request,
             category=selected_category,
