@@ -16,6 +16,7 @@ import {
 import { HttpError } from '../../api/http'
 import { ImmersivePageFrame } from '../../components/common/ImmersivePageFrame'
 import { EMAIL_SENDING_MODE_OPTIONS } from '../../constants/emailSendingModes'
+import { sanitizeEmailEditorHtml } from '../../util/sanitize'
 import { OutboxMessageEditor } from './OutboxMessageEditor'
 
 
@@ -42,7 +43,7 @@ type OutboxDraft = {
 function draftFromItem(item: OutboxItem): OutboxDraft {
   return {
     subject: item.subject,
-    body: item.bodyEditorHtml || item.body || '',
+    body: sanitizeEmailEditorHtml(item.bodyEditorHtml || item.body || ''),
     attachmentNodeIds: item.attachments?.flatMap((attachment) => attachment.nodeId ? [attachment.nodeId] : []) ?? [],
   }
 }
