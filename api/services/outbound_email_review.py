@@ -26,10 +26,6 @@ from api.models import (
     PersistentAgentMessageAttachment,
     PersistentAgentUserActionEvent,
 )
-from api.services.contact_authorization import (
-    ContactAuthorizationError,
-    authorize_reviewed_email_contacts,
-)
 from api.services.email_verification import EmailVerificationError, require_verified_email
 from api.services.outbound_email_policy import classify_email_recipients, normalize_email_addresses
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -306,30 +302,6 @@ def expire_review_if_needed(review: OutboundEmailReview, *, now=None) -> bool:
     return True
 
 
-def authorize_reviewed_external_contacts(
-    message: PersistentAgentMessage,
-    *,
-    locked_agent: PersistentAgent | None = None,
-) -> None:
-    agent = message.owner_agent
-    decision = classify_email_recipients(agent, get_message_email_recipients(message))
-    if decision.blocked_recipients:
-        blocked = decision.blocked_recipients[0]
-        raise OutboundEmailReviewError(
-            f"Outbound email is disabled for contact '{blocked}'. Enable it in Contacts & Access first."
-        )
-    if not decision.unknown_external_recipients:
-        return
-    try:
-        authorize_reviewed_email_contacts(
-            agent,
-            decision.unknown_external_recipients,
-            locked_agent=locked_agent,
-        )
-    except ContactAuthorizationError as exc:
-        raise OutboundEmailReviewError(str(exc)) from exc
-
-
 def validate_approved_external_contacts(message: PersistentAgentMessage) -> None:
     decision = classify_email_recipients(message.owner_agent, get_message_email_recipients(message))
     unavailable = decision.blocked_recipients or decision.unknown_external_recipients
@@ -552,7 +524,7 @@ def _approve_review(
 
         clear_pending_cron_throttle_footer(str(locked_agent.id))
         return locked, True
-    authorize_reviewed_external_contacts(message, locked_agent=locked_agent)
+    validate_approved_external_contacts(message)
 
     now = timezone.now()
     locked.status = OutboundEmailReview.Status.APPROVED

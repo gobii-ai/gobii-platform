@@ -7,52 +7,28 @@ from api.models import (
     get_agent_contact_counts,
 )
 from api.services.outbound_email_policy import (
-    email_review_outbox_enabled,
-    get_effective_email_sending_mode,
     normalize_email_addresses,
 )
 from util.subscription_helper import get_user_max_contacts_per_agent
 
 
-class ContactAuthorizationError(Exception):
+class AutomaticContactAuthorizationError(Exception):
     pass
 
 
-class AutomaticContactAuthorizationError(ContactAuthorizationError):
-    pass
-
-
-def _authorize_email_contacts(
-    agent: PersistentAgent,
-    addresses,
-    *,
-    automatic: bool,
-    locked_agent: PersistentAgent | None = None,
-) -> None:
+def authorize_email_contacts(agent: PersistentAgent, addresses) -> None:
+    """Add otherwise-unauthorized email recipients when the agent owner opted in."""
     normalized_addresses = normalize_email_addresses(addresses)
     if not normalized_addresses:
         return
-    error_class = (
-        AutomaticContactAuthorizationError
-        if automatic
-        else ContactAuthorizationError
-    )
 
     with transaction.atomic():
         # PostgreSQL cannot lock the nullable side of the organization outer join.
-        locked_agent = locked_agent or PersistentAgent.objects.select_for_update().get(pk=agent.pk)
-        if automatic:
-            automatically_authorized = (
-                get_effective_email_sending_mode(locked_agent)
-                == PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
-                if email_review_outbox_enabled(agent.user)
-                else locked_agent.contact_approval_mode
-                == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        locked_agent = PersistentAgent.objects.select_for_update().get(pk=agent.pk)
+        if locked_agent.contact_approval_mode != PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL:
+            raise AutomaticContactAuthorizationError(
+                "This agent requires approval before adding new email contacts."
             )
-            if not automatically_authorized:
-                raise error_class(
-                    "This agent requires approval before adding new email contacts."
-                )
 
         existing_contacts = {
             contact.address: contact
@@ -66,16 +42,13 @@ def _authorize_email_contacts(
         for address in normalized_addresses:
             contact = existing_contacts.get(address)
             internal = locked_agent.is_internal_responder_identity(CommsChannel.EMAIL, address)
-            blocked = contact and (
-                (contact.is_active and not contact.allow_outbound)
-                or (not contact.is_active and not automatic)
-            )
+            blocked = contact and contact.is_active and not contact.allow_outbound
             if blocked and not internal:
-                raise error_class(
+                raise AutomaticContactAuthorizationError(
                     f"Outbound email is disabled for contact '{address}'. "
                     "The owner can enable it in Contacts & Access."
                 )
-            if contact and (contact.is_active or not automatic):
+            if contact and contact.is_active:
                 continue
             if contact is None and locked_agent.is_recipient_whitelisted(CommsChannel.EMAIL, address):
                 continue
@@ -91,11 +64,11 @@ def _authorize_email_contacts(
         )
         contact_counts = get_agent_contact_counts(locked_agent)
         if contact_cap > 0 and contact_counts is None:
-            raise error_class("Unable to verify this agent's available contact slots.")
+            raise AutomaticContactAuthorizationError("Unable to verify this agent's available contact slots.")
         if contact_cap > 0:
             available_slots = max(contact_cap - contact_counts["total"], 0)
             if slots_needed > available_slots:
-                raise error_class(
+                raise AutomaticContactAuthorizationError(
                     f"Cannot add {slots_needed} new email contact(s). "
                     f"This agent has {available_slots} of {contact_cap} contact slots available."
                 )
@@ -107,7 +80,7 @@ def _authorize_email_contacts(
                 address=address,
                 defaults={
                     "is_active": True,
-                    "allow_inbound": automatic,
+                    "allow_inbound": True,
                     "allow_outbound": True,
                     "can_configure": False,
                 },
@@ -119,27 +92,3 @@ def _authorize_email_contacts(
 
     # send_email reuses this instance for its post-authorization allowlist check.
     agent.whitelist_policy = locked_agent.whitelist_policy
-
-
-def authorize_email_contacts(agent: PersistentAgent, addresses) -> None:
-    """Add otherwise-unauthorized email recipients when the agent owner opted in."""
-    _authorize_email_contacts(
-        agent,
-        addresses,
-        automatic=True,
-    )
-
-
-def authorize_reviewed_email_contacts(
-    agent: PersistentAgent,
-    addresses,
-    *,
-    locked_agent: PersistentAgent | None = None,
-) -> None:
-    """Add human-approved email recipients as outbound-only contacts."""
-    _authorize_email_contacts(
-        agent,
-        addresses,
-        automatic=False,
-        locked_agent=locked_agent,
-    )
