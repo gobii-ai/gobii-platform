@@ -67,14 +67,6 @@ def _valid_mode(value: object) -> str | None:
     return None
 
 
-def email_sending_mode_for_contact_approval_mode(contact_approval_mode: str) -> str:
-    if contact_approval_mode == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL:
-        return PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
-    if contact_approval_mode == PersistentAgent.ContactApprovalMode.REQUIRE_APPROVAL:
-        return PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS
-    raise ValueError("Invalid contact approval mode.")
-
-
 def get_workspace_default_email_sending_mode(*, user, organization=None) -> str:
     if organization is not None:
         settings_value = organization.org_settings if isinstance(organization.org_settings, dict) else {}

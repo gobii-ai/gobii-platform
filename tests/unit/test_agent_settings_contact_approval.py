@@ -179,7 +179,33 @@ class AgentSettingsContactApprovalTests(TestCase):
         )
         self.assertEqual(
             self.agent.email_sending_mode,
-            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
+
+    def test_email_review_mode_changes_without_changing_contact_approval(self):
+        self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
+        self.agent.save(update_fields=["email_sending_mode"])
+        self.client.force_login(self.owner)
+
+        with override_flag(EMAIL_REVIEW_OUTBOX, active=True):
+            response = self.client.post(
+                self.url,
+                self._settings_form(
+                    contact_approval_mode="require_approval",
+                    email_sending_mode="review_all_external",
+                ),
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content.decode())
+        self.agent.refresh_from_db()
+        self.assertEqual(
+            self.agent.contact_approval_mode,
+            PersistentAgent.ContactApprovalMode.REQUIRE_APPROVAL,
+        )
+        self.assertEqual(
+            self.agent.email_sending_mode,
+            PersistentAgent.EmailSendingMode.REVIEW_ALL_EXTERNAL,
         )
 
     def test_settings_update_rejects_invalid_mode(self):

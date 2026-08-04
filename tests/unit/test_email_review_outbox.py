@@ -1,9 +1,11 @@
 import hashlib
 from dataclasses import replace
 from datetime import timedelta
+from importlib import import_module
 from unittest.mock import patch
 
 from allauth.account.models import EmailAddress
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
@@ -109,6 +111,15 @@ class EmailReviewOutboxTests(TestCase):
             raw_payload={"subject": "Review me"},
         )
 
+    def _allow_contact(self, address: str) -> CommsAllowlistEntry:
+        return CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=address.lower(),
+            is_active=True,
+            allow_outbound=True,
+        )
+
     def _approved_message_with_attachment(self, content=b"approved attachment"):
         recipient = "attachment-recipient@example.com"
         CommsAllowlistEntry.objects.create(
@@ -140,6 +151,8 @@ class EmailReviewOutboxTests(TestCase):
     @patch("django.db.close_old_connections")
     @patch("api.agent.tools.email_sender.deliver_agent_email")
     def test_external_send_is_queued_without_provider_or_attempt(self, deliver_mock, close_mock):
+        self._allow_contact("external.person@example.com")
+
         result = execute_send_email(
             self.agent,
             {
@@ -166,6 +179,7 @@ class EmailReviewOutboxTests(TestCase):
     def test_superuser_rollout_queues_external_send(self, deliver_mock, close_mock):
         self.owner.is_superuser = True
         self.owner.save(update_fields=["is_superuser"])
+        self._allow_contact("external@example.com")
 
         result = execute_send_email(
             self.agent,
@@ -179,6 +193,78 @@ class EmailReviewOutboxTests(TestCase):
 
         self.assertEqual(result["status"], "pending_approval")
         self.assertTrue(OutboundEmailReview.objects.filter(pk=result["outbox_item_id"]).exists())
+        deliver_mock.assert_not_called()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("django.db.close_old_connections")
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_contact_approval_gates_unknown_recipient_before_outbox(self, deliver_mock, close_mock):
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": "unknown@example.com",
+                "subject": "Contact approval required",
+                "mobile_first_html": "<p>Hello</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("request_contact_permission", result["message"])
+        self.assertFalse(OutboundEmailReview.objects.exists())
+        self.assertFalse(
+            CommsAllowlistEntry.objects.filter(agent=self.agent, address="unknown@example.com").exists()
+        )
+        deliver_mock.assert_not_called()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("django.db.close_old_connections")
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_contact_auto_approval_and_outbox_review_are_independent(self, deliver_mock, close_mock):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        self.agent.save(update_fields=["contact_approval_mode"])
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": "auto-approved@example.com",
+                "subject": "Email review still required",
+                "mobile_first_html": "<p>Hello</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "pending_approval")
+        self.assertTrue(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                address="auto-approved@example.com",
+                allow_inbound=True,
+                allow_outbound=True,
+            ).exists()
+        )
+        deliver_mock.assert_not_called()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("django.db.close_old_connections")
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_send_automatically_does_not_bypass_contact_approval(self, deliver_mock, close_mock):
+        self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
+        self.agent.save(update_fields=["email_sending_mode"])
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": "still-needs-contact-approval@example.com",
+                "subject": "Permission still required",
+                "mobile_first_html": "<p>Hello</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("request_contact_permission", result["message"])
+        self.assertFalse(OutboundEmailReview.objects.exists())
         deliver_mock.assert_not_called()
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
@@ -289,6 +375,8 @@ class EmailReviewOutboxTests(TestCase):
     @patch("django.db.close_old_connections")
     @patch("api.agent.tools.email_sender.deliver_agent_email")
     def test_external_cc_queues_the_entire_email(self, deliver_mock, close_mock):
+        self._allow_contact("external-cc@example.com")
+
         result = execute_send_email(
             self.agent,
             {
@@ -308,6 +396,8 @@ class EmailReviewOutboxTests(TestCase):
     @patch("django.db.close_old_connections")
     @patch("api.agent.tools.email_sender.deliver_agent_email")
     def test_external_bcc_is_persisted_and_queues_the_entire_email(self, deliver_mock, close_mock):
+        self._allow_contact("external-bcc@example.com")
+
         result = execute_send_email(
             self.agent,
             {
@@ -334,6 +424,7 @@ class EmailReviewOutboxTests(TestCase):
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     def test_low_level_delivery_denies_unreviewed_external_message(self):
+        self._allow_contact("external@example.com")
         message = self._message()
 
         deliver_agent_email(message)
@@ -341,6 +432,19 @@ class EmailReviewOutboxTests(TestCase):
         message.refresh_from_db()
         self.assertEqual(message.latest_status, DeliveryStatus.FAILED)
         self.assertEqual(message.latest_error_code, "outbox_review_required")
+        self.assertFalse(OutboundMessageAttempt.objects.filter(message=message).exists())
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    def test_low_level_delivery_enforces_contact_access_when_review_is_disabled(self):
+        self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
+        self.agent.save(update_fields=["email_sending_mode"])
+        message = self._message("unauthorized-low-level@example.com")
+
+        deliver_agent_email(message)
+
+        message.refresh_from_db()
+        self.assertEqual(message.latest_status, DeliveryStatus.FAILED)
+        self.assertEqual(message.latest_error_code, "contact_authorization_required")
         self.assertFalse(OutboundMessageAttempt.objects.filter(message=message).exists())
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
@@ -531,6 +635,7 @@ class EmailReviewOutboxTests(TestCase):
 
     @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
     def test_approval_reuses_the_exact_reviewed_transport_content(self, _delay_mock):
+        self._allow_contact("external@example.com")
         message = self._message()
         message.body = "First line\nSecond & line"
         message.save(update_fields=["body"])
@@ -581,6 +686,7 @@ class EmailReviewOutboxTests(TestCase):
         pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
         cooldown_key = cron_throttle_footer_cooldown_key(str(self.agent.id))
         fake_redis.set(pending_key, "1")
+        self._allow_contact("external@example.com")
 
         with (
             patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
@@ -615,6 +721,7 @@ class EmailReviewOutboxTests(TestCase):
         fake_redis = _FakeRedis()
         pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
         fake_redis.set(pending_key, "1")
+        self._allow_contact("external@example.com")
 
         with (
             patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
@@ -653,6 +760,7 @@ class EmailReviewOutboxTests(TestCase):
         fake_redis = _FakeRedis()
         pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
         fake_redis.set(pending_key, "1")
+        self._allow_contact("first@example.com")
 
         with (
             patch("api.agent.comms.email_footer_service.switch_is_active", return_value=True),
@@ -733,7 +841,7 @@ class EmailReviewOutboxTests(TestCase):
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=False)
     @patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True)
-    def test_agent_provisioned_before_outbox_rollout_dual_writes_legacy_mode(self, _has_capacity_mock):
+    def test_agent_provisioned_before_outbox_rollout_defaults_to_no_review(self, _has_capacity_mock):
         result = PersistentAgentProvisioningService.provision(
             user=self.owner,
             name="Flag-off Outbox Agent",
@@ -746,7 +854,20 @@ class EmailReviewOutboxTests(TestCase):
         )
         self.assertEqual(
             result.agent.email_sending_mode,
-            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
+
+    def test_migration_disables_outbox_for_grandfathered_review_new_agents(self):
+        self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS
+        self.agent.save(update_fields=["email_sending_mode"])
+        migration = import_module("api.migrations.0450_decouple_contact_approval_from_outbox")
+
+        migration.disable_outbox_for_grandfathered_agents(apps, None)
+
+        self.agent.refresh_from_db()
+        self.assertEqual(
+            self.agent.email_sending_mode,
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
         )
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
@@ -857,7 +978,8 @@ class EmailReviewOutboxTests(TestCase):
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
-    def test_outbox_api_uses_versions_and_creates_outbound_only_contact(self, delay_mock):
+    def test_outbox_api_uses_versions_for_an_authorized_contact(self, delay_mock):
+        contact = self._allow_contact("new-contact@example.com")
         message = self._message("new-contact@example.com")
         review = queue_message_for_review(message)
         pending_actions = list_pending_action_requests(self.agent, self.owner)
@@ -892,43 +1014,26 @@ class EmailReviewOutboxTests(TestCase):
         message.refresh_from_db()
         self.assertEqual(review.status, OutboundEmailReview.Status.APPROVED)
         self.assertEqual(message.latest_status, DeliveryStatus.QUEUED)
-        contact = CommsAllowlistEntry.objects.get(agent=self.agent, address="new-contact@example.com")
-        self.assertFalse(contact.allow_inbound)
+        contact.refresh_from_db()
         self.assertTrue(contact.allow_outbound)
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
-    @patch("api.services.contact_authorization.get_user_max_contacts_per_agent", return_value=1)
     @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")
-    def test_approvals_share_serialized_contact_capacity_check(self, delay_mock, _contact_cap_mock):
-        first_review = queue_message_for_review(self._message("first-new-contact@example.com"))
-        second_review = queue_message_for_review(self._message("second-new-contact@example.com"))
+    def test_outbox_approval_does_not_authorize_a_contact(self, delay_mock):
+        review = queue_message_for_review(self._message("unauthorized@example.com"))
 
-        with patch.object(
-            PersistentAgent.objects,
-            "select_for_update",
-            wraps=PersistentAgent.objects.select_for_update,
-        ) as select_for_update_mock:
-            approve_review(first_review, actor=self.owner, expected_version=1)
-            with self.assertRaisesRegex(OutboundEmailReviewError, "0 of 1 contact slots available"):
-                approve_review(second_review, actor=self.owner, expected_version=1)
+        with self.assertRaisesRegex(OutboundEmailReviewError, "no longer authorized"):
+            approve_review(review, actor=self.owner, expected_version=1)
 
-        self.assertEqual(select_for_update_mock.call_count, 2)
-        second_review.refresh_from_db()
-        self.assertEqual(second_review.status, OutboundEmailReview.Status.PENDING)
-        self.assertTrue(
-            CommsAllowlistEntry.objects.filter(
-                agent=self.agent,
-                address="first-new-contact@example.com",
-                allow_inbound=False,
-                allow_outbound=True,
-            ).exists()
-        )
+        review.refresh_from_db()
+        self.assertEqual(review.status, OutboundEmailReview.Status.PENDING)
         self.assertFalse(
             CommsAllowlistEntry.objects.filter(
                 agent=self.agent,
-                address="second-new-contact@example.com",
+                address="unauthorized@example.com",
             ).exists()
         )
+        delay_mock.assert_not_called()
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     @patch("api.tasks.outbox.dispatch_approved_outbox_email.delay")

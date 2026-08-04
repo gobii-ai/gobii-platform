@@ -20,7 +20,6 @@ from api.services.agent_webhooks import (
 from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
 from api.services.outbound_email_policy import (
     email_review_outbox_enabled,
-    email_sending_mode_for_contact_approval_mode,
     get_effective_email_sending_mode,
     get_organization_minimum_email_sending_mode,
 )
@@ -1661,14 +1660,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
         ).strip()
         if new_email_sending_mode not in PersistentAgent.EmailSendingMode.values:
             return _general_error("Select a valid external email autonomy option.")
-        if not email_review_outbox_enabled(agent.user):
-            new_email_sending_mode = email_sending_mode_for_contact_approval_mode(
-                new_contact_approval_mode
-            )
-        elif new_email_sending_mode == PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY:
-            new_contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
-        else:
-            new_contact_approval_mode = PersistentAgent.ContactApprovalMode.REQUIRE_APPROVAL
 
         avatar_file = request.FILES.get('avatar')
         clear_avatar_flag = (request.POST.get('clear_avatar') or '').strip().lower() in {'1', 'true', 'yes', 'on'}

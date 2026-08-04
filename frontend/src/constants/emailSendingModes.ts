@@ -2,17 +2,17 @@ export const EMAIL_SENDING_MODE_OPTIONS = [
   {
     value: 'review_all_external',
     title: 'Review before send',
-    description: 'Every email to someone outside your verified workspace waits in Outbox.',
+    description: 'Every permitted email to someone outside your verified workspace waits in Outbox.',
   },
   {
     value: 'review_new_contacts',
     title: 'Review only new contacts',
-    description: 'Known contacts send immediately; first-time external recipients wait for review.',
+    description: 'Known contacts send immediately; newly auto-approved external recipients wait for review.',
   },
   {
     value: 'send_automatically',
     title: 'Send external emails automatically',
-    description: 'External email is sent immediately without human review.',
+    description: 'Permitted external email is sent without Outbox review. Contact approval still applies.',
   },
 ] as const
 

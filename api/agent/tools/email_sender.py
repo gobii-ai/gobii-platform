@@ -318,11 +318,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
         requires_review = bool(policy_decision and policy_decision.requires_review)
         should_auto_authorize = (
-            policy_decision is not None
-            and policy_decision.effective_mode == PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
-        ) or (
-            not outbox_enabled
-            and agent.contact_approval_mode == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+            agent.contact_approval_mode == PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
         )
         if should_auto_authorize:
             try:
@@ -330,7 +326,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             except AutomaticContactAuthorizationError as exc:
                 return {"status": "error", "message": str(exc)}
 
-        for recipient in (() if requires_review else all_recipients):
+        # Contact authorization and email review are independent. An Outbox
+        # decision must never grant permission to contact a new recipient.
+        for recipient in all_recipients:
             if policy_decision and recipient in policy_decision.internal_recipients:
                 continue
             if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, recipient):
