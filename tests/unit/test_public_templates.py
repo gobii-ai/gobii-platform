@@ -1781,6 +1781,7 @@ class LibraryViewTests(TestCase):
             response,
             'data-analytics-cta-tracking-enabled="true"',
         )
+        self.assertNotContains(response, "https://js.stripe.com")
         self.assertEqual(len(soup.find_all("h1")), 1)
         custom_agent_link = soup.find(
             "a",
