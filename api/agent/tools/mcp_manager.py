@@ -1602,7 +1602,7 @@ class MCPToolManager:
         tools_by_app: Dict[str, List[MCPToolInfo]] = {app_slug: [] for app_slug in app_slugs}
         unassigned = 0
         for tool in tools:
-            app_slug = pipedream_app_slug_for_tool_name(tool.full_name)
+            app_slug = normalize_app_slug(tool.app_slug) or pipedream_app_slug_for_tool_name(tool.full_name)
             if app_slug in tools_by_app:
                 tools_by_app[app_slug].append(tool)
             else:

@@ -14,7 +14,8 @@ from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
-CACHE_KEY_VERSION = 3
+# Version 4 invalidates entries serialized before MCP tool app metadata was cached.
+CACHE_KEY_VERSION = 4
 CACHE_SOFT_TTL_SECONDS = 60 * 60
 CACHE_HARD_TTL_SECONDS = 7 * 24 * 60 * 60
 CACHE_PREFIX = f"mcp:tools:v{CACHE_KEY_VERSION}"

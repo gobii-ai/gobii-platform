@@ -85,6 +85,7 @@ from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
 from api.services.deprecated_provider_guard import (
+    filter_deprecated_provider_blocked_tool,
     is_deprecated_provider_blocked_result,
     is_pipedream_google_sheets_blocked_call,
 )
@@ -3374,11 +3375,15 @@ _REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
 def _refresh_tools_after_deprecated_provider_handoff(
     agent: PersistentAgent,
     result: Any,
+    blocked_tool_name: str,
 ) -> Optional[List[dict]]:
     if not is_deprecated_provider_blocked_result(result):
         return None
     try:
-        return get_agent_tools(agent)
+        return filter_deprecated_provider_blocked_tool(
+            get_agent_tools(agent),
+            blocked_tool_name,
+        )
     except Exception:
         # Tool refresh is secondary to returning the trusted block and its
         # recovery instructions; the next prompt build can retry the refresh.
@@ -3425,7 +3430,7 @@ def _execute_tool_call_runtime(
             current_sqlite_db_path=get_sqlite_db_path(),
             resolved_entry=resolved_entry,
         )
-        updated_tools = _refresh_tools_after_deprecated_provider_handoff(agent, result)
+        updated_tools = _refresh_tools_after_deprecated_provider_handoff(agent, result, tool_name)
         return result, updated_tools
     resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
     if resolve_executor:
@@ -3442,7 +3447,7 @@ def _execute_tool_call_runtime(
         current_sqlite_db_path=get_sqlite_db_path(),
         resolved_entry=resolved_entry,
     )
-    updated_tools = _refresh_tools_after_deprecated_provider_handoff(agent, result)
+    updated_tools = _refresh_tools_after_deprecated_provider_handoff(agent, result, tool_name)
     if (
         tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
         and isinstance(result, dict)

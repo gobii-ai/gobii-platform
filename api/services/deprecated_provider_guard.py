@@ -86,6 +86,24 @@ def is_deprecated_provider_blocked_result(result: Any) -> bool:
     )
 
 
+def filter_deprecated_provider_blocked_tool(
+    tool_definitions: Optional[list[dict]],
+    blocked_tool_name: str,
+) -> Optional[list[dict]]:
+    """Keep the just-blocked legacy tool out of the same-turn roster refresh."""
+    if tool_definitions is None:
+        return None
+    return [
+        definition
+        for definition in tool_definitions
+        if not (
+            isinstance(definition, dict)
+            and isinstance(definition.get("function"), dict)
+            and definition["function"].get("name") == blocked_tool_name
+        )
+    ]
+
+
 def _invocation_log_context() -> tuple[str, str, str]:
     execution_context = get_tool_execution_context()
     if execution_context is None or not execution_context.step_id:

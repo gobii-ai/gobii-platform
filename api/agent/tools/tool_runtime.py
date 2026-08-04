@@ -2,7 +2,10 @@ import logging
 from typing import Any, Dict, Optional
 
 from api.models import PersistentAgent
-from api.services.deprecated_provider_guard import is_deprecated_provider_blocked_result
+from api.services.deprecated_provider_guard import (
+    filter_deprecated_provider_blocked_tool,
+    is_deprecated_provider_blocked_result,
+)
 from api.services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 
 from .apply_patch import execute_apply_patch
@@ -36,11 +39,15 @@ def _refresh_agent_tools(agent: PersistentAgent) -> Optional[list[dict]]:
 def _refresh_agent_tools_after_deprecated_provider_handoff(
     agent: PersistentAgent,
     result: Any,
+    blocked_tool_name: str,
 ) -> Optional[list[dict]]:
     if not is_deprecated_provider_blocked_result(result):
         return None
     try:
-        return _refresh_agent_tools(agent)
+        return filter_deprecated_provider_blocked_tool(
+            _refresh_agent_tools(agent),
+            blocked_tool_name,
+        )
     except Exception:
         # Preserve the actionable block if this best-effort roster refresh
         # fails; the next prompt build can retry it from persisted state.
@@ -65,7 +72,7 @@ def execute_runtime_tool_call(
 
     if isolated_mcp:
         result = execute_enabled_tool(agent, tool_name, exec_params, isolated_mcp=True)
-        updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(agent, result)
+        updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(agent, result, tool_name)
         return result, updated_tools
     if tool_name == "spawn_web_task":
         return execute_spawn_web_task(agent, exec_params), updated_tools
@@ -105,5 +112,5 @@ def execute_runtime_tool_call(
         return result, updated_tools
 
     result = execute_enabled_tool(agent, tool_name, exec_params)
-    updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(agent, result)
+    updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(agent, result, tool_name)
     return result, updated_tools

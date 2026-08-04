@@ -15,6 +15,7 @@ from api.agent.core.event_processing import (
 from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.tools.mcp_manager import MCPToolInfo
 from api.agent.tools.sqlite_skills import format_recent_skills_for_prompt
+from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from api.agent.tools.tool_manager import (
     BUILTIN_TOOL_REGISTRY,
     ToolCatalogEntry,
@@ -247,7 +248,10 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
     def test_top_level_handoff_refreshes_tools_for_the_same_agent_turn(self):
         entry = self._mcp_entry("google_sheets-read-rows")
         self._enable(self.agent_a, entry)
-        refreshed_tools = [{"type": "function", "function": {"name": "http_request"}}]
+        refreshed_tools = [
+            {"type": "function", "function": {"name": entry.full_name}},
+            {"type": "function", "function": {"name": "http_request"}},
+        ]
 
         with patch(
             "api.agent.core.event_processing.get_agent_tools",
@@ -263,8 +267,38 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             )
 
         self.assertEqual(result["handoff_status"], "ready")
-        self.assertEqual(updated_tools, refreshed_tools)
+        self.assertEqual(
+            updated_tools,
+            [{"type": "function", "function": {"name": "http_request"}}],
+        )
         refresh.assert_called_once_with(self.agent_a)
+
+    def test_nested_handoff_filters_blocked_tool_from_same_turn_roster(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+        refreshed_tools = [
+            {"type": "function", "function": {"name": entry.full_name}},
+            {"type": "function", "function": {"name": "http_request"}},
+        ]
+
+        with patch(
+            "api.agent.tools.tool_manager.resolve_tool_entry",
+            return_value=entry,
+        ), patch(
+            "api.agent.tools.tool_runtime._refresh_agent_tools",
+            return_value=refreshed_tools,
+        ):
+            result, updated_tools = execute_runtime_tool_call(
+                self.agent_a,
+                tool_name=entry.full_name,
+                exec_params={},
+            )
+
+        self.assertEqual(result["handoff_status"], "ready")
+        self.assertEqual(
+            updated_tools,
+            [{"type": "function", "function": {"name": "http_request"}}],
+        )
 
     def test_top_level_refresh_failure_preserves_actionable_block(self):
         entry = self._mcp_entry("google_sheets-read-rows")
