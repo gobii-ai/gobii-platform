@@ -2061,7 +2061,8 @@ class MCPToolManager:
         tools: List[MCPToolInfo] = []
         blacklisted_count = 0
         for tool in mcp_tools:
-            tool_meta = tool.meta if isinstance(tool.meta, dict) else {}
+            raw_tool_meta = getattr(tool, "meta", None)
+            tool_meta = raw_tool_meta if isinstance(raw_tool_meta, dict) else {}
             app_slug = normalize_app_slug(
                 tool_meta.get("app_slug") or tool_meta.get("appSlug")
             )
