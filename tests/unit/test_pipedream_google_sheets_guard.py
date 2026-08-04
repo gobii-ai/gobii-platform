@@ -1,9 +1,15 @@
 import json
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
+from api.agent.core.event_processing import (
+    _PreparedToolExecution,
+    _ToolExecutionOutcome,
+    _finalize_tool_batch,
+)
 from api.agent.tools.mcp_manager import MCPToolInfo
 from api.agent.tools.tool_manager import (
     BUILTIN_TOOL_REGISTRY,
@@ -21,6 +27,7 @@ from api.models import (
 
 
 @tag("batch_mcp_tools")
+@override_settings(PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED=True)
 class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -136,6 +143,25 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             ).exists()
         )
 
+    @override_settings(PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED=False)
+    def test_global_rollback_switch_restores_pipedream_google_sheets_execution(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+
+        with patch(
+            "api.agent.tools.tool_manager.execute_mcp_tool",
+            return_value={"status": "ok", "rows": []},
+        ) as executor:
+            result = execute_enabled_tool(
+                self.agent_a,
+                entry.full_name,
+                {},
+                resolved_entry=entry,
+            )
+
+        self.assertEqual(result["status"], "ok")
+        executor.assert_called_once()
+
     def test_nested_custom_tool_call_is_blocked_at_shared_execution_boundary(self):
         entry = self._mcp_entry("google_sheets-add-rows")
         self._enable(self.agent_a, entry)
@@ -156,13 +182,15 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             return_value=True,
         ), patch(
             "api.agent.core.event_processing._ensure_credit_for_tool",
-            return_value={"cost": None, "credit": None},
+            return_value={"cost": Decimal("0.4"), "credit": None},
         ), patch(
             "api.agent.tools.tool_manager.resolve_tool_entry",
             return_value=entry,
         ), patch(
             "api.agent.tools.tool_manager.execute_mcp_tool"
-        ) as executor:
+        ) as executor, patch(
+            "api.agent.core.event_processing._refund_tool_credit_on_error_if_configured"
+        ) as refund:
             result, _updated_tools = execute_tracked_runtime_tool_call(
                 self.agent_a,
                 tool_name=entry.full_name,
@@ -177,6 +205,65 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertEqual(child_call.parent_tool_call_id, parent_call.pk)
         self.assertEqual(child_call.status, PersistentAgentToolCall.Status.ERROR)
         executor.assert_not_called()
+        refund.assert_called_once_with(
+            agent=self.agent_a,
+            tool_name=entry.full_name,
+            step=child_call.step,
+            credits_consumed=Decimal("0.4"),
+            consumed_credit=None,
+            force=True,
+        )
+
+    def test_top_level_blocked_result_forces_credit_refund(self):
+        prepared = _PreparedToolExecution(
+            idx=1,
+            tool_name="google_sheets-read-rows",
+            tool_params={},
+            exec_params={},
+            pending_step=None,
+            credits_consumed=Decimal("0.4"),
+            consumed_credit=Mock(),
+            call_id="call-1",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="test",
+        )
+        outcome = _ToolExecutionOutcome(
+            prepared=prepared,
+            result={
+                "status": "error",
+                "error_code": "deprecated_provider_blocked",
+                "message": "Use the native Google Sheets integration.",
+                "retryable": False,
+            },
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+        persisted_step = Mock()
+
+        with patch(
+            "api.agent.core.event_processing._persist_tool_call_step",
+            return_value=persisted_step,
+        ), patch(
+            "api.agent.core.event_processing._refund_tool_credit_on_error_if_configured"
+        ) as refund:
+            _finalize_tool_batch(
+                self.agent_a,
+                [outcome],
+                attach_completion=lambda kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        refund.assert_called_once_with(
+            agent=self.agent_a,
+            tool_name=prepared.tool_name,
+            step=persisted_step,
+            credits_consumed=Decimal("0.4"),
+            consumed_credit=prepared.consumed_credit,
+            force=True,
+        )
 
     def test_pipedream_google_sheets_metadata_match_is_blocked_for_every_agent(self):
         entry = self._mcp_entry(

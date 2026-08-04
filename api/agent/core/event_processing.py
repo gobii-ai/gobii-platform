@@ -84,6 +84,7 @@ from .llm_config import apply_tier_credit_multiplier, clear_runtime_tier_overrid
 from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
+from api.services.deprecated_provider_guard import is_deprecated_provider_blocked_result
 from . import internal_reasoning
 from .daily_limit_mode import (
     CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
@@ -4428,6 +4429,7 @@ def _finalize_tool_batch(
                 step=step,
                 credits_consumed=prepared.credits_consumed,
                 consumed_credit=prepared.consumed_credit,
+                force=is_deprecated_provider_blocked_result(result),
             )
         elif tool_name == "request_human_input":
             human_input_request_ok = True

@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 from api.agent.comms.human_input_requests import attach_originating_step_from_result, track_human_input_request_created
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
+from api.services.deprecated_provider_guard import is_deprecated_provider_blocked_result
 
 from .runtime_execution_context import tool_execution_context
 from .tool_runtime import execute_runtime_tool_call
@@ -58,6 +59,7 @@ def execute_tracked_runtime_tool_call(
         _mark_tool_call_started,
         _normalize_error_result,
         _persist_tool_call_step,
+        _refund_tool_credit_on_error_if_configured,
     )
 
     attach_completion = _build_attach_completion(parent_step)
@@ -165,5 +167,15 @@ def execute_tracked_runtime_tool_call(
     if step is not None and tool_name == "request_human_input" and isinstance(result, dict):
         attach_originating_step_from_result(step, result)
         track_human_input_request_created(step, result)
+
+    if is_deprecated_provider_blocked_result(result):
+        _refund_tool_credit_on_error_if_configured(
+            agent=agent,
+            tool_name=tool_name,
+            step=step,
+            credits_consumed=credits_consumed,
+            consumed_credit=consumed_credit,
+            force=True,
+        )
 
     return result, updated_tools

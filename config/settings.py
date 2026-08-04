@@ -1771,6 +1771,12 @@ def _default_pipedream_environment() -> str:
 
 PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default=_default_pipedream_environment())
 
+# Emergency rollback for the universal legacy Google Sheets execution guard.
+PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED = env.bool(
+    "PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED",
+    default=True,
+)
+
 # Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,google_docs,greenhouse")
 PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,google_docs,greenhouse,trello")
 

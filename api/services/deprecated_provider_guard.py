@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Optional
 
+from django.conf import settings
 from django.db import DatabaseError
 
 from api.agent.tools.runtime_execution_context import get_tool_execution_context
@@ -49,6 +50,14 @@ def _blocked_error() -> dict[str, Any]:
     }
 
 
+def is_deprecated_provider_blocked_result(result: Any) -> bool:
+    return (
+        isinstance(result, dict)
+        and result.get("status") == "error"
+        and result.get("error_code") == DEPRECATED_PROVIDER_BLOCKED
+    )
+
+
 def _invocation_log_context() -> tuple[str, str, str]:
     execution_context = get_tool_execution_context()
     if execution_context is None or not execution_context.step_id:
@@ -82,6 +91,8 @@ def pipedream_google_sheets_blocked_error(
     entry: Any,
     params: Any,
 ) -> Optional[dict[str, Any]]:
+    if not settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED:
+        return None
     if entry.provider != "mcp" or str(entry.tool_server).strip().casefold() != PIPEDREAM_PROVIDER:
         return None
 
