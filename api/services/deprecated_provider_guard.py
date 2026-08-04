@@ -11,6 +11,7 @@ from api.services.pipedream_apps import (
     normalize_app_slug,
     pipedream_app_slug_for_tool_call,
 )
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 
@@ -35,17 +36,44 @@ def _provider_app_slug(entry: Any, params: Any) -> str:
     return pipedream_app_slug_for_tool_call(tool_name, params)
 
 
-def _blocked_error() -> dict[str, Any]:
+def _blocked_error(handoff_status: str) -> dict[str, Any]:
+    from api.agent.system_skills.service import (
+        GOOGLE_SHEETS_HANDOFF_EXPLICITLY_DISABLED,
+        GOOGLE_SHEETS_HANDOFF_READY,
+    )
+
+    if handoff_status == GOOGLE_SHEETS_HANDOFF_READY:
+        message = (
+            "Google Sheets through Pipedream is disabled. The native Google Sheets skill is enabled; continue with "
+            "it now. If Google Drive is disconnected, tell the requester to open /app/integrations, connect Google "
+            "Drive, and select the spreadsheets to use. Do not retry Pipedream."
+        )
+        next_action = "continue_with_native_google_sheets"
+    elif handoff_status == GOOGLE_SHEETS_HANDOFF_EXPLICITLY_DISABLED:
+        message = (
+            "Google Sheets through Pipedream is disabled, and the native Google Sheets skill was explicitly disabled "
+            "for this agent. Do not retry Pipedream; tell the requester the native Google Sheets skill must be "
+            "re-enabled before this work can continue."
+        )
+        next_action = "ask_user_to_enable_native_google_sheets"
+    else:
+        message = (
+            "Google Sheets through Pipedream is disabled, and the native Google Sheets skill could not be prepared "
+            "automatically. Do not retry Pipedream; use search_tools to enable Google Sheets, or tell the requester "
+            "that native integration setup needs attention."
+        )
+        next_action = "enable_native_google_sheets"
+
     return {
         "status": "error",
         "error_code": DEPRECATED_PROVIDER_BLOCKED,
-        "message": (
-            "Google Sheets through Pipedream is disabled for this agent. "
-            "Use the native Google Sheets integration."
-        ),
+        "message": message,
         "provider": PIPEDREAM_PROVIDER,
         "integration": GOOGLE_SHEETS_INTEGRATION,
         "replacement": GOOGLE_SHEETS_REPLACEMENT,
+        "handoff_status": handoff_status,
+        "next_action": next_action,
+        "setup_url": "/app/integrations",
         "retryable": False,
     }
 
@@ -86,6 +114,45 @@ def _invocation_log_context() -> tuple[str, str, str]:
     )
 
 
+def _track_blocked_execution(
+    agent: PersistentAgent,
+    *,
+    tool_name: str,
+    app_slug: str,
+    invocation_scope: str,
+    handoff_status: str,
+) -> None:
+    properties = Analytics.with_org_properties(
+        {
+            "agent_id": str(agent.id),
+            "tool_name": tool_name,
+            "provider": PIPEDREAM_PROVIDER,
+            "app_slug": app_slug,
+            "integration": GOOGLE_SHEETS_INTEGRATION,
+            "replacement": GOOGLE_SHEETS_REPLACEMENT,
+            "invocation_scope": invocation_scope,
+            "handoff_status": handoff_status,
+            "error_code": DEPRECATED_PROVIDER_BLOCKED,
+        },
+        organization_id=str(agent.organization_id) if agent.organization_id else None,
+    )
+    try:
+        Analytics.track_event(
+            user_id=agent.user_id,
+            event=AnalyticsEvent.PIPEDREAM_GOOGLE_SHEETS_EXECUTION_BLOCKED,
+            source=AnalyticsSource.AGENT,
+            properties=properties,
+        )
+    except Exception:
+        # Analytics is diagnostic only and must never weaken the execution
+        # guard or replace its actionable native handoff result.
+        logger.warning(
+            "Unable to emit deprecated-provider block analytics for agent %s.",
+            agent.id,
+            exc_info=True,
+        )
+
+
 def pipedream_google_sheets_blocked_error(
     agent: PersistentAgent,
     entry: Any,
@@ -93,6 +160,21 @@ def pipedream_google_sheets_blocked_error(
 ) -> Optional[dict[str, Any]]:
     if not is_pipedream_google_sheets_blocked_call(entry, params):
         return None
+
+    from api.agent.system_skills.service import (
+        GOOGLE_SHEETS_HANDOFF_UNAVAILABLE,
+        prepare_google_sheets_native_handoff,
+    )
+
+    try:
+        handoff_status = prepare_google_sheets_native_handoff(agent)
+    except DatabaseError:
+        handoff_status = GOOGLE_SHEETS_HANDOFF_UNAVAILABLE
+        logger.warning(
+            "Unable to prepare native Google Sheets handoff for agent %s.",
+            agent.id,
+            exc_info=True,
+        )
 
     app_slug = _provider_app_slug(entry, params)
     invocation_scope, parent_tool_id, parent_tool_name = _invocation_log_context()
@@ -107,9 +189,17 @@ def pipedream_google_sheets_blocked_error(
             "parent_tool_id": parent_tool_id,
             "parent_tool_name": parent_tool_name,
             "error_code": DEPRECATED_PROVIDER_BLOCKED,
+            "handoff_status": handoff_status,
         },
     )
-    return _blocked_error()
+    _track_blocked_execution(
+        agent,
+        tool_name=entry.full_name,
+        app_slug=app_slug,
+        invocation_scope=invocation_scope,
+        handoff_status=handoff_status,
+    )
+    return _blocked_error(handoff_status)
 
 
 def is_pipedream_google_sheets_blocked_call(entry: Any, params: Any) -> bool:

@@ -3370,6 +3370,25 @@ _REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "end_planning": lambda: execute_end_planning,
 }
 
+
+def _refresh_tools_after_deprecated_provider_handoff(
+    agent: PersistentAgent,
+    result: Any,
+) -> Optional[List[dict]]:
+    if not is_deprecated_provider_blocked_result(result):
+        return None
+    try:
+        return get_agent_tools(agent)
+    except Exception:
+        # Tool refresh is secondary to returning the trusted block and its
+        # recovery instructions; the next prompt build can retry the refresh.
+        logger.exception(
+            "Agent %s: native Sheets handoff tool refresh failed; preserving the blocked result.",
+            agent.id,
+        )
+        return None
+
+
 def _execute_tool_call_runtime(
     agent: PersistentAgent,
     *,
@@ -3398,14 +3417,16 @@ def _execute_tool_call_runtime(
         )
         return mock_result, updated_tools
     if parallel_safe:
-        return execute_enabled_tool(
+        result = execute_enabled_tool(
             agent,
             tool_name,
             exec_params,
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
             resolved_entry=resolved_entry,
-        ), updated_tools
+        )
+        updated_tools = _refresh_tools_after_deprecated_provider_handoff(agent, result)
+        return result, updated_tools
     resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
     if resolve_executor:
         return resolve_executor()(agent, exec_params), updated_tools
@@ -3421,6 +3442,7 @@ def _execute_tool_call_runtime(
         current_sqlite_db_path=get_sqlite_db_path(),
         resolved_entry=resolved_entry,
     )
+    updated_tools = _refresh_tools_after_deprecated_provider_handoff(agent, result)
     if (
         tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
         and isinstance(result, dict)

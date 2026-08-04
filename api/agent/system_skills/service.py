@@ -9,7 +9,16 @@ from api.models import PersistentAgent, PersistentAgentEnabledTool, PersistentAg
 from api.services.pipedream_apps import enable_pipedream_apps_for_agent
 
 from .registry import SystemSkillDefinition, equivalent_system_skill_keys, get_system_skill_definition, normalize_system_skill_key
-from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS, WEBHOOKS_SYSTEM_SKILL_KEY
+from .defaults import (
+    DEFAULT_SYSTEM_SKILL_DEFINITIONS,
+    GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+    WEBHOOKS_SYSTEM_SKILL_KEY,
+)
+
+
+GOOGLE_SHEETS_HANDOFF_READY = "ready"
+GOOGLE_SHEETS_HANDOFF_EXPLICITLY_DISABLED = "explicitly_disabled"
+GOOGLE_SHEETS_HANDOFF_UNAVAILABLE = "unavailable"
 
 
 def default_enabled_system_skill_keys() -> tuple[str, ...]:
@@ -60,6 +69,55 @@ def get_enabled_system_skill_states(agent: PersistentAgent):
         # Preserve pre-skill webhook setups without overriding an explicit disable.
         enable_system_skills(agent, [WEBHOOKS_SYSTEM_SKILL_KEY])
     return PersistentAgentSystemSkillState.objects.filter(agent=agent, is_enabled=True)
+
+
+def prepare_google_sheets_native_handoff(agent: PersistentAgent) -> str:
+    """Make the native Sheets path immediately usable unless it was explicitly disabled."""
+    state = (
+        PersistentAgentSystemSkillState.objects.filter(
+            agent=agent,
+            skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+        )
+        .only("id", "is_enabled")
+        .first()
+    )
+    if state is not None and not state.is_enabled:
+        return GOOGLE_SHEETS_HANDOFF_EXPLICITLY_DISABLED
+
+    # Use the trusted built-in path so this handoff does not depend on MCP
+    # discovery being healthy after the deprecated provider is rejected.
+    from api.agent.tools.tool_manager import (
+        HTTP_REQUEST_TOOL_NAME,
+        mark_tool_enabled_without_discovery,
+    )
+
+    tool_result = mark_tool_enabled_without_discovery(agent, HTTP_REQUEST_TOOL_NAME)
+    if tool_result.get("status") != "success":
+        return GOOGLE_SHEETS_HANDOFF_UNAVAILABLE
+
+    used_at = timezone.now()
+    state, created = PersistentAgentSystemSkillState.objects.get_or_create(
+        agent=agent,
+        skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+        defaults={
+            "is_enabled": True,
+            "last_used_at": used_at,
+            "usage_count": 1,
+        },
+    )
+    if created:
+        return GOOGLE_SHEETS_HANDOFF_READY
+
+    updated = PersistentAgentSystemSkillState.objects.filter(
+        id=state.id,
+        is_enabled=True,
+    ).update(
+        last_used_at=used_at,
+        usage_count=F("usage_count") + 1,
+    )
+    if not updated:
+        return GOOGLE_SHEETS_HANDOFF_EXPLICITLY_DISABLED
+    return GOOGLE_SHEETS_HANDOFF_READY
 
 
 def _system_skill_keys_for_tool(tool_name: str) -> list[str]:

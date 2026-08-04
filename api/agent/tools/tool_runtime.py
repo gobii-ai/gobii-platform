@@ -1,6 +1,8 @@
+import logging
 from typing import Any, Dict, Optional
 
 from api.models import PersistentAgent
+from api.services.deprecated_provider_guard import is_deprecated_provider_blocked_result
 from api.services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 
 from .apply_patch import execute_apply_patch
@@ -22,10 +24,31 @@ from .tool_manager import execute_enabled_tool
 from .web_chat_sender import execute_send_chat_message
 
 
+logger = logging.getLogger(__name__)
+
+
 def _refresh_agent_tools(agent: PersistentAgent) -> Optional[list[dict]]:
     from ..core.prompt_context import get_agent_tools
 
     return get_agent_tools(agent)
+
+
+def _refresh_agent_tools_after_deprecated_provider_handoff(
+    agent: PersistentAgent,
+    result: Any,
+) -> Optional[list[dict]]:
+    if not is_deprecated_provider_blocked_result(result):
+        return None
+    try:
+        return _refresh_agent_tools(agent)
+    except Exception:
+        # Preserve the actionable block if this best-effort roster refresh
+        # fails; the next prompt build can retry it from persisted state.
+        logger.exception(
+            "Agent %s: nested native Sheets handoff tool refresh failed; preserving the blocked result.",
+            agent.id,
+        )
+        return None
 
 
 def execute_runtime_tool_call(
@@ -41,7 +64,9 @@ def execute_runtime_tool_call(
         return tool_blacklist_error(tool_name), updated_tools
 
     if isolated_mcp:
-        return execute_enabled_tool(agent, tool_name, exec_params, isolated_mcp=True), updated_tools
+        result = execute_enabled_tool(agent, tool_name, exec_params, isolated_mcp=True)
+        updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(agent, result)
+        return result, updated_tools
     if tool_name == "spawn_web_task":
         return execute_spawn_web_task(agent, exec_params), updated_tools
     if tool_name == "send_email":
@@ -79,4 +104,6 @@ def execute_runtime_tool_call(
         updated_tools = _refresh_agent_tools(agent)
         return result, updated_tools
 
-    return execute_enabled_tool(agent, tool_name, exec_params), updated_tools
+    result = execute_enabled_tool(agent, tool_name, exec_params)
+    updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(agent, result)
+    return result, updated_tools

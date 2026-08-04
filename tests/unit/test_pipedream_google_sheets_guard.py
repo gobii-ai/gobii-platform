@@ -8,10 +8,13 @@ from django.test import TestCase, override_settings, tag
 from api.agent.core.event_processing import (
     _PreparedToolExecution,
     _ToolExecutionOutcome,
+    _execute_tool_call_runtime,
     _finalize_tool_batch,
     _prepare_tool_batch,
 )
+from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.tools.mcp_manager import MCPToolInfo
+from api.agent.tools.sqlite_skills import format_recent_skills_for_prompt
 from api.agent.tools.tool_manager import (
     BUILTIN_TOOL_REGISTRY,
     ToolCatalogEntry,
@@ -23,8 +26,10 @@ from api.models import (
     PersistentAgent,
     PersistentAgentEnabledTool,
     PersistentAgentStep,
+    PersistentAgentSystemSkillState,
     PersistentAgentToolCall,
 )
+from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 @tag("batch_mcp_tools")
@@ -122,7 +127,9 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         )
         self._enable(self.agent_a, entry)
 
-        with patch("api.agent.tools.tool_manager.execute_mcp_tool") as executor:
+        with patch("api.agent.tools.tool_manager.execute_mcp_tool") as executor, patch(
+            "api.services.deprecated_provider_guard.Analytics.track_event"
+        ) as track_event:
             result = execute_enabled_tool(
                 self.agent_a,
                 entry.full_name,
@@ -135,14 +142,173 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertEqual(result["provider"], "pipedream")
         self.assertEqual(result["integration"], "google_sheets")
         self.assertEqual(result["replacement"], "google_sheets_native")
+        self.assertEqual(result["handoff_status"], "ready")
+        self.assertEqual(result["next_action"], "continue_with_native_google_sheets")
         self.assertIs(result["retryable"], False)
         executor.assert_not_called()
+        track_event.assert_called_once()
+        analytics_call = track_event.call_args.kwargs
+        self.assertEqual(analytics_call["user_id"], self.agent_a.user_id)
+        self.assertEqual(
+            analytics_call["event"],
+            AnalyticsEvent.PIPEDREAM_GOOGLE_SHEETS_EXECUTION_BLOCKED,
+        )
+        self.assertEqual(analytics_call["source"], AnalyticsSource.AGENT)
+        self.assertEqual(
+            analytics_call["properties"],
+            {
+                "agent_id": str(self.agent_a.id),
+                "tool_name": entry.full_name,
+                "provider": "pipedream",
+                "app_slug": "google_sheets",
+                "integration": "google_sheets",
+                "replacement": "google_sheets_native",
+                "invocation_scope": "top_level",
+                "handoff_status": "ready",
+                "error_code": "deprecated_provider_blocked",
+                "organization": False,
+            },
+        )
+        self.assertTrue(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent_a,
+                skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists()
+        )
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent_a,
+                tool_full_name="http_request",
+            ).exists()
+        )
+        native_prompt = format_recent_skills_for_prompt(self.agent_a, limit=3)
+        self.assertIn("System Skill: Google Sheets", native_prompt)
+        self.assertIn("Google Drive is not connected", native_prompt)
+        self.assertIn("/app/integrations", native_prompt)
+        self.assertIn("Park this work until the native connection event wakes you", native_prompt)
         self.assertTrue(
             PersistentAgentEnabledTool.objects.filter(
                 agent=self.agent_a,
                 tool_full_name=entry.full_name,
             ).exists()
         )
+
+    def test_explicitly_disabled_native_skill_is_not_reactivated(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+        state = PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent_a,
+            skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+            is_enabled=False,
+        )
+
+        result = execute_enabled_tool(
+            self.agent_a,
+            entry.full_name,
+            {},
+            resolved_entry=entry,
+        )
+
+        state.refresh_from_db()
+        self.assertIs(state.is_enabled, False)
+        self.assertEqual(result["handoff_status"], "explicitly_disabled")
+        self.assertEqual(result["next_action"], "ask_user_to_enable_native_google_sheets")
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent_a,
+                tool_full_name="http_request",
+            ).exists()
+        )
+
+    def test_native_handoff_failure_preserves_typed_block_and_recovery_hint(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+
+        with patch(
+            "api.agent.tools.tool_manager.mark_tool_enabled_without_discovery",
+            return_value={"status": "error", "message": "unavailable"},
+        ), patch(
+            "api.services.deprecated_provider_guard.Analytics.track_event",
+            side_effect=RuntimeError("analytics unavailable"),
+        ):
+            result = execute_enabled_tool(
+                self.agent_a,
+                entry.full_name,
+                {},
+                resolved_entry=entry,
+            )
+
+        self.assertEqual(result["error_code"], "deprecated_provider_blocked")
+        self.assertEqual(result["handoff_status"], "unavailable")
+        self.assertEqual(result["next_action"], "enable_native_google_sheets")
+        self.assertIn("search_tools", result["message"])
+
+    def test_top_level_handoff_refreshes_tools_for_the_same_agent_turn(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+        refreshed_tools = [{"type": "function", "function": {"name": "http_request"}}]
+
+        with patch(
+            "api.agent.core.event_processing.get_agent_tools",
+            return_value=refreshed_tools,
+        ) as refresh:
+            result, updated_tools = _execute_tool_call_runtime(
+                self.agent_a,
+                tool_name=entry.full_name,
+                exec_params={},
+                budget_ctx=None,
+                eval_run_id=None,
+                resolved_entry=entry,
+            )
+
+        self.assertEqual(result["handoff_status"], "ready")
+        self.assertEqual(updated_tools, refreshed_tools)
+        refresh.assert_called_once_with(self.agent_a)
+
+    def test_top_level_refresh_failure_preserves_actionable_block(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+
+        with patch(
+            "api.agent.core.event_processing.get_agent_tools",
+            side_effect=RuntimeError("refresh failed"),
+        ):
+            result, updated_tools = _execute_tool_call_runtime(
+                self.agent_a,
+                tool_name=entry.full_name,
+                exec_params={},
+                budget_ctx=None,
+                eval_run_id=None,
+                resolved_entry=entry,
+            )
+
+        self.assertEqual(result["error_code"], "deprecated_provider_blocked")
+        self.assertIn("native Google Sheets skill is enabled", result["message"])
+        self.assertIn("Do not retry Pipedream", result["message"])
+        self.assertIsNone(updated_tools)
+
+    def test_nested_refresh_failure_preserves_actionable_block(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+
+        with patch(
+            "api.agent.tools.tool_manager.resolve_tool_entry",
+            return_value=entry,
+        ), patch(
+            "api.agent.tools.tool_runtime._refresh_agent_tools",
+            side_effect=RuntimeError("refresh failed"),
+        ):
+            result, updated_tools = execute_tracked_runtime_tool_call(
+                self.agent_a,
+                tool_name=entry.full_name,
+                exec_params={},
+            )
+
+        self.assertEqual(result["error_code"], "deprecated_provider_blocked")
+        self.assertIn("native Google Sheets skill is enabled", result["message"])
+        self.assertIn("Do not retry Pipedream", result["message"])
+        self.assertIsNone(updated_tools)
 
     @override_settings(PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED=False)
     def test_global_rollback_switch_restores_pipedream_google_sheets_execution(self):
@@ -189,7 +355,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         ), patch(
             "api.agent.tools.tool_manager.execute_mcp_tool"
         ) as executor:
-            result, _updated_tools = execute_tracked_runtime_tool_call(
+            result, updated_tools = execute_tracked_runtime_tool_call(
                 self.agent_a,
                 tool_name=entry.full_name,
                 exec_params={},
@@ -204,6 +370,14 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertEqual(child_call.status, PersistentAgentToolCall.Status.ERROR)
         self.assertIsNone(child_call.step.credits_cost)
         self.assertIsNone(child_call.step.task_credit_id)
+        self.assertIn(
+            "http_request",
+            {
+                tool["function"]["name"]
+                for tool in updated_tools
+                if isinstance(tool.get("function"), dict)
+            },
+        )
         executor.assert_not_called()
         rate_limit.assert_not_called()
         credit_gate.assert_not_called()
