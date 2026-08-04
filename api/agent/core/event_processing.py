@@ -4467,13 +4467,21 @@ def _finalize_tool_batch(
         if not is_error_status and is_source_bearing_tool(tool_name):
             rewrite_prompt_urls(result_content, agent, create=True)
         if is_error_status:
+            trusted_deprecated_provider_block = bool(
+                is_deprecated_provider_blocked_result(result)
+                and prepared.resolved_entry
+                and is_pipedream_google_sheets_blocked_call(
+                    prepared.resolved_entry,
+                    prepared.exec_params,
+                )
+            )
             _refund_tool_credit_on_error_if_configured(
                 agent=agent,
                 tool_name=tool_name,
                 step=step,
                 credits_consumed=prepared.credits_consumed,
                 consumed_credit=prepared.consumed_credit,
-                force=is_deprecated_provider_blocked_result(result),
+                force=trusted_deprecated_provider_block,
             )
         elif tool_name == "request_human_input":
             human_input_request_ok = True

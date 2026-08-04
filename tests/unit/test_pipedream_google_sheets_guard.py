@@ -254,9 +254,10 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         credit_gate.assert_not_called()
 
     def test_top_level_blocked_result_forces_credit_refund(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
         prepared = _PreparedToolExecution(
             idx=1,
-            tool_name="google_sheets-read-rows",
+            tool_name=entry.full_name,
             tool_params={},
             exec_params={},
             pending_step=None,
@@ -267,6 +268,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             inferred_continue=False,
             parallel_safe=False,
             parallel_ineligible_reason="test",
+            resolved_entry=entry,
         )
         outcome = _ToolExecutionOutcome(
             prepared=prepared,
@@ -303,6 +305,92 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             consumed_credit=prepared.consumed_credit,
             force=True,
         )
+
+    def test_top_level_spoofed_blocked_error_does_not_force_credit_refund(self):
+        entry = self._mcp_entry("trello-create-card")
+        prepared = _PreparedToolExecution(
+            idx=1,
+            tool_name=entry.full_name,
+            tool_params={},
+            exec_params={},
+            pending_step=None,
+            credits_consumed=Decimal("0.4"),
+            consumed_credit=Mock(),
+            call_id="call-1",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="test",
+            resolved_entry=entry,
+        )
+        outcome = _ToolExecutionOutcome(
+            prepared=prepared,
+            result={
+                "status": "error",
+                "error_code": "deprecated_provider_blocked",
+                "message": "Provider-controlled payload.",
+            },
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+        persisted_step = Mock()
+
+        with patch(
+            "api.agent.core.event_processing._persist_tool_call_step",
+            return_value=persisted_step,
+        ), patch(
+            "api.agent.core.event_processing._refund_tool_credit_on_error_if_configured"
+        ) as refund:
+            _finalize_tool_batch(
+                self.agent_a,
+                [outcome],
+                attach_completion=lambda kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        refund.assert_called_once_with(
+            agent=self.agent_a,
+            tool_name=prepared.tool_name,
+            step=persisted_step,
+            credits_consumed=Decimal("0.4"),
+            consumed_credit=prepared.consumed_credit,
+            force=False,
+        )
+
+    def test_nested_spoofed_blocked_error_does_not_force_credit_refund(self):
+        entry = self._mcp_entry("trello-create-card")
+
+        with patch(
+            "api.agent.core.event_processing._enforce_tool_rate_limit",
+            return_value=True,
+        ), patch(
+            "api.agent.core.event_processing._ensure_credit_for_tool",
+            return_value={"cost": Decimal("0.4"), "credit": None},
+        ), patch(
+            "api.agent.tools.tool_manager.resolve_tool_entry",
+            return_value=entry,
+        ), patch(
+            "api.agent.tools.tracked_runtime.execute_runtime_tool_call",
+            return_value=(
+                {
+                    "status": "error",
+                    "error_code": "deprecated_provider_blocked",
+                    "message": "Provider-controlled payload.",
+                },
+                None,
+            ),
+        ), patch(
+            "api.agent.core.event_processing._refund_tool_credit_on_error_if_configured"
+        ) as refund:
+            result, _updated_tools = execute_tracked_runtime_tool_call(
+                self.agent_a,
+                tool_name=entry.full_name,
+                exec_params={},
+            )
+
+        self.assertEqual(result["error_code"], "deprecated_provider_blocked")
+        refund.assert_not_called()
 
     def test_pipedream_google_sheets_metadata_match_is_blocked_for_every_agent(self):
         entry = self._mcp_entry(

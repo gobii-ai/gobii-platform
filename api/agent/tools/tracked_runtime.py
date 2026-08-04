@@ -187,7 +187,7 @@ def execute_tracked_runtime_tool_call(
         attach_originating_step_from_result(step, result)
         track_human_input_request_created(step, result)
 
-    if is_deprecated_provider_blocked_result(result):
+    if blocked_provider_call and is_deprecated_provider_blocked_result(result):
         _refund_tool_credit_on_error_if_configured(
             agent=agent,
             tool_name=tool_name,
