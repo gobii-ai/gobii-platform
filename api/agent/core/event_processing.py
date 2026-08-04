@@ -861,6 +861,13 @@ def _copy_native_http_error_context(source: dict, payload: dict) -> None:
         payload["headers"] = _coerce_error_json_value(source.get("headers"), TOOL_ERROR_NATIVE_HEADERS_MAX_BYTES)
 
 
+def _copy_structured_tool_error_context(source: dict, payload: dict) -> None:
+    for key in ("code", "error_code", "provider", "integration", "replacement"):
+        value = source.get(key)
+        if value is not None:
+            payload[key] = _coerce_error_text(value, TOOL_ERROR_DETAIL_MAX_BYTES)
+
+
 def _normalize_error_result(result: dict) -> dict:
     message = result.get("message") or result.get("error") or result.get("detail") or "Tool returned an error."
     error_type = result.get("error_type") or result.get("type")
@@ -898,6 +905,7 @@ def _normalize_error_result(result: dict) -> dict:
     )
     if result.get(TERMINAL_ERROR_FLAG) is True:
         payload[TERMINAL_ERROR_FLAG] = True
+    _copy_structured_tool_error_context(result, payload)
     _copy_native_http_error_context(result, payload)
     return payload
 

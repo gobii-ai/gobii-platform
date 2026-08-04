@@ -21,6 +21,7 @@ from util.text_sanitizer import decode_unicode_escapes
 
 from api.agent.eval_agents import is_eval_agent
 from api.services.agent_sqlite_coordination import AgentSQLiteBusy, agent_sqlite_busy_result
+from api.services.deprecated_provider_guard import pipedream_google_sheets_blocked_error
 
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
 from ...services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, sandbox_compute_enabled_for_agent, track_sandbox_unavailable
@@ -1495,6 +1496,10 @@ def execute_enabled_tool(
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}
 
     resolved_name = entry.full_name
+
+    blocked_error = pipedream_google_sheets_blocked_error(agent, entry, params)
+    if blocked_error is not None:
+        return blocked_error
 
     params = _coerce_params_to_schema(params, entry.parameters)
 

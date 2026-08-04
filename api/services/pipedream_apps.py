@@ -18,6 +18,7 @@ from api.models import MCPServerConfig, PersistentAgent, PersistentAgentEnabledT
 logger = logging.getLogger(__name__)
 
 PIPEDREAM_RUNTIME_NAME = "pipedream"
+PIPEDREAM_COMPONENT_OPTION_TOOLS = frozenset({"retrieve_options", "configure_component"})
 SEARCH_CACHE_TTL_SECONDS = 300
 APP_CACHE_TTL_SECONDS = 1800
 SEARCH_CACHE_PREFIX = "pipedream:apps:search:v1"
@@ -199,6 +200,20 @@ def pipedream_app_slug_for_tool_name(tool_name: object) -> str:
     if not normalized or "-" not in normalized:
         return ""
     return normalize_app_slug(normalized.split("-", 1)[0])
+
+
+def pipedream_app_slug_for_tool_call(tool_name: object, params: object) -> str:
+    """Resolve the app targeted by a concrete Pipedream tool invocation."""
+    app_slug = pipedream_app_slug_for_tool_name(tool_name)
+    if app_slug:
+        return app_slug
+
+    normalized_tool_name = tool_name.strip() if isinstance(tool_name, str) else ""
+    if normalized_tool_name not in PIPEDREAM_COMPONENT_OPTION_TOOLS or not isinstance(params, dict):
+        return ""
+
+    component_key = params.get("componentKey") or params.get("component_key")
+    return pipedream_app_slug_for_tool_name(component_key)
 
 
 def get_connected_pipedream_app_slugs_for_agent(agent: PersistentAgent) -> set[str]:

@@ -95,7 +95,9 @@ from ...services.mcp_oauth import (
 from ...services.pipedream_apps import (
     get_effective_pipedream_app_slugs_for_agent,
     get_platform_pipedream_app_slugs,
+    normalize_app_slug,
     normalize_app_slugs,
+    pipedream_app_slug_for_tool_call,
     pipedream_app_slug_for_tool_name,
 )
 
@@ -275,6 +277,7 @@ class MCPToolInfo:
     tool_name: str  # e.g., "search_engine"
     description: str
     parameters: Dict[str, Any]
+    app_slug: str = ""
     
     def to_search_dict(self) -> Dict[str, str]:
         """Convert to a dictionary for LLM search context."""
@@ -388,7 +391,6 @@ class MCPToolManager:
     """Manages MCP tool connections and provides search/enable/disable functionality."""
 
     PIPEDREAM_RUNTIME_NAME = "pipedream"
-    PIPEDREAM_COMPONENT_OPTION_TOOLS = {"retrieve_options", "configure_component"}
 
     # Blacklisted tool patterns (glob-style patterns)
     # Tools matching these patterns will be excluded from discovery and execution
@@ -1549,6 +1551,7 @@ class MCPToolManager:
                 "tool_name": tool.tool_name,
                 "description": tool.description,
                 "parameters": tool.parameters,
+                "app_slug": tool.app_slug,
             }
             for tool in tools
         ]
@@ -1575,6 +1578,7 @@ class MCPToolManager:
                     tool_name=tool_name,
                     description=entry.get("description", ""),
                     parameters=entry.get("parameters") or {"type": "object", "properties": {}},
+                    app_slug=normalize_app_slug(entry.get("app_slug")),
                 )
             )
         return tools
@@ -2057,6 +2061,10 @@ class MCPToolManager:
         tools: List[MCPToolInfo] = []
         blacklisted_count = 0
         for tool in mcp_tools:
+            tool_meta = tool.meta if isinstance(tool.meta, dict) else {}
+            app_slug = normalize_app_slug(
+                tool_meta.get("app_slug") or tool_meta.get("appSlug")
+            )
             if server.name == self.PIPEDREAM_RUNTIME_NAME:
                 full_name = tool.name
             else:
@@ -2077,7 +2085,8 @@ class MCPToolManager:
                     server_name=server.name,
                     tool_name=tool.name,
                     description=description,
-                    parameters=tool.inputSchema or {"type": "object", "properties": {}}
+                    parameters=tool.inputSchema or {"type": "object", "properties": {}},
+                    app_slug=app_slug,
                 )
             )
         if blacklisted_count:
@@ -3392,15 +3401,7 @@ class MCPToolManager:
         return app or None
 
     def _pd_app_slug_for_tool_call(self, tool_name: str, params: Dict[str, Any]) -> Optional[str]:
-        app_slug = self._pd_parse_tool(tool_name)
-        if app_slug:
-            return app_slug
-
-        if tool_name not in self.PIPEDREAM_COMPONENT_OPTION_TOOLS or not isinstance(params, dict):
-            return None
-
-        component_key = str(params.get("componentKey") or params.get("component_key") or "").strip()
-        return self._pd_parse_tool(component_key)
+        return pipedream_app_slug_for_tool_call(tool_name, params) or None
 
     def _get_pipedream_agent_client(self, agent: PersistentAgent, app_slug: Optional[str]) -> Client:
         """Get or create a Pipedream client for an agent/app pair."""
