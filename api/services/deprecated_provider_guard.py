@@ -91,15 +91,10 @@ def pipedream_google_sheets_blocked_error(
     entry: Any,
     params: Any,
 ) -> Optional[dict[str, Any]]:
-    if not settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED:
-        return None
-    if entry.provider != "mcp" or str(entry.tool_server).strip().casefold() != PIPEDREAM_PROVIDER:
+    if not is_pipedream_google_sheets_blocked_call(entry, params):
         return None
 
     app_slug = _provider_app_slug(entry, params)
-    if app_slug != GOOGLE_SHEETS_INTEGRATION:
-        return None
-
     invocation_scope, parent_tool_id, parent_tool_name = _invocation_log_context()
     logger.warning(
         "Blocked deprecated provider tool execution.",
@@ -115,3 +110,11 @@ def pipedream_google_sheets_blocked_error(
         },
     )
     return _blocked_error()
+
+
+def is_pipedream_google_sheets_blocked_call(entry: Any, params: Any) -> bool:
+    if not settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED:
+        return False
+    if entry.provider != "mcp" or str(entry.tool_server).strip().casefold() != PIPEDREAM_PROVIDER:
+        return False
+    return _provider_app_slug(entry, params) == GOOGLE_SHEETS_INTEGRATION

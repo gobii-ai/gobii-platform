@@ -9,6 +9,7 @@ from api.agent.core.event_processing import (
     _PreparedToolExecution,
     _ToolExecutionOutcome,
     _finalize_tool_batch,
+    _prepare_tool_batch,
 )
 from api.agent.tools.mcp_manager import MCPToolInfo
 from api.agent.tools.tool_manager import (
@@ -180,17 +181,14 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         with patch(
             "api.agent.core.event_processing._enforce_tool_rate_limit",
             return_value=True,
-        ), patch(
+        ) as rate_limit, patch(
             "api.agent.core.event_processing._ensure_credit_for_tool",
-            return_value={"cost": Decimal("0.4"), "credit": None},
-        ), patch(
+        ) as credit_gate, patch(
             "api.agent.tools.tool_manager.resolve_tool_entry",
             return_value=entry,
         ), patch(
             "api.agent.tools.tool_manager.execute_mcp_tool"
-        ) as executor, patch(
-            "api.agent.core.event_processing._refund_tool_credit_on_error_if_configured"
-        ) as refund:
+        ) as executor:
             result, _updated_tools = execute_tracked_runtime_tool_call(
                 self.agent_a,
                 tool_name=entry.full_name,
@@ -204,15 +202,56 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertEqual(result["error_code"], "deprecated_provider_blocked")
         self.assertEqual(child_call.parent_tool_call_id, parent_call.pk)
         self.assertEqual(child_call.status, PersistentAgentToolCall.Status.ERROR)
+        self.assertIsNone(child_call.step.credits_cost)
+        self.assertIsNone(child_call.step.task_credit_id)
         executor.assert_not_called()
-        refund.assert_called_once_with(
-            agent=self.agent_a,
-            tool_name=entry.full_name,
-            step=child_call.step,
-            credits_consumed=Decimal("0.4"),
-            consumed_credit=None,
-            force=True,
-        )
+        rate_limit.assert_not_called()
+        credit_gate.assert_not_called()
+
+    def test_top_level_blocked_call_bypasses_credit_message_only_mode(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+        tool_call = {
+            "id": "call-1",
+            "function": {
+                "name": entry.full_name,
+                "arguments": json.dumps({"spreadsheetId": "sheet-1"}),
+            },
+        }
+
+        with patch(
+            "api.agent.core.event_processing.is_credit_message_only_mode",
+            return_value=True,
+        ), patch(
+            "api.agent.core.event_processing.resolve_tool_entry",
+            return_value=entry,
+        ), patch(
+            "api.agent.core.event_processing._enforce_tool_rate_limit"
+        ) as rate_limit, patch(
+            "api.agent.core.event_processing._ensure_credit_for_tool"
+        ) as credit_gate:
+            prepared_batch = _prepare_tool_batch(
+                self.agent_a,
+                tool_calls=[tool_call],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={"available": Decimal("0"), "daily_state": {}},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(len(prepared_batch.prepared_calls), 1)
+        prepared = prepared_batch.prepared_calls[0]
+        self.assertIs(prepared.resolved_entry, entry)
+        self.assertIsNone(prepared.credits_consumed)
+        self.assertIsNone(prepared.consumed_credit)
+        rate_limit.assert_not_called()
+        credit_gate.assert_not_called()
 
     def test_top_level_blocked_result_forces_credit_refund(self):
         prepared = _PreparedToolExecution(

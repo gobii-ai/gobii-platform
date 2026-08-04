@@ -84,7 +84,10 @@ from .llm_config import apply_tier_credit_multiplier, clear_runtime_tier_overrid
 from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
-from api.services.deprecated_provider_guard import is_deprecated_provider_blocked_result
+from api.services.deprecated_provider_guard import (
+    is_deprecated_provider_blocked_result,
+    is_pipedream_google_sheets_blocked_call,
+)
 from . import internal_reasoning
 from .daily_limit_mode import (
     CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
@@ -3229,12 +3232,14 @@ def _should_skip_irrelevant_agent_config_mutation(
 def _resolve_tool_for_execution(
     agent: PersistentAgent,
     tool_name: str,
+    resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> tuple[str, Optional[ToolCatalogEntry]]:
-    entry = (
-        resolve_tool_entry(agent, tool_name)
-        if isinstance(tool_name, str) and tool_name.startswith("mcp_")
-        else None
+    should_resolve = (
+        resolved_entry is not None
+        or django_settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED
+        or isinstance(tool_name, str) and tool_name.startswith("mcp_")
     )
+    entry = resolved_entry or (resolve_tool_entry(agent, tool_name) if should_resolve else None)
     return (entry.full_name, entry) if entry else (tool_name, None)
 
 
@@ -3702,6 +3707,8 @@ def _prepare_tool_batch(
             tool_span.set_attribute("tool.name", tool_name)
             logger.info("Agent %s preparing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
+            preflight_entry: Optional[ToolCatalogEntry] = None
+            preflight_blocked_provider_call = False
             daily_state = None
             if isinstance(credit_snapshot, dict):
                 daily_state = credit_snapshot.get("daily_state")
@@ -3723,10 +3730,31 @@ def _prepare_tool_batch(
                 if isinstance(credit_snapshot, dict)
                 else None
             )
-            if (
+            credit_message_only_restricted = (
                 is_credit_message_only_mode(daily_state, task_credit_available)
                 and not is_credit_message_only_allowed_tool(tool_name)
+            )
+            if (
+                credit_message_only_restricted
+                and django_settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED
             ):
+                try:
+                    _, preflight_params = _parse_tool_call_params(
+                        _get_tool_call_arguments(call)
+                    )
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    preflight_params = None
+                if isinstance(preflight_params, dict):
+                    preflight_entry = resolve_tool_entry(agent, tool_name)
+                    preflight_blocked_provider_call = bool(
+                        preflight_entry
+                        and is_pipedream_google_sheets_blocked_call(
+                            preflight_entry,
+                            preflight_params,
+                        )
+                    )
+
+            if credit_message_only_restricted and not preflight_blocked_provider_call:
                 try:
                     step_kwargs = {
                         "agent": agent,
@@ -3890,7 +3918,11 @@ def _prepare_tool_batch(
                 call_id = call.get("id")
             if tool_name == "search_tools":
                 tool_params.pop("will_continue_work", None)
-            normalized_tool_name, resolved_entry = _resolve_tool_for_execution(agent, tool_name)
+            normalized_tool_name, resolved_entry = _resolve_tool_for_execution(
+                agent,
+                tool_name,
+                resolved_entry=preflight_entry,
+            )
             if normalized_tool_name != tool_name:
                 logger.info("Agent %s: normalized tool call %s -> %s", agent.id, tool_name, normalized_tool_name)
                 tool_name = normalized_tool_name
@@ -3969,6 +4001,14 @@ def _prepare_tool_batch(
                 exec_params = dict(exec_params)
                 exec_params["_has_user_facing_message"] = has_user_facing_message
 
+            blocked_provider_call = bool(
+                resolved_entry
+                and is_pipedream_google_sheets_blocked_call(
+                    resolved_entry,
+                    exec_params,
+                )
+            )
+
             if tool_name == "http_request":
                 duplicate_call = _find_successful_duplicate_http_request(
                     agent,
@@ -3994,7 +4034,7 @@ def _prepare_tool_batch(
 
             parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
 
-            if not _enforce_tool_rate_limit(
+            if not blocked_provider_call and not _enforce_tool_rate_limit(
                 agent,
                 tool_name,
                 span=tool_span,
@@ -4005,12 +4045,16 @@ def _prepare_tool_batch(
                 followup_required = True
                 continue
 
-            credit_info = _ensure_credit_for_tool(
-                agent,
-                tool_name,
-                span=tool_span,
-                credit_snapshot=credit_snapshot,
-                eval_run_id=eval_run_id,
+            credit_info = (
+                {"cost": None, "credit": None}
+                if blocked_provider_call
+                else _ensure_credit_for_tool(
+                    agent,
+                    tool_name,
+                    span=tool_span,
+                    credit_snapshot=credit_snapshot,
+                    eval_run_id=eval_run_id,
+                )
             )
             if not credit_info:
                 abort_after_execution = True

@@ -3,9 +3,14 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+from django.conf import settings
+
 from api.agent.comms.human_input_requests import attach_originating_step_from_result, track_human_input_request_created
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
-from api.services.deprecated_provider_guard import is_deprecated_provider_blocked_result
+from api.services.deprecated_provider_guard import (
+    is_deprecated_provider_blocked_result,
+    is_pipedream_google_sheets_blocked_call,
+)
 
 from .runtime_execution_context import tool_execution_context
 from .tool_runtime import execute_runtime_tool_call
@@ -61,11 +66,21 @@ def execute_tracked_runtime_tool_call(
         _persist_tool_call_step,
         _refund_tool_credit_on_error_if_configured,
     )
+    from api.agent.tools.tool_manager import resolve_tool_entry
 
     attach_completion = _build_attach_completion(parent_step)
     parent_tool_call = _parent_tool_call_from_step(parent_step)
+    resolved_entry = (
+        resolve_tool_entry(agent, tool_name)
+        if settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED
+        else None
+    )
+    blocked_provider_call = bool(
+        resolved_entry
+        and is_pipedream_google_sheets_blocked_call(resolved_entry, exec_params)
+    )
 
-    if not _enforce_tool_rate_limit(
+    if not blocked_provider_call and not _enforce_tool_rate_limit(
         agent,
         tool_name,
         attach_completion=attach_completion,
@@ -76,7 +91,11 @@ def execute_tracked_runtime_tool_call(
             "message": f"Tool '{tool_name}' skipped due to hourly rate limit.",
         }, None
 
-    credit_info = _ensure_credit_for_tool(agent, tool_name)
+    credit_info = (
+        {"cost": None, "credit": None}
+        if blocked_provider_call
+        else _ensure_credit_for_tool(agent, tool_name)
+    )
     if not credit_info:
         return {
             "status": "error",
