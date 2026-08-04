@@ -45,6 +45,7 @@ from api.agent.tools.sqlite_query_quality import (
     named_model_read_tables,
     named_model_reference_tables,
     source_derived_model_mutation_tables,
+    source_derived_model_reconciled_paths,
     source_derived_model_reconciled_tables,
     summarize_sqlite_tool_result_calls,
     summarize_sqlite_tool_result_sql,
@@ -1916,6 +1917,48 @@ class SqliteBatchQualityTests(SqliteBatchTestCase):
         self.assertEqual(
             source_derived_model_reconciled_tables([
                 f"{derived_update[0]}; SELECT stage FROM accounts; {derived_update[0]}"
+            ]),
+            (),
+        )
+
+        posts_import = (
+            "INSERT INTO reddit_subreddit_posts_current(post_id,title) "
+            "SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.title') "
+            "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j "
+            "WHERE t.is_current_batch=1 AND t.tool_name='http_request'; "
+            "SELECT post_id,title FROM reddit_subreddit_posts_current LIMIT 50"
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([posts_import]),
+            ("$.result.posts",),
+        )
+        self.assertEqual(
+            set(source_derived_model_reconciled_paths([
+                posts_import.rsplit(";", 1)[0] + "; "
+                "INSERT INTO reddit_subreddit_posts_current(post_id,title) "
+                "SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.title') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.pinned_posts') j; "
+                "SELECT * FROM reddit_subreddit_posts_current LIMIT 50"
+            ])),
+            {"$.result.posts", "$.result.pinned_posts"},
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([
+                posts_import.rsplit(";", 1)[0],
+            ]),
+            (),
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([
+                posts_import.rsplit(";", 1)[0] + "; SELECT * FROM unrelated_posts",
+            ]),
+            (),
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([
+                "INSERT INTO temp_posts(post_id) SELECT json_extract(j.value,'$.id') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM temp_posts"
             ]),
             (),
         )

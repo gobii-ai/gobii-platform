@@ -41,6 +41,11 @@ CTE_NAME_RE = re.compile(
 MANUAL_INSERT_VALUES_RE = re.compile(r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<name>[a-z_]\w*)"?\s*(?:\(\s*"?[a-z_]\w*"?(?:\s*,\s*"?[a-z_]\w*"?)*\s*\)\s*)?values\b', re.I)
 JSON_FUNCTION_RE = re.compile(r"\bjson_(?:extract|each)\s*\(", re.I)
 JSON_EACH_RE = re.compile(r"\bjson_each\s*\(", re.I)
+SOURCE_JSON_EACH_PATH_RE = re.compile(
+    r"\bjson_each\s*\(\s*(?:(?:[a-z_]\w*)\s*\.\s*)?(?:result_json|analysis_json)\s*,\s*"
+    r"(?P<quote>['\"])(?P<path>\$[^'\"]+)(?P=quote)",
+    re.I,
+)
 TOOL_PAYLOAD_RE = re.compile(r"\b(?:result_json|result_text|analysis_json)\b", re.I)
 BOUND_ROWS_RE = re.compile(r"\bjson_each\s*\(\s*[:@$][a-z_]\w*\s*\)", re.I)
 BOUND_ROWS_PROVENANCE_RE = re.compile(
@@ -337,6 +342,36 @@ def source_derived_model_reconciled_tables(sql_values: Iterable[str]) -> tuple[s
                 pending.add(table)
                 reconciled = [reconciled_table for reconciled_table in reconciled if reconciled_table != table]
     return tuple(dict.fromkeys(reconciled))
+
+
+def source_derived_model_reconciled_paths(sql_values: Iterable[str]) -> tuple[str, ...]:
+    """Return structured source-array paths persisted and read through a durable model."""
+
+    pending: dict[str, set[str]] = {}
+    reconciled: dict[str, set[str]] = {}
+    for sql in sql_values:
+        for raw_statement in sqlparse.split(str(sql or "")):
+            for table in named_model_read_tables((raw_statement,)):
+                if table in pending:
+                    reconciled[table] = pending.pop(table)
+            mutation_tables = source_derived_model_mutation_tables((raw_statement,))
+            if not mutation_tables:
+                continue
+            paths = {
+                match.group("path")
+                for match in SOURCE_JSON_EACH_PATH_RE.finditer(raw_statement)
+            }
+            for table in mutation_tables:
+                pending[table] = (
+                    pending.get(table, set())
+                    | reconciled.pop(table, set())
+                    | paths
+                )
+    return tuple(dict.fromkeys(
+        path
+        for paths in reconciled.values()
+        for path in sorted(paths)
+    ))
 
 
 def _is_named_model_table(table_name: str) -> bool:

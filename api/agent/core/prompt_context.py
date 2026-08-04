@@ -114,12 +114,14 @@ from ..tools.sqlite_state import (
     FILES_TABLE,
     get_sqlite_digest_prompt,
     get_sqlite_model_table_columns,
+    get_sqlite_model_tables_with_identity,
     get_sqlite_schema_prompt,
 )
 from ..tools.sqlite_query_quality import (
     named_model_reference_tables,
     named_model_read_tables,
     source_derived_model_mutation_tables,
+    source_derived_model_reconciled_paths,
     source_derived_model_reconciled_tables,
     _sql_values_from_params,
     summarize_sqlite_tool_result_sql,
@@ -1795,6 +1797,7 @@ def _render_prompt_context_once(
     sqlite_table_priorities = _get_recent_sqlite_table_priorities(agent)
     sqlite_schema_block = get_sqlite_schema_prompt(sqlite_table_priorities)
     named_model_columns = get_sqlite_model_table_columns(sqlite_table_priorities)
+    keyed_model_tables = get_sqlite_model_tables_with_identity()
     named_model_tables = {
         match.group(1)
         for match in re.finditer(r"^Table ([^\s(]+)", sqlite_schema_block, re.MULTILINE)
@@ -1816,6 +1819,7 @@ def _render_prompt_context_once(
         run_cache=run_cache,
         named_model_tables=named_model_tables,
         named_model_columns=named_model_columns,
+        keyed_model_tables=keyed_model_tables,
         has_peer_links=has_peer_links,
     )
 
@@ -4952,6 +4956,7 @@ def _get_unified_history_prompt(
     run_cache: PromptRunCache | None = None,
     named_model_tables: Set[str] | None = None,
     named_model_columns: Mapping[str, Set[str]] | None = None,
+    keyed_model_tables: Set[str] | None = None,
     has_peer_links: bool = False,
 ) -> Tuple[Set[str], bool, Tuple[str, ...], bool]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
@@ -5075,7 +5080,7 @@ def _get_unified_history_prompt(
         )
         tool_call_parent_ids: Dict[str, str] = {}
         tool_call_parent_names: Dict[str, str] = {}
-        source_reconciliations = []
+        source_reconciliations: list[tuple[datetime, str, set[str]]] = []
         for row in tool_call_results:
             step_id = str(row["step_id"])
             step = step_lookup.get(step_id)
@@ -5107,8 +5112,22 @@ def _get_unified_history_prompt(
                     tool_call_parent_names[step_id] = str(parent_tool_name)
             if row.get("tool_name") == "sqlite_batch" and str(row.get("status") or "").casefold() == "complete" and _tool_result_status_is_ok(result_text):
                 sql_values = _sql_values_from_params(row.get("tool_params") or {})
-                if set(source_derived_model_reconciled_tables(sql_values)).intersection(named_model_tables or ()):
-                    source_reconciliations.append((step.created_at, "\n".join(sql_values)))
+                reconciled_tables = source_derived_model_reconciled_tables(sql_values)
+                sql_summary = summarize_sqlite_tool_result_sql(sql_values)
+                newly_created_keyed_tables = (
+                    set(sql_summary.working_table_names)
+                    - set(sql_summary.unkeyed_explicit_table_names)
+                )
+                eligible_tables = set(keyed_model_tables or ()) | newly_created_keyed_tables
+                if set(reconciled_tables).intersection(eligible_tables):
+                    reconciled_paths = source_derived_model_reconciled_paths(sql_values)
+                    reconciled_entities = {
+                        entity_name_stem(path.rsplit(".", 1)[-1].strip('"'))
+                        for path in reconciled_paths
+                    }
+                    source_reconciliations.append(
+                        (step.created_at, "\n".join(sql_values), reconciled_entities)
+                    )
             tool_name = row.get("tool_name") or ""
             tool_params = row.get("tool_params")
             source_bearing = _tool_result_is_source_bearing(tool_name, tool_params)
@@ -5225,7 +5244,7 @@ def _get_unified_history_prompt(
                         return True
                     required_entities = matching_entities | keyed_entities
                     reconciled_entities = set()
-                    for reconciled_at, sql in source_reconciliations:
+                    for reconciled_at, sql, source_entities in source_reconciliations:
                         if reconciled_at <= record.created_at:
                             continue
                         id_filter = sql_filters_column(sql, "result_id")
@@ -5235,10 +5254,7 @@ def _get_unified_history_prompt(
                         batch_match = not batch_filter or source_batch_id in sql
                         tool_match = not tool_filter or record.tool_name in sql
                         if id_match and batch_match and tool_match:
-                            reconciled_entities.update(
-                                entity_name_stem(table)
-                                for table in source_derived_model_reconciled_tables([sql])
-                            )
+                            reconciled_entities.update(source_entities)
                     return bool(required_entities) and required_entities.issubset(reconciled_entities)
 
                 fresh_tool_call_step_ids.update(

@@ -16,6 +16,7 @@ from api.agent.comms.routing import (
     bind_inbound_routing_scope,
     capture_inbound_routing_scope,
     get_bound_inbound_routing_scope,
+    get_current_inbound_message,
     reset_inbound_routing_scope,
 )
 from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
@@ -3455,19 +3456,38 @@ class ImpliedSendTests(TestCase):
         ]
         return response
 
-    def _run_feedback_flow(self, feedback, responses, tools, *, prompt_metadata=None, config_apply=None):
-        self._add_feedback_followup(
-            feedback,
-            initial_body="Draft outreach",
-            prior_body="Here is the draft.",
-        )
+    def _run_feedback_flow(
+        self,
+        feedback,
+        responses,
+        tools,
+        *,
+        prompt_metadata=None,
+        prompt_metadata_sequence=None,
+        config_apply=None,
+        tool_results=None,
+        add_feedback=True,
+    ):
+        if add_feedback:
+            self._add_feedback_followup(
+                feedback,
+                initial_body="Draft outreach",
+                prior_body="Here is the draft.",
+            )
         start_web_session(self.agent, self.user)
         failover_configs = [("provider-a", "model-a", {"supports_tool_choice": True})]
-        prompt_result = (
-            [{"role": "system", "content": "sys"}, {"role": "user", "content": feedback}],
-            1000,
-            None,
-            {"prompt_failover_configs": failover_configs, **(prompt_metadata or {})},
+        def prompt_result(metadata):
+            return (
+                [{"role": "system", "content": "sys"}, {"role": "user", "content": feedback}],
+                1000,
+                None,
+                {"prompt_failover_configs": failover_configs, **(metadata or {})},
+            )
+
+        prompt_results = (
+            [prompt_result(metadata) for metadata in prompt_metadata_sequence]
+            if prompt_metadata_sequence is not None
+            else None
         )
         usage = {
             "prompt_tokens": 10,
@@ -3480,19 +3500,25 @@ class ImpliedSendTests(TestCase):
 
         def execute_tool(_agent, *, tool_name, **_kwargs):
             executed_tools.append(tool_name)
+            if tool_results is not None:
+                return tool_results[len(executed_tools) - 1], None
             return {
                 "status": "ok",
                 "auto_sleep_ok": tool_name in ep.MESSAGE_TOOL_NAMES,
             }, None
 
         skill_apply = MagicMock(changed=False, errors=())
+        prompt_patch = (
+            patch.object(ep, "build_prompt_context", side_effect=prompt_results)
+            if prompt_results is not None
+            else patch.object(ep, "build_prompt_context", return_value=prompt_result(prompt_metadata))
+        )
         with patch.object(ep, "get_agent_tools", return_value=tools), \
              patch.object(ep, "get_agent_daily_credit_state", return_value=None), \
-             patch.object(ep, "build_prompt_context", return_value=prompt_result) as build_prompt, \
+             prompt_patch as build_prompt, \
              patch.object(ep, "get_llm_config_with_failover", side_effect=AssertionError("use prompt configs")), \
              patch.object(ep, "_completion_with_failover", side_effect=[(response, usage) for response in responses]) as completion, \
              patch.object(ep, "_execute_tool_call_runtime", side_effect=execute_tool), \
-             patch.object(ep, "_capture_tool_display_metadata", return_value={}), \
              patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}), \
              patch.object(ep, "get_sqlite_db_path", return_value="/tmp/test-agent.sqlite3"), \
              patch.object(ep, "seed_sqlite_agent_config", return_value=MagicMock()), \
@@ -3742,6 +3768,200 @@ class ImpliedSendTests(TestCase):
         self.assertIs(kwargs["failover_configs"][0][2]["use_parallel_tool_calls"], False)
         self.assertIsNone(kwargs["stream_broadcaster"])
         self.assertIs(kwargs["allow_streamed_content"], False)
+        self.assertIn("one focused reconciliation batch", sqlite_parameters["properties"]["sql"]["description"])
+        self.assertIn("normal tool routing resumes", sqlite_parameters["properties"]["sql"]["description"])
+        tool_call = PersistentAgentToolCall.objects.filter(
+            step__agent=self.agent,
+            tool_name="sqlite_batch",
+        ).latest("step__created_at")
+        directive_hash = ep._source_reconciliation_directive_hash(
+            self.agent,
+            "[SOURCE ARRAYS result_id=abc123; stored paths: $.content.accounts(account_id,name).]",
+            [],
+        )
+        self.assertEqual(
+            tool_call.display_metadata[ep.SOURCE_RECONCILIATION_METADATA_KEY]["directive_hash"],
+            directive_hash,
+        )
+
+    def test_validated_source_reconciliation_restores_full_tool_routing(self):
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "http_request", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {}}}},
+        ]
+        directive = "[SOURCE ARRAYS; paths: $.result.posts(id,title)[stable_key=id].]"
+        responses = [
+            self._tool_completion("sqlite_batch", {
+                "rows": [],
+                "sql": "INSERT INTO posts SELECT * FROM source; SELECT * FROM posts LIMIT 20",
+                "will_continue_work": True,
+            }),
+            self._tool_completion("http_request", {"url": "https://example.test/remaining-action"}),
+        ]
+
+        completion, _, executed_tools = self._run_feedback_flow(
+            "Import the source and continue.",
+            responses,
+            tools,
+            prompt_metadata_sequence=[
+                {"source_reconciliation_directive": directive},
+                {"source_reconciliation_directive": None},
+            ],
+        )
+
+        self.assertEqual(executed_tools, ["sqlite_batch", "http_request"])
+        self.assertEqual(
+            [tool["function"]["name"] for tool in completion.call_args_list[0].kwargs["tools"]],
+            ["sqlite_batch"],
+        )
+        self.assertEqual(
+            [tool["function"]["name"] for tool in completion.call_args_list[1].kwargs["tools"]],
+            ["sqlite_batch", "http_request", "send_chat_message"],
+        )
+
+    def test_successful_unverified_source_reconciliation_releases_after_two_attempts(self):
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "http_request", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {}}}},
+        ]
+        directive = "[SOURCE ARRAYS; paths: $.result.posts(id,title)[stable_key=id].]"
+        sqlite_args = {
+            "rows": [],
+            "sql": "INSERT INTO posts SELECT * FROM source; SELECT * FROM posts LIMIT 20",
+            "will_continue_work": True,
+        }
+        responses = [
+            self._tool_completion("sqlite_batch", sqlite_args),
+            self._tool_completion("sqlite_batch", sqlite_args),
+            self._tool_completion("send_chat_message", {
+                "body": "I could not validate the source reconciliation.",
+                "will_continue_work": False,
+            }),
+        ]
+
+        completion, _, executed_tools = self._run_feedback_flow(
+            "Import the source.",
+            responses,
+            tools,
+            prompt_metadata={"source_reconciliation_directive": directive},
+        )
+
+        self.assertEqual(executed_tools, ["sqlite_batch", "sqlite_batch", "send_chat_message"])
+        released_kwargs = completion.call_args_list[2].kwargs
+        self.assertNotIn(
+            "sqlite_batch",
+            [tool["function"]["name"] for tool in released_kwargs["tools"]],
+        )
+        self.assertIn("SQLite Source Reconciliation Safety Release", released_kwargs["messages"][0]["content"])
+        self.assertNotIn(directive, "\n".join(message["content"] for message in released_kwargs["messages"]))
+        self.assertTrue(PersistentAgentSystemStep.objects.filter(
+            step__agent=self.agent,
+            notes__startswith="sqlite_source_reconciliation_guard:",
+        ).exists())
+
+    def test_failed_source_reconciliation_guard_persists_across_followup_run(self):
+        tools = [
+            {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "send_chat_message", "parameters": {"type": "object", "properties": {}}}},
+        ]
+        directive = "[SOURCE ARRAYS; paths: $.result.posts(id,title)[stable_key=id].]"
+        source_step = PersistentAgentStep.objects.create(agent=self.agent, description="active source batch")
+        PersistentAgentToolCall.objects.create(
+            step=source_step,
+            tool_name="http_request",
+            tool_params={"url": "https://example.test/posts"},
+            result=json.dumps({"status": "ok", "result": {"posts": [{"id": "p1"}]}}),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+        metadata = {
+            "source_reconciliation_directive": directive,
+            "fresh_tool_call_step_ids": [str(source_step.id)],
+        }
+        sqlite_response = lambda: self._tool_completion("sqlite_batch", {
+            "rows": [],
+            "sql": "INSERT INTO posts SELECT * FROM missing_source; SELECT * FROM posts LIMIT 20",
+            "will_continue_work": True,
+        })
+        retryable_error = {"status": "error", "error": "SQL failed", "retryable": True}
+
+        first_completion, _, first_executed = self._run_feedback_flow(
+            "Import the source.",
+            [sqlite_response(), sqlite_response()],
+            tools,
+            prompt_metadata=metadata,
+            tool_results=[retryable_error, retryable_error],
+        )
+        self.assertEqual(first_completion.call_count, 2)
+        self.assertEqual(first_executed, ["sqlite_batch", "sqlite_batch"])
+
+        second_completion, _, second_executed = self._run_feedback_flow(
+            "Continue the existing source task.",
+            [
+                sqlite_response(),
+                self._tool_completion("send_chat_message", {
+                    "body": "The source reconciliation failed after three attempts.",
+                    "will_continue_work": False,
+                }),
+            ],
+            tools,
+            prompt_metadata=metadata,
+            tool_results=[retryable_error, {"status": "ok", "auto_sleep_ok": True}],
+            add_feedback=False,
+        )
+
+        self.assertEqual(second_executed, ["sqlite_batch", "send_chat_message"])
+        self.assertNotIn(
+            "sqlite_batch",
+            [tool["function"]["name"] for tool in second_completion.call_args_list[1].kwargs["tools"]],
+        )
+        directive_hash = ep._source_reconciliation_directive_hash(
+            self.agent,
+            directive,
+            [str(source_step.id)],
+        )
+        counts = ep._source_reconciliation_attempt_counts(self.agent, directive_hash)
+        self.assertEqual(counts.total, 3)
+        self.assertEqual(counts.successful_unverified, 0)
+        self.assertTrue(counts.exhausted)
+
+        current_inbound = get_current_inbound_message(self.agent)
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=current_inbound.from_endpoint,
+            conversation=current_inbound.conversation,
+            body="Start a new inbound source task.",
+        )
+        self.assertNotEqual(
+            directive_hash,
+            ep._source_reconciliation_directive_hash(
+                self.agent,
+                directive,
+                [str(source_step.id)],
+            ),
+        )
+
+        replacement_source_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="replacement source batch",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=replacement_source_step,
+            tool_name="http_request",
+            tool_params={"url": "https://example.test/posts?page=2"},
+            result=json.dumps({"status": "ok", "result": {"posts": [{"id": "p2"}]}}),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+        self.assertNotEqual(
+            directive_hash,
+            ep._source_reconciliation_directive_hash(
+                self.agent,
+                directive,
+                [str(replacement_source_step.id)],
+            ),
+        )
 
     def test_direct_rewrite_continues_to_distinct_research_task(self):
         feedback = "That sounded robotic. Rewrite it, then find three prospects."

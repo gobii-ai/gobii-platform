@@ -282,6 +282,43 @@ def get_sqlite_model_table_columns(
                 conn.close()
 
 
+def get_sqlite_model_tables_with_identity() -> set[str]:
+    """Return durable model tables backed by a primary or unique key."""
+    db_path = _sqlite_db_path_var.get(None)
+    if not db_path or not os.path.exists(db_path):
+        return set()
+
+    conn = None
+    try:
+        conn = open_guarded_sqlite_connection(db_path)
+        table_names = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' AND substr(name, 1, 2) != '__'"
+            ).fetchall()
+        }
+        keyed_tables = set()
+        for table_name in table_names:
+            quoted_name = table_name.replace('"', '""')
+            columns = conn.execute(f'PRAGMA table_info("{quoted_name}")').fetchall()
+            if any(int(column[5] or 0) > 0 for column in columns):
+                keyed_tables.add(table_name)
+                continue
+            indexes = conn.execute(f'PRAGMA index_list("{quoted_name}")').fetchall()
+            if any(bool(index[2]) for index in indexes):
+                keyed_tables.add(table_name)
+        return keyed_tables
+    except (OSError, sqlite3.Error):
+        logger.debug("Failed to inspect SQLite model identities", exc_info=True)
+        return set()
+    finally:
+        if conn is not None:
+            with contextlib.suppress(sqlite3.Error):
+                clear_guarded_connection(conn)
+                conn.close()
+
+
 def get_sqlite_digest_prompt() -> str:
     """Return a compact SQLite digest for the agent's database."""
     db_path = _sqlite_db_path_var.get(None)
