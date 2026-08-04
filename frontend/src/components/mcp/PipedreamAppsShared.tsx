@@ -236,8 +236,16 @@ export function PipedreamAppSummaryCell({
     <div className="flex min-w-0 items-center gap-3">
       <PipedreamAppIcon app={app} />
       <div className="min-w-0">
-        <p className={`truncate text-sm font-semibold ${titleClassName}`}>{app.name}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className={`truncate text-sm font-semibold ${titleClassName}`}>{app.name}</p>
+          {app.routingStatus === 'superseded' ? (
+            <span className="rounded-full border border-amber-300 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+              Superseded
+            </span>
+          ) : null}
+        </div>
         {app.description ? <p className={`mt-1 line-clamp-2 text-sm ${descriptionClassName}`}>{app.description}</p> : null}
+        {app.routingMessage ? <p className="mt-1 line-clamp-2 text-sm text-amber-700">{app.routingMessage}</p> : null}
       </div>
     </div>
   )

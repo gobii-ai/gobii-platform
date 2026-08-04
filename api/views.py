@@ -1082,6 +1082,7 @@ class PipedreamConnectRedirectView(View):
         from django.contrib.auth.views import redirect_to_login
         from django.template.response import TemplateResponse
         from api.integrations.pipedream_connect import create_connect_session
+        from api.services.integration_routing import PipedreamAppSupersededError
 
         span = trace.get_current_span()
         span.set_attribute('agent_id', str(agent_id))
@@ -1142,7 +1143,22 @@ class PipedreamConnectRedirectView(View):
             return HttpResponseRedirect('/app')
 
         # Always create a fresh connect link (Pipedream links are single-use)
-        session, connect_url = create_connect_session(agent, app_slug)
+        try:
+            session, connect_url = create_connect_session(agent, app_slug)
+        except PipedreamAppSupersededError as exc:
+            return TemplateResponse(
+                request,
+                "integrations/pipedream_connect_error.html",
+                context={
+                    "title": "Integration Superseded",
+                    "heading": "Use native Google Drive",
+                    "icon_type": "info",
+                    "message": str(exc),
+                    "show_retry": False,
+                    "show_support": False,
+                },
+                status=409,
+            )
 
         if not connect_url:
             logger.error(

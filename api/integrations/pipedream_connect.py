@@ -11,6 +11,7 @@ from django.utils import timezone
 from api.models import PersistentAgent
 from api.models import PipedreamConnectSession
 from api.agent.tools.mcp_manager import get_mcp_manager
+from api.services.integration_routing import assert_pipedream_app_available_for_agent
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ def create_connect_session(agent: PersistentAgent, app_slug: str) -> Tuple[Piped
     Returns (session, final_connect_url) where final_connect_url already includes &app={app_slug}.
     If token creation fails, returns (session, None).
     """
+    assert_pipedream_app_available_for_agent(agent, app_slug, entry_point="connect_session")
+
     # Build a pending session with a per‑session webhook secret
     session = PipedreamConnectSession.objects.create(
         agent=agent,

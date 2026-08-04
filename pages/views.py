@@ -138,7 +138,13 @@ from pages.context_processors import account_info as build_account_info_context
 from util.attribution_referrers import ATTRIBUTION_REFERRER_SESSION_KEYS, clean_acquisition_referrer, decode_attribution_value
 from util.waffle_flags import is_waffle_flag_active, is_waffle_switch_active
 from util.fish_collateral import build_web_manifest_payload
-from api.services.pipedream_apps import PipedreamCatalogError, PipedreamCatalogService, get_owner_selected_app_slugs
+from api.services.pipedream_apps import (
+    PipedreamCatalogError,
+    PipedreamCatalogService,
+    get_owner_selected_app_slugs,
+    serialize_pipedream_app_for_owner,
+)
+from api.services.integration_routing import get_superseded_pipedream_app_slugs
 from api.services.native_integrations import list_native_integration_providers
 from api.pipedream_app_utils import normalize_app_slugs
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
@@ -1309,6 +1315,13 @@ class HomePage(TemplateView):
             initial_selected_pipedream_app_slugs = normalize_app_slugs(
                 [*enabled_pipedream_app_slugs, *initial_selected_pipedream_app_slugs]
             )
+            superseded_app_slugs = get_superseded_pipedream_app_slugs(
+                None if organization is not None else self.request.user,
+                organization,
+            )
+            initial_selected_pipedream_app_slugs = [
+                slug for slug in initial_selected_pipedream_app_slugs if slug not in superseded_app_slugs
+            ]
 
         context.update(
             {
@@ -1653,9 +1666,17 @@ class HomepageIntegrationsSearchView(View):
             for app in (integrations_payload.get("builtins") or [])
             if str(app.get("slug") or "").strip()
         }
+        owner_user = None
+        owner_org = None
+        if request.user.is_authenticated:
+            console_context = build_console_context(request)
+            if console_context.current_context.type == "organization" and console_context.current_membership is not None:
+                owner_org = console_context.current_membership.org
+            else:
+                owner_user = request.user
         try:
             results = [
-                app.to_dict()
+                serialize_pipedream_app_for_owner(app, owner_user, owner_org)
                 for app in PipedreamCatalogService().search_apps(query)
                 if app.slug not in builtin_slugs
             ]

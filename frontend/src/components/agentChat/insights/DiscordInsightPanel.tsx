@@ -35,6 +35,7 @@ const DISCORD_PROVIDER: NativeIntegrationProvider = {
   credentialFields: [],
   presentCredentialFields: [],
   missingCredentialFields: [],
+  supersededPipedreamAppSlugs: [],
 }
 
 export function DiscordInsightPanel({ agentId = null, onOpenApps }: DiscordInsightPanelProps) {

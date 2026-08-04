@@ -98,6 +98,12 @@ from ...services.pipedream_apps import (
     normalize_app_slugs,
     pipedream_app_slug_for_tool_name,
 )
+from ...services.integration_routing import (
+    get_pipedream_app_routing_status_for_agent,
+    get_superseded_pipedream_app_slugs,
+    get_superseded_pipedream_app_slugs_for_owner_id,
+    superseded_pipedream_tool_result_for_agent,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -1428,8 +1434,13 @@ class MCPToolManager:
     ) -> PipedreamToolCacheContext:
         platform_app_slugs = get_platform_pipedream_app_slugs()
         selected_app_slugs = normalize_app_slugs(app_slugs or [])
+        superseded_app_slugs = get_superseded_pipedream_app_slugs_for_owner_id(owner_scope, owner_id)
         return PipedreamToolCacheContext(
-            effective_app_slugs=normalize_app_slugs([*platform_app_slugs, *selected_app_slugs]),
+            effective_app_slugs=[
+                slug
+                for slug in normalize_app_slugs([*platform_app_slugs, *selected_app_slugs])
+                if slug not in superseded_app_slugs
+            ],
         )
 
     def _tool_cache_slot_key(
@@ -2099,6 +2110,17 @@ class MCPToolManager:
     ) -> List[MCPToolInfo]:
         """Return MCP tools that the given agent may access."""
 
+        superseded_app_slugs: set[str] | None = None
+        if pipedream_app_slugs is not None:
+            owner_user = None if agent.organization_id else agent.user
+            owner_org = agent.organization if agent.organization_id else None
+            superseded_app_slugs = get_superseded_pipedream_app_slugs(owner_user, owner_org)
+            pipedream_app_slugs = [
+                slug
+                for slug in normalize_app_slugs(pipedream_app_slugs)
+                if slug not in superseded_app_slugs
+            ]
+
         allowed_set = None
         allowed_config_set = None
         if allowed_server_names is not None:
@@ -2160,6 +2182,10 @@ class MCPToolManager:
             pipedream_context = None
             sandbox_context = None
             if runtime.name == self.PIPEDREAM_RUNTIME_NAME:
+                if superseded_app_slugs is None:
+                    owner_user = None if agent.organization_id else agent.user
+                    owner_org = agent.organization if agent.organization_id else None
+                    superseded_app_slugs = get_superseded_pipedream_app_slugs(owner_user, owner_org)
                 pipedream_context = self._pipedream_cache_context_for_agent(agent)
                 if pipedream_app_slugs is not None:
                     pipedream_context = PipedreamToolCacheContext(
@@ -2177,7 +2203,13 @@ class MCPToolManager:
             slot_key = self._tool_cache_slot_key(runtime, pipedream_context, sandbox_context)
             server_tools = self._tools_cache.get(slot_key)
             if server_tools:
-                tools.extend(server_tools)
+                blocked_app_slugs = superseded_app_slugs or frozenset()
+                tools.extend(
+                    tool
+                    for tool in server_tools
+                    if runtime.name != self.PIPEDREAM_RUNTIME_NAME
+                    or pipedream_app_slug_for_tool_name(tool.full_name) not in blocked_app_slugs
+                )
         return tools
 
     def find_tool_by_name(self, full_name: str) -> Optional[MCPToolInfo]:
@@ -2218,6 +2250,9 @@ class MCPToolManager:
         require_enabled: bool = True,
     ) -> Optional[MCPToolInfo]:
         """Load only the runtime/catalog shard needed to resolve one tool."""
+        app_slug = pipedream_app_slug_for_tool_name(tool_name)
+        if app_slug and get_pipedream_app_routing_status_for_agent(agent, app_slug).superseded:
+            return None
         started_at = monotonic()
         try:
             enabled_row = (
@@ -2867,6 +2902,15 @@ class MCPToolManager:
         isolated: bool = False,
     ) -> Dict[str, Any]:
         """Execute an MCP tool if it's enabled for the agent."""
+        app_slug = pipedream_app_slug_for_tool_name(tool_name)
+        if app_slug:
+            superseded_result = superseded_pipedream_tool_result_for_agent(
+                agent,
+                app_slug,
+                entry_point="execute_mcp_tool",
+            )
+            if superseded_result:
+                return superseded_result
         # Check if tool is blacklisted
         if self._is_tool_blacklisted(tool_name):
             return {
@@ -3470,6 +3514,15 @@ def execute_mcp_tool(
     tool_info: Optional[MCPToolInfo] = None,
 ) -> Dict[str, Any]:
     """Execute any enabled MCP tool via the shared manager."""
+    app_slug = pipedream_app_slug_for_tool_name(tool_name)
+    if app_slug:
+        superseded_result = superseded_pipedream_tool_result_for_agent(
+            agent,
+            app_slug,
+            entry_point="execute_mcp_tool_wrapper",
+        )
+        if superseded_result:
+            return superseded_result
     tool_info = tool_info or _mcp_manager.prepare_tool_for_agent(
         agent,
         tool_name,
@@ -3494,6 +3547,15 @@ def execute_mcp_tool_isolated(
     tool_info: Optional[MCPToolInfo] = None,
 ) -> Dict[str, Any]:
     """Execute any enabled MCP tool without shared runtime state."""
+    app_slug = pipedream_app_slug_for_tool_name(tool_name)
+    if app_slug:
+        superseded_result = superseded_pipedream_tool_result_for_agent(
+            agent,
+            app_slug,
+            entry_point="execute_mcp_tool_isolated_wrapper",
+        )
+        if superseded_result:
+            return superseded_result
     tool_info = tool_info or _mcp_manager.prepare_tool_for_agent(
         agent,
         tool_name,

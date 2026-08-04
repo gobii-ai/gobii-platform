@@ -21,6 +21,7 @@ export const DISCORD_NATIVE_DISPLAY_PROVIDER: NativeIntegrationProvider = {
   credentialFields: [],
   presentCredentialFields: [],
   missingCredentialFields: [],
+  supersededPipedreamAppSlugs: [],
 }
 
 export function withDiscordNativeProvider(providers: NativeIntegrationProvider[]): NativeIntegrationProvider[] {

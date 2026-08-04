@@ -15,6 +15,7 @@ from django.utils.dateparse import parse_datetime
 
 from api.models import GlobalSecret, MCPServerConfig, PersistentAgent, PersistentAgentEnabledTool
 from api.services.pipedream_apps import disable_pipedream_apps_for_owner
+from api.services.integration_routing import NATIVE_PROVIDER_PIPEDREAM_APP_SLUGS
 from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
 
 logger = logging.getLogger(__name__)
@@ -613,7 +614,7 @@ NATIVE_INTEGRATION_CAPABILITIES: dict[str, tuple[NativeIntegrationCapability, ..
 }
 
 NATIVE_INTEGRATION_PIPEDREAM_APP_SLUGS = {
-    GOOGLE_DRIVE_PROVIDER.key: ("google_sheets", "google_drive"),
+    **NATIVE_PROVIDER_PIPEDREAM_APP_SLUGS,
     APOLLO_PROVIDER.key: ("apollo_io", "apollo_io_oauth"),
     HUBSPOT_PROVIDER.key: ("hubspot",),
 }

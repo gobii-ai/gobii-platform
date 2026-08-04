@@ -169,7 +169,11 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
         "connect Google Drive, then choose the spreadsheets I may access",
     )
     if connection_gate:
-        return connection_gate
+        return (
+            f"{connection_gate}\n"
+            "Do not use or search for Pipedream Google Sheets or Google Drive tools as a fallback. "
+            "Native Google Drive is the required route for Google Sheets work."
+        )
     missing_file_text = (
         "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
         "integration before making Sheets API calls for that file."
@@ -178,6 +182,9 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
     return (
         "Use `http_request` for Google Sheets and Drive API calls. Native Google Drive OAuth is applied "
         "automatically for `https://sheets.googleapis.com/` and `https://www.googleapis.com/drive/` requests.\n"
+        "Never use, search for, enable, or connect Pipedream Google Sheets or Google Drive tools. "
+        "The native Google integration is the required route. Generic Drive operations outside the supported "
+        "selected Sheets/Docs surface are unavailable and must not fall back to Pipedream.\n"
         "If the user supplies a concrete spreadsheet ID, use it directly with the Sheets API; do not search Drive "
         "for that ID first unless the Sheets API says the file is missing or inaccessible. For reads, appends, updates, "
         "formatting, and charts against a known ID, your first call should be a Sheets endpoint. List accessible spreadsheets "

@@ -11,7 +11,9 @@ from api.models import (
     BrowserUseAgent,
     Organization,
     OrganizationMembership,
+    PipedreamConnectSession,
 )
+from api.services.integration_routing import ensure_native_integration_routing_lock
 
 
 def _create_browser_agent(user, name=None):
@@ -128,6 +130,16 @@ class PipedreamJitConnectRedirectTests(TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertTemplateUsed(response, "integrations/pipedream_connect_error.html")
         self.assertIn(b"Unable to connect", response.content)
+
+    def test_superseded_google_app_returns_409_without_creating_session(self):
+        self.client.login(username="jit@example.com", password="testpass123")
+        ensure_native_integration_routing_lock("google_drive", self.user, None)
+
+        response = self.client.get(self._get_url(self.agent.id, "google_sheets"))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, "Use native Google Drive", status_code=409)
+        self.assertFalse(PipedreamConnectSession.objects.filter(agent=self.agent).exists())
 
     @patch("api.integrations.pipedream_connect.create_connect_session")
     def test_organization_member_can_access_org_agent(self, mock_create_session):

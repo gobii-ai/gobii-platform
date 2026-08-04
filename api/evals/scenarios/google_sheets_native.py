@@ -13,7 +13,9 @@ from api.evals.scenarios.native_http import (
     tool_calls_for_run as _tool_calls_for_run,
 )
 from api.evals.tool_params import resolved_tool_param
-from api.models import EvalRunTask, PersistentAgentToolCall
+from api.models import EvalRunTask, PersistentAgent, PersistentAgentToolCall
+from api.services.integration_routing import ensure_native_integration_routing_lock
+from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
 
 
 GOOGLE_SHEETS_NATIVE_SUITE_SLUG = "google_sheets_native"
@@ -28,6 +30,7 @@ GOOGLE_SHEETS_NATIVE_CREATE_AND_FORMAT = "google_sheets_native_create_and_format
 GOOGLE_SHEETS_NATIVE_FORMAT_EXISTING_IDEMPOTENT = "google_sheets_native_format_existing_idempotent"
 GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA = "google_sheets_native_chart_with_helper_data"
 GOOGLE_SHEETS_NATIVE_MISSING_SELECTED_FILE = "google_sheets_native_missing_selected_file"
+GOOGLE_SHEETS_NATIVE_RECONNECT_REQUIRED = "google_sheets_native_reconnect_required"
 
 FORBIDDEN_DISCOVERY_TOOL_NAMES = ("search_tools", "enable_system_skills")
 
@@ -632,6 +635,21 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         ),
         tags=("drive_discovery", "missing_file"),
     ),
+    GoogleSheetsNativeCase(
+        slug=GOOGLE_SHEETS_NATIVE_RECONNECT_REQUIRED,
+        description="Require native Google reconnection without falling back to legacy Pipedream tools.",
+        prompt=(
+            "Add Acme Corp as a new row in the Leads tab of Google spreadsheet sheet-123. "
+            "The native Google connection may need attention."
+        ),
+        http_rules=(),
+        expected_http_requests=(),
+        response_term_groups=(
+            ("Google Drive", "native Google"),
+            ("reconnect", "connect"),
+        ),
+        tags=("missing_connection", "routing_lock", "forbidden_legacy_path"),
+    ),
 )
 
 GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS = tuple(case.slug for case in GOOGLE_SHEETS_NATIVE_CASES)
@@ -675,10 +693,16 @@ class GoogleSheetsNativeScenario(NativeHttpScenarioBase):
     system_skill_name = "Google Sheets"
     native_provider_key = "google_drive"
     forbidden_tool_names = FORBIDDEN_DISCOVERY_TOOL_NAMES
-    forbidden_tool_prefixes = ("google_sheets-",)
+    forbidden_tool_prefixes = ("google_sheets-", "google_drive-")
     expected_requests_summary = "Agent completed the expected Google Drive/Sheets REST request(s)."
     forbidden_pass_summary = "Agent avoided legacy Sheets tools, skill discovery, and forbidden Google API URLs."
     response_pass_summary = "Final response included the expected mocked Sheets result or setup guidance."
+
+    def _prepare_agent(self, agent_id: str) -> None:
+        super()._prepare_agent(agent_id)
+        agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
+        owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
+        ensure_native_integration_routing_lock(self.native_provider_key, owner_user, owner_org)
 
     def _extra_checks(self, run_id: str, inbound) -> None:
         self.record_task_result(

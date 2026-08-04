@@ -30,12 +30,12 @@ from api.evals.suites import SuiteRegistry
 
 @tag("eval_sim")
 class GoogleSheetsNativeScenarioTests(SimpleTestCase):
-    def test_google_sheets_native_suite_contains_ten_scenarios(self):
+    def test_google_sheets_native_suite_contains_eleven_scenarios(self):
         suite = SuiteRegistry.get(GOOGLE_SHEETS_NATIVE_SUITE_SLUG)
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 10)
+        self.assertEqual(len(suite.scenario_slugs), 11)
 
     def test_generated_scenarios_have_expected_metadata(self):
         registered = ScenarioRegistry.list_all()
@@ -55,7 +55,8 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         for case in GOOGLE_SHEETS_NATIVE_CASES:
             self.assertEqual(set(case.mock_config()), {"http_request"})
             mock = case.mock_config()["http_request"]
-            self.assertTrue(mock["rules"])
+            if "missing_connection" not in case.tags:
+                self.assertTrue(mock["rules"])
             self.assertIn("default", mock)
             for rule in mock["rules"]:
                 self.assertTrue("url_contains" in rule or "url_decoded_contains" in rule)
@@ -63,7 +64,8 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
 
     def test_cases_expect_http_request_not_legacy_sheets_tools_or_enablement(self):
         for case in GOOGLE_SHEETS_NATIVE_CASES:
-            self.assertTrue(case.expected_http_requests)
+            if "missing_connection" not in case.tags:
+                self.assertTrue(case.expected_http_requests)
             for expectation in case.expected_http_requests:
                 self.assertEqual(expectation.name.startswith("google_sheets-"), False)
                 self.assertTrue(expectation.url_terms)

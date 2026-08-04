@@ -893,6 +893,17 @@ def pipedream_connect_webhook(request, session_id):
                 str(session.id), session.app_slug, account_id or ""
             )
 
+            from api.services.integration_routing import get_pipedream_app_routing_status_for_agent
+            routing_status = get_pipedream_app_routing_status_for_agent(session.agent, session.app_slug)
+            if routing_status.superseded:
+                logger.info(
+                    "PD Connect: suppressing superseded connection wake agent=%s app=%s session=%s",
+                    session.agent_id,
+                    session.app_slug,
+                    session.id,
+                )
+                return HttpResponse(status=200)
+
             # Record a system step and trigger processing
             try:
                 from api.models import PersistentAgentStep, PersistentAgentSystemStep

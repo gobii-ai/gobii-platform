@@ -19,6 +19,7 @@ from api.models import (
 from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo
 from api.integrations.pipedream_connect import create_connect_session
 from api.services.pipedream_connections import PipedreamConnectionError
+from api.services.integration_routing import ensure_native_integration_routing_lock
 from api.webhooks import pipedream_connect_webhook
 
 
@@ -207,6 +208,40 @@ class PipedreamConnectWebhookTests(TestCase):
         )
         self.assertIn("Call search_tools", system_step.step.description)
         self.assertIn("google_sheets", system_step.step.description)
+
+    @patch("api.agent.tasks.process_events.process_agent_events_task")
+    def test_webhook_success_does_not_wake_agent_when_app_became_superseded(self, mock_task):
+        agent = self._mk_agent()
+        ensure_native_integration_routing_lock("google_drive", agent.user, None)
+        session = PipedreamConnectSession.objects.create(
+            agent=agent,
+            external_user_id=str(agent.id),
+            conversation_id=str(agent.id),
+            app_slug="google_sheets",
+            connect_token="ctok_superseded",
+            webhook_secret="superseded-secret",
+            status=PipedreamConnectSession.Status.PENDING,
+        )
+        payload = {
+            "event": "CONNECTION_SUCCESS",
+            "connect_token": "ctok_superseded",
+            "account": {"id": "apn_superseded"},
+        }
+        request = self.factory.post(
+            f"/api/v1/webhooks/pipedream/connect/{session.id}/?t=superseded-secret",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+        response = pipedream_connect_webhook(request, session_id=str(session.id))
+
+        self.assertEqual(response.status_code, 200)
+        session.refresh_from_db()
+        self.assertEqual(session.status, PipedreamConnectSession.Status.SUCCESS)
+        mock_task.delay.assert_not_called()
+        self.assertFalse(
+            PersistentAgentSystemStep.objects.filter(step__agent=agent).exists()
+        )
 
 
 @tag("pipedream_connect")

@@ -14,6 +14,11 @@ from django.db.models import Q, QuerySet
 
 from api.pipedream_app_utils import normalize_app_slug, normalize_app_slugs
 from api.models import MCPServerConfig, PersistentAgent, PersistentAgentEnabledTool, PipedreamAppSelection
+from api.services.integration_routing import (
+    PipedreamAppRoutingStatus,
+    get_pipedream_app_routing_status,
+    get_superseded_pipedream_app_slugs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +57,15 @@ class PipedreamOwnerAppsState:
     platform_app_slugs: list[str]
     selected_app_slugs: list[str]
     effective_app_slugs: list[str]
+    superseded_app_slugs: list[str]
+    routing_statuses: dict[str, PipedreamAppRoutingStatus]
 
 
 @dataclass(frozen=True)
 class PipedreamAppVisibility:
     deprecated_app_slugs: frozenset[str]
     connected_app_slugs: frozenset[str] = frozenset()
+    superseded_app_slugs: frozenset[str] = frozenset()
 
     def is_app_deprecated(self, app_slug: object) -> bool:
         normalized = normalize_app_slug(app_slug)
@@ -67,7 +75,13 @@ class PipedreamAppVisibility:
         normalized = normalize_app_slug(app_slug)
         if not normalized:
             return allow_unknown
+        if normalized in self.superseded_app_slugs:
+            return False
         return normalized not in self.deprecated_app_slugs or normalized in self.connected_app_slugs
+
+    def is_app_superseded(self, app_slug: object) -> bool:
+        normalized = normalize_app_slug(app_slug)
+        return bool(normalized and normalized in self.superseded_app_slugs)
 
     def is_tool_visible(self, tool_name: object) -> bool:
         app_slug = pipedream_app_slug_for_tool_name(tool_name)
@@ -101,28 +115,37 @@ def serialize_owner_apps_state(
 ) -> dict[str, object]:
     catalog_service = catalog or PipedreamCatalogService()
     visibility = PipedreamAppVisibility(frozenset(get_deprecated_pipedream_app_slugs()))
+    superseded_set = set(state.superseded_app_slugs)
     visible_platform_app_slugs = [
-        slug for slug in state.platform_app_slugs if visibility.is_app_visible(slug)
+        slug
+        for slug in state.platform_app_slugs
+        if slug not in superseded_set and visibility.is_app_visible(slug)
     ]
     visible_selected_app_slugs = [
-        slug for slug in state.selected_app_slugs if visibility.is_app_visible(slug)
+        slug
+        for slug in state.selected_app_slugs
+        if slug not in superseded_set and visibility.is_app_visible(slug)
     ]
     visible_effective_app_slugs = [
         slug for slug in state.effective_app_slugs if visibility.is_app_visible(slug)
     ]
-    app_lookup: dict[str, dict[str, str]] = {}
+    visible_superseded_app_slugs = list(state.superseded_app_slugs)
+    app_lookup: dict[str, dict[str, object]] = {}
     for app in catalog_service.get_apps(
         normalize_app_slugs(
             [
                 *visible_platform_app_slugs,
                 *visible_selected_app_slugs,
                 *visible_effective_app_slugs,
+                *visible_superseded_app_slugs,
             ]
         )
     ):
         app_data = app.to_dict()
         slug = str(app_data.get("slug") or "").strip()
         if slug and slug not in app_lookup:
+            routing_status = state.routing_statuses.get(slug, PipedreamAppRoutingStatus(app_slug=slug))
+            app_data.update(routing_status.to_dict())
             app_lookup[slug] = app_data
     return {
         "owner_scope": state.owner_scope,
@@ -130,7 +153,15 @@ def serialize_owner_apps_state(
         "platform_apps": [app_lookup[slug] for slug in visible_platform_app_slugs if slug in app_lookup],
         "selected_apps": [app_lookup[slug] for slug in visible_selected_app_slugs if slug in app_lookup],
         "effective_apps": [app_lookup[slug] for slug in visible_effective_app_slugs if slug in app_lookup],
+        "superseded_apps": [app_lookup[slug] for slug in visible_superseded_app_slugs if slug in app_lookup],
     }
+
+
+def serialize_pipedream_app_for_owner(app: Any, owner_user=None, owner_org=None) -> dict[str, object]:
+    app_data = app.to_dict() if hasattr(app, "to_dict") else dict(app)
+    slug = pipedream_app_slug_from_catalog_entry(app_data)
+    app_data.update(get_pipedream_app_routing_status(slug, owner_user, owner_org).to_dict())
+    return app_data
 
 
 def _owner_queryset(owner_scope: str, owner_user=None, owner_org=None) -> QuerySet[PipedreamAppSelection]:
@@ -228,16 +259,19 @@ def get_pipedream_app_visibility_for_agent(
     connected_app_slugs: set[str] | None = None,
 ) -> PipedreamAppVisibility:
     deprecated = frozenset(get_deprecated_pipedream_app_slugs())
-    if not deprecated:
-        return PipedreamAppVisibility(deprecated_app_slugs=deprecated)
+    if agent.organization_id:
+        superseded = frozenset(get_superseded_pipedream_app_slugs(owner_org=agent.organization))
+    else:
+        superseded = frozenset(get_superseded_pipedream_app_slugs(owner_user=agent.user))
     connected = (
         connected_app_slugs
         if connected_app_slugs is not None
-        else get_connected_pipedream_app_slugs_for_agent(agent)
+        else get_connected_pipedream_app_slugs_for_agent(agent) if deprecated else set()
     )
     return PipedreamAppVisibility(
         deprecated_app_slugs=deprecated,
         connected_app_slugs=frozenset(connected),
+        superseded_app_slugs=superseded,
     )
 
 
@@ -285,7 +319,17 @@ def get_owner_apps_state(owner_scope: str, owner_label: str, owner_user=None, ow
     owner_id = owner_id_from_scope(owner_scope, owner_user=owner_user, owner_org=owner_org)
     platform_app_slugs = get_platform_pipedream_app_slugs()
     selected_app_slugs = get_owner_selected_app_slugs(owner_scope, owner_user=owner_user, owner_org=owner_org)
-    effective_app_slugs = normalize_app_slugs([*platform_app_slugs, *selected_app_slugs])
+    superseded_app_slugs = sorted(get_superseded_pipedream_app_slugs(owner_user, owner_org))
+    superseded_set = set(superseded_app_slugs)
+    effective_app_slugs = [
+        slug
+        for slug in normalize_app_slugs([*platform_app_slugs, *selected_app_slugs])
+        if slug not in superseded_set
+    ]
+    routing_statuses = {
+        slug: get_pipedream_app_routing_status(slug, owner_user, owner_org)
+        for slug in superseded_app_slugs
+    }
     return PipedreamOwnerAppsState(
         owner_scope=owner_scope,
         owner_label=owner_label,
@@ -293,6 +337,8 @@ def get_owner_apps_state(owner_scope: str, owner_label: str, owner_user=None, ow
         platform_app_slugs=platform_app_slugs,
         selected_app_slugs=selected_app_slugs,
         effective_app_slugs=effective_app_slugs,
+        superseded_app_slugs=superseded_app_slugs,
+        routing_statuses=routing_statuses,
     )
 
 
@@ -424,7 +470,12 @@ def disable_pipedream_apps_for_owner(
 def set_owner_selected_app_slugs(owner_scope: str, selected_app_slugs: Iterable[object], owner_user=None, owner_org=None) -> list[str]:
     platform_app_slugs = get_platform_pipedream_app_slugs()
     platform_set = set(platform_app_slugs)
-    normalized = [slug for slug in normalize_app_slugs(selected_app_slugs, strict=True) if slug not in platform_set]
+    superseded_set = get_superseded_pipedream_app_slugs(owner_user, owner_org)
+    normalized = [
+        slug
+        for slug in normalize_app_slugs(selected_app_slugs, strict=True)
+        if slug not in platform_set and slug not in superseded_set
+    ]
     prior = get_owner_selected_app_slugs(owner_scope, owner_user=owner_user, owner_org=owner_org)
 
     with transaction.atomic():
@@ -483,6 +534,7 @@ def enable_pipedream_apps_for_agent(
             "enabled": [],
             "already_enabled": [],
             "invalid": [],
+            "superseded": [],
             "selected": [],
             "effective_apps": get_effective_pipedream_app_slugs_for_agent(agent),
         }
@@ -503,6 +555,7 @@ def enable_pipedream_apps_for_agent(
         requested.append(normalized)
 
     visibility = get_pipedream_app_visibility_for_agent(agent)
+    superseded = [slug for slug in requested if visibility.is_app_superseded(slug)]
     available_set = {
         slug
         for slug in normalize_app_slugs(available_app_slugs)
@@ -510,7 +563,7 @@ def enable_pipedream_apps_for_agent(
     }
 
     valid_requested = [slug for slug in requested if slug in available_set]
-    invalid.extend(slug for slug in requested if slug not in available_set)
+    invalid.extend(slug for slug in requested if slug not in available_set and slug not in superseded)
 
     owner_scope, owner_label, owner_user, owner_org, owner_id = _agent_owner_info(agent)
     platform_set = set(get_platform_pipedream_app_slugs())
@@ -542,6 +595,7 @@ def enable_pipedream_apps_for_agent(
         "enabled": enabled,
         "already_enabled": already_enabled,
         "invalid": invalid,
+        "superseded": superseded,
         "selected": state.selected_app_slugs,
         "effective_apps": state.effective_app_slugs,
     }

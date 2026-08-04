@@ -32,6 +32,7 @@ from ...services.pipedream_apps import (
     is_pipedream_tool_visible_to_agent,
     pipedream_app_slug_for_tool_name,
 )
+from ...services.integration_routing import superseded_pipedream_tool_result_for_agent
 from ...services.tool_blacklist import get_agent_tool_blacklist, is_tool_blacklisted_for_agent, tool_blacklist_error
 from ...utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
@@ -800,6 +801,10 @@ def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
         mcp_configs = []
     tier_blacklist = get_agent_tool_blacklist(agent)
     for tool_name in dynamic_required:
+        app_slug = pipedream_app_slug_for_tool_name(tool_name)
+        if app_slug and not is_pipedream_tool_visible_to_agent(agent, tool_name):
+            invalid.append(tool_name)
+            continue
         if tool_name in tier_blacklist or (
             tool_name not in BUILTIN_TOOL_REGISTRY and _is_mcp_tool_blacklisted(tool_name)
         ):
@@ -1101,6 +1106,16 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
     """
     if not tool_name:
         return {"status": "error", "message": "Tool name is required"}
+
+    app_slug = pipedream_app_slug_for_tool_name(tool_name)
+    if app_slug:
+        superseded_result = superseded_pipedream_tool_result_for_agent(
+            agent,
+            app_slug,
+            entry_point="mark_enabled_without_discovery",
+        )
+        if superseded_result:
+            return superseded_result
 
     if is_tool_blacklisted_for_agent(agent, tool_name):
         return tool_blacklist_error(tool_name)
@@ -1490,6 +1505,15 @@ def execute_enabled_tool(
     resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> Dict[str, Any]:
     """Execute an enabled tool, routing to the appropriate provider."""
+    app_slug = pipedream_app_slug_for_tool_name(tool_name)
+    if app_slug:
+        superseded_result = superseded_pipedream_tool_result_for_agent(
+            agent,
+            app_slug,
+            entry_point="execute_enabled_tool",
+        )
+        if superseded_result:
+            return superseded_result
     entry = resolved_entry or resolve_tool_entry(agent, tool_name)
     if not entry:
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}

@@ -38,6 +38,11 @@ from api.services.native_integrations import (
     upsert_manual_native_integration_credentials,
 )
 from api.services.native_integration_events import normalize_native_integration_event_files, record_native_integration_agent_event, resolve_native_integration_event_agent
+from api.services.integration_routing import (
+    NATIVE_PROVIDER_PIPEDREAM_APP_SLUGS,
+    ensure_native_integration_routing_lock,
+    get_superseded_pipedream_app_slugs,
+)
 from console.context_helpers import build_console_context
 
 NATIVE_INTEGRATION_STATE_SALT = "gobii.native_integrations.oauth_state"
@@ -84,6 +89,7 @@ def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
         credentials if credentials_valid else None,
         connected=secret is not None and credentials_valid,
     )
+    superseded_app_slugs = get_superseded_pipedream_app_slugs(owner_user, owner_org)
 
     return {
         "provider_key": provider.key,
@@ -114,6 +120,11 @@ def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
         "picker_token_url": reverse("console-native-integration-picker-token", args=[provider.key]),
         "agent_event_url": reverse("console-native-integration-agent-events", args=[provider.key]),
         "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
+        "superseded_pipedream_app_slugs": [
+            app_slug
+            for app_slug in NATIVE_PROVIDER_PIPEDREAM_APP_SLUGS.get(provider.key, ())
+            if app_slug in superseded_app_slugs
+        ],
     }
 
 
@@ -354,6 +365,7 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
 
         with transaction.atomic():
             secret = save_native_integration_credentials(provider, owner_user, owner_org, credentials)
+            ensure_native_integration_routing_lock(provider.key, owner_user, owner_org)
             disable_overlapping_pipedream_tools_for_native_integration(provider.key, owner_user, owner_org)
 
         return JsonResponse(

@@ -90,6 +90,9 @@ type PipedreamAppSummaryDTO = {
   name: string
   description: string
   icon_url: string
+  routing_status?: 'available' | 'superseded'
+  routing_message?: string
+  superseded_by_provider_key?: string | null
 }
 
 type PipedreamAppSettingsDTO = {
@@ -98,6 +101,7 @@ type PipedreamAppSettingsDTO = {
   platform_apps: PipedreamAppSummaryDTO[]
   selected_apps: PipedreamAppSummaryDTO[]
   effective_apps: PipedreamAppSummaryDTO[]
+  superseded_apps: PipedreamAppSummaryDTO[]
   message?: string
 }
 
@@ -249,6 +253,9 @@ export type PipedreamAppSummary = {
   name: string
   description: string
   iconUrl: string
+  routingStatus: 'available' | 'superseded'
+  routingMessage: string
+  supersededByProviderKey: string | null
 }
 
 export type PipedreamAppSettings = {
@@ -257,6 +264,7 @@ export type PipedreamAppSettings = {
   platformApps: PipedreamAppSummary[]
   selectedApps: PipedreamAppSummary[]
   effectiveApps: PipedreamAppSummary[]
+  supersededApps: PipedreamAppSummary[]
   message?: string
 }
 
@@ -382,6 +390,9 @@ export const mapPipedreamApp = (app: PipedreamAppSummaryDTO): PipedreamAppSummar
   name: app.name ?? app.slug ?? '',
   description: app.description ?? '',
   iconUrl: app.icon_url ?? '',
+  routingStatus: app.routing_status === 'superseded' ? 'superseded' : 'available',
+  routingMessage: app.routing_message ?? '',
+  supersededByProviderKey: app.superseded_by_provider_key ?? null,
 })
 
 const mapAgentPipedreamAppRow = (app: AgentPipedreamAppRowDTO): AgentPipedreamAppRow => ({
@@ -407,6 +418,7 @@ const mapPipedreamSettings = (payload: PipedreamAppSettingsDTO): PipedreamAppSet
   platformApps: (payload.platform_apps ?? []).map(mapPipedreamApp),
   selectedApps: (payload.selected_apps ?? []).map(mapPipedreamApp),
   effectiveApps: (payload.effective_apps ?? []).map(mapPipedreamApp),
+  supersededApps: (payload.superseded_apps ?? []).map(mapPipedreamApp),
   message: payload.message,
 })
 

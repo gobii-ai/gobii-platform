@@ -101,6 +101,7 @@ const EMPTY_SETTINGS: PipedreamAppSettings = {
   platformApps: [],
   selectedApps: [],
   effectiveApps: [],
+  supersededApps: [],
 }
 
 export function WorkspaceAppsManager({
@@ -219,7 +220,9 @@ export function WorkspaceAppsManager({
   const discordConnected = Boolean(discordContextAppQuery.data)
 
   const rows = useMemo<WorkspaceAppRow[]>(() => {
-    const visibleApps = debouncedSearchTerm ? (searchQuery.data ?? []) : settings.effectiveApps
+    const visibleApps = debouncedSearchTerm
+      ? (searchQuery.data ?? [])
+      : [...settings.effectiveApps, ...settings.supersededApps]
     const normalizedSearch = debouncedSearchTerm.toLowerCase()
     const nativeRows = nativeIntegrationsUrl
       ? withDiscordNativeProvider(nativeIntegrationsQuery.data?.providers ?? [])
@@ -261,6 +264,7 @@ export function WorkspaceAppsManager({
     searchQuery.data,
     selectedSlugSet,
     settings.effectiveApps,
+    settings.supersededApps,
   ])
 
   const removeMutation = useMutation({
@@ -751,7 +755,8 @@ function PipedreamAppRowItem({
   onRemove: () => void
 }) {
   const isPendingRemove = pendingAppAction?.slug === app.slug && pendingAppAction.kind === 'remove'
-  const removeDisabled = disabled || app.source !== 'added'
+  const isSuperseded = app.routingStatus === 'superseded'
+  const removeDisabled = disabled || isSuperseded || app.source !== 'added'
   const removeTitle = app.source === 'built_in'
     ? 'Built-in apps cannot be removed'
     : app.source === 'available'
@@ -761,7 +766,7 @@ function PipedreamAppRowItem({
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_8rem] md:items-center">
       <PipedreamAppSummaryCell app={app} />
       <div className="flex justify-start md:justify-end">
-        <IntegrationManageButton onClick={onManageConnections} disabled={disabled} />
+        <IntegrationManageButton onClick={onManageConnections} disabled={disabled || isSuperseded} />
       </div>
       <div className="flex justify-start md:justify-end">
         <PipedreamRemoveButton
@@ -830,6 +835,7 @@ function AppConnectionsScreen({
           {agents.map((agent) => (
             <AgentConnectionRow
               key={agent.agentId}
+              app={app}
               agent={agent}
               pendingAgentAction={pendingAgentAction}
               disabled={isBusy}
@@ -844,12 +850,14 @@ function AppConnectionsScreen({
 }
 
 function AgentConnectionRow({
+  app,
   agent,
   pendingAgentAction,
   disabled,
   onConnect,
   onDisconnect,
 }: {
+  app: WorkspacePipedreamAppRow
   agent: PipedreamAppAgentConnection
   pendingAgentAction: PendingAgentAction
   disabled: boolean
@@ -872,7 +880,7 @@ function AgentConnectionRow({
         <IntegrationConnectionButton
           connected={agent.connected}
           pendingKind={pendingKind}
-          disabled={disabled}
+          disabled={disabled || (app.routingStatus === 'superseded' && !agent.connected)}
           onConnect={onConnect}
           onDisconnect={onDisconnect}
         />

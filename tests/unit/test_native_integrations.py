@@ -27,6 +27,7 @@ from api.agent.tools.sqlite_skills import format_recent_skills_for_prompt
 from api.models import (
     BrowserUseAgent,
     GlobalSecret,
+    MCPServerConfig,
     Organization,
     OrganizationMembership,
     PersistentAgent,
@@ -35,6 +36,7 @@ from api.models import (
     PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
     PipedreamAppSelection,
+    NativeIntegrationRoutingLock,
 )
 from api.services.native_integrations import (
     APOLLO_PROVIDER,
@@ -50,7 +52,8 @@ from api.services.native_integrations import (
     parse_native_integration_scopes,
     preflight_native_integration_capability,
 )
-from api.services.pipedream_apps import PIPEDREAM_RUNTIME_NAME
+from api.services.integration_routing import ensure_native_integration_routing_lock
+from api.services.pipedream_apps import PIPEDREAM_RUNTIME_NAME, get_owner_apps_state
 
 
 User = get_user_model()
@@ -603,6 +606,12 @@ class NativeIntegrationTests(TestCase):
         secret = GlobalSecret.objects.get(user=self.user, key="native_meta_ads")
         self.assertEqual(secret.secret_type, GlobalSecret.SecretType.INTEGRATION)
         self.assertEqual(secret.domain_pattern, GlobalSecret.INTEGRATION_DOMAIN_SENTINEL)
+        self.assertTrue(
+            NativeIntegrationRoutingLock.objects.filter(
+                user=self.user,
+                provider_key="google_drive",
+            ).exists()
+        )
         stored = load_native_integration_credentials(secret)
         self.assertEqual(stored["META_APP_ID"], "app-123")
         self.assertEqual(stored["META_API_VERSION"], "v25.0")
@@ -938,10 +947,18 @@ class NativeIntegrationTests(TestCase):
                     .values_list("tool_full_name", flat=True)
                 )
                 self.assertEqual(enabled_tool_names, preserved_tools)
-                selected_app_slugs = set(
-                    PipedreamAppSelection.objects.get(user=self.user).selected_app_slugs
-                )
+                selection = PipedreamAppSelection.objects.filter(user=self.user).first()
+                selected_app_slugs = set(selection.selected_app_slugs if selection else [])
                 self.assertFalse(selected_app_slugs & removed_app_slugs)
+                if provider_key == "google_drive":
+                    effective_app_slugs = set(
+                        get_owner_apps_state(
+                            MCPServerConfig.Scope.USER,
+                            self.user.username,
+                            owner_user=self.user,
+                        ).effective_app_slugs
+                    )
+                    self.assertFalse(effective_app_slugs & removed_app_slugs)
 
     @patch("api.services.native_integrations.httpx.post")
     def test_callback_stores_hidden_apollo_integration_secret(self, mock_post):
@@ -1041,6 +1058,7 @@ class NativeIntegrationTests(TestCase):
 
     def test_revoke_deletes_only_provider_integration_secret(self):
         self._create_integration_secret(owner_user=self.user)
+        ensure_native_integration_routing_lock("google_drive", self.user, None)
         meta_secret = GlobalSecret(
             user=self.user,
             name=META_ADS_PROVIDER.display_name,
@@ -1079,6 +1097,12 @@ class NativeIntegrationTests(TestCase):
         self.assertFalse(GlobalSecret.objects.filter(key="native_google_drive").exists())
         self.assertTrue(GlobalSecret.objects.filter(key="native_meta_ads").exists())
         self.assertTrue(GlobalSecret.objects.filter(id=credential.id).exists())
+        self.assertTrue(
+            NativeIntegrationRoutingLock.objects.filter(
+                user=self.user,
+                provider_key="google_drive",
+            ).exists()
+        )
 
     def test_secret_apis_exclude_integration_secrets(self):
         self._create_integration_secret(owner_user=self.user)

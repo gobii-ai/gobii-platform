@@ -715,6 +715,7 @@ def _section_payload(
     already_enabled: Optional[list[str]] = None,
     evicted: Optional[list[str]] = None,
     invalid: Optional[list[str]] = None,
+    superseded: Optional[list[str]] = None,
     conflicts: Optional[list[str]] = None,
     effective_apps: Optional[list[str]] = None,
 ) -> dict[str, Any]:
@@ -726,6 +727,8 @@ def _section_payload(
         payload["evicted"] = list(evicted)
     if invalid is not None:
         payload["invalid"] = list(invalid)
+    if superseded is not None:
+        payload["superseded"] = list(superseded)
     if conflicts is not None:
         payload["conflicts"] = list(conflicts)
     if effective_apps is not None:
@@ -741,6 +744,7 @@ def _append_section_summary(
     already_enabled_label: str,
     evicted_label: Optional[str] = None,
     invalid_label: Optional[str] = None,
+    superseded_label: Optional[str] = None,
     conflicts_label: Optional[str] = None,
     failed_label: Optional[str] = None,
 ) -> None:
@@ -756,6 +760,8 @@ def _append_section_summary(
         summary.append(f"{evicted_label}: {', '.join(result['evicted'])}")
     if invalid_label and result.get("invalid"):
         summary.append(f"{invalid_label}: {', '.join(result['invalid'])}")
+    if superseded_label and result.get("superseded"):
+        summary.append(f"{superseded_label}: {', '.join(result['superseded'])}")
     if conflicts_label and result.get("conflicts"):
         summary.append(f"{conflicts_label}: {', '.join(result['conflicts'])}")
     if failed_label and result.get("failed"):
@@ -1050,11 +1056,20 @@ def _search_with_llm(
                         summary.append(f"Already enabled apps: {', '.join(enabled_apps_result['already_enabled'])}")
                     if enabled_apps_result.get("invalid"):
                         summary.append(f"Invalid apps: {', '.join(enabled_apps_result['invalid'])}")
+                    if enabled_apps_result.get("superseded"):
+                        summary.append(
+                            "Superseded apps: "
+                            f"{', '.join(enabled_apps_result['superseded'])}. Use native Google Drive."
+                        )
                     if summary:
                         message_lines.append("; ".join(summary))
                     if enabled_apps_result.get("enabled") or enabled_apps_result.get("already_enabled"):
                         message_lines.append(
                             "Pipedream apps are ready. Run search_tools again to discover and enable the specific tools for those apps."
+                        )
+                    elif enabled_apps_result.get("superseded"):
+                        message_lines.append(
+                            "Superseded Pipedream apps cannot be enabled. Use or reconnect native Google Drive."
                         )
                     else:
                         message_lines.append("No Pipedream apps were enabled. Search again with one of the listed app slugs.")
@@ -1065,6 +1080,7 @@ def _search_with_llm(
                             enabled=enabled_apps_result.get("enabled", []),
                             already_enabled=enabled_apps_result.get("already_enabled", []),
                             invalid=enabled_apps_result.get("invalid", []),
+                            superseded=enabled_apps_result.get("superseded", []),
                             effective_apps=enabled_apps_result.get("effective_apps", []),
                         ),
                     }
@@ -1206,6 +1222,7 @@ def _search_with_llm(
                         enabled_label="Enabled apps",
                         already_enabled_label="Already enabled apps",
                         invalid_label="Invalid apps",
+                        superseded_label="Superseded apps (use the native integration)",
                     )
                 _append_section_summary(
                     message_lines,

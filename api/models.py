@@ -8548,6 +8548,66 @@ class PipedreamAppSelection(models.Model):
         return f"PipedreamAppSelection<{owner}>"
 
 
+class NativeIntegrationRoutingLock(models.Model):
+    """Persist an owner's native-over-legacy integration routing choice."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    provider_key = models.CharField(max_length=64)
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="native_integration_routing_locks",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="native_integration_routing_locks",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(organization__isnull=False, user__isnull=True)
+                    | Q(organization__isnull=True, user__isnull=False)
+                ),
+                name="native_route_lock_one_owner",
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "provider_key"],
+                name="unique_native_route_lock_org",
+                condition=Q(organization__isnull=False),
+            ),
+            models.UniqueConstraint(
+                fields=["user", "provider_key"],
+                name="unique_native_route_lock_user",
+                condition=Q(user__isnull=False),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "provider_key"], name="native_route_lock_org_idx"),
+            models.Index(fields=["user", "provider_key"], name="native_route_lock_user_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if bool(self.organization_id) == bool(self.user_id):
+            raise ValidationError("Native integration routing locks must reference exactly one owner.")
+        self.provider_key = str(self.provider_key or "").strip()
+        if not self.provider_key:
+            raise ValidationError({"provider_key": "Provider key is required."})
+
+    def __str__(self) -> str:  # pragma: no cover - trivial display helper
+        owner = self.organization or self.user or "unknown"
+        return f"NativeIntegrationRoutingLock<{owner}:{self.provider_key}>"
+
+
 class PersistentAgentSystemMessageBroadcast(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

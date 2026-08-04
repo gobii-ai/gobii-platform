@@ -184,6 +184,7 @@ def enable_system_skills(
     pipedream_apps_enabled: list[str] = []
     pipedream_apps_already_enabled: list[str] = []
     pipedream_apps_invalid: list[str] = []
+    pipedream_apps_superseded: list[str] = []
     pipedream_effective_apps: list[str] = []
 
     for skill_key in requested:
@@ -208,7 +209,11 @@ def enable_system_skills(
             pipedream_apps_enabled.extend(app_result.get("enabled", []))
             pipedream_apps_already_enabled.extend(app_result.get("already_enabled", []))
             pipedream_apps_invalid.extend(app_result.get("invalid", []))
+            pipedream_apps_superseded.extend(app_result.get("superseded", []))
             pipedream_effective_apps = list(app_result.get("effective_apps", []))
+            if app_result.get("superseded"):
+                invalid.append(skill_key)
+                continue
             app_enabled = bool(app_result.get("enabled"))
 
         static_tool_names: set[str] = set()
@@ -270,9 +275,11 @@ def enable_system_skills(
         "invalid": invalid,
         "evicted": list(dict.fromkeys(evicted)),
         "pipedream_apps": {
+            "status": "success",
             "enabled": list(dict.fromkeys(pipedream_apps_enabled)),
             "already_enabled": list(dict.fromkeys(pipedream_apps_already_enabled)),
             "invalid": list(dict.fromkeys(pipedream_apps_invalid)),
+            "superseded": list(dict.fromkeys(pipedream_apps_superseded)),
             "effective_apps": pipedream_effective_apps,
         },
     }

@@ -61,7 +61,8 @@ GOOGLE_DRIVE_COOKBOOK = NativeApiCookbook(
             guardrails=(
                 "Never call partial Drive URLs like `?q=mimeType%3D`, `?q=name%20%3D`, or "
                 "`?q=name%20contains%20`; omit the name predicate if unknown. Do not use Drive discovery for a "
-                "known spreadsheet ID unless a Sheets endpoint returned missing or inaccessible."
+                "known spreadsheet ID unless a Sheets endpoint returned missing or inaccessible. Never fall back "
+                "to Pipedream Google Sheets or Google Drive tools."
             ),
         ),
         _recipe(

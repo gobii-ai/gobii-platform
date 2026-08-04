@@ -16,6 +16,10 @@ from api.services.pipedream_apps import (
     owner_agents_queryset,
     set_owner_selected_app_slugs,
 )
+from api.services.integration_routing import (
+    assert_pipedream_app_available_for_agent,
+    get_pipedream_app_routing_status_for_agent,
+)
 from api.services.pipedream_connections import (
     PipedreamConnectionError,
     delete_pipedream_connected_accounts,
@@ -76,8 +80,9 @@ def _serialize_agent_app_row(
     *,
     source: str,
     account_ids: list[str],
+    agent: PersistentAgent,
 ) -> dict[str, object]:
-    return {
+    row = {
         "slug": app.get("slug", ""),
         "name": app.get("name", app.get("slug", "")),
         "description": app.get("description", ""),
@@ -86,6 +91,8 @@ def _serialize_agent_app_row(
         "connected": bool(account_ids),
         "account_ids": account_ids,
     }
+    row.update(get_pipedream_app_routing_status_for_agent(agent, row["slug"]).to_dict())
+    return row
 
 
 def list_agent_pipedream_app_rows(agent: PersistentAgent, *, query: str = "") -> dict[str, object]:
@@ -105,19 +112,24 @@ def list_agent_pipedream_app_rows(agent: PersistentAgent, *, query: str = "") ->
 
     if normalized_query:
         search_results = catalog.search_apps(normalized_query, limit=30)
-        search_results = visibility.filter_apps(search_results)
+        search_results = [
+            app
+            for app in search_results
+            if visibility.is_app_visible(app.slug) or visibility.is_app_superseded(app.slug)
+        ]
         apps = {app.slug: app.to_dict() for app in search_results}
         ordered_slugs = normalize_app_slugs(app.slug for app in search_results)
     else:
+        display_slugs = normalize_app_slugs([*state.effective_app_slugs, *state.superseded_app_slugs])
         apps = {
             app.slug: app.to_dict()
-            for app in catalog.get_apps(state.effective_app_slugs)
+            for app in catalog.get_apps(display_slugs)
         }
-        ordered_slugs = state.effective_app_slugs
+        ordered_slugs = display_slugs
 
     rows = []
     for slug in ordered_slugs:
-        if not visibility.is_app_visible(slug):
+        if not visibility.is_app_visible(slug) and not visibility.is_app_superseded(slug):
             continue
         app = apps.get(slug)
         if app is None:
@@ -133,6 +145,7 @@ def list_agent_pipedream_app_rows(agent: PersistentAgent, *, query: str = "") ->
                 app,
                 source=source,
                 account_ids=connected_by_app.get(slug, []),
+                agent=agent,
             )
         )
 
@@ -181,6 +194,8 @@ def start_agent_pipedream_app_connect(agent: PersistentAgent, app_slug: str) -> 
     normalized_slug = normalize_app_slug(app_slug)
     if not normalized_slug:
         raise ValueError("app_slug is required.")
+
+    assert_pipedream_app_available_for_agent(agent, normalized_slug, entry_point="agent_app_connect")
 
     if not get_pipedream_app_visibility_for_agent(agent).is_app_visible(normalized_slug):
         raise ValueError("This Pipedream app is deprecated and cannot be newly connected.")

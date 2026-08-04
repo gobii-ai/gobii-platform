@@ -78,6 +78,7 @@ from .models import (
     TrialPromoAllowedEmail,
     TrialPromoRedemption,
     ExecutionPauseReasonChoices,
+    NativeIntegrationRoutingLock,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -140,6 +141,63 @@ for _model, _attrs in (
     if _model is OrganizationBilling:
         OrganizationBillingAdmin = _admin_class
 del _model, _attrs, _admin_class
+
+
+@admin.register(NativeIntegrationRoutingLock)
+class NativeIntegrationRoutingLockAdmin(admin.ModelAdmin):
+    list_display = ("provider_key", "user", "organization", "created_at", "updated_at")
+    list_filter = ("provider_key", "created_at")
+    search_fields = ("provider_key", "user__email", "organization__name")
+    readonly_fields = ("id", "provider_key", "user", "organization", "created_at", "updated_at")
+    actions = ("allow_pipedream_fallback_after_native_disconnect",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.action(description="Allow Pipedream fallback after native disconnect")
+    def allow_pipedream_fallback_after_native_disconnect(self, request, queryset):
+        locks = list(queryset.select_related("user", "organization"))
+        with transaction.atomic():
+            queryset.delete()
+
+            def refresh_owner_caches():
+                from api.agent.tools.mcp_manager import get_mcp_manager
+                from api.models import MCPServerConfig
+                from api.services.pipedream_apps import get_owner_apps_state
+
+                manager = get_mcp_manager()
+                for lock in locks:
+                    if lock.organization_id:
+                        scope = MCPServerConfig.Scope.ORGANIZATION
+                        owner_id = str(lock.organization_id)
+                        state = get_owner_apps_state(
+                            scope,
+                            lock.organization.name if lock.organization else "",
+                            owner_org=lock.organization,
+                        )
+                    else:
+                        scope = MCPServerConfig.Scope.USER
+                        owner_id = str(lock.user_id)
+                        state = get_owner_apps_state(
+                            scope,
+                            lock.user.get_full_name() or lock.user.username if lock.user else "",
+                            owner_user=lock.user,
+                        )
+                    manager.prewarm_pipedream_owner_cache(
+                        scope,
+                        owner_id,
+                        app_slugs=state.effective_app_slugs,
+                    )
+
+            transaction.on_commit(refresh_owner_caches)
+        self.message_user(
+            request,
+            f"Cleared {len(locks)} native integration routing lock(s).",
+            messages.SUCCESS,
+        )
 
 
 # 2.10.1 has removed some fields we still want to see, but their own admin still references them

@@ -19,6 +19,7 @@ export type NativeIntegrationProviderDTO = {
   credential_fields?: NativeIntegrationCredentialFieldDTO[]
   present_credential_fields?: string[]
   missing_credential_fields?: string[]
+  superseded_pipedream_app_slugs?: string[]
 }
 
 export type NativeIntegrationDocLinkDTO = {
@@ -97,6 +98,7 @@ export type NativeIntegrationProvider = {
   credentialFields: NativeIntegrationCredentialField[]
   presentCredentialFields: string[]
   missingCredentialFields: string[]
+  supersededPipedreamAppSlugs?: string[]
 }
 
 export type NativeIntegrationDocLink = {
@@ -187,6 +189,7 @@ export const mapNativeIntegrationProvider = (provider: NativeIntegrationProvider
   })),
   presentCredentialFields: (provider.present_credential_fields ?? []).map(String),
   missingCredentialFields: (provider.missing_credential_fields ?? []).map(String),
+  supersededPipedreamAppSlugs: (provider.superseded_pipedream_app_slugs ?? []).map(String),
 })
 
 const mapNativeIntegrationFile = (file: NativeIntegrationAccessibleFileDTO): NativeIntegrationAccessibleFile => ({

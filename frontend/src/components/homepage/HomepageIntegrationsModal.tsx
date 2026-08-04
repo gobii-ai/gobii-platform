@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Check, Loader2, Search, Sparkles, X } from 'lucide-react'
@@ -58,6 +58,9 @@ function fallbackAppForSlug(slug: string): PipedreamAppSummary {
     name: slug.replace(/[_-]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
     description: '',
     iconUrl: '',
+    routingStatus: 'available',
+    routingMessage: '',
+    supersededByProviderKey: null,
   }
 }
 
@@ -152,8 +155,7 @@ export function HomepageIntegrationsModal({
     }
   }, [])
 
-  const builtinApps = useMemo(() => builtins.map(mapPipedreamApp), [builtins])
-  const builtinSlugSet = useMemo(() => new Set(builtinApps.map((app) => app.slug)), [builtinApps])
+  const rawBuiltinApps = useMemo(() => builtins.map(mapPipedreamApp), [builtins])
 
   const searchQuery = useQuery({
     queryKey: ['homepage-pipedream-app-search', searchUrl, debouncedSearchTerm],
@@ -166,8 +168,35 @@ export function HomepageIntegrationsModal({
     enabled: isAuthenticated && nativeIntegrationsUrl.length > 0,
   })
 
-  const searchResults = searchQuery.data ?? []
   const currentNativeProviders = nativeIntegrationsQuery.data?.providers ?? seededNativeProviders
+  const nativeRoutingBySlug = useMemo(() => {
+    const routing = new Map<string, Pick<PipedreamAppSummary, 'routingStatus' | 'routingMessage' | 'supersededByProviderKey'>>()
+    currentNativeProviders.forEach((provider) => {
+      (provider.supersededPipedreamAppSlugs ?? []).forEach((slug) => {
+        routing.set(slug, {
+          routingStatus: 'superseded',
+          routingMessage: provider.connected
+            ? 'Superseded by native Google Drive. Use the native integration for Google Sheets and Drive.'
+            : 'Native Google Drive is the preferred route. Reconnect it to use Google Sheets and Drive.',
+          supersededByProviderKey: provider.providerKey,
+        })
+      })
+    })
+    return routing
+  }, [currentNativeProviders])
+  const applyNativeRouting = useCallback((app: PipedreamAppSummary): PipedreamAppSummary => ({
+    ...app,
+    ...(nativeRoutingBySlug.get(app.slug) ?? {}),
+  }), [nativeRoutingBySlug])
+  const builtinApps = useMemo(
+    () => rawBuiltinApps.map(applyNativeRouting),
+    [applyNativeRouting, rawBuiltinApps],
+  )
+  const searchResults = useMemo(
+    () => (searchQuery.data ?? []).map(applyNativeRouting),
+    [applyNativeRouting, searchQuery.data],
+  )
+  const builtinSlugSet = useMemo(() => new Set(builtinApps.map((app) => app.slug)), [builtinApps])
   const visibleNativeProviders = useMemo(() => {
     const normalizedSearch = debouncedSearchTerm.toLowerCase()
     if (!normalizedSearch) {
@@ -240,7 +269,7 @@ export function HomepageIntegrationsModal({
       const next = { ...current }
       let changed = false
       nextEntries.forEach((app) => {
-        if (!next[app.slug]) {
+        if (next[app.slug] !== app) {
           next[app.slug] = app
           changed = true
         }
@@ -249,9 +278,14 @@ export function HomepageIntegrationsModal({
     })
   }, [builtinApps, searchResults])
 
+  const selectableSelectedSlugs = useMemo(
+    () => selectedSlugs.filter((slug) => !nativeRoutingBySlug.has(slug)),
+    [nativeRoutingBySlug, selectedSlugs],
+  )
+
   const selectedApps = useMemo(
-    () => selectedSlugs.map((slug) => knownApps[slug] ?? fallbackAppForSlug(slug)),
-    [knownApps, selectedSlugs],
+    () => selectableSelectedSlugs.map((slug) => knownApps[slug] ?? fallbackAppForSlug(slug)),
+    [knownApps, selectableSelectedSlugs],
   )
 
   const clearSearch = () => {
@@ -260,7 +294,7 @@ export function HomepageIntegrationsModal({
   }
 
   const toggleSelection = (slug: string) => {
-    if (builtinSlugSet.has(slug)) {
+    if (builtinSlugSet.has(slug) || nativeRoutingBySlug.has(slug)) {
       return
     }
     setSelectedSlugs((current) => {
@@ -277,7 +311,7 @@ export function HomepageIntegrationsModal({
   const hiddenFieldsPortal = hiddenFieldsContainer
     ? createPortal(
         <>
-          {selectedSlugs.map((slug) => (
+          {selectableSelectedSlugs.map((slug) => (
             <input key={slug} type="hidden" name="selected_pipedream_app_slugs" value={slug} />
           ))}
         </>,
@@ -371,6 +405,9 @@ export function HomepageIntegrationsModal({
               >
                 <PipedreamAppIcon app={app} size="sm" />
                 <span>{app.name}</span>
+                {app.routingStatus === 'superseded' ? (
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Superseded</span>
+                ) : null}
               </span>
             ))}
           </div>
@@ -388,7 +425,7 @@ export function HomepageIntegrationsModal({
             <p className="text-sm text-slate-600">Selected apps will be enabled when the AI employee is created.</p>
           </div>
           <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
-            {selectedSlugs.length} selected
+            {selectableSelectedSlugs.length} selected
           </span>
         </div>
         {selectedApps.length > 0 ? (
@@ -461,15 +498,16 @@ export function HomepageIntegrationsModal({
         ) : (
           <ul className={`overflow-y-auto rounded-lg border border-slate-200 ${isMobile ? 'bg-white' : 'max-h-96'}`}>
             {searchResults.map((app) => {
-              const isSelected = selectedSlugs.includes(app.slug)
+              const isSelected = selectableSelectedSlugs.includes(app.slug)
               const isBuiltin = builtinSlugSet.has(app.slug)
+              const isSuperseded = app.routingStatus === 'superseded'
               return (
                 <li key={app.slug} className="border-b border-slate-200 last:border-b-0">
                   <button
                     type="button"
                     className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left transition hover:bg-slate-50"
                     onClick={() => toggleSelection(app.slug)}
-                    disabled={isBuiltin}
+                    disabled={isBuiltin || isSuperseded}
                   >
                     <div className="flex min-w-0 items-start gap-3">
                       <PipedreamAppIcon app={app} />
@@ -484,21 +522,27 @@ export function HomepageIntegrationsModal({
                               Included
                             </span>
                           ) : null}
+                          {isSuperseded ? (
+                            <span className="rounded-full border border-amber-300 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                              Superseded
+                            </span>
+                          ) : null}
                         </div>
                         {app.description ? <p className="mt-1 text-sm text-slate-600">{app.description}</p> : null}
+                        {app.routingMessage ? <p className="mt-1 text-sm text-amber-700">{app.routingMessage}</p> : null}
                       </div>
                     </div>
                     <span
                       className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                        isSelected || isBuiltin
+                        isSelected || isBuiltin || isSuperseded
                           ? 'border-blue-200 bg-blue-50 text-blue-700'
                           : 'border-slate-200 text-slate-500'
                       }`}
                     >
-                      {isSelected || isBuiltin ? (
+                      {isSelected || isBuiltin || isSuperseded ? (
                         <>
                           <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                          {isBuiltin ? 'Included' : 'Selected'}
+                          {isSuperseded ? 'Unavailable' : isBuiltin ? 'Included' : 'Selected'}
                         </>
                       ) : (
                         'Select'

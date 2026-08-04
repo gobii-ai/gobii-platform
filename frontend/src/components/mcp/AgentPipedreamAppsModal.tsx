@@ -450,7 +450,8 @@ function AgentPipedreamAppRowItem({
 }) {
   const isPending = pendingAction?.slug === app.slug
   const pendingKind = isPending ? pendingAction?.kind : null
-  const removeDisabled = disabled || app.source !== 'added'
+  const isSuperseded = app.routingStatus === 'superseded'
+  const removeDisabled = disabled || isSuperseded || app.source !== 'added'
   const removeTitle = app.source === 'built_in'
     ? 'Built-in apps cannot be removed'
     : app.source === 'available'
@@ -461,7 +462,11 @@ function AgentPipedreamAppRowItem({
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_7rem] md:items-center">
       <PipedreamAppSummaryCell app={app} />
       <div>
-        {app.connected ? (
+        {isSuperseded ? (
+          <span className="inline-flex rounded-full border border-amber-300 px-2.5 py-1 text-xs font-semibold text-amber-700">
+            Superseded
+          </span>
+        ) : app.connected ? (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
             Connected
@@ -476,7 +481,7 @@ function AgentPipedreamAppRowItem({
         <IntegrationConnectionButton
           connected={app.connected}
           pendingKind={pendingKind === 'connect' || pendingKind === 'disconnect' ? pendingKind : null}
-          disabled={disabled}
+          disabled={disabled || (isSuperseded && !app.connected)}
           onConnect={onConnect}
           onDisconnect={onDisconnect}
         />
