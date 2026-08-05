@@ -128,6 +128,7 @@ def execute_tracked_runtime_tool_call(
                 tool_name=tool_name,
                 exec_params=exec_params,
                 isolated_mcp=isolated_mcp,
+                resolved_entry=resolved_entry,
             )
         duration_ms = int(round((time.monotonic() - started_at) * 1000))
     except Exception as exc:

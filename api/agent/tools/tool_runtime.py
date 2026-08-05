@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from api.models import PersistentAgent
 from api.services.deprecated_provider_guard import (
@@ -30,6 +30,7 @@ from .web_chat_sender import execute_send_chat_message
 
 
 logger = logging.getLogger(__name__)
+_RESOLVED_ENTRY_UNSET = object()
 
 
 def _refresh_agent_tools(agent: PersistentAgent) -> Optional[list[dict]]:
@@ -73,6 +74,7 @@ def execute_runtime_tool_call(
     tool_name: str,
     exec_params: Dict[str, Any],
     isolated_mcp: bool = False,
+    resolved_entry: Optional[ToolCatalogEntry] | object = _RESOLVED_ENTRY_UNSET,
 ) -> tuple[Any, Optional[list[dict]]]:
     updated_tools: Optional[list[dict]] = None
 
@@ -80,19 +82,25 @@ def execute_runtime_tool_call(
         return tool_blacklist_error(tool_name), updated_tools
 
     if isolated_mcp:
-        resolved_entry = tool_manager_service.resolve_tool_entry(agent, tool_name)
+        entry = (
+            tool_manager_service.resolve_tool_entry(agent, tool_name)
+            if resolved_entry is _RESOLVED_ENTRY_UNSET
+            else cast(Optional[ToolCatalogEntry], resolved_entry)
+        )
+        if entry is None:
+            return {"status": "error", "message": f"Tool '{tool_name}' is not available"}, updated_tools
         result = execute_enabled_tool(
             agent,
             tool_name,
             exec_params,
             isolated_mcp=True,
-            resolved_entry=resolved_entry,
+            resolved_entry=entry,
         )
         updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(
             agent,
             result,
             tool_name,
-            resolved_entry,
+            entry,
             exec_params,
         )
         return result, updated_tools
@@ -133,18 +141,24 @@ def execute_runtime_tool_call(
         updated_tools = _refresh_agent_tools(agent)
         return result, updated_tools
 
-    resolved_entry = tool_manager_service.resolve_tool_entry(agent, tool_name)
+    entry = (
+        tool_manager_service.resolve_tool_entry(agent, tool_name)
+        if resolved_entry is _RESOLVED_ENTRY_UNSET
+        else cast(Optional[ToolCatalogEntry], resolved_entry)
+    )
+    if entry is None:
+        return {"status": "error", "message": f"Tool '{tool_name}' is not available"}, updated_tools
     result = execute_enabled_tool(
         agent,
         tool_name,
         exec_params,
-        resolved_entry=resolved_entry,
+        resolved_entry=entry,
     )
     updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(
         agent,
         result,
         tool_name,
-        resolved_entry,
+        entry,
         exec_params,
     )
     return result, updated_tools

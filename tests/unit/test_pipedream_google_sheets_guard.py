@@ -15,7 +15,7 @@ from api.agent.core.event_processing import (
     _resolve_tool_for_execution,
 )
 from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
-from api.agent.tools.mcp_manager import MCPToolInfo
+from api.agent.tools.mcp_manager import MCPToolInfo, MCPToolManager
 from api.agent.tools.sqlite_skills import format_recent_skills_for_prompt
 from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from api.agent.tools.tool_manager import (
@@ -422,7 +422,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         ) as credit_gate, patch(
             "api.agent.tools.tool_manager.resolve_tool_entry",
             return_value=entry,
-        ), patch(
+        ) as resolve, patch(
             "api.agent.tools.tool_manager.execute_mcp_tool"
         ) as executor:
             result, updated_tools = execute_tracked_runtime_tool_call(
@@ -449,8 +449,82 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             },
         )
         executor.assert_not_called()
+        resolve.assert_called_once_with(self.agent_a, entry.full_name)
         rate_limit.assert_not_called()
         credit_gate.assert_not_called()
+
+    def test_connected_pipedream_sheets_tools_stay_out_of_future_rosters(self):
+        prefixed_entry = self._mcp_entry("google_sheets-read-rows")
+        metadata_entry = self._mcp_entry(
+            "component-proxy",
+            app_slug="google_sheets",
+        )
+        other_app_entry = self._mcp_entry(
+            "trello-create-card",
+            app_slug="trello",
+        )
+        for entry in (prefixed_entry, metadata_entry, other_app_entry):
+            self._enable(self.agent_a, entry)
+
+        manager = MCPToolManager()
+        with patch.object(
+            manager,
+            "get_tools_for_agent",
+            return_value=[
+                prefixed_entry.mcp_info,
+                metadata_entry.mcp_info,
+                other_app_entry.mcp_info,
+            ],
+        ), patch.object(manager, "_backfill_enabled_tool_metadata"):
+            definitions = manager.get_enabled_tools_definitions(self.agent_a)
+
+        names = {
+            definition["function"]["name"]
+            for definition in definitions
+        }
+        self.assertNotIn(prefixed_entry.full_name, names)
+        self.assertNotIn(metadata_entry.full_name, names)
+        self.assertIn(other_app_entry.full_name, names)
+
+    def test_nested_runtime_reuses_failed_catalog_resolution(self):
+        with patch(
+            "api.agent.tools.tool_runtime.tool_manager_service.resolve_tool_entry"
+        ) as resolve, patch(
+            "api.agent.tools.tool_runtime.execute_enabled_tool"
+        ) as executor:
+            result, updated_tools = execute_runtime_tool_call(
+                self.agent_a,
+                tool_name="missing-pipedream-tool",
+                exec_params={},
+                resolved_entry=None,
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("not available", result["message"])
+        self.assertIsNone(updated_tools)
+        resolve.assert_not_called()
+        executor.assert_not_called()
+
+    @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=False)
+    def test_guard_rollback_restores_connected_sheets_tools_to_future_rosters(self):
+        entry = self._mcp_entry(
+            "component-proxy",
+            app_slug="google_sheets",
+        )
+        self._enable(self.agent_a, entry)
+        manager = MCPToolManager()
+
+        with patch.object(
+            manager,
+            "get_tools_for_agent",
+            return_value=[entry.mcp_info],
+        ), patch.object(manager, "_backfill_enabled_tool_metadata"):
+            definitions = manager.get_enabled_tools_definitions(self.agent_a)
+
+        self.assertEqual(
+            [definition["function"]["name"] for definition in definitions],
+            [entry.full_name],
+        )
 
     def test_top_level_blocked_call_bypasses_credit_message_only_mode(self):
         entry = self._mcp_entry("google_sheets-read-rows")

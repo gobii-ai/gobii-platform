@@ -92,8 +92,7 @@ class PipedreamAppVisibility:
             if server_name != PIPEDREAM_RUNTIME_NAME:
                 visible.append(tool)
                 continue
-            tool_name = getattr(tool, "tool_name", "") or getattr(tool, "full_name", "")
-            if self.is_tool_visible(tool_name):
+            if self.is_app_visible(pipedream_app_slug_for_tool(tool), allow_unknown=True):
                 visible.append(tool)
         return visible
 
@@ -228,6 +227,27 @@ def pipedream_app_slug_for_tool_call(tool_name: object, params: object) -> str:
     return pipedream_app_slug_for_tool_name(component_key)
 
 
+def pipedream_app_slug_for_tool(tool: Any) -> str:
+    """Resolve a Pipedream tool's app from metadata before its legacy name."""
+    return normalize_app_slug(getattr(tool, "app_slug", "")) or pipedream_app_slug_for_tool_name(
+        getattr(tool, "tool_name", "") or getattr(tool, "full_name", "")
+    )
+
+
+def filter_guarded_pipedream_google_sheets_tools(tools: Iterable[Any]) -> list[Any]:
+    tool_list = list(tools)
+    if not pipedream_google_sheets_guard_enabled():
+        return tool_list
+    return [
+        tool
+        for tool in tool_list
+        if not (
+            getattr(tool, "server_name", "") == PIPEDREAM_RUNTIME_NAME
+            and pipedream_app_slug_for_tool(tool) == PIPEDREAM_GOOGLE_SHEETS_APP_SLUG
+        )
+    ]
+
+
 def get_connected_pipedream_app_slugs_for_agent(agent: PersistentAgent) -> set[str]:
     from api.services.pipedream_connections import PipedreamConnectionError, list_pipedream_connected_accounts
 
@@ -298,7 +318,7 @@ def filter_deprecated_pipedream_apps_without_agent(apps: Iterable[Any]) -> list[
 
 def filter_deprecated_pipedream_tools_for_agent(agent: PersistentAgent, tools: Iterable[Any]) -> list[Any]:
     visibility = get_pipedream_app_visibility_for_agent(agent)
-    return visibility.filter_tools(tools)
+    return filter_guarded_pipedream_google_sheets_tools(visibility.filter_tools(tools))
 
 
 def get_owner_selected_app_slugs(owner_scope: str, owner_user=None, owner_org=None) -> list[str]:
