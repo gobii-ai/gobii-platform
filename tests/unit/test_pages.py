@@ -1392,8 +1392,8 @@ class HomePageTests(TestCase):
             for link in soup.select(".gk-cat[data-analytics-cta-id]")
         }
         self.assertEqual(category_links["sales"].name, "a")
-        self.assertEqual(category_links["sales"]["id"], "sales")
         self.assertEqual(category_links["sales"]["href"], "#sales")
+        self.assertIsNone(soup.find(id="sales"))
         self.assertEqual(
             category_links["recruiting"]["data-analytics-cta-id"],
             "home_k_category_recruiting",
