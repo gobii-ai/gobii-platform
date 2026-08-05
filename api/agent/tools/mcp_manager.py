@@ -1422,6 +1422,24 @@ class MCPToolManager:
             effective_app_slugs=get_effective_pipedream_app_slugs_for_agent(agent),
         )
 
+    def _pipedream_app_slugs_for_tool_resolution(
+        self,
+        agent: PersistentAgent,
+        tool_name: str,
+    ) -> tuple[set[str], str]:
+        """Return safe discovery shards and an app slug safe for fallback metadata."""
+        inferred_app_slug = pipedream_app_slug_for_tool_name(tool_name)
+        effective_app_slugs = set(
+            normalize_app_slugs(get_effective_pipedream_app_slugs_for_agent(agent))
+        )
+        if inferred_app_slug and inferred_app_slug in effective_app_slugs:
+            return {inferred_app_slug}, inferred_app_slug
+
+        # Generic names such as component-proxy identify their app only in MCP
+        # metadata. Search the agent's real app shards and never synthesize an
+        # app identity from an unrelated name prefix when discovery misses.
+        return effective_app_slugs, ""
+
     def _pipedream_cache_context_for_owner(
         self,
         owner_scope: str,
@@ -2273,8 +2291,21 @@ class MCPToolManager:
             allowed_server_names.add(enabled_row.tool_server)
 
         app_slug = pipedream_app_slug_for_tool_name(tool_name)
-        if app_slug:
+        fallback_app_slug = app_slug
+        pipedream_target = bool(
+            enabled_row
+            and str(enabled_row.tool_server or "").strip().casefold()
+            == self.PIPEDREAM_RUNTIME_NAME
+        )
+        if pipedream_target:
+            app_slugs, fallback_app_slug = self._pipedream_app_slugs_for_tool_resolution(
+                agent,
+                tool_name,
+            )
+        elif app_slug:
             app_slugs.add(app_slug)
+
+        if app_slugs:
             if not allowed_config_ids:
                 allowed_server_names.add(self.PIPEDREAM_RUNTIME_NAME)
         elif not allowed_config_ids and not allowed_server_names and tool_name.startswith("mcp_"):
@@ -2350,7 +2381,7 @@ class MCPToolManager:
                         description=f"{actual_name} via {runtime.display_name}",
                         parameters={"type": "object", "properties": {}},
                     )
-            elif app_slug:
+            elif fallback_app_slug:
                 runtime = next(
                     (
                         candidate
@@ -2371,6 +2402,7 @@ class MCPToolManager:
                         ),
                         description=f"{tool_name} via {runtime.display_name}",
                         parameters={"type": "object", "properties": {}},
+                        app_slug=fallback_app_slug,
                     )
 
         if info and enabled_row:
@@ -2399,12 +2431,22 @@ class MCPToolManager:
         allowed_config_ids: set[str] = set()
         allowed_server_names: set[str] = set()
         pipedream_app_slugs: set[str] = set()
+        effective_pipedream_app_slugs: Optional[set[str]] = None
         for row in enabled_rows:
             tool_name = row.tool_full_name
             tool_server = (row.tool_server or "").strip()
             server_config_id = str(row.server_config_id) if row.server_config_id else ""
             app_slug = pipedream_app_slug_for_tool_name(tool_name)
-            if app_slug:
+            if tool_server.casefold() == self.PIPEDREAM_RUNTIME_NAME:
+                if effective_pipedream_app_slugs is None:
+                    effective_pipedream_app_slugs = set(
+                        normalize_app_slugs(get_effective_pipedream_app_slugs_for_agent(agent))
+                    )
+                if app_slug and app_slug in effective_pipedream_app_slugs:
+                    pipedream_app_slugs.add(app_slug)
+                else:
+                    pipedream_app_slugs.update(effective_pipedream_app_slugs)
+            elif app_slug:
                 pipedream_app_slugs.add(app_slug)
 
             if server_config_id:

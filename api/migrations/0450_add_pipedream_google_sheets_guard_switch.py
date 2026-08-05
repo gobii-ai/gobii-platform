@@ -8,7 +8,7 @@ def add_switch(apps, schema_editor):
     Switch = apps.get_model("waffle", "Switch")
     Switch.objects.get_or_create(
         name=SWITCH_NAME,
-        defaults={"active": True},
+        defaults={"active": False},
     )
 
 

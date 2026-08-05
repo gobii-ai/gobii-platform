@@ -38,6 +38,7 @@ from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 @tag("batch_mcp_tools")
+@override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=True)
 class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -497,6 +498,58 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertNotIn(metadata_entry.full_name, after_names)
         self.assertIn(other_app_entry.full_name, after_names)
 
+    def test_metadata_only_pipedream_tool_cold_resolution_uses_effective_app_shards(self):
+        entry = self._mcp_entry(
+            "component-proxy",
+            app_slug="google_sheets",
+        )
+        self._enable(self.agent_a, entry)
+        manager = MCPToolManager()
+
+        with patch(
+            "api.agent.tools.mcp_manager.get_effective_pipedream_app_slugs_for_agent",
+            return_value=["google_sheets", "trello"],
+        ), patch.object(
+            manager,
+            "get_tools_for_agent",
+            return_value=[entry.mcp_info],
+        ) as get_tools, patch.object(manager, "_backfill_enabled_tool_metadata"):
+            resolved = manager.prepare_tool_for_agent(self.agent_a, entry.full_name)
+
+        self.assertIs(resolved, entry.mcp_info)
+        self.assertEqual(resolved.app_slug, "google_sheets")
+        get_tools.assert_called_once_with(
+            self.agent_a,
+            allowed_server_names={"pipedream"},
+            pipedream_app_slugs={"google_sheets", "trello"},
+        )
+
+    def test_metadata_only_pipedream_tool_refuses_metadata_less_fallback(self):
+        entry = self._mcp_entry("component-proxy")
+        self._enable(self.agent_a, entry)
+        manager = MCPToolManager()
+        manager._server_cache[entry.server_config_id] = Mock(
+            config_id=entry.server_config_id,
+            name="pipedream",
+            display_name="Pipedream",
+        )
+
+        with patch(
+            "api.agent.tools.mcp_manager.get_effective_pipedream_app_slugs_for_agent",
+            return_value=["google_sheets"],
+        ), patch.object(
+            manager,
+            "get_tools_for_agent",
+            return_value=[],
+        ), patch.object(
+            manager,
+            "_sandbox_required_runtime_available",
+            return_value=True,
+        ):
+            resolved = manager.prepare_tool_for_agent(self.agent_a, entry.full_name)
+
+        self.assertIsNone(resolved)
+
     def test_nested_runtime_reuses_failed_catalog_resolution(self):
         with patch(
             "api.agent.tools.tool_runtime.tool_manager_service.resolve_tool_entry"
@@ -544,7 +597,40 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             exec_params={"to_address": "test@example.com", "body": "hello"},
             isolated_mcp=False,
             resolved_entry=None,
+            pipedream_google_sheets_blocked=False,
         )
+
+    def test_nested_guard_decision_is_stable_for_execution_and_billing(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+
+        with patch(
+            "api.services.deprecated_provider_guard.pipedream_google_sheets_guard_enabled",
+            side_effect=[True, AssertionError("guard decision was evaluated twice")],
+        ) as guard_enabled, patch(
+            "api.agent.core.event_processing._enforce_tool_rate_limit",
+        ) as rate_limit, patch(
+            "api.agent.core.event_processing._ensure_credit_for_tool",
+        ) as credit_gate, patch(
+            "api.agent.tools.tool_manager.resolve_tool_entry",
+            return_value=entry,
+        ), patch(
+            "api.agent.tools.tool_manager.execute_mcp_tool",
+        ) as executor, patch(
+            "api.agent.tools.tool_runtime._refresh_agent_tools",
+            return_value=[],
+        ):
+            result, _updated_tools = execute_tracked_runtime_tool_call(
+                self.agent_a,
+                tool_name=entry.full_name,
+                exec_params={},
+            )
+
+        self.assertEqual(result["error_code"], "deprecated_provider_blocked")
+        guard_enabled.assert_called_once_with()
+        rate_limit.assert_not_called()
+        credit_gate.assert_not_called()
+        executor.assert_not_called()
 
     @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=False)
     def test_guard_rollback_restores_connected_sheets_tools_to_future_rosters(self):
@@ -629,6 +715,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             parallel_safe=False,
             parallel_ineligible_reason="test",
             resolved_entry=entry,
+            pipedream_google_sheets_blocked=True,
         )
         outcome = _ToolExecutionOutcome(
             prepared=prepared,

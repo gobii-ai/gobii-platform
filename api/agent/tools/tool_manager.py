@@ -1489,6 +1489,7 @@ def execute_enabled_tool(
     isolated_mcp: bool = False,
     current_sqlite_db_path: Optional[str] = None,
     resolved_entry: Optional[ToolCatalogEntry] = None,
+    pipedream_google_sheets_blocked: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Execute an enabled tool, routing to the appropriate provider."""
     entry = resolved_entry or resolve_tool_entry(agent, tool_name)
@@ -1497,7 +1498,12 @@ def execute_enabled_tool(
 
     resolved_name = entry.full_name
 
-    blocked_error = pipedream_google_sheets_blocked_error(agent, entry, params)
+    blocked_error = pipedream_google_sheets_blocked_error(
+        agent,
+        entry,
+        params,
+        blocked_call=pipedream_google_sheets_blocked,
+    )
     if blocked_error is not None:
         return blocked_error
 

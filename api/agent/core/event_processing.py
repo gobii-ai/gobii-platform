@@ -2266,6 +2266,7 @@ class _PreparedToolExecution:
     parallel_safe: bool
     parallel_ineligible_reason: Optional[str]
     resolved_entry: Optional[ToolCatalogEntry] = None
+    pipedream_google_sheets_blocked: bool = False
 
 
 @dataclass
@@ -3397,12 +3398,12 @@ def _refresh_tools_after_deprecated_provider_handoff(
     result: Any,
     blocked_tool_name: str,
     resolved_entry: Optional[ToolCatalogEntry],
-    exec_params: Dict[str, Any],
+    blocked_provider_call: bool,
 ) -> Optional[List[dict]]:
     if not (
         is_deprecated_provider_blocked_result(result)
         and resolved_entry is not None
-        and is_pipedream_google_sheets_blocked_call(resolved_entry, exec_params)
+        and blocked_provider_call
     ):
         return None
     try:
@@ -3430,6 +3431,7 @@ def _execute_tool_call_runtime(
     eval_run_id: Optional[str],
     parallel_safe: bool = False,
     resolved_entry: Optional[ToolCatalogEntry] = None,
+    pipedream_google_sheets_blocked: Optional[bool] = None,
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
     try:
@@ -3440,6 +3442,12 @@ def _execute_tool_call_runtime(
     mock_result = _resolve_eval_mock_result(mock_config, tool_name, exec_params)
     if is_tool_blacklisted_for_agent(agent, tool_name):
         return tool_blacklist_error(tool_name), updated_tools
+    blocked_provider_call = pipedream_google_sheets_blocked
+    if blocked_provider_call is None and resolved_entry is not None:
+        blocked_provider_call = is_pipedream_google_sheets_blocked_call(
+            resolved_entry,
+            exec_params,
+        )
     if mock_result is not None:
         logger.info(
             "Agent %s: using mock for %s (eval_run_id=%s)",
@@ -3456,13 +3464,14 @@ def _execute_tool_call_runtime(
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
             resolved_entry=resolved_entry,
+            pipedream_google_sheets_blocked=blocked_provider_call,
         )
         updated_tools = _refresh_tools_after_deprecated_provider_handoff(
             agent,
             result,
             tool_name,
             resolved_entry,
-            exec_params,
+            bool(blocked_provider_call),
         )
         return result, updated_tools
     resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
@@ -3479,13 +3488,14 @@ def _execute_tool_call_runtime(
         exec_params,
         current_sqlite_db_path=get_sqlite_db_path(),
         resolved_entry=resolved_entry,
+        pipedream_google_sheets_blocked=blocked_provider_call,
     )
     updated_tools = _refresh_tools_after_deprecated_provider_handoff(
         agent,
         result,
         tool_name,
         resolved_entry,
-        exec_params,
+        bool(blocked_provider_call),
     )
     if (
         tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
@@ -3585,6 +3595,7 @@ def _execute_prepared_tool_call(
                 eval_run_id=eval_run_id,
                 parallel_safe=parallel_safe,
                 resolved_entry=prepared.resolved_entry,
+                pipedream_google_sheets_blocked=prepared.pipedream_google_sheets_blocked,
             )
             if _tool_result_is_success(result) and not parallel_safe:
                 refresh_skills_for_tool(agent, prepared.tool_name)
@@ -4064,11 +4075,15 @@ def _prepare_tool_batch(
                 exec_params = dict(exec_params)
                 exec_params["_has_user_facing_message"] = has_user_facing_message
 
-            blocked_provider_call = bool(
-                resolved_entry
-                and is_pipedream_google_sheets_blocked_call(
-                    resolved_entry,
-                    exec_params,
+            blocked_provider_call = (
+                preflight_blocked_provider_call
+                if preflight_entry is not None
+                else bool(
+                    resolved_entry
+                    and is_pipedream_google_sheets_blocked_call(
+                        resolved_entry,
+                        exec_params,
+                    )
                 )
             )
 
@@ -4152,6 +4167,7 @@ def _prepare_tool_batch(
                     parallel_safe=parallel_ineligible_reason is None,
                     parallel_ineligible_reason=parallel_ineligible_reason,
                     resolved_entry=resolved_entry,
+                    pipedream_google_sheets_blocked=blocked_provider_call,
                 )
             )
 
@@ -4532,11 +4548,7 @@ def _finalize_tool_batch(
         if is_error_status:
             trusted_deprecated_provider_block = bool(
                 is_deprecated_provider_blocked_result(result)
-                and prepared.resolved_entry
-                and is_pipedream_google_sheets_blocked_call(
-                    prepared.resolved_entry,
-                    prepared.exec_params,
-                )
+                and prepared.pipedream_google_sheets_blocked
             )
             _refund_tool_credit_on_error_if_configured(
                 agent=agent,

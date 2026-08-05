@@ -221,8 +221,15 @@ def pipedream_google_sheets_blocked_error(
     agent: PersistentAgent,
     entry: Any,
     params: Any,
+    *,
+    blocked_call: Optional[bool] = None,
 ) -> Optional[dict[str, Any]]:
-    if not is_pipedream_google_sheets_blocked_call(entry, params):
+    should_block = (
+        is_pipedream_google_sheets_blocked_call(entry, params)
+        if blocked_call is None
+        else blocked_call and is_pipedream_google_sheets_call(entry, params)
+    )
+    if not should_block:
         return None
 
     from api.agent.system_skills.service import (
@@ -267,6 +274,11 @@ def pipedream_google_sheets_blocked_error(
 
 
 def is_pipedream_google_sheets_blocked_call(entry: Any, params: Any) -> bool:
-    if not _entry_targets_pipedream_google_sheets(entry, params):
-        return False
-    return pipedream_google_sheets_guard_enabled()
+    return (
+        is_pipedream_google_sheets_call(entry, params)
+        and pipedream_google_sheets_guard_enabled()
+    )
+
+
+def is_pipedream_google_sheets_call(entry: Any, params: Any) -> bool:
+    return _entry_targets_pipedream_google_sheets(entry, params)

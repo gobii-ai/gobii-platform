@@ -133,6 +133,7 @@ def execute_tracked_runtime_tool_call(
                 exec_params=exec_params,
                 isolated_mcp=isolated_mcp,
                 resolved_entry=resolved_entry,
+                pipedream_google_sheets_blocked=blocked_provider_call,
             )
         duration_ms = int(round((time.monotonic() - started_at) * 1000))
     except Exception as exc:

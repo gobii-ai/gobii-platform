@@ -67,12 +67,12 @@ def _refresh_agent_tools_after_deprecated_provider_handoff(
     result: Any,
     blocked_tool_name: str,
     resolved_entry: Optional[ToolCatalogEntry],
-    exec_params: Dict[str, Any],
+    blocked_provider_call: bool,
 ) -> Optional[list[dict]]:
     if not (
         is_deprecated_provider_blocked_result(result)
         and resolved_entry is not None
-        and is_pipedream_google_sheets_blocked_call(resolved_entry, exec_params)
+        and blocked_provider_call
     ):
         return None
     try:
@@ -98,6 +98,7 @@ def execute_runtime_tool_call(
     exec_params: Dict[str, Any],
     isolated_mcp: bool = False,
     resolved_entry: Optional[ToolCatalogEntry] | object = _RESOLVED_ENTRY_UNSET,
+    pipedream_google_sheets_blocked: Optional[bool] = None,
 ) -> tuple[Any, Optional[list[dict]]]:
     updated_tools: Optional[list[dict]] = None
 
@@ -112,19 +113,25 @@ def execute_runtime_tool_call(
         )
         if entry is None:
             return {"status": "error", "message": f"Tool '{tool_name}' is not available"}, updated_tools
+        blocked_provider_call = (
+            is_pipedream_google_sheets_blocked_call(entry, exec_params)
+            if pipedream_google_sheets_blocked is None
+            else pipedream_google_sheets_blocked
+        )
         result = execute_enabled_tool(
             agent,
             tool_name,
             exec_params,
             isolated_mcp=True,
             resolved_entry=entry,
+            pipedream_google_sheets_blocked=blocked_provider_call,
         )
         updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(
             agent,
             result,
             tool_name,
             entry,
-            exec_params,
+            blocked_provider_call,
         )
         return result, updated_tools
     if tool_name == "spawn_web_task":
@@ -171,17 +178,23 @@ def execute_runtime_tool_call(
     )
     if entry is None:
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}, updated_tools
+    blocked_provider_call = (
+        is_pipedream_google_sheets_blocked_call(entry, exec_params)
+        if pipedream_google_sheets_blocked is None
+        else pipedream_google_sheets_blocked
+    )
     result = execute_enabled_tool(
         agent,
         tool_name,
         exec_params,
         resolved_entry=entry,
+        pipedream_google_sheets_blocked=blocked_provider_call,
     )
     updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(
         agent,
         result,
         tool_name,
         entry,
-        exec_params,
+        blocked_provider_call,
     )
     return result, updated_tools
