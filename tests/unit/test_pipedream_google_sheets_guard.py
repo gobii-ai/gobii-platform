@@ -251,6 +251,8 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self._enable(self.agent_a, entry)
         refreshed_tools = [
             {"type": "function", "function": {"name": entry.full_name}},
+            {"type": "function", "function": {"name": "google_sheets-add-row"}},
+            {"type": "function", "function": {"name": "trello-create-card"}},
             {"type": "function", "function": {"name": "http_request"}},
         ]
 
@@ -270,7 +272,10 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertEqual(result["handoff_status"], "ready")
         self.assertEqual(
             updated_tools,
-            [{"type": "function", "function": {"name": "http_request"}}],
+            [
+                {"type": "function", "function": {"name": "trello-create-card"}},
+                {"type": "function", "function": {"name": "http_request"}},
+            ],
         )
         refresh.assert_called_once_with(self.agent_a)
 
@@ -279,6 +284,8 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self._enable(self.agent_a, entry)
         refreshed_tools = [
             {"type": "function", "function": {"name": entry.full_name}},
+            {"type": "function", "function": {"name": "google_sheets-add-row"}},
+            {"type": "function", "function": {"name": "trello-create-card"}},
             {"type": "function", "function": {"name": "http_request"}},
         ]
 
@@ -298,7 +305,10 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertEqual(result["handoff_status"], "ready")
         self.assertEqual(
             updated_tools,
-            [{"type": "function", "function": {"name": "http_request"}}],
+            [
+                {"type": "function", "function": {"name": "trello-create-card"}},
+                {"type": "function", "function": {"name": "http_request"}},
+            ],
         )
 
     def test_top_level_refresh_failure_preserves_actionable_block(self):
@@ -764,7 +774,16 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         persisted_result = json.loads(persisted_call.result)
         self.assertEqual(persisted_call.status, PersistentAgentToolCall.Status.ERROR)
         self.assertEqual(result["error_code"], "deprecated_provider_blocked")
+        self.assertEqual(result["handoff_status"], "ready")
+        self.assertEqual(result["next_action"], "continue_with_native_google_sheets")
+        self.assertEqual(result["setup_url"], "/app/integrations")
         self.assertEqual(persisted_result["error_code"], "deprecated_provider_blocked")
+        self.assertEqual(persisted_result["handoff_status"], "ready")
+        self.assertEqual(
+            persisted_result["next_action"],
+            "continue_with_native_google_sheets",
+        )
+        self.assertEqual(persisted_result["setup_url"], "/app/integrations")
         self.assertIs(persisted_result["retryable"], False)
 
     def test_provider_executor_is_never_invoked_for_blocked_fallback_match(self):

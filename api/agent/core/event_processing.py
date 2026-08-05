@@ -867,7 +867,16 @@ def _copy_native_http_error_context(source: dict, payload: dict) -> None:
 
 
 def _copy_structured_tool_error_context(source: dict, payload: dict) -> None:
-    for key in ("code", "error_code", "provider", "integration", "replacement"):
+    for key in (
+        "code",
+        "error_code",
+        "provider",
+        "integration",
+        "replacement",
+        "handoff_status",
+        "next_action",
+        "setup_url",
+    ):
         value = source.get(key)
         if value is not None:
             payload[key] = _coerce_error_text(value, TOOL_ERROR_DETAIL_MAX_BYTES)

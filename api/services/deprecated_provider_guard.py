@@ -9,6 +9,7 @@ from api.services.pipedream_apps import (
     PIPEDREAM_COMPONENT_OPTION_TOOLS,
     normalize_app_slug,
     pipedream_app_slug_for_tool_call,
+    pipedream_app_slug_for_tool_name,
 )
 from api.services.pipedream_feature_flags import pipedream_google_sheets_guard_enabled
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -90,16 +91,26 @@ def filter_deprecated_provider_blocked_tool(
     tool_definitions: Optional[list[dict]],
     blocked_tool_name: str,
 ) -> Optional[list[dict]]:
-    """Keep the just-blocked legacy tool out of the same-turn roster refresh."""
+    """Keep deprecated Sheets actions out of the same-turn roster refresh."""
     if tool_definitions is None:
         return None
+
+    def should_remove(definition: dict) -> bool:
+        function = definition.get("function")
+        if not isinstance(function, dict):
+            return False
+        tool_name = function.get("name")
+        return (
+            tool_name == blocked_tool_name
+            or pipedream_app_slug_for_tool_name(tool_name) == GOOGLE_SHEETS_INTEGRATION
+        )
+
     return [
         definition
         for definition in tool_definitions
         if not (
             isinstance(definition, dict)
-            and isinstance(definition.get("function"), dict)
-            and definition["function"].get("name") == blocked_tool_name
+            and should_remove(definition)
         )
     ]
 
