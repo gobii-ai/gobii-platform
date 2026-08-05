@@ -110,9 +110,10 @@
         <a class="gk-l" href="/app/agents">My Agents</a>
       {% else %}
         {% with request.session.utm_querystring as utm_qs %}
-        <a class="gk-login gk-l" href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}">Log in</a>
+        {# Keep the auth flow's ?next= on nav links — losing it strands a mid-funnel user on the homepage after signup. #}
+        <a class="gk-login gk-l" href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}{% if request.GET.next %}{% if utm_qs or '?' in account_login_url %}&{% else %}?{% endif %}next={{ request.GET.next|urlencode }}{% endif %}">Log in</a>
         {% url 'account_signup' as account_signup_url %}
-        <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
+        <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}{% if request.GET.next %}{% if utm_qs or '?' in account_signup_url %}&{% else %}?{% endif %}next={{ request.GET.next|urlencode }}{% endif %}"
            data-analytics-cta-id="nav_start_trial" data-analytics-placement="header" data-analytics-intent="signup"
            class="gk-nav-cta">Start free trial</a>
         {% endwith %}
@@ -311,9 +312,10 @@
       </form>
     {% else %}
       {% with request.session.utm_querystring as utm_qs %}
-      <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}">Log in</a>
+      {# Keep the auth flow's ?next= here too — see the desktop nav note. #}
+      <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}{% if request.GET.next %}{% if utm_qs or '?' in account_login_url %}&{% else %}?{% endif %}next={{ request.GET.next|urlencode }}{% endif %}">Log in</a>
       {% url 'account_signup' as account_signup_url %}
-      <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
+      <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}{% if request.GET.next %}{% if utm_qs or '?' in account_signup_url %}&{% else %}?{% endif %}next={{ request.GET.next|urlencode }}{% endif %}"
          data-analytics-cta-id="nav_start_trial" data-analytics-placement="header_mobile" data-analytics-intent="signup"
          class="gk-mm-cta">Start free trial</a>
       {% endwith %}

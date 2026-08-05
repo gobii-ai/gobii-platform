@@ -2263,7 +2263,12 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(self.request_obj.selected_option_key, "ship")
         self.assertIsNotNone(self.request_obj.raw_reply_message_id)
-        self.assertTrue(self.request_obj.raw_reply_message.raw_payload["hide_in_chat"])
+        reply_payload = self.request_obj.raw_reply_message.raw_payload
+        self.assertNotIn("hide_in_chat", reply_payload)
+        self.assertEqual(
+            reply_payload["human_input_responses"][0]["question"],
+            self.request_obj.question,
+        )
         self.assertTrue(
             PersistentAgentUserActionEvent.objects.filter(
                 agent=self.agent,
@@ -2493,7 +2498,11 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(second_request.free_text, "Follow up with a summary.")
         self.assertEqual(first_request.raw_reply_message_id, second_request.raw_reply_message_id)
         reply_message = PersistentAgentMessage.objects.get(id=first_request.raw_reply_message_id)
-        self.assertTrue(reply_message.raw_payload["hide_in_chat"])
+        self.assertNotIn("hide_in_chat", reply_message.raw_payload)
+        self.assertEqual(
+            [entry["question"] for entry in reply_message.raw_payload["human_input_responses"]],
+            ["What should I do first?", "What should I do second?"],
+        )
         self.assertEqual(reply_message.conversation.channel, CommsChannel.WEB)
         self.assertEqual(
             reply_message.body,

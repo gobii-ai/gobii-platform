@@ -96,7 +96,7 @@ export function AgentIntelligenceGateModal({
       subtitle={subtitle}
       onClose={onClose}
       icon={needsPlanUpgrade ? Lock : Zap}
-      desktopIconBgClass={needsPlanUpgrade ? 'bg-gradient-to-br from-amber-100 to-orange-100' : 'bg-gradient-to-br from-indigo-100 to-blue-100'}
+      desktopIconBgClass={needsPlanUpgrade ? 'bg-gradient-to-br from-amber-100 to-orange-100' : 'bg-gradient-to-br from-indigo-100 to-violet-100'}
       desktopIconColorClass={needsPlanUpgrade ? 'text-amber-600' : 'text-indigo-600'}
       desktopWidthClass="sm:max-w-2xl"
       desktopBodyClassName="pr-1"

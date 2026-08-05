@@ -31,6 +31,27 @@ export type WebhookMeta = {
   payload?: unknown
 }
 
+export type BriefingRow = {
+  label: string
+  value: string
+  open?: boolean
+}
+
+export type BriefingPayload = {
+  template?: string
+  title?: string | null
+  rows: BriefingRow[]
+}
+
+export type AnswerRow = {
+  question: string
+  answer: string
+}
+
+export type AnswersPayload = {
+  rows: AnswerRow[]
+}
+
 export type StructuredPeerPayload = Record<string, unknown> | unknown[]
 
 export type AgentMessageFeedback = 'up' | 'down'
@@ -67,6 +88,8 @@ export type AgentMessage = {
   channelLabel?: string | null
   webhookMeta?: WebhookMeta | null
   structuredPayload?: StructuredPeerPayload | null
+  briefing?: BriefingPayload | null
+  answers?: AnswersPayload | null
   viewerFeedback?: AgentMessageFeedback | null
   deliveryStatus?: 'pending_approval' | 'queued' | 'sending' | 'sent' | 'delivered' | 'failed'
   outboxReview?: {

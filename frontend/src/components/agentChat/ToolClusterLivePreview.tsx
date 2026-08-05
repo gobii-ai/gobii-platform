@@ -1585,7 +1585,7 @@ export function ToolClusterLivePreview({
                           >
                             <span
                               className={`tool-cluster-live-preview__enabled-tool-card-icon ${
-                                chip.kind === 'system_skill' ? 'bg-blue-100 text-blue-600' : 'bg-violet-100 text-violet-600'
+                                chip.kind === 'system_skill' ? 'bg-violet-100 text-violet-600' : 'bg-violet-100 text-violet-600'
                               }`}
                             >
                               <ChipIcon aria-hidden="true" />

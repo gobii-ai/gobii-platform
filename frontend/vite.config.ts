@@ -33,6 +33,7 @@ export default defineConfig(({ mode }) => ({
       input: {
         main: resolve(projectRootDir, 'src/main.tsx'),
         homepageIntegrations: resolve(projectRootDir, 'src/homepageIntegrations.tsx'),
+        templateIntake: resolve(projectRootDir, 'src/templateIntake.tsx'),
         prequal: resolve(projectRootDir, 'src/prequal.ts'),
       },
     },

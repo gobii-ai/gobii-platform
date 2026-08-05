@@ -93,8 +93,8 @@ export function PendingRequestReviewFooter({
   const primaryColor = theme === 'contact'
     ? 'bg-amber-600 hover:bg-amber-700'
     : theme === 'outbox'
-      ? 'bg-blue-600 hover:bg-blue-700'
-      : 'bg-sky-600 hover:bg-sky-700'
+      ? 'bg-violet-600 hover:bg-violet-700'
+      : 'bg-violet-600 hover:bg-violet-700'
   return (
     <div className="space-y-2">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

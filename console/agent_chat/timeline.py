@@ -694,6 +694,30 @@ def _serialize_message(
     reply_to_payload: dict | None = None
     raw_message_payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
     structured_payload = get_structured_peer_payload(raw_message_payload)
+    briefing_payload = (
+        raw_message_payload.get("gobii_briefing")
+        if isinstance(raw_message_payload, dict)
+        and isinstance(raw_message_payload.get("gobii_briefing"), dict)
+        else None
+    )
+    # Human-input answers render as a structured card, not a prose bubble; the
+    # question text travels in the payload so the card is self-contained.
+    answers_payload = None
+    raw_responses = raw_message_payload.get("human_input_responses")
+    if isinstance(raw_responses, list):
+        answer_rows = []
+        for response in raw_responses:
+            if not isinstance(response, Mapping):
+                continue
+            answer = str(response.get("selected_option_title") or response.get("free_text") or "").strip()
+            if not answer:
+                continue
+            answer_rows.append({
+                "question": str(response.get("question") or "").strip(),
+                "answer": answer,
+            })
+        if answer_rows:
+            answers_payload = {"rows": answer_rows}
     reply_raw = raw_message_payload.get("discord_reply_to")
     if isinstance(reply_raw, Mapping) and not reply_raw.get("unavailable"):
         reply_body = str(reply_raw.get("content") or "").strip()
@@ -746,6 +770,8 @@ def _serialize_message(
             "channelLabel": discord_channel_label or None,
             "webhookMeta": webhook_meta,
             "structuredPayload": structured_payload,
+            "briefing": briefing_payload,
+            "answers": answers_payload,
             "viewerFeedback": feedback_lookup.get(message.id) if feedback_lookup else None,
             "deliveryStatus": message.latest_status,
             "outboxReview": outbox_review,

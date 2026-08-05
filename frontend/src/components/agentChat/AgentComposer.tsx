@@ -311,7 +311,7 @@ const PENDING_WORKING_TAB_ORDER: PendingWorkingTabKind[] = ['questions', 'messag
 const PENDING_WORKING_TAB_CONFIG = {
   questions: {
     title: 'Questions',
-    color: '#0284c7',
+    color: '#7c3aed',
     icon: <MessageSquareQuote size={11} strokeWidth={2.2} />,
   },
   messages: {

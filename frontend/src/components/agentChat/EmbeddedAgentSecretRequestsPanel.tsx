@@ -300,9 +300,9 @@ export function EmbeddedAgentSecretRequestsPanel({
                     checked={makeGlobal}
                     onChange={(event) => setMakeGlobal(event.currentTarget.checked)}
                     disabled={busy}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-400 bg-slate-950 text-sky-500 focus:ring-sky-400"
+                    className="mt-0.5 h-4 w-4 rounded border-slate-400 bg-slate-950 text-violet-500 focus:ring-violet-400"
                   />
-                  <Globe className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" aria-hidden="true" />
+                  <Globe className="mt-0.5 h-4 w-4 shrink-0 text-violet-300" aria-hidden="true" />
                   <span>Save as global secrets for this context so other agents can reuse matching keys.</span>
                 </label>
               )}
@@ -326,7 +326,7 @@ export function EmbeddedAgentSecretRequestsPanel({
                         onChange={(event) => toggleSelected(request.id, event.currentTarget.checked)}
                         disabled={busy}
                         aria-label={`Select ${request.name}`}
-                        className="mt-1 h-4 w-4 rounded border-slate-400 bg-slate-950 text-sky-500 focus:ring-sky-400"
+                        className="mt-1 h-4 w-4 rounded border-slate-400 bg-slate-950 text-violet-500 focus:ring-violet-400"
                       />
                       <div className="min-w-0 flex-1 space-y-4">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -373,7 +373,7 @@ export function EmbeddedAgentSecretRequestsPanel({
                             onChange={(event) => updateSecretValue(request.id, event.currentTarget.value)}
                             disabled={busy}
                             autoComplete="new-password"
-                            className="mt-2 block w-full rounded-xl border border-slate-200/20 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-100 shadow-none outline-none transition focus:border-sky-300/60 focus:ring-2 focus:ring-sky-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="mt-2 block w-full rounded-xl border border-slate-200/20 bg-slate-950/45 px-3 py-2.5 text-sm text-slate-100 shadow-none outline-none transition focus:border-violet-300/60 focus:ring-2 focus:ring-violet-400/20 disabled:cursor-not-allowed disabled:opacity-60"
                             placeholder={`Enter value for ${request.name}`}
                           />
                           {fieldError ? <p className="mt-2 text-sm text-rose-200">{fieldError}</p> : null}

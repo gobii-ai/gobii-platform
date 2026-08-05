@@ -766,6 +766,34 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             # Do not plan-clamp here; plan clamping happens when the agent is persisted and at runtime.
             preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
 
+        # Draw the agent's real name now so the plan gate can say "<Name> is
+        # ready" — the spawn honors it via provision(name=...), so the gate
+        # never lies. Idempotent per session; only when a charter is staged.
+        prospective_agent_name = None
+        if saved_charter:
+            from pages.template_intake import PROSPECTIVE_NAME_SESSION_KEY
+
+            prospective_agent_name = request.session.get(PROSPECTIVE_NAME_SESSION_KEY)
+            if not prospective_agent_name:
+                try:
+                    from api.services.persistent_agents import PersistentAgentProvisioningService
+
+                    prospective_agent_name = PersistentAgentProvisioningService.generate_unique_name(
+                        request.user
+                    )
+                    request.session[PROSPECTIVE_NAME_SESSION_KEY] = prospective_agent_name
+                    request.session.modified = True
+                except Exception:
+                    logger.warning("Failed to draw prospective agent name", exc_info=True)
+
+        from pages.template_intake import BRIEFING_PAYLOAD_SESSION_KEY, get_outcome_estimate
+
+        briefing_payload = request.session.get(BRIEFING_PAYLOAD_SESSION_KEY)
+        brief_title = (
+            briefing_payload.get("title") if isinstance(briefing_payload, dict) else None
+        )
+        staged_template_code = request.session.get("signup_template_code")
+
         payload = {
             "charter": saved_charter,
             "charter_override": request.session.get("agent_charter_override"),
@@ -782,6 +810,9 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
                 request.user,
                 resolved_context,
             ),
+            "prospective_agent_name": prospective_agent_name,
+            "brief_title": brief_title,
+            "outcome_estimate": get_outcome_estimate(staged_template_code),
         }
         response = JsonResponse(payload)
         if restored_cookie:

@@ -1787,7 +1787,9 @@ class LibraryViewTests(TestCase):
             {"data-analytics-cta-id": "library_custom_agent"},
         )
         self.assertIsNotNone(custom_agent_link)
-        self.assertEqual(custom_agent_link["href"], "/?spawn=1")
+        # Custom-agent building lives in the app now — the legacy homepage
+        # charter surface is gone and must never come back.
+        self.assertEqual(custom_agent_link["href"], "/app/agents/new")
         self.assertEqual(custom_agent_link["rel"], ["nofollow"])
         for script in soup.find_all("script", {"type": "application/ld+json"}):
             json.loads(script.string)
@@ -2014,3 +2016,110 @@ class LibraryViewTests(TestCase):
         self.assertEqual(second_response.status_code, 200)
         self.assertFalse(second_response.json()["isLiked"])
         self.assertEqual(second_response.json()["likeCount"], 0)
+
+
+class TemplateIntakeBriefTests(TestCase):
+    """The intake brief quiz: templates with a schema route hire through the
+    brief, and the brief's answers become the agent's first input."""
+
+    def _create_sourcing_template(self):
+        return PersistentAgentTemplate.objects.create(
+            code="ai-agent-for-candidate-sourcing",
+            slug="candidate-sourcing",
+            display_name="Candidate Sourcing",
+            tagline="Sourcing tagline",
+            description="Sourcing description",
+            charter="Source qualified candidates.",
+            category="Recruiting",
+            is_active=True,
+        )
+
+    def _brief_url(self, template):
+        from pages.public_template_urls import public_template_category_slug
+
+        return reverse(
+            "pages:public_template_brief",
+            kwargs={
+                "category_slug": public_template_category_slug(template),
+                "template_slug": template.slug,
+            },
+        )
+
+    @tag("batch_public_templates")
+    def test_hire_redirects_to_brief_when_schema_exists(self):
+        template = self._create_sourcing_template()
+        from pages.public_template_urls import public_template_category_slug
+
+        response = self.client.post(
+            reverse(
+                "pages:public_template_hire",
+                kwargs={
+                    "category_slug": public_template_category_slug(template),
+                    "template_slug": template.slug,
+                },
+            )
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], self._brief_url(template))
+
+    @tag("batch_public_templates")
+    def test_brief_get_renders_schema(self):
+        template = self._create_sourcing_template()
+        response = self.client.get(self._brief_url(template))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("What are you hiring for?", response.content.decode())
+
+    @tag("batch_public_templates")
+    def test_brief_post_stages_intake_session(self):
+        template = self._create_sourcing_template()
+        response = self.client.post(
+            self._brief_url(template),
+            data={
+                "answers": json.dumps(
+                    {
+                        "role": "Senior Data Engineer",
+                        "must": ["Spark", "5+ years"],
+                        "where": "Remote · US timezones",
+                    }
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        session = self.client.session
+        charter = session["agent_charter"]
+        self.assertIn("Hiring brief — Senior Data Engineer", charter)
+        self.assertIn("Spark, 5+ years", charter)
+        override = session["agent_charter_override"]
+        self.assertIn("structured human-input request tool", override)
+        briefing = session["agent_briefing_payload"]
+        self.assertEqual(briefing["title"], "Senior Data Engineer")
+        self.assertTrue(any(row["open"] for row in briefing["rows"]))
+        self.assertEqual(session["signup_template_code"], template.code)
+
+    @tag("batch_public_templates")
+    def test_spawn_intent_carries_gate_personalization(self):
+        template = self._create_sourcing_template()
+        user = get_user_model().objects.create_user(
+            username="intake-gate-user",
+            email="intake-gate-user@example.com",
+            password="pw",
+        )
+        self.client.force_login(user)
+        self.client.post(
+            self._brief_url(template),
+            data={"answers": json.dumps({"role": "Staff ML Engineer"})},
+        )
+
+        response = self.client.get("/console/api/agents/spawn-intent/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["prospective_agent_name"])
+        self.assertEqual(payload["brief_title"], "Staff ML Engineer")
+        estimate = payload["outcome_estimate"]
+        self.assertEqual(estimate["unit"], "qualified candidates")
+        self.assertGreater(estimate["scale"], estimate["startup"])
+
+        # Idempotent: a second fetch keeps the drawn name.
+        second = self.client.get("/console/api/agents/spawn-intent/").json()
+        self.assertEqual(second["prospective_agent_name"], payload["prospective_agent_name"])

@@ -1840,13 +1840,15 @@ def submit_human_input_responses_batch(
         if len(prepared_responses) == 1
         else _build_batch_response_body(prepared_responses)
     )
+    # Not hidden: the chat timeline renders these as a structured answers card
+    # (mirroring the question card), so the user sees what they submitted.
     raw_payload: dict[str, Any] = {
         "source": "console_human_input_response_batch" if len(prepared_responses) > 1 else "console_human_input_response",
-        "hide_in_chat": True,
         "human_input_request_ids": [str(prepared.request.id) for prepared in prepared_responses],
         "human_input_responses": [
             {
                 "request_id": str(prepared.request.id),
+                "question": prepared.request.question,
                 "selected_option_key": prepared.selected_option_key or None,
                 "selected_option_title": prepared.selected_option_title or None,
                 "free_text": prepared.free_text or None,

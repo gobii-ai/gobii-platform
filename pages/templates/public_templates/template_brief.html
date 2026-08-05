@@ -1,0 +1,36 @@
+{% load static %}
+{% load vite_tags %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brief your agent · Gobii</title>
+<link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { min-height:100%; }
+  body { font-family:'Inter Variable','InterVariable',ui-sans-serif,system-ui,sans-serif;
+    background:linear-gradient(170deg,#0f0a1e 0%,#16102b 40%,#241a4a 100%); background-attachment:scroll; color:#b7aed4; }
+  .bg-glow { position:fixed; inset:0; pointer-events:none; overflow:hidden; }
+  .bg-glow::before { content:""; position:absolute; width:560px; height:560px; border-radius:50%;
+    background:rgba(168,85,247,.30); filter:blur(110px); top:-160px; right:-120px; }
+  .bg-glow::after { content:""; position:absolute; width:460px; height:460px; border-radius:50%;
+    background:rgba(124,58,237,.22); filter:blur(120px); bottom:-160px; left:-120px; }
+  .brief-nav { position:relative; display:flex; align-items:center; max-width:1080px; margin:18px auto 0; padding:10px 18px;
+    border-radius:15px; background:rgba(16,10,30,.85); border:1px solid rgba(255,255,255,.09); }
+  .brief-nav img { width:30px; height:30px; }
+  .brief-nav span { color:#fff; font-weight:300; font-size:21px; margin-left:8px; transform:translateY(-2px); display:inline-block; }
+  @media (max-width:680px){ .brief-nav { margin:10px 12px 0; } }
+</style>
+</head>
+<body>
+<div class="bg-glow"></div>
+<nav class="brief-nav"><a href="/" style="display:flex;align-items:center;text-decoration:none"><img src="{% static 'images/gobii_fish.png' %}" alt=""><span>gobii</span></a></nav>
+<div id="template-intake-root"
+     data-schema="{{ intake_schema_json }}"
+     data-action="{{ post_url }}"
+     data-csrf="{{ csrf_token }}"></div>
+{% vite_asset 'src/templateIntake.tsx' %}
+</body>
+</html>

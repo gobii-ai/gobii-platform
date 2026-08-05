@@ -2,11 +2,7 @@
 {% load static %}
 {% load cta_tags %}
 {% block tailwind_css %}
-  {% if home_use_k %}
   <link rel="stylesheet" href="{% static 'css/home_tailwind.css' %}">
-  {% else %}
-  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
-  {% endif %}
 {% endblock %}
 {% block title %}{{ home_meta_title }}{% endblock %}
 {% block canonical_link %}
@@ -16,7 +12,7 @@
   {% endif %}
   {% endif %}
 {% endblock %}
-{% block showcase_css %}{% if home_use_k %}{% include "includes/_gk_showcase.html" %}{% endif %}{% endblock %}
+{% block showcase_css %}{% include "includes/_gk_showcase.html" %}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="{{ home_meta_description }}">
@@ -45,16 +41,6 @@
   {% endif %}
   {% if home_structured_data_json %}
   <script type="application/ld+json">{{ home_structured_data_json }}</script>
-  {% endif %}
-  {% if not home_use_k %}
-    {% if immersive_app_assets %}
-      {% for href in immersive_app_assets.styles %}
-        <link rel="preload" as="style" href="{{ href }}">
-      {% endfor %}
-      {% for src in immersive_app_assets.scripts %}
-        <link rel="modulepreload" href="{{ src }}">
-      {% endfor %}
-    {% endif %}
   {% endif %}
 {% endblock %}
 {% block early_head_styles %}
@@ -451,64 +437,7 @@
   {% include "home/_k_styles.html" %}
 {% endblock %}
 {% block content %}
-{% if home_use_k %}
 {% include "home/_k_page.html" %}
-{% else %}
-<main id="main-content" class="relative game-of-life-panel -mt-16 min-h-[420px] sm:min-h-[520px]">
-  <div class="game-of-life-gradient-bg" aria-hidden="true"></div>
-  
-  <!-- Grid pattern overlay -->
-  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[-1]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
-  
-  <!-- Seamless Gradient Fade -->
-  <div class="absolute bottom-0 left-0 right-0 h-64 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none z-10"></div>
-
-  <!-- ========================================================= -->
-  <!-- Agent Spawn Hero -->
-  <section class="relative pb-8 game-of-life-content z-20">
-
-    <!-- Content container with enhanced styling -->
-    <div class="relative max-w-5xl mx-auto px-6 pt-20 sm:pt-28 pb-0">
-      
-      <!-- Ambient Glow centered on hero + input -->
-      <div class="absolute top-16 sm:top-24 left-1/2 -translate-x-1/2 w-[600px] sm:w-[1000px] h-[500px] sm:h-[800px] bg-white blur-[80px] sm:blur-[100px] opacity-90 rounded-full pointer-events-none -z-10"></div>
-
-      <!-- Main Headline -->
-      {% include "home/_hero.html" %}
-
-      <div class="gk-spawn contents">{% include "home/_spawn_module.html" %}</div>
-
-    </div>
-  </section>
-
-  <!-- Value proposition sections (proprietary only) -->
-  {% if settings.GOBII_PROPRIETARY_MODE %}
-    {% include "home/_flow_strip.html" %}
-    <section id="what-is-gobii" class="relative py-10 sm:py-12" aria-labelledby="what-is-gobii-heading" data-animate>
-      <div class="max-w-3xl mx-auto px-6 text-center">
-        <h2 id="what-is-gobii-heading" class="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">What is Gobii?</h2>
-        <p class="mt-4 text-base sm:text-lg leading-relaxed text-slate-600">
-          Gobii is an AI agent platform that gives businesses always-on virtual employees capable of browser automation, web research, data collection, and workflow execution.
-        </p>
-      </div>
-    </section>
-    {% include "home/_value_sections.html" %}
-    {% include "home/_vision_and_trust.html" %}
-  {% endif %}
-
-  <!-- OR Divider -->
-  <section class="relative">
-    <div class="max-w-5xl mx-auto px-6">
-      <div class="relative flex items-center justify-center py-8 sm:py-10">
-        <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
-        <span class="flex-shrink-0 mx-6 text-xs font-bold tracking-[0.25em] uppercase text-indigo-400">OR</span>
-        <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
-      </div>
-    </div>
-  </section>
-  {% include "home/_directory.html" %}
-</main>
-{% endif %}
   {% if homepage_perf_motion_reduction_enabled %}
   <script>
     window.GobiiHomePerf = window.GobiiHomePerf || (function () {
@@ -1143,11 +1072,9 @@
         const textarea = document.querySelector('textarea[name="charter"]');
         if (textarea) {
           textareaAutoResize(textarea);
-          {% if home_use_k %}
-          // The charter box sits below the fold on the template-first layout;
-          // focusing it on load would scroll the visitor past the hero.
+          // The charter box (build-your-own surfaces) never autofocuses on the
+          // homepage — the template-first hero owns the fold.
           return;
-          {% endif %}
           const homePerf = window.GobiiHomePerf;
           if (
             homePerf &&

@@ -1,0 +1,79 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Start your free trial · Gobii</title>
+<link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Inter Variable','InterVariable',ui-sans-serif,system-ui,sans-serif; min-height:100vh;
+    background:linear-gradient(170deg,#0f0a1e 0%,#16102b 40%,#241a4a 100%); color:#b7aed4; }
+  .glow { position:fixed; inset:0; pointer-events:none; }
+  .glow::before { content:""; position:absolute; width:560px; height:560px; border-radius:50%;
+    background:rgba(168,85,247,.30); filter:blur(110px); top:-160px; right:-120px; }
+  .wrap { max-width:440px; margin:0 auto; padding:clamp(30px,9vh,72px) 16px; position:relative; }
+  .card { border-radius:16px; padding:28px 28px 24px;
+    background:linear-gradient(rgba(22,14,40,.82),rgba(22,14,40,.82)) padding-box,
+               linear-gradient(120deg,rgba(124,58,237,.5),rgba(240,171,252,.28)) border-box;
+    border:1px solid transparent; box-shadow:0 44px 110px -44px rgba(124,58,237,.6); }
+  h1 { font-weight:300; letter-spacing:-0.5px; font-size:25px; color:#fff; }
+  .accent { font-weight:400; background:linear-gradient(90deg,#c4b5fd,#f0abfc); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .zero { margin:8px 0 18px; font-size:13.5px; line-height:1.55; }
+  .zero b { color:#7ee2b8; font-weight:650; }
+  .plan { display:flex; align-items:center; border-radius:12px; padding:13px 15px; margin-bottom:8px; font-size:14px; color:#e9dcff;
+    background:rgba(139,92,246,.14); border:1px solid rgba(196,181,253,.4); }
+  .plan .nm { font-weight:650; color:#fff; }
+  .plan .pr { margin-left:auto; } .plan .pr b { color:#fff; }
+  .alt { font-size:12px; color:#8a80a8; margin-bottom:18px; } .alt a { color:#c4b5fd; }
+  .lbl { font-size:11px; letter-spacing:1.8px; font-weight:600; color:#c4b5fd; margin-bottom:7px; }
+  .ccrow { display:grid; grid-template-columns:1fr 84px 68px; gap:8px; margin-bottom:16px; }
+  .cc { font:inherit; font-size:14px; padding:11px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(10,6,22,.55); color:#fff; outline:none; min-width:0; }
+  .cc:focus { box-shadow:0 0 0 3px rgba(168,85,247,.22); border-color:#a855f7; }
+  .bullets { font-size:12.5px; line-height:1.9; margin-bottom:18px; }
+  .bullets b { color:#e9dcff; font-weight:550; }
+  .go { display:block; width:100%; text-align:center; font:inherit; font-size:15px; font-weight:650; color:#fff; text-decoration:none;
+    background:linear-gradient(180deg,#7c3aed,#6d28d9); border:0; border-radius:12px; padding:13px; cursor:pointer;
+    box-shadow:0 12px 28px -12px rgba(124,58,237,.8); }
+  .under { text-align:center; font-size:11.5px; color:#6f6590; margin-top:12px; }
+  .simnote { text-align:center; font-size:10.5px; letter-spacing:1.4px; color:#6f6590; margin-top:22px; }
+
+  .whostrip{display:flex;align-items:center;gap:10px;margin:0 auto 14px;padding:9px 14px;border-radius:12px;max-width:320px;
+    background:rgba(139,92,246,.1);border:1px solid rgba(196,181,253,.28)}
+  .avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#8b5cf6,#c026d3);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none;
+    box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 4px 12px -4px rgba(124,58,237,.6)}
+  .ready{margin-left:auto;color:#7ee2b8;font-size:9px;animation:pulse 2s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.4}}
+  @media (prefers-reduced-motion: reduce){.ready{animation:none}}
+
+  .wallets{display:flex;gap:7px;justify-content:center;align-items:center;margin-top:12px;flex-wrap:wrap}
+  .wchip{font-size:11px;font-weight:600;color:#e9dcff;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:5px 12px}
+  .wsec{font-size:10.5px;color:#8a80a8}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="wrap"><div class="card">
+  {% if prospective_name %}
+  <div class="whostrip">
+    <span class="avatar">{{ prospective_name|slice:":1" }}</span>
+    <div style="text-align:left">
+      <b style="color:#fff;font-size:13px">{{ prospective_name }} is ready</b>
+      <div style="font-size:11px;color:#9a8fc0">{% if brief_role %}{{ brief_role|title }} · {% endif %}Brief loaded</div>
+    </div>
+    <span class="ready">●</span>
+  </div>
+  {% endif %}
+  <h1>Start your <span class="accent">7-day free trial</span></h1>
+  <p class="zero"><b>$0 today</b> · then $250/mo · drop to Pro anytime</p>
+  <a class="go" href="{{ continue_url }}">Start free trial</a>
+  <div class="wallets"><span class="wchip">&#63743; Pay</span><span class="wchip">G Pay</span><span class="wchip">Card</span><span class="wsec">via Stripe Checkout</span></div>
+  <p class="under">Not charged until day 8 · reminder email first</p>
+</div>
+<p class="simnote">DEMO — NO PAYMENT IS PROCESSED ON THIS SCREEN</p>
+</div>
+</body>
+</html>
