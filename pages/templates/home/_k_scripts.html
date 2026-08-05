@@ -222,7 +222,7 @@
       at(base + cands.length * 380 + 2600, runDemo);
     }
 
-    function applyKey(key) {
+    function applyKey(key, renderImmediately) {
       hswap.querySelectorAll('.gk-hgroup').forEach(function (group) {
         group.classList.toggle('gk-live', group.dataset.g === key);
       });
@@ -246,8 +246,18 @@
         }
       }
 
-      renderDemo(key);
+      if (renderImmediately !== false) renderDemo(key);
       window.requestAnimationFrame(syncHeadlineHeight);
+    }
+
+    function keyFromHash() {
+      var hashKey = window.location.hash.slice(1).toLowerCase();
+      if (!hashKey) return null;
+      var matchingPill = Array.prototype.find.call(
+        cats.querySelectorAll('.gk-cat'),
+        function (pill) { return pill.dataset.k === hashKey; }
+      );
+      return matchingPill ? matchingPill.dataset.k : null;
     }
 
     var ctaFormEl = document.getElementById('gk-cta-form');
@@ -260,18 +270,15 @@
       });
     }
 
-    cats.addEventListener('click', function (event) {
-      var pill = event.target.closest('.gk-cat');
-      if (pill && pill.dataset.k) applyKey(pill.dataset.k);
+    window.addEventListener('hashchange', function () {
+      var hashKey = keyFromHash();
+      if (hashKey) applyKey(hashKey);
     });
     window.addEventListener('resize', syncHeadlineHeight, { passive: true });
 
     var initialPill = cats.querySelector('.gk-cat[data-active="true"]');
-    var initialKey = initialPill ? initialPill.dataset.k : 'all';
-    document.querySelectorAll('.gk-row-block').forEach(function (row) {
-      row.hidden = initialKey !== 'all' && row.dataset.row !== initialKey;
-    });
-    syncHeadlineHeight();
+    var initialKey = keyFromHash() || (initialPill ? initialPill.dataset.k : 'all');
+    applyKey(initialKey, false);
 
     var startDemo = function () { renderDemo(initialKey); };
     if (window.GobiiHomePerf && typeof window.GobiiHomePerf.runWhenIdle === 'function') {

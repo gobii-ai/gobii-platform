@@ -2,11 +2,11 @@
 <div class="gk-hero">
   <div class="gk-cats" id="gk-cats">
     {% for group in home_hero_groups %}
-      <button type="button" class="gk-pill gk-cat" data-k="{{ group.key }}" data-active="{% if forloop.first %}true{% else %}false{% endif %}"
-              data-analytics-cta-id="home_k_category_{{ group.key }}" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">{{ group.label }}</button>
+      <a id="{{ group.key }}" href="#{{ group.key }}" class="gk-pill gk-cat" data-k="{{ group.key }}" data-active="{% if forloop.first %}true{% else %}false{% endif %}"
+         data-analytics-cta-id="home_k_category_{{ group.key }}" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">{{ group.label }}</a>
     {% endfor %}
-    <button type="button" class="gk-pill gk-cat" data-k="all" data-active="{% if not home_hero_groups %}true{% else %}false{% endif %}"
-            data-analytics-cta-id="home_k_category_all" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">All agents</button>
+    <a id="all" href="#all" class="gk-pill gk-cat" data-k="all" data-active="{% if not home_hero_groups %}true{% else %}false{% endif %}"
+       data-analytics-cta-id="home_k_category_all" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">All agents</a>
   </div>
 
   <div class="gk-hswap" id="gk-hswap">

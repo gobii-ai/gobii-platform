@@ -1387,16 +1387,19 @@ class HomePageTests(TestCase):
         self.assertFalse(
             cta_form.find("button", type="submit").has_attr("data-analytics-cta-id")
         )
-        category_buttons = {
-            button["data-k"]: button
-            for button in soup.select(".gk-cat[data-analytics-cta-id]")
+        category_links = {
+            link["data-k"]: link
+            for link in soup.select(".gk-cat[data-analytics-cta-id]")
         }
+        self.assertEqual(category_links["sales"].name, "a")
+        self.assertEqual(category_links["sales"]["id"], "sales")
+        self.assertEqual(category_links["sales"]["href"], "#sales")
         self.assertEqual(
-            category_buttons["recruiting"]["data-analytics-cta-id"],
+            category_links["recruiting"]["data-analytics-cta-id"],
             "home_k_category_recruiting",
         )
         self.assertEqual(
-            category_buttons["all"]["data-analytics-intent"],
+            category_links["all"]["data-analytics-intent"],
             "select_agent_category",
         )
         self.assertContains(
