@@ -440,6 +440,7 @@ class LibraryView(TemplateView):
             official_only=False,
         )
         context["page_name"] = "AI Employee Template Library"
+        context["suppress_stripe_js"] = True
         context["library_initial_category"] = selected_category
         context["library_initial_official_only"] = official_only
         context["library_page_title"] = page_title

@@ -76,6 +76,20 @@ BUILTIN_PETS = (
         "description": "A Yorkshire terrier named Chewie.",
         "spritesheetUrl": "images/pets/chewie-v2.webp",
     },
+    {
+        "id": "builtin:violet",
+        "kind": "builtin",
+        "displayName": "Violet",
+        "description": "A lovable dog.",
+        "spritesheetUrl": "images/pets/violet-v2.webp",
+    },
+    {
+        "id": "builtin:jimothy",
+        "kind": "builtin",
+        "displayName": "Jimothy",
+        "description": "The world famous racoon.",
+        "spritesheetUrl": "images/pets/jimothy-v2.webp",
+    },
 )
 
 

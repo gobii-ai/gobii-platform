@@ -2303,6 +2303,7 @@ class PublicTemplateDetailView(TemplateView):
         }
 
         context["template"] = self.template
+        context["suppress_stripe_js"] = True
         public_profile_handle = self.template.public_profile.handle if self.template.public_profile_id else ""
         context["public_profile_handle"] = public_profile_handle
         context["template_is_gobii_owned"] = self.template.is_official

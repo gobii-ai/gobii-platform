@@ -944,6 +944,7 @@ class PublicTemplateRouteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Stripe Fraud Dispute Monitor")
         self.assertContains(response, "Monitor Stripe disputes and flag risky activity.")
+        self.assertNotContains(response, "https://js.stripe.com")
         self.assertEqual(
             response.context["template_seo_title"],
             f"{template.display_name} AI Employee Template | Gobii",
@@ -1781,6 +1782,7 @@ class LibraryViewTests(TestCase):
             response,
             'data-analytics-cta-tracking-enabled="true"',
         )
+        self.assertNotContains(response, "https://js.stripe.com")
         self.assertEqual(len(soup.find_all("h1")), 1)
         custom_agent_link = soup.find(
             "a",

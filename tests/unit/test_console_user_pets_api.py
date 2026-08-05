@@ -162,6 +162,20 @@ class ConsoleUserPetsApiTests(TestCase):
                     "description": "A Yorkshire terrier named Chewie.",
                     "spritesheetUrl": "/static/images/pets/chewie-v2.webp",
                 },
+                {
+                    "id": "builtin:violet",
+                    "kind": "builtin",
+                    "displayName": "Violet",
+                    "description": "A lovable dog.",
+                    "spritesheetUrl": "/static/images/pets/violet-v2.webp",
+                },
+                {
+                    "id": "builtin:jimothy",
+                    "kind": "builtin",
+                    "displayName": "Jimothy",
+                    "description": "The world famous racoon.",
+                    "spritesheetUrl": "/static/images/pets/jimothy-v2.webp",
+                },
             ],
         )
         self.assertEqual(
@@ -254,6 +268,8 @@ class ConsoleUserPetsApiTests(TestCase):
             "builtin:clementine",
             "builtin:riby",
             "builtin:chewie",
+            "builtin:violet",
+            "builtin:jimothy",
         ):
             with self.subTest(pet_id=pet_id):
                 response = self._update_preferences(
