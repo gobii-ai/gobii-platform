@@ -31,6 +31,8 @@ RECRUITMENT_SOURCING_SOURCE_FALLBACK = "recruitment_sourcing_source_fallback"
 RECRUITMENT_SOURCING_DEDUPE_LEDGER = "recruitment_sourcing_dedupe_ledger"
 RECRUITMENT_SOURCING_PARTIAL_VERIFICATION = "recruitment_sourcing_partial_verification"
 
+RECRUITMENT_SOURCING_FIRST_PASS_MOMENTUM = "recruitment_sourcing_first_pass_momentum"
+
 RECRUITMENT_SOURCING_SCENARIO_SLUGS = (
     RECRUITMENT_SOURCING_SKILL_DISCOVERY,
     RECRUITMENT_SOURCING_INTAKE_GATES_SOURCING,
@@ -38,6 +40,7 @@ RECRUITMENT_SOURCING_SCENARIO_SLUGS = (
     RECRUITMENT_SOURCING_SOURCE_FALLBACK,
     RECRUITMENT_SOURCING_DEDUPE_LEDGER,
     RECRUITMENT_SOURCING_PARTIAL_VERIFICATION,
+    RECRUITMENT_SOURCING_FIRST_PASS_MOMENTUM,
 )
 
 MESSAGE_TOOL_NAMES = ("send_chat_message", "send_email", "send_sms")
@@ -996,6 +999,292 @@ class RecruitmentSourcingScenario(EvalScenario, ScenarioExecutionTools):
         self._record_expected_tools(run_id, inbound)
         self._record_forbidden_tools(run_id, inbound)
         self._record_response(run_id, agent_id, inbound)
+
+
+FIRST_PASS_TEMPLATE_CHARTER = (
+    "Run a human-reviewed candidate-sourcing workflow for the user's open role. "
+    "Confirm required and preferred skills, seniority, location, and exclusions. "
+    "Discover and qualify prospects using role-relevant public evidence. Return a "
+    "structured shortlist with sources, fit reasoning, and gaps. Draft personalized "
+    "outreach only for human approval, maintain candidate status, and summarize "
+    "funnel progress on the agreed weekly cadence."
+)
+
+FIRST_PASS_ANSWERS = {
+    "role": "Senior Backend Engineer",
+    "where": "Remote · US timezones",
+    "volume": "20 · the sweet spot",
+    "delivery": "Email digest · Monday 8:00 AM",
+}
+
+FIRST_PASS_SOURCING_TOOLS = (
+    "mcp_brightdata_web_data_linkedin_people_search",
+    "mcp_brightdata_search_engine",
+    "apollo_io-search-contacts",
+)
+
+FIRST_PASS_CANDIDATE_ITEMS = [
+    {
+        "name": "Elena Vasquez",
+        "title": "Senior Backend Engineer",
+        "company": "Streamline Systems",
+        "location": "Denver, CO (remote)",
+        "url": "https://www.linkedin.com/in/elena-vasquez-eval",
+        "evidence": "Go microservices and production Kubernetes at scale.",
+    },
+    {
+        "name": "Marcus Osei",
+        "title": "Staff Software Engineer, Platform",
+        "company": "Harborlight Data",
+        "location": "Austin, TX (remote)",
+        "url": "https://www.linkedin.com/in/marcus-osei-eval",
+        "evidence": "Distributed systems in Go, 8 years backend.",
+    },
+    {
+        "name": "Tara Lindqvist",
+        "title": "Senior Software Engineer",
+        "company": "Nordwind Labs",
+        "location": "Chicago, IL (remote)",
+        "url": "https://www.linkedin.com/in/tara-lindqvist-eval",
+        "evidence": "Kubernetes operators and Go services in production.",
+    },
+]
+
+
+class RecruitmentSourcingFirstPassMomentumScenario(RecruitmentSourcingScenario):
+    """After the user answers intake questions, the first sourcing pass happens
+    NOW: the agent must source and deliver initial results in the same session,
+    not register the weekly schedule, acknowledge the plan, and go idle.
+
+    Observed on production (2026-08-05): post-intake the agent summarized the
+    locked-in criteria, created its weekly schedule, and stopped — the first
+    deliverable silently deferred to the cron. The charter is composed exactly
+    the way the template-intake funnel composes it, so this measures the
+    shipped steering text.
+    """
+
+    slug = RECRUITMENT_SOURCING_FIRST_PASS_MOMENTUM
+    description = "Deliver the first sourcing pass in-session after intake answers instead of deferring to the schedule."
+    tags = RecruitmentSourcingScenario.tags + ("intake", "momentum")
+    tasks = [
+        ScenarioTask(name="inject_brief", assertion_type="agent_processing"),
+        ScenarioTask(name="inject_answers", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_first_pass_tools", assertion_type="tool_call"),
+        ScenarioTask(name="verify_first_results_delivered", assertion_type="llm_judge"),
+    ]
+    case = RecruitmentSourcingCase(
+        slug=RECRUITMENT_SOURCING_FIRST_PASS_MOMENTUM,
+        description="first pass momentum",
+        prompt="",
+        mock_config={
+            "mcp_brightdata_web_data_linkedin_people_search": _linkedin_people_result(FIRST_PASS_CANDIDATE_ITEMS),
+            "apollo_io-search-contacts": _apollo_people_result(
+                [
+                    {**item, "linkedin_url": item["url"]}
+                    for item in FIRST_PASS_CANDIDATE_ITEMS
+                ]
+            ),
+            "mcp_brightdata_search_engine": _search_result(
+                [
+                    {"t": f"{item['name']} - {item['title']}", "u": item["url"], "p": index + 1}
+                    for index, item in enumerate(FIRST_PASS_CANDIDATE_ITEMS)
+                ]
+            ),
+        },
+        expected_tool_names=FIRST_PASS_SOURCING_TOOLS[:1],
+        accepted_tool_alternatives={
+            FIRST_PASS_SOURCING_TOOLS[0]: FIRST_PASS_SOURCING_TOOLS[1:],
+        },
+        allowed_extra_tool_names=("deliver_results",),
+        tags=("intake", "momentum"),
+        max_relevant_tool_calls=14,
+    )
+
+    def _prepare_agent(self, agent_id: str) -> None:
+        try:
+            super()._prepare_agent(agent_id)
+        except Exception:
+            # The control arm predates deliver_results; enable what exists.
+            case = self._case()
+            names = tuple(n for n in case.tool_names_to_enable() if n != "deliver_results")
+            PersistentAgent.objects.filter(id=agent_id).update(planning_state=PersistentAgent.PlanningState.SKIPPED)
+            self._seed_prior_processing_run(agent_id)
+            self._enable_tools(agent_id, names)
+            agent = PersistentAgent.objects.get(id=agent_id)
+            if case.pre_enable_system_skill:
+                enable_system_skills(agent, [RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY])
+
+    def _compose_charter(self) -> str:
+        from pages.template_intake import build_charter_override, get_intake_schema
+
+        schema = get_intake_schema("ai-agent-for-candidate-sourcing")
+        # "must" is intentionally unanswered so the agent has one open item to ask about.
+        return build_charter_override(FIRST_PASS_TEMPLATE_CHARTER, schema, FIRST_PASS_ANSWERS)
+
+    def _brief_message(self) -> str:
+        from pages.template_intake import build_brief_message, get_intake_schema
+
+        return build_brief_message(get_intake_schema("ai-agent-for-candidate-sourcing"), FIRST_PASS_ANSWERS)
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        case = self._case()
+        self._prepare_agent(agent_id)
+        PersistentAgent.objects.filter(id=agent_id).update(charter=self._compose_charter())
+
+        # Phase 1: the brief lands; the agent may ask about the open item.
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_brief")
+        phase_one_policy = dict(case.eval_stop_policy())
+        phase_one_policy["stop_on_human_input_request"] = True
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            self.inject_message(
+                agent_id,
+                self._brief_message(),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=case.mock_config,
+                eval_stop_policy=phase_one_policy,
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_brief",
+            observed_summary="Brief injected; phase one processing completed.",
+        )
+
+        # Phase 2: the user answers the open intake item. The contract under
+        # test: the first sourcing pass and initial results happen NOW.
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_answers")
+        answers_body = (
+            "Question: What makes a candidate qualified?\n"
+            "Answer: Distributed systems experience in Go, 6+ years backend, production Kubernetes.\n\n"
+            "Question: Anything to exclude?\n"
+            "Answer: No staffing-agency recruiters; individual contributors only."
+        )
+        # Phase 1's (still-open) question must not trip the stop policy here —
+        # it cancelled every phase-2 tool call before execution and scored all
+        # runs red regardless of behavior. Runtime is bounded by the tool-call
+        # cap instead.
+        phase_two_policy = dict(case.eval_stop_policy())
+        phase_two_policy["stop_on_human_input_request"] = False
+        with self.wait_for_agent_idle(agent_id, timeout=240):
+            answers_inbound = self.inject_message(
+                agent_id,
+                answers_body,
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=case.mock_config,
+                eval_stop_policy=phase_two_policy,
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_answers",
+            observed_summary="Intake answers injected; phase two processing completed.",
+        )
+
+        # Deterministic: a sourcing tool ran after the answers landed.
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_first_pass_tools")
+        sourcing_calls = [
+            call
+            for call in _tool_calls_for_run(run_id, after=answers_inbound.timestamp, tool_names=FIRST_PASS_SOURCING_TOOLS)
+            if call.status == "complete"
+        ]
+        if not sourcing_calls:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_first_pass_tools",
+                observed_summary=(
+                    "No sourcing tool ran after the intake answers — the first pass was deferred "
+                    "(schedule-and-acknowledge failure mode)."
+                ),
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_first_pass_tools",
+                observed_summary=f"First sourcing pass ran in-session: {[call.tool_name for call in sourcing_calls]}.",
+                artifacts={"step": sourcing_calls[0].step},
+            )
+
+        # Deterministic first, judge fallback: initial results reached the user in this session.
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_first_results_delivered")
+        candidate_names = tuple(item["name"] for item in FIRST_PASS_CANDIDATE_ITEMS)
+        structured_calls = [
+            call
+            for call in _tool_calls_for_run(run_id, after=answers_inbound.timestamp, tool_names=("deliver_results",))
+            if call.status == "complete"
+        ]
+        for call in structured_calls:
+            rows = (call.tool_params or {}).get("results") or []
+            row_primaries = " ".join(str(row.get("primary") or "") for row in rows if isinstance(row, dict))
+            if rows and any(name in row_primaries for name in candidate_names):
+                self.record_task_result(
+                    run_id,
+                    None,
+                    EvalRunTask.Status.PASSED,
+                    task_name="verify_first_results_delivered",
+                    observed_summary=f"Structured delivery in-session: deliver_results with {len(rows)} row(s).",
+                    artifacts={"step": call.step},
+                )
+                return
+        response_bodies = _candidate_response_bodies(run_id, agent_id, answers_inbound)
+        delivered = next(
+            (
+                (body, artifact)
+                for body, artifact in response_bodies
+                if any(response_contains_term(body, name) for name in candidate_names)
+            ),
+            None,
+        )
+        if delivered:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_first_results_delivered",
+                observed_summary="Initial sourcing results were delivered in the same session.",
+                artifacts={"response_artifact": delivered[1], "response_preview": delivered[0][:800]},
+            )
+            return
+        latest_body = response_bodies[-1][0] if response_bodies else ""
+        if latest_body:
+            choice, reasoning = self.llm_judge(
+                question=(
+                    "After the user answered the agent's intake questions, did the agent deliver concrete "
+                    "initial sourcing results (actual candidates) in this same session? A summary of the "
+                    "locked-in criteria, a plan, or a promise that results will arrive on the weekly "
+                    "schedule does NOT count as delivering first results."
+                ),
+                context=f"Agent's post-answer response:\n{latest_body}",
+                options=["Delivered first results", "Deferred or only acknowledged"],
+            )
+            if choice == "Delivered first results":
+                self.record_task_result(
+                    run_id,
+                    None,
+                    EvalRunTask.Status.PASSED,
+                    task_name="verify_first_results_delivered",
+                    observed_summary=f"Judge: first results delivered. {reasoning}",
+                )
+                return
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name="verify_first_results_delivered",
+            observed_summary=(
+                f"No initial results delivered after intake answers; last response: {latest_body[:600]!r}"
+            ),
+        )
+
+
+ScenarioRegistry.register(RecruitmentSourcingFirstPassMomentumScenario())
 
 
 for recruitment_case in RECRUITMENT_SOURCING_CASES:

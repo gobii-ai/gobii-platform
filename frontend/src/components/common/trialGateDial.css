@@ -205,3 +205,16 @@
 .trial-gate__wsec { font-size: 0.66rem; color: #8a80a8; }
 
 .trial-gate__under { margin: 0.6rem 0 0; font-size: 0.7rem; color: #8a80a8; }
+
+.trial-gate__prohatch { margin: 0.7rem 0 0; font-size: 0.72rem; color: #8a80a8; }
+.trial-gate__prohatch button {
+    font: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: #7c3aed;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.trial-gate__prohatch button:hover { color: #c026d3; }

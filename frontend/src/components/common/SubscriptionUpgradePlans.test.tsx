@@ -59,15 +59,13 @@ describe('SubscriptionUpgradePlans mobile layout', () => {
 
     expect(screen.getByTestId('subscription-plans-grid')).toBeInTheDocument()
     expect(screen.getByTestId('subscription-plan-startup')).toBeInTheDocument()
-    const scaleToggle = screen.getByTestId('subscription-plan-scale')
-    expect(scaleToggle).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText('$0 today')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId('trial-gate-start'))
+    fireEvent.click(screen.getByTestId('subscription-plan-scale'))
     expect(onUpgrade).toHaveBeenCalledWith('scale')
   })
 
-  it('starts a Pro trial when the Pro toggle is chosen', () => {
+  it('starts a Pro trial through the escape hatch', () => {
     const onUpgrade = vi.fn()
     renderPlans(
       {
@@ -78,7 +76,6 @@ describe('SubscriptionUpgradePlans mobile layout', () => {
     )
 
     fireEvent.click(screen.getByTestId('subscription-plan-startup'))
-    fireEvent.click(screen.getByTestId('trial-gate-start'))
     expect(onUpgrade).toHaveBeenCalledWith('startup')
   })
 

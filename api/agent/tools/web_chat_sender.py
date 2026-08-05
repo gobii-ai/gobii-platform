@@ -335,8 +335,17 @@ def get_send_chat_tool() -> Dict[str, Any]:
 
 
 @handle_link_reference_errors
-def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Persist an outbound web chat message for an agent."""
+def execute_send_chat_message(
+    agent: PersistentAgent,
+    params: Dict[str, Any],
+    *,
+    extra_raw_payload: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Persist an outbound web chat message for an agent.
+
+    extra_raw_payload lets structured-delivery tools (deliver_results) attach
+    their payload to the message while reusing all routing/whitelist logic.
+    """
 
     raw_body = params.get("body", "")
     # Normalize LLM output: decode escapes, strip control chars, normalize whitespace
@@ -507,7 +516,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         conversation=conversation,
         is_outbound=True,
         body=body,
-        raw_payload={"source": "web_chat_tool"},
+        raw_payload={"source": "web_chat_tool", **(extra_raw_payload or {})},
     )
     if resolved_attachments:
         create_message_attachments(message, resolved_attachments)

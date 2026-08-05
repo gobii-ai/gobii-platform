@@ -39,6 +39,14 @@ INTAKE_SCHEMAS = {
             "startup": 4,
             "scale": 12,
         },
+        # What one delivered result is. The teaser count is how many rows stay
+        # readable at the signup freeze; the rest are redacted server-side
+        # until the trial starts. Real rows only — the lock is an offer, never
+        # a fabrication.
+        "result": {
+            "noun": "candidate",
+            "teaserCount": 3,
+        },
         "questions": [
             {
                 "id": "role",
@@ -117,6 +125,21 @@ def get_outcome_estimate(template_code: str | None) -> dict | None:
         return None
     outcome = schema.get("outcome")
     return dict(outcome) if isinstance(outcome, dict) else None
+
+
+DEFAULT_RESULT_TEASER_COUNT = 3
+
+
+def get_result_teaser_count(template_code: str | None) -> int:
+    schema = get_intake_schema(template_code)
+    result_spec = (schema or {}).get("result")
+    if isinstance(result_spec, dict):
+        try:
+            count = int(result_spec.get("teaserCount", DEFAULT_RESULT_TEASER_COUNT))
+            return max(1, count)
+        except (TypeError, ValueError):
+            pass
+    return DEFAULT_RESULT_TEASER_COUNT
 
 
 def _answer(answers: dict, qid: str, fallback: str = "") -> str:

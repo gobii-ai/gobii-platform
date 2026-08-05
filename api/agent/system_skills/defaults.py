@@ -605,7 +605,7 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "Source, qualify, dedupe, and deliver recruiting candidates while preserving role requirements, "
         "source constraints, and recruiter feedback."
     ),
-    tool_names=("search_tools",),
+    tool_names=("search_tools", "deliver_results"),
     enables=(
         "intake role requirements and decide when enough information exists to begin sourcing",
         "source candidates across available connected systems, professional networks, spreadsheets, databases, and public web data",
@@ -716,7 +716,12 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "If source access is partial, a tool errors, or the requested count cannot be met responsibly, report the "
         "verified partial set, blocker, and next bounded search path. When fallback search and verification produce "
         "the requested batch, deliver immediately; do not repeat equivalent searches or add ledger work unless "
-        "requested. Quality and criteria fidelity beat volume."
+        "requested. Quality and criteria fidelity beat volume.\n"
+        "Hand candidate batches to the user with `deliver_results` — one row per verified candidate (primary = name, "
+        "secondary = title · company, detail = fit evidence, score = confidence, url = source) — never as a prose "
+        "list in chat. Once screening criteria are settled (answered, confirmed, or explicitly assumed), run the "
+        "first bounded sourcing pass and deliver its verified batch in that same session; a recurring schedule "
+        "governs later batches only and is never a reason to defer the first delivery."
     ),
 )
 

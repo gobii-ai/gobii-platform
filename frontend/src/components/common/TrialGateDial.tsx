@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 
 import './trialGateDial.css'
 
@@ -33,31 +33,29 @@ export function TrialGateDial({
   briefTitle,
   outcomeEstimate,
 }: TrialGateDialProps) {
-  const [selected, setSelected] = useState<'startup' | 'scale'>('scale')
-
+  // Evidence (comps + friction data): one predetermined top-tier trial with a
+  // quiet cheaper-plan hatch beats a plan chooser at the card moment. The
+  // real decision stays switchable during the trial.
   const estimate = useMemo(() => {
     if (outcomeEstimate) {
       return {
-        value: selected === 'scale' ? outcomeEstimate.scale : outcomeEstimate.startup,
+        value: outcomeEstimate.scale,
         max: Math.max(outcomeEstimate.scale, outcomeEstimate.startup),
         unit: outcomeEstimate.unit,
         per: outcomeEstimate.per,
         isOutcome: true,
       }
     }
-    const credits = selected === 'scale' ? planTaskCreditsByPlan.scale : planTaskCreditsByPlan.startup
     return {
-      value: credits,
+      value: planTaskCreditsByPlan.scale,
       max: Math.max(planTaskCreditsByPlan.scale, planTaskCreditsByPlan.startup),
       unit: 'tasks included',
       per: 'month',
       isOutcome: false,
     }
-  }, [outcomeEstimate, planTaskCreditsByPlan, selected])
+  }, [outcomeEstimate, planTaskCreditsByPlan])
 
   const sweep = estimate.max > 0 ? Math.max(0.12, estimate.value / estimate.max) : 0.5
-  const price = PLAN_META[selected].price
-  const otherLabel = PLAN_META[selected === 'scale' ? 'startup' : 'scale'].label
   const trialLabel = trialDays > 0 ? `${trialDays}-day free trial` : 'free trial'
 
   return (
@@ -77,27 +75,7 @@ export function TrialGateDial({
         Start your <span className="trial-gate__accent">{trialLabel}</span>
       </h2>
 
-      <div className="trial-gate__plans" role="radiogroup" aria-label="Plan">
-        {(['startup', 'scale'] as const).map((planId) => (
-          <button
-            key={planId}
-            type="button"
-            role="radio"
-            aria-checked={selected === planId}
-            data-testid={`subscription-plan-${planId}`}
-            className={`trial-gate__plan${selected === planId ? ' trial-gate__plan--on' : ''}`}
-            onClick={() => setSelected(planId)}
-          >
-            <span className="trial-gate__plan-name">{PLAN_META[planId].label}</span>
-            <span className="trial-gate__plan-price">${PLAN_META[planId].price}/mo</span>
-            <span className="trial-gate__plan-hint">
-              {planId === 'scale' ? 'Maximum intelligence · best value' : 'Most popular'}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      <div className="trial-gate__dial" data-plan={selected}>
+      <div className="trial-gate__dial" data-plan="scale">
         <div className="trial-gate__arc" style={{ ['--sweep' as string]: String(sweep) }} aria-hidden="true" />
         <div className="trial-gate__reading">
           <span className="trial-gate__value">
@@ -120,17 +98,24 @@ export function TrialGateDial({
       ) : null}
 
       <p className="trial-gate__zero">
-        <b>$0 today</b> · then ${price}/mo · switch to {otherLabel} anytime
+        <b>$0 today</b> · everything in Scale included · then ${PLAN_META.scale.price}/mo
       </p>
 
       <button
         type="button"
         className="trial-gate__go"
-        onClick={() => onSelectPlan(selected)}
-        data-testid="trial-gate-start"
+        onClick={() => onSelectPlan('scale')}
+        data-testid="subscription-plan-scale"
       >
         Start free trial
       </button>
+      <p className="trial-gate__prohatch">
+        Prefer to start on Pro (${PLAN_META.startup.price}/mo)?{' '}
+        <button type="button" data-testid="subscription-plan-startup" onClick={() => onSelectPlan('startup')}>
+          Start your trial on Pro
+        </button>{' '}
+        — switch or cancel anytime.
+      </p>
 
       <div className="trial-gate__wallets" aria-label="Payment options">
         <span className="trial-gate__wchip">&#63743; Pay</span>

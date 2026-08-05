@@ -5,6 +5,7 @@ import type { AgentMessage } from './types'
 import { trackAgentMessageCopy } from '../../api/agentChat'
 import { BriefingEventCard } from './BriefingEventCard'
 import { AnswersEventCard } from './AnswersEventCard'
+import { ResultsEventCard } from './ResultsEventCard'
 import { MessageContent } from './MessageContent'
 import { MessageFeedbackActions } from './MessageFeedbackActions'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -131,6 +132,17 @@ export const MessageEventCard = memo(function MessageEventCard({
     return (
       <AnswersEventCard
         answers={message.answers}
+        relativeTimestamp={message.relativeTimestamp}
+      />
+    )
+  }
+
+  // Structured result deliveries render as result cards, not bubbles.
+  if (message.results && message.isOutbound) {
+    return (
+      <ResultsEventCard
+        results={message.results}
+        bodyText={message.bodyText}
         relativeTimestamp={message.relativeTimestamp}
       />
     )

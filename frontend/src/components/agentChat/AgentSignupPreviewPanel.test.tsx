@@ -49,26 +49,33 @@ describe('AgentSignupPreviewPanel', () => {
     )
   }
 
-  it('renders the unlock copy with the agent name and scoped trial CTA copy', () => {
+  it('renders the freeze wall with the agent name at the paused state', () => {
+    const onUpgrade = vi.fn()
     renderSignupPreviewPanel({
       status: 'awaiting_signup_completion',
       agentName: 'Bob Smith',
-      onUpgrade: vi.fn(),
+      onUpgrade,
     })
 
-    expect(screen.getByRole('heading', { name: 'Bob Smith is ready.' })).toBeInTheDocument()
-    expect(screen.getByText('Unlock your agent now.')).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /start for free/i })).toHaveLength(2)
-    expect(screen.getAllByText('No charge today. Cancel anytime.')).toHaveLength(2)
+    expect(screen.getByTestId('trial-freeze-wall')).toBeInTheDocument()
+    expect(screen.getByText('Bob Smith is mid-job')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /keep Bob working/i })).toBeInTheDocument()
+
+    screen.getByTestId('subscription-plan-scale').click()
+    expect(onUpgrade).toHaveBeenCalledWith('scale', 'signup_preview_panel')
+
+    screen.getByTestId('subscription-plan-startup').click()
+    expect(onUpgrade).toHaveBeenCalledWith('startup', 'signup_preview_panel')
   })
 
-  it('falls back to a generic agent label when no agent name is available', () => {
+  it('keeps the classic plans panel before the first-reply pause', () => {
     renderSignupPreviewPanel({
       status: 'awaiting_first_reply_pause',
       agentName: '',
       onUpgrade: vi.fn(),
     })
 
+    expect(screen.queryByTestId('trial-freeze-wall')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Your agent is ready.' })).toBeInTheDocument()
   })
 })

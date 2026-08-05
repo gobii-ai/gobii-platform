@@ -44,7 +44,9 @@ COUNTED_CANDIDATE_PROMPT = (
 def _matching_definitions(text: str):
     return shortlist_system_skills(
         text,
-        available_tool_names={"search_tools"},
+        # Both are builtins, available in every real environment; the sourcing
+        # skill bundles deliver_results for structured candidate hand-offs.
+        available_tool_names={"search_tools", "deliver_results"},
         limit=len(SYSTEM_SKILL_REGISTRY),
         discovery_only=True,
     )
