@@ -84,6 +84,11 @@ from .llm_config import apply_tier_credit_multiplier, clear_runtime_tier_overrid
 from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
+from api.services.deprecated_provider_guard import (
+    filter_deprecated_provider_blocked_tool,
+    is_deprecated_provider_blocked_result,
+    is_pipedream_google_sheets_blocked_call,
+)
 from . import internal_reasoning
 from .daily_limit_mode import (
     CREDIT_MESSAGE_ONLY_ALLOWED_TOOL_NAMES_TEXT,
@@ -143,7 +148,15 @@ from ..tools.secure_credentials_request import execute_secure_credentials_reques
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.request_human_input import execute_request_human_input
 from ..tools.search_tools import execute_search_tools
-from ..tools.tool_manager import ToolCatalogEntry, execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
+from ..tools.tool_manager import (
+    BUILTIN_TOOL_REGISTRY,
+    ToolCatalogEntry,
+    auto_enable_heuristic_tools,
+    execute_enabled_tool,
+    get_parallel_safe_tool_rejection_reason,
+    resolve_tool_entry,
+    should_skip_auto_substitution,
+)
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 from ..tools.web_chat_sender import execute_send_chat_message, _looks_like_routine_progress_message
 from ..tools.mcp_sender import execute_send_mcp_message, get_send_mcp_message_tool
@@ -861,6 +874,22 @@ def _copy_native_http_error_context(source: dict, payload: dict) -> None:
         payload["headers"] = _coerce_error_json_value(source.get("headers"), TOOL_ERROR_NATIVE_HEADERS_MAX_BYTES)
 
 
+def _copy_structured_tool_error_context(source: dict, payload: dict) -> None:
+    for key in (
+        "code",
+        "error_code",
+        "provider",
+        "integration",
+        "replacement",
+        "handoff_status",
+        "next_action",
+        "setup_url",
+    ):
+        value = source.get(key)
+        if value is not None:
+            payload[key] = _coerce_error_text(value, TOOL_ERROR_DETAIL_MAX_BYTES)
+
+
 def _normalize_error_result(result: dict) -> dict:
     message = result.get("message") or result.get("error") or result.get("detail") or "Tool returned an error."
     error_type = result.get("error_type") or result.get("type")
@@ -898,6 +927,7 @@ def _normalize_error_result(result: dict) -> dict:
     )
     if result.get(TERMINAL_ERROR_FLAG) is True:
         payload[TERMINAL_ERROR_FLAG] = True
+    _copy_structured_tool_error_context(result, payload)
     _copy_native_http_error_context(result, payload)
     return payload
 
@@ -2236,6 +2266,7 @@ class _PreparedToolExecution:
     parallel_safe: bool
     parallel_ineligible_reason: Optional[str]
     resolved_entry: Optional[ToolCatalogEntry] = None
+    pipedream_google_sheets_blocked: bool = False
 
 
 @dataclass
@@ -3220,12 +3251,17 @@ def _should_skip_irrelevant_agent_config_mutation(
 def _resolve_tool_for_execution(
     agent: PersistentAgent,
     tool_name: str,
+    resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> tuple[str, Optional[ToolCatalogEntry]]:
-    entry = (
-        resolve_tool_entry(agent, tool_name)
-        if isinstance(tool_name, str) and tool_name.startswith("mcp_")
-        else None
-    )
+    if resolved_entry is not None:
+        return resolved_entry.full_name, resolved_entry
+    if (
+        tool_name in _DIRECT_TOOL_EXECUTORS
+        or tool_name in _REFRESHING_TOOL_EXECUTORS
+        or tool_name in BUILTIN_TOOL_REGISTRY
+    ):
+        return tool_name, None
+    entry = resolve_tool_entry(agent, tool_name)
     return (entry.full_name, entry) if entry else (tool_name, None)
 
 
@@ -3356,6 +3392,36 @@ _REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
     "end_planning": lambda: execute_end_planning,
 }
 
+
+def _refresh_tools_after_deprecated_provider_handoff(
+    agent: PersistentAgent,
+    result: Any,
+    blocked_tool_name: str,
+    resolved_entry: Optional[ToolCatalogEntry],
+    blocked_provider_call: bool,
+) -> Optional[List[dict]]:
+    if not (
+        is_deprecated_provider_blocked_result(result)
+        and resolved_entry is not None
+        and blocked_provider_call
+    ):
+        return None
+    try:
+        return filter_deprecated_provider_blocked_tool(
+            agent,
+            get_agent_tools(agent),
+            blocked_tool_name,
+        )
+    except Exception:
+        # Tool refresh is secondary to returning the trusted block and its
+        # recovery instructions; the next prompt build can retry the refresh.
+        logger.exception(
+            "Agent %s: native Sheets handoff tool refresh failed; preserving the blocked result.",
+            agent.id,
+        )
+        return None
+
+
 def _execute_tool_call_runtime(
     agent: PersistentAgent,
     *,
@@ -3365,6 +3431,7 @@ def _execute_tool_call_runtime(
     eval_run_id: Optional[str],
     parallel_safe: bool = False,
     resolved_entry: Optional[ToolCatalogEntry] = None,
+    pipedream_google_sheets_blocked: Optional[bool] = None,
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
     try:
@@ -3375,7 +3442,13 @@ def _execute_tool_call_runtime(
     mock_result = _resolve_eval_mock_result(mock_config, tool_name, exec_params)
     if is_tool_blacklisted_for_agent(agent, tool_name):
         return tool_blacklist_error(tool_name), updated_tools
-    if mock_result is not None:
+    blocked_provider_call = pipedream_google_sheets_blocked
+    if blocked_provider_call is None and resolved_entry is not None:
+        blocked_provider_call = is_pipedream_google_sheets_blocked_call(
+            resolved_entry,
+            exec_params,
+        )
+    if mock_result is not None and not blocked_provider_call:
         logger.info(
             "Agent %s: using mock for %s (eval_run_id=%s)",
             agent.id,
@@ -3384,14 +3457,23 @@ def _execute_tool_call_runtime(
         )
         return mock_result, updated_tools
     if parallel_safe:
-        return execute_enabled_tool(
+        result = execute_enabled_tool(
             agent,
             tool_name,
             exec_params,
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
             resolved_entry=resolved_entry,
-        ), updated_tools
+            pipedream_google_sheets_blocked=blocked_provider_call,
+        )
+        updated_tools = _refresh_tools_after_deprecated_provider_handoff(
+            agent,
+            result,
+            tool_name,
+            resolved_entry,
+            bool(blocked_provider_call),
+        )
+        return result, updated_tools
     resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
     if resolve_executor:
         return resolve_executor()(agent, exec_params), updated_tools
@@ -3406,6 +3488,14 @@ def _execute_tool_call_runtime(
         exec_params,
         current_sqlite_db_path=get_sqlite_db_path(),
         resolved_entry=resolved_entry,
+        pipedream_google_sheets_blocked=blocked_provider_call,
+    )
+    updated_tools = _refresh_tools_after_deprecated_provider_handoff(
+        agent,
+        result,
+        tool_name,
+        resolved_entry,
+        bool(blocked_provider_call),
     )
     if (
         tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
@@ -3505,6 +3595,7 @@ def _execute_prepared_tool_call(
                 eval_run_id=eval_run_id,
                 parallel_safe=parallel_safe,
                 resolved_entry=prepared.resolved_entry,
+                pipedream_google_sheets_blocked=prepared.pipedream_google_sheets_blocked,
             )
             if _tool_result_is_success(result) and not parallel_safe:
                 refresh_skills_for_tool(agent, prepared.tool_name)
@@ -3693,6 +3784,8 @@ def _prepare_tool_batch(
             tool_span.set_attribute("tool.name", tool_name)
             logger.info("Agent %s preparing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
+            preflight_entry: Optional[ToolCatalogEntry] = None
+            preflight_blocked_provider_call = False
             daily_state = None
             if isinstance(credit_snapshot, dict):
                 daily_state = credit_snapshot.get("daily_state")
@@ -3714,10 +3807,28 @@ def _prepare_tool_batch(
                 if isinstance(credit_snapshot, dict)
                 else None
             )
-            if (
+            credit_message_only_restricted = (
                 is_credit_message_only_mode(daily_state, task_credit_available)
                 and not is_credit_message_only_allowed_tool(tool_name)
-            ):
+            )
+            if credit_message_only_restricted:
+                try:
+                    _, preflight_params = _parse_tool_call_params(
+                        _get_tool_call_arguments(call)
+                    )
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    preflight_params = None
+                if isinstance(preflight_params, dict):
+                    preflight_entry = resolve_tool_entry(agent, tool_name)
+                    preflight_blocked_provider_call = bool(
+                        preflight_entry
+                        and is_pipedream_google_sheets_blocked_call(
+                            preflight_entry,
+                            preflight_params,
+                        )
+                    )
+
+            if credit_message_only_restricted and not preflight_blocked_provider_call:
                 try:
                     step_kwargs = {
                         "agent": agent,
@@ -3881,7 +3992,11 @@ def _prepare_tool_batch(
                 call_id = call.get("id")
             if tool_name == "search_tools":
                 tool_params.pop("will_continue_work", None)
-            normalized_tool_name, resolved_entry = _resolve_tool_for_execution(agent, tool_name)
+            normalized_tool_name, resolved_entry = _resolve_tool_for_execution(
+                agent,
+                tool_name,
+                resolved_entry=preflight_entry,
+            )
             if normalized_tool_name != tool_name:
                 logger.info("Agent %s: normalized tool call %s -> %s", agent.id, tool_name, normalized_tool_name)
                 tool_name = normalized_tool_name
@@ -3960,6 +4075,18 @@ def _prepare_tool_batch(
                 exec_params = dict(exec_params)
                 exec_params["_has_user_facing_message"] = has_user_facing_message
 
+            blocked_provider_call = (
+                preflight_blocked_provider_call
+                if preflight_entry is not None
+                else bool(
+                    resolved_entry
+                    and is_pipedream_google_sheets_blocked_call(
+                        resolved_entry,
+                        exec_params,
+                    )
+                )
+            )
+
             if tool_name == "http_request":
                 duplicate_call = _find_successful_duplicate_http_request(
                     agent,
@@ -3985,7 +4112,7 @@ def _prepare_tool_batch(
 
             parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
 
-            if not _enforce_tool_rate_limit(
+            if not blocked_provider_call and not _enforce_tool_rate_limit(
                 agent,
                 tool_name,
                 span=tool_span,
@@ -3996,12 +4123,16 @@ def _prepare_tool_batch(
                 followup_required = True
                 continue
 
-            credit_info = _ensure_credit_for_tool(
-                agent,
-                tool_name,
-                span=tool_span,
-                credit_snapshot=credit_snapshot,
-                eval_run_id=eval_run_id,
+            credit_info = (
+                {"cost": None, "credit": None}
+                if blocked_provider_call
+                else _ensure_credit_for_tool(
+                    agent,
+                    tool_name,
+                    span=tool_span,
+                    credit_snapshot=credit_snapshot,
+                    eval_run_id=eval_run_id,
+                )
             )
             if not credit_info:
                 abort_after_execution = True
@@ -4036,6 +4167,7 @@ def _prepare_tool_batch(
                     parallel_safe=parallel_ineligible_reason is None,
                     parallel_ineligible_reason=parallel_ineligible_reason,
                     resolved_entry=resolved_entry,
+                    pipedream_google_sheets_blocked=blocked_provider_call,
                 )
             )
 
@@ -4414,12 +4546,17 @@ def _finalize_tool_batch(
         if not is_error_status and is_source_bearing_tool(tool_name):
             rewrite_prompt_urls(result_content, agent, create=True)
         if is_error_status:
+            trusted_deprecated_provider_block = bool(
+                is_deprecated_provider_blocked_result(result)
+                and prepared.pipedream_google_sheets_blocked
+            )
             _refund_tool_credit_on_error_if_configured(
                 agent=agent,
                 tool_name=tool_name,
                 step=step,
                 credits_consumed=prepared.credits_consumed,
                 consumed_credit=prepared.consumed_credit,
+                force=trusted_deprecated_provider_block,
             )
         elif tool_name == "request_human_input":
             human_input_request_ok = True

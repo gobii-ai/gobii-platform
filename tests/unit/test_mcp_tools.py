@@ -46,6 +46,7 @@ from api.agent.tools.mcp_manager import (
     MCPToolManager,
     MCPToolInfo,
     MCPServerRuntime,
+    PipedreamToolCacheContext,
     SandboxToolCacheContext,
     get_mcp_manager,
     execute_mcp_tool,
@@ -69,6 +70,7 @@ from api.agent.system_skills.registry import SystemSkillDefinition
 from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from api.services.prompt_settings import invalidate_prompt_settings_cache
 from api.services.mcp_oauth import MCPOAuthResult, MCPOAuthStatus
+from api.services.mcp_tool_cache import CACHE_KEY_VERSION, build_mcp_tool_cache_key
 from api.services.tool_settings import invalidate_tool_settings_cache
 from tests.utils.llm_seed import seed_persistent_basic
 from util.analytics import AnalyticsEvent
@@ -255,6 +257,53 @@ class MCPToolManagerTests(TestCase):
         )
         self.config_id = str(self.server_config.id)
         self.server_name = self.server_config.name
+
+    def test_cache_namespace_invalidates_entries_without_app_metadata(self):
+        self.assertGreaterEqual(CACHE_KEY_VERSION, 4)
+        self.assertEqual(
+            build_mcp_tool_cache_key("config", "fingerprint"),
+            f"mcp:tools:v{CACHE_KEY_VERSION}:config:fingerprint",
+        )
+
+    @patch("api.agent.tools.mcp_manager.set_cached_mcp_tool_definitions")
+    def test_pipedream_cache_sharding_prefers_tool_app_metadata(self, mock_set_cached):
+        runtime = MCPServerRuntime(
+            config_id=self.config_id,
+            name="pipedream",
+            display_name="Pipedream",
+            description="",
+            command=None,
+            args=[],
+            url="https://example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=timezone.now(),
+        )
+        tool = MCPToolInfo(
+            config_id=self.config_id,
+            full_name="component-proxy",
+            server_name="pipedream",
+            tool_name="component-proxy",
+            description="Proxy an app component",
+            parameters={"type": "object", "properties": {}},
+            app_slug="google_sheets",
+        )
+        context = PipedreamToolCacheContext(effective_app_slugs=["google_sheets"])
+
+        self.manager._store_discovered_tools(runtime, [tool], "unused", context)
+
+        mock_set_cached.assert_called_once()
+        cached_payload = mock_set_cached.call_args.args[2]
+        self.assertEqual(cached_payload[0]["app_slug"], "google_sheets")
+        restored_tools = self.manager._deserialize_tools_from_cache(runtime, cached_payload)
+        self.assertEqual(len(restored_tools), 1)
+        self.assertEqual(restored_tools[0].full_name, "component-proxy")
+        self.assertEqual(restored_tools[0].app_slug, "google_sheets")
     
     def _setup_http_tool(self) -> PersistentAgent:
         """Register a simple HTTP MCP server and enable it for a new agent."""
@@ -1635,6 +1684,70 @@ class MCPToolManagerTests(TestCase):
             agent,
             allowed_config_ids={self.config_id},
             pipedream_app_slugs=None,
+        )
+
+    @tag("batch_mcp_tools")
+    def test_targeted_pipedream_preparation_does_not_reuse_other_app_shard(self):
+        user = get_user_model().objects.create_user(username=f"pd-scoped-{uuid.uuid4().hex[:8]}")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Pipedream scoped agent",
+            charter="Test",
+            browser_use_agent=create_test_browser_agent(user),
+        )
+        pipedream_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            display_name="Pipedream",
+            url="https://example.com/mcp",
+        )
+        runtime = self.manager._build_runtime_from_config(pipedream_config)
+        self.manager._server_cache[runtime.config_id] = runtime
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="component-proxy",
+            tool_server="pipedream",
+            tool_name="component-proxy",
+            server_config=pipedream_config,
+        )
+        wrong = MCPToolInfo(
+            runtime.config_id,
+            "component-proxy",
+            "pipedream",
+            "component-proxy",
+            "Trello component proxy",
+            {},
+            app_slug="trello",
+        )
+        expected = MCPToolInfo(
+            runtime.config_id,
+            "component-proxy",
+            "pipedream",
+            "component-proxy",
+            "Google Sheets component proxy",
+            {},
+            app_slug="google_sheets",
+        )
+        wrong_context = PipedreamToolCacheContext(effective_app_slugs=["trello"])
+        self.manager._tools_cache[
+            self.manager._tool_cache_slot_key(runtime, wrong_context)
+        ] = [wrong]
+
+        with patch(
+            "api.agent.tools.mcp_manager.get_effective_pipedream_app_slugs_for_agent",
+            return_value=["google_sheets"],
+        ), patch.object(
+            self.manager,
+            "get_tools_for_agent",
+            return_value=[expected],
+        ) as get_tools:
+            result = self.manager.prepare_tool_for_agent(agent, expected.full_name)
+
+        self.assertIs(result, expected)
+        get_tools.assert_called_once_with(
+            agent,
+            allowed_config_ids={runtime.config_id},
+            pipedream_app_slugs={"google_sheets"},
         )
 
     @tag("batch_mcp_tools")
@@ -4959,6 +5072,77 @@ class MCPToolIntegrationTests(TestCase):
         self.assertEqual(result["result"], {"ok": True})
         self.assertEqual(mock_get_client.call_args.kwargs["app_slug"], "discord")
         mock_execute.assert_called_once()
+
+    def test_execute_mcp_tool_uses_pipedream_app_slug_metadata_for_generic_tool(self):
+        config, _created = MCPServerConfig.objects.update_or_create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            defaults={
+                "display_name": "Pipedream",
+                "description": "Pipedream remote MCP",
+                "command": "",
+                "command_args": [],
+                "url": "https://remote.mcp.pipedream.net",
+                "prefetch_apps": [],
+                "metadata": {},
+                "is_active": True,
+            },
+        )
+        runtime = self._pipedream_runtime(config)
+        manager = MCPToolManager()
+        manager._initialized = True
+        manager._server_cache = {runtime.config_id: runtime}
+        tool = MCPToolInfo(
+            runtime.config_id,
+            "component-proxy",
+            "pipedream",
+            "component-proxy",
+            "Proxy a Google Sheets component",
+            {"type": "object", "properties": {}},
+            app_slug="google_sheets",
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name=tool.full_name,
+            tool_server="pipedream",
+            tool_name=tool.tool_name,
+            server_config=config,
+        )
+        client = MagicMock()
+
+        with (
+            patch.object(manager, "_ensure_runtime_registered", return_value=True),
+            patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)),
+            patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[object()]),
+            patch.object(manager, "_get_pipedream_agent_client", return_value=client) as mock_get_client,
+            patch.object(
+                manager,
+                "_execute_async",
+                new=MagicMock(
+                    return_value={
+                        "result": {
+                            "connect": "https://pipedream.com/_static/connect.html",
+                        }
+                    }
+                ),
+            ),
+            patch.object(manager, "_run_coroutine_sync", side_effect=lambda value: value),
+            patch(
+                "api.integrations.pipedream_connect.create_connect_session",
+                return_value=(MagicMock(id="connect-session"), "https://example.com/connect"),
+            ) as create_connect_session,
+        ):
+            result = manager.execute_mcp_tool(
+                self.agent,
+                tool.full_name,
+                {},
+                tool_info=tool,
+            )
+
+        self.assertEqual(result["status"], "action_required")
+        self.assertEqual(mock_get_client.call_args.kwargs["app_slug"], "google_sheets")
+        create_connect_session.assert_called_once_with(self.agent, "google_sheets")
+        self.assertIn("/google_sheets/", result["connect_url"])
 
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')

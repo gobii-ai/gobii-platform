@@ -93,9 +93,12 @@ from ...services.mcp_oauth import (
     ensure_mcp_oauth_credential,
 )
 from ...services.pipedream_apps import (
+    filter_guarded_pipedream_google_sheets_tools,
     get_effective_pipedream_app_slugs_for_agent,
     get_platform_pipedream_app_slugs,
+    normalize_app_slug,
     normalize_app_slugs,
+    pipedream_app_slug_for_tool_call,
     pipedream_app_slug_for_tool_name,
 )
 
@@ -275,6 +278,7 @@ class MCPToolInfo:
     tool_name: str  # e.g., "search_engine"
     description: str
     parameters: Dict[str, Any]
+    app_slug: str = ""
     
     def to_search_dict(self) -> Dict[str, str]:
         """Convert to a dictionary for LLM search context."""
@@ -388,7 +392,6 @@ class MCPToolManager:
     """Manages MCP tool connections and provides search/enable/disable functionality."""
 
     PIPEDREAM_RUNTIME_NAME = "pipedream"
-    PIPEDREAM_COMPONENT_OPTION_TOOLS = {"retrieve_options", "configure_component"}
 
     # Blacklisted tool patterns (glob-style patterns)
     # Tools matching these patterns will be excluded from discovery and execution
@@ -1419,6 +1422,24 @@ class MCPToolManager:
             effective_app_slugs=get_effective_pipedream_app_slugs_for_agent(agent),
         )
 
+    def _pipedream_app_slugs_for_tool_resolution(
+        self,
+        agent: PersistentAgent,
+        tool_name: str,
+    ) -> tuple[set[str], str]:
+        """Return safe discovery shards and an app slug safe for fallback metadata."""
+        inferred_app_slug = pipedream_app_slug_for_tool_name(tool_name)
+        effective_app_slugs = set(
+            normalize_app_slugs(get_effective_pipedream_app_slugs_for_agent(agent))
+        )
+        if inferred_app_slug and inferred_app_slug in effective_app_slugs:
+            return {inferred_app_slug}, inferred_app_slug
+
+        # Generic names such as component-proxy identify their app only in MCP
+        # metadata. Search the agent's real app shards and never synthesize an
+        # app identity from an unrelated name prefix when discovery misses.
+        return effective_app_slugs, ""
+
     def _pipedream_cache_context_for_owner(
         self,
         owner_scope: str,
@@ -1549,6 +1570,7 @@ class MCPToolManager:
                 "tool_name": tool.tool_name,
                 "description": tool.description,
                 "parameters": tool.parameters,
+                "app_slug": tool.app_slug,
             }
             for tool in tools
         ]
@@ -1575,6 +1597,7 @@ class MCPToolManager:
                     tool_name=tool_name,
                     description=entry.get("description", ""),
                     parameters=entry.get("parameters") or {"type": "object", "properties": {}},
+                    app_slug=normalize_app_slug(entry.get("app_slug")),
                 )
             )
         return tools
@@ -1598,7 +1621,7 @@ class MCPToolManager:
         tools_by_app: Dict[str, List[MCPToolInfo]] = {app_slug: [] for app_slug in app_slugs}
         unassigned = 0
         for tool in tools:
-            app_slug = pipedream_app_slug_for_tool_name(tool.full_name)
+            app_slug = normalize_app_slug(tool.app_slug) or pipedream_app_slug_for_tool_name(tool.full_name)
             if app_slug in tools_by_app:
                 tools_by_app[app_slug].append(tool)
             else:
@@ -2057,6 +2080,11 @@ class MCPToolManager:
         tools: List[MCPToolInfo] = []
         blacklisted_count = 0
         for tool in mcp_tools:
+            raw_tool_meta = getattr(tool, "meta", None)
+            tool_meta = raw_tool_meta if isinstance(raw_tool_meta, dict) else {}
+            app_slug = normalize_app_slug(
+                tool_meta.get("app_slug") or tool_meta.get("appSlug")
+            )
             if server.name == self.PIPEDREAM_RUNTIME_NAME:
                 full_name = tool.name
             else:
@@ -2077,7 +2105,8 @@ class MCPToolManager:
                     server_name=server.name,
                     tool_name=tool.name,
                     description=description,
-                    parameters=tool.inputSchema or {"type": "object", "properties": {}}
+                    parameters=tool.inputSchema or {"type": "object", "properties": {}},
+                    app_slug=app_slug,
                 )
             )
         if blacklisted_count:
@@ -2234,7 +2263,38 @@ class MCPToolManager:
         if require_enabled and enabled_row is None:
             return None
 
+        app_slug = pipedream_app_slug_for_tool_name(tool_name)
+        fallback_app_slug = app_slug
+        pipedream_target = bool(
+            enabled_row
+            and str(enabled_row.tool_server or "").strip().casefold()
+            == self.PIPEDREAM_RUNTIME_NAME
+        )
+        app_slugs: set[str] = set()
+        if pipedream_target:
+            app_slugs, fallback_app_slug = self._pipedream_app_slugs_for_tool_resolution(
+                agent,
+                tool_name,
+            )
+        elif app_slug:
+            app_slugs.add(app_slug)
+
         cached = self.find_tool_by_name(tool_name)
+        if pipedream_target and enabled_row and enabled_row.server_config_id:
+            runtime = self._server_cache.get(str(enabled_row.server_config_id))
+            if runtime is not None:
+                context = PipedreamToolCacheContext(
+                    effective_app_slugs=normalize_app_slugs(app_slugs)
+                )
+                slot_key = self._tool_cache_slot_key(runtime, context)
+                cached = next(
+                    (
+                        tool
+                        for tool in self._tools_cache.get(slot_key, [])
+                        if tool.full_name == tool_name
+                    ),
+                    None,
+                )
         cached_matches_row = bool(
             cached
             and enabled_row
@@ -2251,7 +2311,6 @@ class MCPToolManager:
 
         allowed_config_ids: set[str] = set()
         allowed_server_names: set[str] = set()
-        app_slugs: set[str] = set()
         if enabled_row and enabled_row.server_config_id:
             allowed_config_ids.add(str(enabled_row.server_config_id))
         if (
@@ -2261,9 +2320,7 @@ class MCPToolManager:
         ):
             allowed_server_names.add(enabled_row.tool_server)
 
-        app_slug = pipedream_app_slug_for_tool_name(tool_name)
-        if app_slug:
-            app_slugs.add(app_slug)
+        if app_slugs:
             if not allowed_config_ids:
                 allowed_server_names.add(self.PIPEDREAM_RUNTIME_NAME)
         elif not allowed_config_ids and not allowed_server_names and tool_name.startswith("mcp_"):
@@ -2339,7 +2396,7 @@ class MCPToolManager:
                         description=f"{actual_name} via {runtime.display_name}",
                         parameters={"type": "object", "properties": {}},
                     )
-            elif app_slug:
+            elif fallback_app_slug:
                 runtime = next(
                     (
                         candidate
@@ -2360,6 +2417,7 @@ class MCPToolManager:
                         ),
                         description=f"{tool_name} via {runtime.display_name}",
                         parameters={"type": "object", "properties": {}},
+                        app_slug=fallback_app_slug,
                     )
 
         if info and enabled_row:
@@ -2388,12 +2446,22 @@ class MCPToolManager:
         allowed_config_ids: set[str] = set()
         allowed_server_names: set[str] = set()
         pipedream_app_slugs: set[str] = set()
+        effective_pipedream_app_slugs: Optional[set[str]] = None
         for row in enabled_rows:
             tool_name = row.tool_full_name
             tool_server = (row.tool_server or "").strip()
             server_config_id = str(row.server_config_id) if row.server_config_id else ""
             app_slug = pipedream_app_slug_for_tool_name(tool_name)
-            if app_slug:
+            if tool_server.casefold() == self.PIPEDREAM_RUNTIME_NAME:
+                if effective_pipedream_app_slugs is None:
+                    effective_pipedream_app_slugs = set(
+                        normalize_app_slugs(get_effective_pipedream_app_slugs_for_agent(agent))
+                    )
+                if app_slug and app_slug in effective_pipedream_app_slugs:
+                    pipedream_app_slugs.add(app_slug)
+                else:
+                    pipedream_app_slugs.update(effective_pipedream_app_slugs)
+            elif app_slug:
                 pipedream_app_slugs.add(app_slug)
 
             if server_config_id:
@@ -2445,7 +2513,7 @@ class MCPToolManager:
                 )
                 if tool.full_name not in seen_tool_names
             )
-        for tool_info in tools:
+        for tool_info in filter_guarded_pipedream_google_sheets_tools(agent, tools):
             if tool_info.full_name in enabled_set:
                 self._backfill_enabled_tool_metadata(
                     enabled_rows_by_name[tool_info.full_name],
@@ -2967,8 +3035,12 @@ class MCPToolManager:
                 return {"status": "error", "message": proxy_error}
 
         modern_protocol: Optional[str] = None
+        app_slug: Optional[str] = None
         if server_name == self.PIPEDREAM_RUNTIME_NAME and not isolated:
-            app_slug = self._pd_app_slug_for_tool_call(info.tool_name, params)
+            app_slug = self._pd_app_slug_for_tool_call(
+                info.tool_name,
+                params,
+            ) or normalize_app_slug(info.app_slug)
             if app_slug:
                 try:
                     from ...services.pipedream_connections import PipedreamConnectionError, list_pipedream_connected_accounts
@@ -3073,36 +3145,40 @@ class MCPToolManager:
                     connect_url = content
 
                 if connect_url:
+                    resolved_app_slug = app_slug
+                    connect_app_slug = resolved_app_slug
                     try:
                         logger.info(
                             "PD Connect: pass-through link detected for tool '%s' agent=%s",
                             actual_tool_name, str(agent.id)
                         )
-                        # Determine app slug: prefer ?app= from server URL, else parse from tool name
-                        app_slug = None
+                        # Prefer the server's explicit app, then the app identity
+                        # already resolved for this invocation.
                         try:
                             from urllib.parse import urlparse, parse_qs
                             qs = parse_qs(urlparse(connect_url).query or "")
                             app_param = qs.get("app", [None])[0]
                             if isinstance(app_param, str) and app_param.strip():
-                                app_slug = app_param.strip()
+                                connect_app_slug = app_param.strip()
                                 logger.info(
                                     "PD Connect: using app from server link app=%s",
-                                    app_slug
+                                    connect_app_slug
                                 )
                         except Exception:
-                            app_slug = None
-                        if not app_slug:
-                            app_slug = self._pd_parse_tool(actual_tool_name)
+                            connect_app_slug = resolved_app_slug
+                        if not connect_app_slug:
+                            connect_app_slug = resolved_app_slug or self._pd_parse_tool(
+                                actual_tool_name
+                            )
                             logger.info(
-                                "PD Connect: derived app from tool name tool=%s app=%s",
-                                actual_tool_name, app_slug or ""
+                                "PD Connect: resolved app for tool=%s app=%s",
+                                actual_tool_name, connect_app_slug or ""
                             )
 
                         # Create (or reuse) a first-party Connect session + link
                         from api.integrations.pipedream_connect import create_connect_session, EFFECTIVE_EXPIRATION_BUFFER_SECONDS
 
-                        normalized_app = (app_slug or "").strip()
+                        normalized_app = (connect_app_slug or "").strip()
 
                         existing_session = (
                             PipedreamConnectSession.objects
@@ -3166,7 +3242,7 @@ class MCPToolManager:
                             if session_status == PipedreamConnectSession.Status.ERROR and session_expiry:
                                 logger.warning(
                                     "PD Connect: refusing expired connect link session=%s app=%s expires_at=%s",
-                                    getattr(session, 'id', None), app_slug or "", str(session_expiry)
+                                    getattr(session, 'id', None), connect_app_slug or "", str(session_expiry)
                                 )
                                 return {
                                     "status": "action_required",
@@ -3180,7 +3256,7 @@ class MCPToolManager:
                         jit_url = _build_jit_connect_url(str(agent.id), normalized_app or "")
                         logger.info(
                             "PD Connect: surfacing JIT connect link agent=%s app=%s",
-                            str(agent.id), app_slug or ""
+                            str(agent.id), connect_app_slug or ""
                         )
                         return {
                             "status": "action_required",
@@ -3189,7 +3265,11 @@ class MCPToolManager:
                         }
                     except Exception:
                         logger.exception("PD Connect: failed to generate first-party link; falling back to JIT URL")
-                        jit_url = _build_jit_connect_url(str(agent.id), (app_slug or "").strip())
+                        fallback_app_slug = connect_app_slug or resolved_app_slug
+                        jit_url = _build_jit_connect_url(
+                            str(agent.id),
+                            (fallback_app_slug or "").strip(),
+                        )
                         return {
                             "status": "action_required",
                             "result": f"Authorization required. Please connect your account via: {jit_url}",
@@ -3392,15 +3472,7 @@ class MCPToolManager:
         return app or None
 
     def _pd_app_slug_for_tool_call(self, tool_name: str, params: Dict[str, Any]) -> Optional[str]:
-        app_slug = self._pd_parse_tool(tool_name)
-        if app_slug:
-            return app_slug
-
-        if tool_name not in self.PIPEDREAM_COMPONENT_OPTION_TOOLS or not isinstance(params, dict):
-            return None
-
-        component_key = str(params.get("componentKey") or params.get("component_key") or "").strip()
-        return self._pd_parse_tool(component_key)
+        return pipedream_app_slug_for_tool_call(tool_name, params) or None
 
     def _get_pipedream_agent_client(self, agent: PersistentAgent, app_slug: Optional[str]) -> Client:
         """Get or create a Pipedream client for an agent/app pair."""

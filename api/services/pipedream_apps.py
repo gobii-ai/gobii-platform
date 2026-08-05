@@ -9,15 +9,19 @@ from typing import Any, Iterable, Optional
 import requests
 from django.conf import settings
 from django.core.cache import cache
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Q, QuerySet
 
 from api.pipedream_app_utils import normalize_app_slug, normalize_app_slugs
 from api.models import MCPServerConfig, PersistentAgent, PersistentAgentEnabledTool, PipedreamAppSelection
+from api.services.pipedream_feature_flags import pipedream_google_sheets_guard_enabled
 
 logger = logging.getLogger(__name__)
 
 PIPEDREAM_RUNTIME_NAME = "pipedream"
+PIPEDREAM_GOOGLE_SHEETS_APP_SLUG = "google_sheets"
+PIPEDREAM_COMPONENT_OPTION_TOOLS = frozenset({"retrieve_options", "configure_component"})
+PIPEDREAM_METADATA_APP_TOOLS = frozenset({"component-proxy"})
 SEARCH_CACHE_TTL_SECONDS = 300
 APP_CACHE_TTL_SECONDS = 1800
 SEARCH_CACHE_PREFIX = "pipedream:apps:search:v1"
@@ -89,8 +93,7 @@ class PipedreamAppVisibility:
             if server_name != PIPEDREAM_RUNTIME_NAME:
                 visible.append(tool)
                 continue
-            tool_name = getattr(tool, "tool_name", "") or getattr(tool, "full_name", "")
-            if self.is_tool_visible(tool_name):
+            if self.is_app_visible(pipedream_app_slug_for_tool(tool), allow_unknown=True):
                 visible.append(tool)
         return visible
 
@@ -184,7 +187,17 @@ def get_deprecated_pipedream_app_slugs() -> list[str]:
     if not isinstance(raw_slugs, (list, tuple, set)):
         logger.warning("Ignoring invalid Pipedream deprecated_apps metadata; expected a JSON array.")
         return []
-    return normalize_app_slugs(raw_slugs)
+    deprecated_app_slugs = normalize_app_slugs(raw_slugs)
+    if (
+        PIPEDREAM_GOOGLE_SHEETS_APP_SLUG in deprecated_app_slugs
+        and not pipedream_google_sheets_guard_enabled()
+    ):
+        return [
+            app_slug
+            for app_slug in deprecated_app_slugs
+            if app_slug != PIPEDREAM_GOOGLE_SHEETS_APP_SLUG
+        ]
+    return deprecated_app_slugs
 
 
 def pipedream_app_slug_from_catalog_entry(app: Any) -> str:
@@ -196,9 +209,94 @@ def pipedream_app_slug_for_tool_name(tool_name: object) -> str:
     if not isinstance(tool_name, str):
         return ""
     normalized = tool_name.strip()
-    if not normalized or "-" not in normalized:
+    if (
+        not normalized
+        or normalized in PIPEDREAM_METADATA_APP_TOOLS
+        or "-" not in normalized
+    ):
         return ""
     return normalize_app_slug(normalized.split("-", 1)[0])
+
+
+def pipedream_app_slug_for_tool_call(tool_name: object, params: object) -> str:
+    """Resolve the app targeted by a concrete Pipedream tool invocation."""
+    app_slug = pipedream_app_slug_for_tool_name(tool_name)
+    if app_slug:
+        return app_slug
+
+    normalized_tool_name = tool_name.strip() if isinstance(tool_name, str) else ""
+    if normalized_tool_name not in PIPEDREAM_COMPONENT_OPTION_TOOLS or not isinstance(params, dict):
+        return ""
+
+    component_key = params.get("componentKey") or params.get("component_key")
+    return pipedream_app_slug_for_tool_name(component_key)
+
+
+def pipedream_app_slug_for_tool(tool: Any) -> str:
+    """Resolve a Pipedream tool's app from metadata before its legacy name."""
+    return normalize_app_slug(getattr(tool, "app_slug", "")) or pipedream_app_slug_for_tool_name(
+        getattr(tool, "tool_name", "") or getattr(tool, "full_name", "")
+    )
+
+
+def _native_google_sheets_handoff_ready(agent: Optional[PersistentAgent]) -> bool:
+    if agent is None or getattr(agent, "pk", None) is None:
+        return False
+    from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
+    from api.models import PersistentAgentSystemSkillState
+    from api.services.tool_blacklist import is_tool_blacklisted_for_agent
+
+    try:
+        # Tier policy can change after the handoff rows were created. Preserve
+        # the legacy action whenever the native path is no longer available.
+        if is_tool_blacklisted_for_agent(agent, "http_request"):
+            return False
+        skill_enabled = PersistentAgentSystemSkillState.objects.filter(
+            agent=agent,
+            skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+            is_enabled=True,
+        ).exists()
+        if not skill_enabled:
+            return False
+        # A skill state can outlive an LRU-evicted tool row. Keep the legacy
+        # action visible until the native execution path is actually usable.
+        return PersistentAgentEnabledTool.objects.filter(
+            agent=agent,
+            tool_full_name="http_request",
+        ).exists()
+    except DatabaseError:
+        logger.warning(
+            "Unable to verify native Google Sheets handoff state for agent %s; preserving legacy tool visibility.",
+            agent.pk,
+            exc_info=True,
+        )
+        return False
+
+
+def filter_guarded_pipedream_google_sheets_tools(
+    agent: Optional[PersistentAgent],
+    tools: Iterable[Any],
+) -> list[Any]:
+    tool_list = list(tools)
+    has_legacy_sheets_tool = any(
+        getattr(tool, "server_name", "") == PIPEDREAM_RUNTIME_NAME
+        and pipedream_app_slug_for_tool(tool) == PIPEDREAM_GOOGLE_SHEETS_APP_SLUG
+        for tool in tool_list
+    )
+    if (
+        not has_legacy_sheets_tool
+        or not pipedream_google_sheets_guard_enabled()
+        or not _native_google_sheets_handoff_ready(agent)
+    ):
+        return tool_list
+    return [
+        tool
+        for tool in tool_list
+        if not (
+            getattr(tool, "server_name", "") == PIPEDREAM_RUNTIME_NAME
+            and pipedream_app_slug_for_tool(tool) == PIPEDREAM_GOOGLE_SHEETS_APP_SLUG
+        )
+    ]
 
 
 def get_connected_pipedream_app_slugs_for_agent(agent: PersistentAgent) -> set[str]:
@@ -271,7 +369,7 @@ def filter_deprecated_pipedream_apps_without_agent(apps: Iterable[Any]) -> list[
 
 def filter_deprecated_pipedream_tools_for_agent(agent: PersistentAgent, tools: Iterable[Any]) -> list[Any]:
     visibility = get_pipedream_app_visibility_for_agent(agent)
-    return visibility.filter_tools(tools)
+    return filter_guarded_pipedream_google_sheets_tools(agent, visibility.filter_tools(tools))
 
 
 def get_owner_selected_app_slugs(owner_scope: str, owner_user=None, owner_org=None) -> list[str]:

@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
+from waffle.testutils import override_switch
 
 from api.models import (
     MCPServerConfig,
@@ -35,7 +36,9 @@ from api.services.pipedream_connections import (
     list_pipedream_connected_accounts,
 )
 from api.services.mcp_servers import update_agent_personal_servers
+from api.services.pipedream_feature_flags import pipedream_google_sheets_guard_enabled
 from api.agent.tools.mcp_manager import MCPToolManager
+from constants.feature_flags import PIPEDREAM_GOOGLE_SHEETS_GUARD
 from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
@@ -1396,6 +1399,7 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual([app["slug"] for app in payload["selected_apps"]], ["trello"])
         self.assertEqual([app["slug"] for app in payload["effective_apps"]], ["google_sheets", "google_docs", "trello"])
 
+    @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=True)
     @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
     def test_get_hides_deprecated_platform_apps(self, mock_get_apps):
         self._set_deprecated_apps("google_sheets")
@@ -1630,12 +1634,24 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["results"][0]["slug"], "trello")
 
+    @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=True)
     def test_deprecated_apps_metadata_is_read_and_normalized(self):
         MCPServerConfig.objects.filter(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream").update(
             metadata={"deprecated_apps": ["Trello", "google sheets", "", None, "GOOGLE_SHEETS"]}
         )
 
         self.assertEqual(get_deprecated_pipedream_app_slugs(), ["trello", "google_sheets"])
+
+    def test_google_sheets_guard_switch_defaults_off(self):
+        self.assertFalse(pipedream_google_sheets_guard_enabled())
+
+    @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=False)
+    def test_guard_rollback_restores_google_sheets_visibility_only(self):
+        MCPServerConfig.objects.filter(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream").update(
+            metadata={"deprecated_apps": ["trello", "google_sheets"]}
+        )
+
+        self.assertEqual(get_deprecated_pipedream_app_slugs(), ["trello"])
 
     @patch("console.pipedream_apps_api.PipedreamCatalogService.search_apps")
     def test_search_hides_deprecated_apps_without_agent_context(self, mock_search_apps):
