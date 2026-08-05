@@ -226,8 +226,8 @@ def pipedream_google_sheets_blocked_error(
 
 
 def is_pipedream_google_sheets_blocked_call(entry: Any, params: Any) -> bool:
-    if not pipedream_google_sheets_guard_enabled():
-        return False
     if entry.provider != "mcp" or str(entry.tool_server).strip().casefold() != PIPEDREAM_PROVIDER:
         return False
-    return _provider_app_slug(entry, params) == GOOGLE_SHEETS_INTEGRATION
+    if _provider_app_slug(entry, params) != GOOGLE_SHEETS_INTEGRATION:
+        return False
+    return pipedream_google_sheets_guard_enabled()

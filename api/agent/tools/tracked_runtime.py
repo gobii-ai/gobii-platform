@@ -8,7 +8,6 @@ from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentTool
 from api.services.deprecated_provider_guard import (
     is_deprecated_provider_blocked_result,
     is_pipedream_google_sheets_blocked_call,
-    pipedream_google_sheets_guard_enabled,
 )
 
 from .runtime_execution_context import tool_execution_context
@@ -69,11 +68,7 @@ def execute_tracked_runtime_tool_call(
 
     attach_completion = _build_attach_completion(parent_step)
     parent_tool_call = _parent_tool_call_from_step(parent_step)
-    resolved_entry = (
-        resolve_tool_entry(agent, tool_name)
-        if pipedream_google_sheets_guard_enabled()
-        else None
-    )
+    resolved_entry = resolve_tool_entry(agent, tool_name)
     blocked_provider_call = bool(
         resolved_entry
         and is_pipedream_google_sheets_blocked_call(resolved_entry, exec_params)

@@ -88,7 +88,6 @@ from api.services.deprecated_provider_guard import (
     filter_deprecated_provider_blocked_tool,
     is_deprecated_provider_blocked_result,
     is_pipedream_google_sheets_blocked_call,
-    pipedream_google_sheets_guard_enabled,
 )
 from . import internal_reasoning
 from .daily_limit_mode import (
@@ -3236,12 +3235,7 @@ def _resolve_tool_for_execution(
     tool_name: str,
     resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> tuple[str, Optional[ToolCatalogEntry]]:
-    should_resolve = (
-        resolved_entry is not None
-        or pipedream_google_sheets_guard_enabled()
-        or isinstance(tool_name, str) and tool_name.startswith("mcp_")
-    )
-    entry = resolved_entry or (resolve_tool_entry(agent, tool_name) if should_resolve else None)
+    entry = resolved_entry or resolve_tool_entry(agent, tool_name)
     return (entry.full_name, entry) if entry else (tool_name, None)
 
 
@@ -3762,10 +3756,7 @@ def _prepare_tool_batch(
                 is_credit_message_only_mode(daily_state, task_credit_available)
                 and not is_credit_message_only_allowed_tool(tool_name)
             )
-            if (
-                credit_message_only_restricted
-                and pipedream_google_sheets_guard_enabled()
-            ):
+            if credit_message_only_restricted:
                 try:
                     _, preflight_params = _parse_tool_call_params(
                         _get_tool_call_arguments(call)
