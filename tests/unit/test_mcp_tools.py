@@ -1687,6 +1687,70 @@ class MCPToolManagerTests(TestCase):
         )
 
     @tag("batch_mcp_tools")
+    def test_targeted_pipedream_preparation_does_not_reuse_other_app_shard(self):
+        user = get_user_model().objects.create_user(username=f"pd-scoped-{uuid.uuid4().hex[:8]}")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Pipedream scoped agent",
+            charter="Test",
+            browser_use_agent=create_test_browser_agent(user),
+        )
+        pipedream_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            display_name="Pipedream",
+            url="https://example.com/mcp",
+        )
+        runtime = self.manager._build_runtime_from_config(pipedream_config)
+        self.manager._server_cache[runtime.config_id] = runtime
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="component-proxy",
+            tool_server="pipedream",
+            tool_name="component-proxy",
+            server_config=pipedream_config,
+        )
+        wrong = MCPToolInfo(
+            runtime.config_id,
+            "component-proxy",
+            "pipedream",
+            "component-proxy",
+            "Trello component proxy",
+            {},
+            app_slug="trello",
+        )
+        expected = MCPToolInfo(
+            runtime.config_id,
+            "component-proxy",
+            "pipedream",
+            "component-proxy",
+            "Google Sheets component proxy",
+            {},
+            app_slug="google_sheets",
+        )
+        wrong_context = PipedreamToolCacheContext(effective_app_slugs=["trello"])
+        self.manager._tools_cache[
+            self.manager._tool_cache_slot_key(runtime, wrong_context)
+        ] = [wrong]
+
+        with patch(
+            "api.agent.tools.mcp_manager.get_effective_pipedream_app_slugs_for_agent",
+            return_value=["google_sheets"],
+        ), patch.object(
+            self.manager,
+            "get_tools_for_agent",
+            return_value=[expected],
+        ) as get_tools:
+            result = self.manager.prepare_tool_for_agent(agent, expected.full_name)
+
+        self.assertIs(result, expected)
+        get_tools.assert_called_once_with(
+            agent,
+            allowed_config_ids={runtime.config_id},
+            pipedream_app_slugs={"google_sheets"},
+        )
+
+    @tag("batch_mcp_tools")
     def test_resolution_does_not_reuse_cached_tool_from_inaccessible_config(self):
         user = get_user_model().objects.create_user(username=f"resolver-{uuid.uuid4().hex[:8]}")
         agent = PersistentAgent.objects.create(
@@ -5008,6 +5072,77 @@ class MCPToolIntegrationTests(TestCase):
         self.assertEqual(result["result"], {"ok": True})
         self.assertEqual(mock_get_client.call_args.kwargs["app_slug"], "discord")
         mock_execute.assert_called_once()
+
+    def test_execute_mcp_tool_uses_pipedream_app_slug_metadata_for_generic_tool(self):
+        config, _created = MCPServerConfig.objects.update_or_create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            defaults={
+                "display_name": "Pipedream",
+                "description": "Pipedream remote MCP",
+                "command": "",
+                "command_args": [],
+                "url": "https://remote.mcp.pipedream.net",
+                "prefetch_apps": [],
+                "metadata": {},
+                "is_active": True,
+            },
+        )
+        runtime = self._pipedream_runtime(config)
+        manager = MCPToolManager()
+        manager._initialized = True
+        manager._server_cache = {runtime.config_id: runtime}
+        tool = MCPToolInfo(
+            runtime.config_id,
+            "component-proxy",
+            "pipedream",
+            "component-proxy",
+            "Proxy a Google Sheets component",
+            {"type": "object", "properties": {}},
+            app_slug="google_sheets",
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name=tool.full_name,
+            tool_server="pipedream",
+            tool_name=tool.tool_name,
+            server_config=config,
+        )
+        client = MagicMock()
+
+        with (
+            patch.object(manager, "_ensure_runtime_registered", return_value=True),
+            patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)),
+            patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[object()]),
+            patch.object(manager, "_get_pipedream_agent_client", return_value=client) as mock_get_client,
+            patch.object(
+                manager,
+                "_execute_async",
+                new=MagicMock(
+                    return_value={
+                        "result": {
+                            "connect": "https://pipedream.com/_static/connect.html",
+                        }
+                    }
+                ),
+            ),
+            patch.object(manager, "_run_coroutine_sync", side_effect=lambda value: value),
+            patch(
+                "api.integrations.pipedream_connect.create_connect_session",
+                return_value=(MagicMock(id="connect-session"), "https://example.com/connect"),
+            ) as create_connect_session,
+        ):
+            result = manager.execute_mcp_tool(
+                self.agent,
+                tool.full_name,
+                {},
+                tool_info=tool,
+            )
+
+        self.assertEqual(result["status"], "action_required")
+        self.assertEqual(mock_get_client.call_args.kwargs["app_slug"], "google_sheets")
+        create_connect_session.assert_called_once_with(self.agent, "google_sheets")
+        self.assertIn("/google_sheets/", result["connect_url"])
 
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')

@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 PIPEDREAM_RUNTIME_NAME = "pipedream"
 PIPEDREAM_GOOGLE_SHEETS_APP_SLUG = "google_sheets"
 PIPEDREAM_COMPONENT_OPTION_TOOLS = frozenset({"retrieve_options", "configure_component"})
+PIPEDREAM_METADATA_APP_TOOLS = frozenset({"component-proxy"})
 SEARCH_CACHE_TTL_SECONDS = 300
 APP_CACHE_TTL_SECONDS = 1800
 SEARCH_CACHE_PREFIX = "pipedream:apps:search:v1"
@@ -208,7 +209,11 @@ def pipedream_app_slug_for_tool_name(tool_name: object) -> str:
     if not isinstance(tool_name, str):
         return ""
     normalized = tool_name.strip()
-    if not normalized or "-" not in normalized:
+    if (
+        not normalized
+        or normalized in PIPEDREAM_METADATA_APP_TOOLS
+        or "-" not in normalized
+    ):
         return ""
     return normalize_app_slug(normalized.split("-", 1)[0])
 
@@ -239,8 +244,13 @@ def _native_google_sheets_handoff_ready(agent: Optional[PersistentAgent]) -> boo
         return False
     from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
     from api.models import PersistentAgentSystemSkillState
+    from api.services.tool_blacklist import is_tool_blacklisted_for_agent
 
     try:
+        # Tier policy can change after the handoff rows were created. Preserve
+        # the legacy action whenever the native path is no longer available.
+        if is_tool_blacklisted_for_agent(agent, "http_request"):
+            return False
         skill_enabled = PersistentAgentSystemSkillState.objects.filter(
             agent=agent,
             skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,

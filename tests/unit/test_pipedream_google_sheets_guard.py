@@ -511,6 +511,12 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
                 tool_full_name="http_request",
             ).delete()
             after_native_tool_eviction = manager.get_enabled_tools_definitions(self.agent_a)
+            prepare_google_sheets_native_handoff(self.agent_a)
+            with patch(
+                "api.services.tool_blacklist.is_tool_blacklisted_for_agent",
+                return_value=True,
+            ):
+                after_native_tool_blacklist = manager.get_enabled_tools_definitions(self.agent_a)
 
         before_names = {
             definition["function"]["name"]
@@ -524,6 +530,10 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             definition["function"]["name"]
             for definition in after_native_tool_eviction
         }
+        after_blacklist_names = {
+            definition["function"]["name"]
+            for definition in after_native_tool_blacklist
+        }
         self.assertEqual(handoff_status, "ready")
         self.assertIn(prefixed_entry.full_name, before_names)
         self.assertIn(metadata_entry.full_name, before_names)
@@ -534,6 +544,9 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertIn(prefixed_entry.full_name, after_eviction_names)
         self.assertIn(metadata_entry.full_name, after_eviction_names)
         self.assertIn(other_app_entry.full_name, after_eviction_names)
+        self.assertIn(prefixed_entry.full_name, after_blacklist_names)
+        self.assertIn(metadata_entry.full_name, after_blacklist_names)
+        self.assertIn(other_app_entry.full_name, after_blacklist_names)
 
     def test_metadata_only_pipedream_tool_cold_resolution_uses_effective_app_shards(self):
         entry = self._mcp_entry(

@@ -2263,7 +2263,38 @@ class MCPToolManager:
         if require_enabled and enabled_row is None:
             return None
 
+        app_slug = pipedream_app_slug_for_tool_name(tool_name)
+        fallback_app_slug = app_slug
+        pipedream_target = bool(
+            enabled_row
+            and str(enabled_row.tool_server or "").strip().casefold()
+            == self.PIPEDREAM_RUNTIME_NAME
+        )
+        app_slugs: set[str] = set()
+        if pipedream_target:
+            app_slugs, fallback_app_slug = self._pipedream_app_slugs_for_tool_resolution(
+                agent,
+                tool_name,
+            )
+        elif app_slug:
+            app_slugs.add(app_slug)
+
         cached = self.find_tool_by_name(tool_name)
+        if pipedream_target and enabled_row and enabled_row.server_config_id:
+            runtime = self._server_cache.get(str(enabled_row.server_config_id))
+            if runtime is not None:
+                context = PipedreamToolCacheContext(
+                    effective_app_slugs=normalize_app_slugs(app_slugs)
+                )
+                slot_key = self._tool_cache_slot_key(runtime, context)
+                cached = next(
+                    (
+                        tool
+                        for tool in self._tools_cache.get(slot_key, [])
+                        if tool.full_name == tool_name
+                    ),
+                    None,
+                )
         cached_matches_row = bool(
             cached
             and enabled_row
@@ -2280,7 +2311,6 @@ class MCPToolManager:
 
         allowed_config_ids: set[str] = set()
         allowed_server_names: set[str] = set()
-        app_slugs: set[str] = set()
         if enabled_row and enabled_row.server_config_id:
             allowed_config_ids.add(str(enabled_row.server_config_id))
         if (
@@ -2289,21 +2319,6 @@ class MCPToolManager:
             and enabled_row.tool_server not in {"", "builtin", "custom", "eval"}
         ):
             allowed_server_names.add(enabled_row.tool_server)
-
-        app_slug = pipedream_app_slug_for_tool_name(tool_name)
-        fallback_app_slug = app_slug
-        pipedream_target = bool(
-            enabled_row
-            and str(enabled_row.tool_server or "").strip().casefold()
-            == self.PIPEDREAM_RUNTIME_NAME
-        )
-        if pipedream_target:
-            app_slugs, fallback_app_slug = self._pipedream_app_slugs_for_tool_resolution(
-                agent,
-                tool_name,
-            )
-        elif app_slug:
-            app_slugs.add(app_slug)
 
         if app_slugs:
             if not allowed_config_ids:
@@ -3020,8 +3035,12 @@ class MCPToolManager:
                 return {"status": "error", "message": proxy_error}
 
         modern_protocol: Optional[str] = None
+        app_slug: Optional[str] = None
         if server_name == self.PIPEDREAM_RUNTIME_NAME and not isolated:
-            app_slug = self._pd_app_slug_for_tool_call(info.tool_name, params)
+            app_slug = self._pd_app_slug_for_tool_call(
+                info.tool_name,
+                params,
+            ) or normalize_app_slug(info.app_slug)
             if app_slug:
                 try:
                     from ...services.pipedream_connections import PipedreamConnectionError, list_pipedream_connected_accounts
@@ -3126,36 +3145,40 @@ class MCPToolManager:
                     connect_url = content
 
                 if connect_url:
+                    resolved_app_slug = app_slug
+                    connect_app_slug = resolved_app_slug
                     try:
                         logger.info(
                             "PD Connect: pass-through link detected for tool '%s' agent=%s",
                             actual_tool_name, str(agent.id)
                         )
-                        # Determine app slug: prefer ?app= from server URL, else parse from tool name
-                        app_slug = None
+                        # Prefer the server's explicit app, then the app identity
+                        # already resolved for this invocation.
                         try:
                             from urllib.parse import urlparse, parse_qs
                             qs = parse_qs(urlparse(connect_url).query or "")
                             app_param = qs.get("app", [None])[0]
                             if isinstance(app_param, str) and app_param.strip():
-                                app_slug = app_param.strip()
+                                connect_app_slug = app_param.strip()
                                 logger.info(
                                     "PD Connect: using app from server link app=%s",
-                                    app_slug
+                                    connect_app_slug
                                 )
                         except Exception:
-                            app_slug = None
-                        if not app_slug:
-                            app_slug = self._pd_parse_tool(actual_tool_name)
+                            connect_app_slug = resolved_app_slug
+                        if not connect_app_slug:
+                            connect_app_slug = resolved_app_slug or self._pd_parse_tool(
+                                actual_tool_name
+                            )
                             logger.info(
-                                "PD Connect: derived app from tool name tool=%s app=%s",
-                                actual_tool_name, app_slug or ""
+                                "PD Connect: resolved app for tool=%s app=%s",
+                                actual_tool_name, connect_app_slug or ""
                             )
 
                         # Create (or reuse) a first-party Connect session + link
                         from api.integrations.pipedream_connect import create_connect_session, EFFECTIVE_EXPIRATION_BUFFER_SECONDS
 
-                        normalized_app = (app_slug or "").strip()
+                        normalized_app = (connect_app_slug or "").strip()
 
                         existing_session = (
                             PipedreamConnectSession.objects
@@ -3219,7 +3242,7 @@ class MCPToolManager:
                             if session_status == PipedreamConnectSession.Status.ERROR and session_expiry:
                                 logger.warning(
                                     "PD Connect: refusing expired connect link session=%s app=%s expires_at=%s",
-                                    getattr(session, 'id', None), app_slug or "", str(session_expiry)
+                                    getattr(session, 'id', None), connect_app_slug or "", str(session_expiry)
                                 )
                                 return {
                                     "status": "action_required",
@@ -3233,7 +3256,7 @@ class MCPToolManager:
                         jit_url = _build_jit_connect_url(str(agent.id), normalized_app or "")
                         logger.info(
                             "PD Connect: surfacing JIT connect link agent=%s app=%s",
-                            str(agent.id), app_slug or ""
+                            str(agent.id), connect_app_slug or ""
                         )
                         return {
                             "status": "action_required",
@@ -3242,7 +3265,11 @@ class MCPToolManager:
                         }
                     except Exception:
                         logger.exception("PD Connect: failed to generate first-party link; falling back to JIT URL")
-                        jit_url = _build_jit_connect_url(str(agent.id), (app_slug or "").strip())
+                        fallback_app_slug = connect_app_slug or resolved_app_slug
+                        jit_url = _build_jit_connect_url(
+                            str(agent.id),
+                            (fallback_app_slug or "").strip(),
+                        )
                         return {
                             "status": "action_required",
                             "result": f"Authorization required. Please connect your account via: {jit_url}",
