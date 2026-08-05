@@ -14,10 +14,12 @@ from django.db.models import Q, QuerySet
 
 from api.pipedream_app_utils import normalize_app_slug, normalize_app_slugs
 from api.models import MCPServerConfig, PersistentAgent, PersistentAgentEnabledTool, PipedreamAppSelection
+from api.services.pipedream_feature_flags import pipedream_google_sheets_guard_enabled
 
 logger = logging.getLogger(__name__)
 
 PIPEDREAM_RUNTIME_NAME = "pipedream"
+PIPEDREAM_GOOGLE_SHEETS_APP_SLUG = "google_sheets"
 PIPEDREAM_COMPONENT_OPTION_TOOLS = frozenset({"retrieve_options", "configure_component"})
 SEARCH_CACHE_TTL_SECONDS = 300
 APP_CACHE_TTL_SECONDS = 1800
@@ -185,7 +187,17 @@ def get_deprecated_pipedream_app_slugs() -> list[str]:
     if not isinstance(raw_slugs, (list, tuple, set)):
         logger.warning("Ignoring invalid Pipedream deprecated_apps metadata; expected a JSON array.")
         return []
-    return normalize_app_slugs(raw_slugs)
+    deprecated_app_slugs = normalize_app_slugs(raw_slugs)
+    if (
+        PIPEDREAM_GOOGLE_SHEETS_APP_SLUG in deprecated_app_slugs
+        and not pipedream_google_sheets_guard_enabled()
+    ):
+        return [
+            app_slug
+            for app_slug in deprecated_app_slugs
+            if app_slug != PIPEDREAM_GOOGLE_SHEETS_APP_SLUG
+        ]
+    return deprecated_app_slugs
 
 
 def pipedream_app_slug_from_catalog_entry(app: Any) -> str:

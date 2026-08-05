@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
+from waffle.testutils import override_switch
 
 from api.models import (
     MCPServerConfig,
@@ -36,6 +37,7 @@ from api.services.pipedream_connections import (
 )
 from api.services.mcp_servers import update_agent_personal_servers
 from api.agent.tools.mcp_manager import MCPToolManager
+from constants.feature_flags import PIPEDREAM_GOOGLE_SHEETS_GUARD
 from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
@@ -1636,6 +1638,14 @@ class PipedreamAppsAPITests(TestCase):
         )
 
         self.assertEqual(get_deprecated_pipedream_app_slugs(), ["trello", "google_sheets"])
+
+    @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=False)
+    def test_guard_rollback_restores_google_sheets_visibility_only(self):
+        MCPServerConfig.objects.filter(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream").update(
+            metadata={"deprecated_apps": ["trello", "google_sheets"]}
+        )
+
+        self.assertEqual(get_deprecated_pipedream_app_slugs(), ["trello"])
 
     @patch("console.pipedream_apps_api.PipedreamCatalogService.search_apps")
     def test_search_hides_deprecated_apps_without_agent_context(self, mock_search_apps):

@@ -5,14 +5,13 @@ from django.db import DatabaseError
 
 from api.agent.tools.runtime_execution_context import get_tool_execution_context
 from api.models import PersistentAgent, PersistentAgentToolCall
-from constants.feature_flags import PIPEDREAM_GOOGLE_SHEETS_GUARD
 from api.services.pipedream_apps import (
     PIPEDREAM_COMPONENT_OPTION_TOOLS,
     normalize_app_slug,
     pipedream_app_slug_for_tool_call,
 )
+from api.services.pipedream_feature_flags import pipedream_google_sheets_guard_enabled
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from util.waffle_flags import is_waffle_switch_active
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +19,6 @@ DEPRECATED_PROVIDER_BLOCKED = "deprecated_provider_blocked"
 PIPEDREAM_PROVIDER = "pipedream"
 GOOGLE_SHEETS_INTEGRATION = "google_sheets"
 GOOGLE_SHEETS_REPLACEMENT = "google_sheets_native"
-
-
-def pipedream_google_sheets_guard_enabled() -> bool:
-    return is_waffle_switch_active(PIPEDREAM_GOOGLE_SHEETS_GUARD, default=True)
 
 
 def _provider_app_slug(entry: Any, params: Any) -> str:
