@@ -15,6 +15,7 @@ from api.agent.core.event_processing import (
     _resolve_tool_for_execution,
 )
 from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
+from api.agent.system_skills.service import prepare_google_sheets_native_handoff
 from api.agent.tools.mcp_manager import MCPToolInfo, MCPToolManager
 from api.agent.tools.sqlite_skills import format_recent_skills_for_prompt
 from api.agent.tools.tool_runtime import execute_runtime_tool_call
@@ -453,7 +454,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         rate_limit.assert_not_called()
         credit_gate.assert_not_called()
 
-    def test_connected_pipedream_sheets_tools_stay_out_of_future_rosters(self):
+    def test_pipedream_sheets_tools_hide_only_after_native_handoff_is_ready(self):
         prefixed_entry = self._mcp_entry("google_sheets-read-rows")
         metadata_entry = self._mcp_entry(
             "component-proxy",
@@ -476,15 +477,25 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
                 other_app_entry.mcp_info,
             ],
         ), patch.object(manager, "_backfill_enabled_tool_metadata"):
-            definitions = manager.get_enabled_tools_definitions(self.agent_a)
+            before_handoff = manager.get_enabled_tools_definitions(self.agent_a)
+            handoff_status = prepare_google_sheets_native_handoff(self.agent_a)
+            after_handoff = manager.get_enabled_tools_definitions(self.agent_a)
 
-        names = {
+        before_names = {
             definition["function"]["name"]
-            for definition in definitions
+            for definition in before_handoff
         }
-        self.assertNotIn(prefixed_entry.full_name, names)
-        self.assertNotIn(metadata_entry.full_name, names)
-        self.assertIn(other_app_entry.full_name, names)
+        after_names = {
+            definition["function"]["name"]
+            for definition in after_handoff
+        }
+        self.assertEqual(handoff_status, "ready")
+        self.assertIn(prefixed_entry.full_name, before_names)
+        self.assertIn(metadata_entry.full_name, before_names)
+        self.assertIn(other_app_entry.full_name, before_names)
+        self.assertNotIn(prefixed_entry.full_name, after_names)
+        self.assertNotIn(metadata_entry.full_name, after_names)
+        self.assertIn(other_app_entry.full_name, after_names)
 
     def test_nested_runtime_reuses_failed_catalog_resolution(self):
         with patch(
@@ -505,6 +516,36 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         resolve.assert_not_called()
         executor.assert_not_called()
 
+    def test_nested_direct_runtime_tool_skips_catalog_resolution(self):
+        with patch(
+            "api.agent.core.event_processing._enforce_tool_rate_limit",
+            return_value=True,
+        ), patch(
+            "api.agent.core.event_processing._ensure_credit_for_tool",
+            return_value={"cost": None, "credit": None},
+        ), patch(
+            "api.agent.tools.tool_manager.resolve_tool_entry",
+        ) as resolve, patch(
+            "api.agent.tools.tracked_runtime.execute_runtime_tool_call",
+            return_value=({"status": "ok"}, None),
+        ) as runtime:
+            result, updated_tools = execute_tracked_runtime_tool_call(
+                self.agent_a,
+                tool_name="send_email",
+                exec_params={"to_address": "test@example.com", "body": "hello"},
+            )
+
+        self.assertEqual(result, {"status": "ok"})
+        self.assertIsNone(updated_tools)
+        resolve.assert_not_called()
+        runtime.assert_called_once_with(
+            self.agent_a,
+            tool_name="send_email",
+            exec_params={"to_address": "test@example.com", "body": "hello"},
+            isolated_mcp=False,
+            resolved_entry=None,
+        )
+
     @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=False)
     def test_guard_rollback_restores_connected_sheets_tools_to_future_rosters(self):
         entry = self._mcp_entry(
@@ -512,6 +553,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             app_slug="google_sheets",
         )
         self._enable(self.agent_a, entry)
+        self.assertEqual(prepare_google_sheets_native_handoff(self.agent_a), "ready")
         manager = MCPToolManager()
 
         with patch.object(

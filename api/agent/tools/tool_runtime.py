@@ -31,6 +31,29 @@ from .web_chat_sender import execute_send_chat_message
 
 logger = logging.getLogger(__name__)
 _RESOLVED_ENTRY_UNSET = object()
+_CATALOG_FREE_RUNTIME_TOOL_NAMES = frozenset(
+    {
+        "spawn_web_task",
+        "send_email",
+        "send_sms",
+        "send_chat_message",
+        "send_mcp_message",
+        "send_agent_message",
+        "update_schedule",
+        "update_charter",
+        "secure_credentials_request",
+        "request_contact_permission",
+        "request_human_input",
+        "search_tools",
+        CREATE_CUSTOM_TOOL_NAME,
+        "apply_patch",
+        "end_planning",
+    }
+)
+
+
+def runtime_tool_requires_catalog_entry(tool_name: str, *, isolated_mcp: bool = False) -> bool:
+    return isolated_mcp or tool_name not in _CATALOG_FREE_RUNTIME_TOOL_NAMES
 
 
 def _refresh_agent_tools(agent: PersistentAgent) -> Optional[list[dict]]:

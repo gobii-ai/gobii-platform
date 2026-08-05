@@ -11,7 +11,7 @@ from api.services.deprecated_provider_guard import (
 )
 
 from .runtime_execution_context import tool_execution_context
-from .tool_runtime import execute_runtime_tool_call
+from .tool_runtime import execute_runtime_tool_call, runtime_tool_requires_catalog_entry
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,11 @@ def execute_tracked_runtime_tool_call(
 
     attach_completion = _build_attach_completion(parent_step)
     parent_tool_call = _parent_tool_call_from_step(parent_step)
-    resolved_entry = resolve_tool_entry(agent, tool_name)
+    resolved_entry = (
+        resolve_tool_entry(agent, tool_name)
+        if runtime_tool_requires_catalog_entry(tool_name, isolated_mcp=isolated_mcp)
+        else None
+    )
     blocked_provider_call = bool(
         resolved_entry
         and is_pipedream_google_sheets_blocked_call(resolved_entry, exec_params)

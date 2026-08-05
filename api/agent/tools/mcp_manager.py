@@ -2456,7 +2456,7 @@ class MCPToolManager:
                 )
                 if tool.full_name not in seen_tool_names
             )
-        for tool_info in filter_guarded_pipedream_google_sheets_tools(tools):
+        for tool_info in filter_guarded_pipedream_google_sheets_tools(agent, tools):
             if tool_info.full_name in enabled_set:
                 self._backfill_enabled_tool_metadata(
                     enabled_rows_by_name[tool_info.full_name],
