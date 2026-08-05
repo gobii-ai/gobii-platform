@@ -12,6 +12,7 @@ from api.agent.core.event_processing import (
     _execute_tool_call_runtime,
     _finalize_tool_batch,
     _prepare_tool_batch,
+    _resolve_tool_for_execution,
 )
 from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.tools.mcp_manager import MCPToolInfo
@@ -248,18 +249,37 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
 
     def test_top_level_handoff_refreshes_tools_for_the_same_agent_turn(self):
         entry = self._mcp_entry("google_sheets-read-rows")
+        sibling_entry = self._mcp_entry("google_sheets-add-row")
+        internal_entry = self._mcp_entry(
+            "google_sheets-internal-read",
+            server_name="internal_spreadsheets",
+        )
+        other_app_entry = self._mcp_entry(
+            "google_sheets-looking-name",
+            app_slug="trello",
+        )
         self._enable(self.agent_a, entry)
         refreshed_tools = [
             {"type": "function", "function": {"name": entry.full_name}},
-            {"type": "function", "function": {"name": "google_sheets-add-row"}},
+            {"type": "function", "function": {"name": sibling_entry.full_name}},
+            {"type": "function", "function": {"name": internal_entry.full_name}},
+            {"type": "function", "function": {"name": other_app_entry.full_name}},
             {"type": "function", "function": {"name": "trello-create-card"}},
             {"type": "function", "function": {"name": "http_request"}},
         ]
+        resolved_entries = {
+            sibling_entry.full_name: sibling_entry,
+            internal_entry.full_name: internal_entry,
+            other_app_entry.full_name: other_app_entry,
+        }
 
         with patch(
             "api.agent.core.event_processing.get_agent_tools",
             return_value=refreshed_tools,
-        ) as refresh:
+        ) as refresh, patch(
+            "api.services.deprecated_provider_guard._resolve_tool_entry",
+            side_effect=lambda _agent, tool_name: resolved_entries.get(tool_name),
+        ):
             result, updated_tools = _execute_tool_call_runtime(
                 self.agent_a,
                 tool_name=entry.full_name,
@@ -273,6 +293,8 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertEqual(
             updated_tools,
             [
+                {"type": "function", "function": {"name": internal_entry.full_name}},
+                {"type": "function", "function": {"name": other_app_entry.full_name}},
                 {"type": "function", "function": {"name": "trello-create-card"}},
                 {"type": "function", "function": {"name": "http_request"}},
             ],
@@ -281,17 +303,20 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
 
     def test_nested_handoff_filters_blocked_tool_from_same_turn_roster(self):
         entry = self._mcp_entry("google_sheets-read-rows")
+        sibling_entry = self._mcp_entry("google_sheets-add-row")
         self._enable(self.agent_a, entry)
         refreshed_tools = [
             {"type": "function", "function": {"name": entry.full_name}},
-            {"type": "function", "function": {"name": "google_sheets-add-row"}},
+            {"type": "function", "function": {"name": sibling_entry.full_name}},
             {"type": "function", "function": {"name": "trello-create-card"}},
             {"type": "function", "function": {"name": "http_request"}},
         ]
 
         with patch(
             "api.agent.tools.tool_manager.resolve_tool_entry",
-            return_value=entry,
+            side_effect=lambda _agent, tool_name: (
+                entry if tool_name == entry.full_name else sibling_entry
+            ),
         ), patch(
             "api.agent.tools.tool_runtime._refresh_agent_tools",
             return_value=refreshed_tools,
@@ -610,6 +635,77 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
 
         self.assertEqual(result["error_code"], "deprecated_provider_blocked")
         refund.assert_not_called()
+
+    def test_spoofed_blocked_result_does_not_replace_top_level_roster(self):
+        entry = self._mcp_entry("trello-create-card")
+        spoofed_result = {
+            "status": "error",
+            "error_code": "deprecated_provider_blocked",
+            "message": "Provider-controlled payload.",
+        }
+
+        with patch(
+            "api.agent.core.event_processing.execute_enabled_tool",
+            return_value=spoofed_result,
+        ), patch(
+            "api.agent.core.event_processing.get_agent_tools",
+        ) as refresh:
+            result, updated_tools = _execute_tool_call_runtime(
+                self.agent_a,
+                tool_name=entry.full_name,
+                exec_params={},
+                budget_ctx=None,
+                eval_run_id=None,
+                resolved_entry=entry,
+            )
+
+        self.assertEqual(result, spoofed_result)
+        self.assertIsNone(updated_tools)
+        refresh.assert_not_called()
+
+    def test_spoofed_blocked_result_does_not_replace_nested_roster(self):
+        entry = self._mcp_entry("trello-create-card")
+        spoofed_result = {
+            "status": "error",
+            "error_code": "deprecated_provider_blocked",
+            "message": "Provider-controlled payload.",
+        }
+
+        with patch(
+            "api.agent.tools.tool_manager.resolve_tool_entry",
+            return_value=entry,
+        ), patch(
+            "api.agent.tools.tool_runtime.execute_enabled_tool",
+            return_value=spoofed_result,
+        ), patch(
+            "api.agent.tools.tool_runtime._refresh_agent_tools",
+        ) as refresh:
+            result, updated_tools = execute_runtime_tool_call(
+                self.agent_a,
+                tool_name=entry.full_name,
+                exec_params={},
+            )
+
+        self.assertEqual(result, spoofed_result)
+        self.assertIsNone(updated_tools)
+        refresh.assert_not_called()
+
+    def test_known_local_tools_skip_catalog_resolution(self):
+        with patch("api.agent.core.event_processing.resolve_tool_entry") as resolve:
+            direct_name, direct_entry = _resolve_tool_for_execution(
+                self.agent_a,
+                "send_email",
+            )
+            builtin_name, builtin_entry = _resolve_tool_for_execution(
+                self.agent_a,
+                "http_request",
+            )
+
+        self.assertEqual(direct_name, "send_email")
+        self.assertIsNone(direct_entry)
+        self.assertEqual(builtin_name, "http_request")
+        self.assertIsNone(builtin_entry)
+        resolve.assert_not_called()
 
     def test_pipedream_google_sheets_metadata_match_is_blocked_for_every_agent(self):
         entry = self._mcp_entry(

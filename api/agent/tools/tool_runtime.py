@@ -5,6 +5,7 @@ from api.models import PersistentAgent
 from api.services.deprecated_provider_guard import (
     filter_deprecated_provider_blocked_tool,
     is_deprecated_provider_blocked_result,
+    is_pipedream_google_sheets_blocked_call,
 )
 from api.services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 
@@ -23,7 +24,8 @@ from .search_tools import execute_search_tools
 from .secure_credentials_request import execute_secure_credentials_request
 from .sms_sender import execute_send_sms
 from .spawn_web_task import execute_spawn_web_task
-from .tool_manager import execute_enabled_tool
+from . import tool_manager as tool_manager_service
+from .tool_manager import ToolCatalogEntry, execute_enabled_tool
 from .web_chat_sender import execute_send_chat_message
 
 
@@ -40,11 +42,18 @@ def _refresh_agent_tools_after_deprecated_provider_handoff(
     agent: PersistentAgent,
     result: Any,
     blocked_tool_name: str,
+    resolved_entry: Optional[ToolCatalogEntry],
+    exec_params: Dict[str, Any],
 ) -> Optional[list[dict]]:
-    if not is_deprecated_provider_blocked_result(result):
+    if not (
+        is_deprecated_provider_blocked_result(result)
+        and resolved_entry is not None
+        and is_pipedream_google_sheets_blocked_call(resolved_entry, exec_params)
+    ):
         return None
     try:
         return filter_deprecated_provider_blocked_tool(
+            agent,
             _refresh_agent_tools(agent),
             blocked_tool_name,
         )
@@ -71,8 +80,21 @@ def execute_runtime_tool_call(
         return tool_blacklist_error(tool_name), updated_tools
 
     if isolated_mcp:
-        result = execute_enabled_tool(agent, tool_name, exec_params, isolated_mcp=True)
-        updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(agent, result, tool_name)
+        resolved_entry = tool_manager_service.resolve_tool_entry(agent, tool_name)
+        result = execute_enabled_tool(
+            agent,
+            tool_name,
+            exec_params,
+            isolated_mcp=True,
+            resolved_entry=resolved_entry,
+        )
+        updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(
+            agent,
+            result,
+            tool_name,
+            resolved_entry,
+            exec_params,
+        )
         return result, updated_tools
     if tool_name == "spawn_web_task":
         return execute_spawn_web_task(agent, exec_params), updated_tools
@@ -111,6 +133,18 @@ def execute_runtime_tool_call(
         updated_tools = _refresh_agent_tools(agent)
         return result, updated_tools
 
-    result = execute_enabled_tool(agent, tool_name, exec_params)
-    updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(agent, result, tool_name)
+    resolved_entry = tool_manager_service.resolve_tool_entry(agent, tool_name)
+    result = execute_enabled_tool(
+        agent,
+        tool_name,
+        exec_params,
+        resolved_entry=resolved_entry,
+    )
+    updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(
+        agent,
+        result,
+        tool_name,
+        resolved_entry,
+        exec_params,
+    )
     return result, updated_tools

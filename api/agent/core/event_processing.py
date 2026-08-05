@@ -148,7 +148,15 @@ from ..tools.secure_credentials_request import execute_secure_credentials_reques
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.request_human_input import execute_request_human_input
 from ..tools.search_tools import execute_search_tools
-from ..tools.tool_manager import ToolCatalogEntry, execute_enabled_tool, auto_enable_heuristic_tools, get_parallel_safe_tool_rejection_reason, resolve_tool_entry, should_skip_auto_substitution
+from ..tools.tool_manager import (
+    BUILTIN_TOOL_REGISTRY,
+    ToolCatalogEntry,
+    auto_enable_heuristic_tools,
+    execute_enabled_tool,
+    get_parallel_safe_tool_rejection_reason,
+    resolve_tool_entry,
+    should_skip_auto_substitution,
+)
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 from ..tools.web_chat_sender import execute_send_chat_message, _looks_like_routine_progress_message
 from ..tools.mcp_sender import execute_send_mcp_message, get_send_mcp_message_tool
@@ -3244,7 +3252,15 @@ def _resolve_tool_for_execution(
     tool_name: str,
     resolved_entry: Optional[ToolCatalogEntry] = None,
 ) -> tuple[str, Optional[ToolCatalogEntry]]:
-    entry = resolved_entry or resolve_tool_entry(agent, tool_name)
+    if resolved_entry is not None:
+        return resolved_entry.full_name, resolved_entry
+    if (
+        tool_name in _DIRECT_TOOL_EXECUTORS
+        or tool_name in _REFRESHING_TOOL_EXECUTORS
+        or tool_name in BUILTIN_TOOL_REGISTRY
+    ):
+        return tool_name, None
+    entry = resolve_tool_entry(agent, tool_name)
     return (entry.full_name, entry) if entry else (tool_name, None)
 
 
@@ -3380,11 +3396,18 @@ def _refresh_tools_after_deprecated_provider_handoff(
     agent: PersistentAgent,
     result: Any,
     blocked_tool_name: str,
+    resolved_entry: Optional[ToolCatalogEntry],
+    exec_params: Dict[str, Any],
 ) -> Optional[List[dict]]:
-    if not is_deprecated_provider_blocked_result(result):
+    if not (
+        is_deprecated_provider_blocked_result(result)
+        and resolved_entry is not None
+        and is_pipedream_google_sheets_blocked_call(resolved_entry, exec_params)
+    ):
         return None
     try:
         return filter_deprecated_provider_blocked_tool(
+            agent,
             get_agent_tools(agent),
             blocked_tool_name,
         )
@@ -3434,7 +3457,13 @@ def _execute_tool_call_runtime(
             current_sqlite_db_path=get_sqlite_db_path(),
             resolved_entry=resolved_entry,
         )
-        updated_tools = _refresh_tools_after_deprecated_provider_handoff(agent, result, tool_name)
+        updated_tools = _refresh_tools_after_deprecated_provider_handoff(
+            agent,
+            result,
+            tool_name,
+            resolved_entry,
+            exec_params,
+        )
         return result, updated_tools
     resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
     if resolve_executor:
@@ -3451,7 +3480,13 @@ def _execute_tool_call_runtime(
         current_sqlite_db_path=get_sqlite_db_path(),
         resolved_entry=resolved_entry,
     )
-    updated_tools = _refresh_tools_after_deprecated_provider_handoff(agent, result, tool_name)
+    updated_tools = _refresh_tools_after_deprecated_provider_handoff(
+        agent,
+        result,
+        tool_name,
+        resolved_entry,
+        exec_params,
+    )
     if (
         tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
         and isinstance(result, dict)

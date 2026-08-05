@@ -4,7 +4,7 @@ from typing import Any, Optional
 from django.db import DatabaseError
 
 from api.agent.tools.runtime_execution_context import get_tool_execution_context
-from api.models import PersistentAgent, PersistentAgentToolCall
+from api.models import PersistentAgent, PersistentAgentEnabledTool, PersistentAgentToolCall
 from api.services.pipedream_apps import (
     PIPEDREAM_COMPONENT_OPTION_TOOLS,
     normalize_app_slug,
@@ -35,6 +35,22 @@ def _provider_app_slug(entry: Any, params: Any) -> str:
         if app_slug:
             return app_slug
     return pipedream_app_slug_for_tool_call(tool_name, params)
+
+
+def _entry_targets_pipedream_google_sheets(entry: Any, params: Any) -> bool:
+    return (
+        entry.provider == "mcp"
+        and str(entry.tool_server).strip().casefold() == PIPEDREAM_PROVIDER
+        and _provider_app_slug(entry, params) == GOOGLE_SHEETS_INTEGRATION
+    )
+
+
+def _resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Any:
+    # Imported lazily because tool_manager owns the execution boundary that
+    # imports this guard.
+    from api.agent.tools.tool_manager import resolve_tool_entry
+
+    return resolve_tool_entry(agent, tool_name)
 
 
 def _blocked_error(handoff_status: str) -> dict[str, Any]:
@@ -88,6 +104,7 @@ def is_deprecated_provider_blocked_result(result: Any) -> bool:
 
 
 def filter_deprecated_provider_blocked_tool(
+    agent: PersistentAgent,
     tool_definitions: Optional[list[dict]],
     blocked_tool_name: str,
 ) -> Optional[list[dict]]:
@@ -95,22 +112,40 @@ def filter_deprecated_provider_blocked_tool(
     if tool_definitions is None:
         return None
 
-    def should_remove(definition: dict) -> bool:
-        function = definition.get("function")
-        if not isinstance(function, dict):
-            return False
-        tool_name = function.get("name")
-        return (
-            tool_name == blocked_tool_name
-            or pipedream_app_slug_for_tool_name(tool_name) == GOOGLE_SHEETS_INTEGRATION
+    tool_names = {
+        definition["function"]["name"]
+        for definition in tool_definitions
+        if (
+            isinstance(definition, dict)
+            and isinstance(definition.get("function"), dict)
+            and isinstance(definition["function"].get("name"), str)
         )
+    }
+    pipedream_tool_names = set(
+        PersistentAgentEnabledTool.objects.filter(
+            agent=agent,
+            tool_full_name__in=tool_names,
+            tool_server=PIPEDREAM_PROVIDER,
+        ).values_list("tool_full_name", flat=True)
+    )
+    candidates = pipedream_tool_names | {
+        tool_name
+        for tool_name in tool_names
+        if pipedream_app_slug_for_tool_name(tool_name) == GOOGLE_SHEETS_INTEGRATION
+    }
+    blocked_tool_names = {blocked_tool_name}
+    for tool_name in candidates - blocked_tool_names:
+        entry = _resolve_tool_entry(agent, tool_name)
+        if entry is not None and _entry_targets_pipedream_google_sheets(entry, {}):
+            blocked_tool_names.add(tool_name)
 
     return [
         definition
         for definition in tool_definitions
         if not (
             isinstance(definition, dict)
-            and should_remove(definition)
+            and isinstance(definition.get("function"), dict)
+            and definition["function"].get("name") in blocked_tool_names
         )
     ]
 
@@ -232,8 +267,6 @@ def pipedream_google_sheets_blocked_error(
 
 
 def is_pipedream_google_sheets_blocked_call(entry: Any, params: Any) -> bool:
-    if entry.provider != "mcp" or str(entry.tool_server).strip().casefold() != PIPEDREAM_PROVIDER:
-        return False
-    if _provider_app_slug(entry, params) != GOOGLE_SHEETS_INTEGRATION:
+    if not _entry_targets_pipedream_google_sheets(entry, params):
         return False
     return pipedream_google_sheets_guard_enabled()
