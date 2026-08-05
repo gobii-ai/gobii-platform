@@ -1,17 +1,18 @@
 import logging
 from typing import Any, Optional
 
-from django.conf import settings
 from django.db import DatabaseError
 
 from api.agent.tools.runtime_execution_context import get_tool_execution_context
 from api.models import PersistentAgent, PersistentAgentToolCall
+from constants.feature_flags import PIPEDREAM_GOOGLE_SHEETS_GUARD
 from api.services.pipedream_apps import (
     PIPEDREAM_COMPONENT_OPTION_TOOLS,
     normalize_app_slug,
     pipedream_app_slug_for_tool_call,
 )
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.waffle_flags import is_waffle_switch_active
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,10 @@ DEPRECATED_PROVIDER_BLOCKED = "deprecated_provider_blocked"
 PIPEDREAM_PROVIDER = "pipedream"
 GOOGLE_SHEETS_INTEGRATION = "google_sheets"
 GOOGLE_SHEETS_REPLACEMENT = "google_sheets_native"
+
+
+def pipedream_google_sheets_guard_enabled() -> bool:
+    return is_waffle_switch_active(PIPEDREAM_GOOGLE_SHEETS_GUARD, default=True)
 
 
 def _provider_app_slug(entry: Any, params: Any) -> str:
@@ -221,7 +226,7 @@ def pipedream_google_sheets_blocked_error(
 
 
 def is_pipedream_google_sheets_blocked_call(entry: Any, params: Any) -> bool:
-    if not settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED:
+    if not pipedream_google_sheets_guard_enabled():
         return False
     if entry.provider != "mcp" or str(entry.tool_server).strip().casefold() != PIPEDREAM_PROVIDER:
         return False

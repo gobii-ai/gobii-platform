@@ -88,6 +88,7 @@ from api.services.deprecated_provider_guard import (
     filter_deprecated_provider_blocked_tool,
     is_deprecated_provider_blocked_result,
     is_pipedream_google_sheets_blocked_call,
+    pipedream_google_sheets_guard_enabled,
 )
 from . import internal_reasoning
 from .daily_limit_mode import (
@@ -3237,7 +3238,7 @@ def _resolve_tool_for_execution(
 ) -> tuple[str, Optional[ToolCatalogEntry]]:
     should_resolve = (
         resolved_entry is not None
-        or django_settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED
+        or pipedream_google_sheets_guard_enabled()
         or isinstance(tool_name, str) and tool_name.startswith("mcp_")
     )
     entry = resolved_entry or (resolve_tool_entry(agent, tool_name) if should_resolve else None)
@@ -3763,7 +3764,7 @@ def _prepare_tool_batch(
             )
             if (
                 credit_message_only_restricted
-                and django_settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED
+                and pipedream_google_sheets_guard_enabled()
             ):
                 try:
                     _, preflight_params = _parse_tool_call_params(

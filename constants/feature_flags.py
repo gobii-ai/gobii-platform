@@ -14,6 +14,9 @@ AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
 # Exponential backoff for cron-triggered runs on free-plan agents
 AGENT_CRON_THROTTLE = "agent_cron_throttle"
 
+# Emergency rollback for the universal legacy Google Sheets execution guard.
+PIPEDREAM_GOOGLE_SHEETS_GUARD = "pipedream_google_sheets_guard"
+
 # Route /support form submissions to Intercom-style email intake.
 SUPPORT_INTERCOM = "support_intercom"
 

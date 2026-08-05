@@ -3,7 +3,8 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings, tag
+from django.test import TestCase, tag
+from waffle.testutils import override_switch
 
 from api.agent.core.event_processing import (
     _PreparedToolExecution,
@@ -30,11 +31,11 @@ from api.models import (
     PersistentAgentSystemSkillState,
     PersistentAgentToolCall,
 )
+from constants.feature_flags import PIPEDREAM_GOOGLE_SHEETS_GUARD
 from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 @tag("batch_mcp_tools")
-@override_settings(PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED=True)
 class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -344,7 +345,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertIn("Do not retry Pipedream", result["message"])
         self.assertIsNone(updated_tools)
 
-    @override_settings(PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED=False)
+    @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=False)
     def test_global_rollback_switch_restores_pipedream_google_sheets_execution(self):
         entry = self._mcp_entry("google_sheets-read-rows")
         self._enable(self.agent_a, entry)

@@ -3,13 +3,12 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
-from django.conf import settings
-
 from api.agent.comms.human_input_requests import attach_originating_step_from_result, track_human_input_request_created
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
 from api.services.deprecated_provider_guard import (
     is_deprecated_provider_blocked_result,
     is_pipedream_google_sheets_blocked_call,
+    pipedream_google_sheets_guard_enabled,
 )
 
 from .runtime_execution_context import tool_execution_context
@@ -72,7 +71,7 @@ def execute_tracked_runtime_tool_call(
     parent_tool_call = _parent_tool_call_from_step(parent_step)
     resolved_entry = (
         resolve_tool_entry(agent, tool_name)
-        if settings.PIPEDREAM_GOOGLE_SHEETS_GUARD_ENABLED
+        if pipedream_google_sheets_guard_enabled()
         else None
     )
     blocked_provider_call = bool(
