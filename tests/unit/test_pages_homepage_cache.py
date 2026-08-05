@@ -4,8 +4,10 @@ from unittest.mock import patch
 from django.core.cache import cache
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
+from waffle.testutils import override_switch
 
 from api.models import MCPServerConfig, PersistentAgentTemplate
+from constants.feature_flags import PIPEDREAM_GOOGLE_SHEETS_GUARD
 from pages.homepage_cache import (
     HOMEPAGE_INTEGRATIONS_CACHE_FRESH_SECONDS,
     HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
@@ -241,6 +243,7 @@ class HomepageIntegrationsCacheTests(TestCase):
         PIPEDREAM_CLIENT_SECRET="test-client-secret",
         PIPEDREAM_PROJECT_ID="test-project-id",
     )
+    @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=True)
     @patch("pages.homepage_cache.PipedreamCatalogService.get_apps")
     def test_build_payload_hides_deprecated_platform_apps(self, mock_get_apps):
         MCPServerConfig.objects.create(
