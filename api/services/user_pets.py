@@ -24,6 +24,8 @@ BUILTIN_PET_IDS = frozenset(
         "builtin:clementine",
         "builtin:riby",
         "builtin:chewie",
+        "builtin:violet",
+        "builtin:jimothy",
     }
 )
 
