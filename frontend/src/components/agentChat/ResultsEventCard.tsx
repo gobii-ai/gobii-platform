@@ -17,6 +17,12 @@ export function ResultsEventCard({
 }) {
   const clearRows = results.rows.filter((row) => !row.locked)
   const lockedRows = results.rows.filter((row) => row.locked)
+  // The delivery body is "**title**\n\nsummary" — the card renders the title
+  // itself, so only the summary remainder is shown, markdown markers stripped.
+  const summary = (bodyText || '')
+    .replace(results.title ? `**${results.title}**` : /^\*\*[^*]+\*\*/, '')
+    .replace(/\*\*/g, '')
+    .trim()
   return (
     <div className="results-card" data-testid="results-card">
       <div className="results-card__head">
@@ -26,7 +32,7 @@ export function ResultsEventCard({
         ) : null}
       </div>
       {results.title ? <div className="results-card__title">{results.title}</div> : null}
-      {bodyText ? <div className="results-card__summary">{bodyText}</div> : null}
+      {summary ? <div className="results-card__summary">{summary}</div> : null}
       <div className="results-card__rows">
         {clearRows.map((row, index) => (
           <div className="results-card__row" key={`${index}-${row.primary}`}>
