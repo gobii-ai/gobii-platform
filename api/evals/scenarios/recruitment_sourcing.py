@@ -1071,6 +1071,7 @@ class RecruitmentSourcingFirstPassMomentumScenario(RecruitmentSourcingScenario):
         ScenarioTask(name="inject_answers", assertion_type="agent_processing"),
         ScenarioTask(name="verify_first_pass_tools", assertion_type="tool_call"),
         ScenarioTask(name="verify_first_results_delivered", assertion_type="llm_judge"),
+        ScenarioTask(name="verify_delivery_discipline", assertion_type="tool_call"),
     ]
     case = RecruitmentSourcingCase(
         slug=RECRUITMENT_SOURCING_FIRST_PASS_MOMENTUM,
@@ -1232,6 +1233,7 @@ class RecruitmentSourcingFirstPassMomentumScenario(RecruitmentSourcingScenario):
                     observed_summary=f"Structured delivery in-session: deliver_results with {len(rows)} row(s).",
                     artifacts={"step": call.step},
                 )
+                self._record_delivery_discipline(run_id, agent_id)
                 return
         response_bodies = _candidate_response_bodies(run_id, agent_id, answers_inbound)
         delivered = next(
@@ -1251,6 +1253,7 @@ class RecruitmentSourcingFirstPassMomentumScenario(RecruitmentSourcingScenario):
                 observed_summary="Initial sourcing results were delivered in the same session.",
                 artifacts={"response_artifact": delivered[1], "response_preview": delivered[0][:800]},
             )
+            self._record_delivery_discipline(run_id, agent_id)
             return
         latest_body = response_bodies[-1][0] if response_bodies else ""
         if latest_body:
@@ -1272,6 +1275,7 @@ class RecruitmentSourcingFirstPassMomentumScenario(RecruitmentSourcingScenario):
                     task_name="verify_first_results_delivered",
                     observed_summary=f"Judge: first results delivered. {reasoning}",
                 )
+                self._record_delivery_discipline(run_id, agent_id)
                 return
         self.record_task_result(
             run_id,
@@ -1281,6 +1285,57 @@ class RecruitmentSourcingFirstPassMomentumScenario(RecruitmentSourcingScenario):
             observed_summary=(
                 f"No initial results delivered after intake answers; last response: {latest_body[:600]!r}"
             ),
+        )
+        self._record_delivery_discipline(run_id, agent_id)
+
+    def _record_delivery_discipline(self, run_id: str, agent_id: str) -> None:
+        """The teaser paywall's economics: identities travel only through
+        deliver_results (server-side redaction), one consolidated batch per
+        session with sane score markers — not name-dropping prose or a drip
+        of small batches with status-sentence scores."""
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_delivery_discipline")
+        candidate_names = tuple(item["name"] for item in FIRST_PASS_CANDIDATE_ITEMS)
+        problems = []
+        for call in _tool_calls_for_run(run_id, tool_names=MESSAGE_TOOL_NAMES):
+            body = _message_tool_body(call)
+            hit = next((name for name in candidate_names if name and name in body), None)
+            if hit:
+                problems.append(f"identity '{hit}' in prose via {call.tool_name}")
+        for message in PersistentAgentMessage.objects.filter(owner_agent_id=agent_id, is_outbound=True):
+            payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+            if payload.get("gobii_results"):
+                continue
+            hit = next((name for name in candidate_names if name and name in (message.body or "")), None)
+            if hit:
+                problems.append(f"identity '{hit}' in outbound message body")
+        delivery_calls = [
+            call
+            for call in _tool_calls_for_run(run_id, tool_names=("deliver_results",))
+            if call.status == "complete"
+        ]
+        if len(delivery_calls) > 1:
+            problems.append(f"{len(delivery_calls)} deliver_results batches (contract: one consolidated batch)")
+        for call in delivery_calls:
+            for row in (call.tool_params or {}).get("results") or []:
+                score = str((row or {}).get("score") or "")
+                if len(score) > 12 or " " in score.strip():
+                    problems.append(f"status-sentence score {score!r}")
+                    break
+        if problems:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_delivery_discipline",
+                observed_summary=f"Delivery discipline violations: {problems[:4]}.",
+            )
+            return
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="verify_delivery_discipline",
+            observed_summary="Identities gated to deliver_results, one consolidated batch, sane scores.",
         )
 
 

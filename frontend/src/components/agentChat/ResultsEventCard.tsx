@@ -49,7 +49,13 @@ export function ResultsEventCard({
               {row.secondary ? <span>{row.secondary}</span> : null}
               {row.detail ? <small>{row.detail}</small> : null}
             </div>
-            {row.score ? <em className="results-card__score">{row.score} fit</em> : null}
+            {row.score ? (
+              <em className="results-card__score">
+                {/* "94%" reads as "94% fit"; a tier word ("strong") or anything
+                    else renders as-is — never blindly suffixed. */}
+                {/^\d{1,3}\s?%$/.test(row.score.trim()) ? `${row.score.trim()} fit` : row.score}
+              </em>
+            ) : null}
           </div>
         ))}
       </div>

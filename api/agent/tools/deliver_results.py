@@ -27,10 +27,12 @@ def get_deliver_results_tool() -> Dict[str, Any]:
         "function": {
             "name": DELIVER_RESULTS_TOOL_NAME,
             "description": (
-                "Deliver a batch of concrete, verified results (e.g. qualified candidates) to the user as "
-                "structured cards in web chat. Use this — not a prose list — whenever you hand over result "
-                "items. Every row must be a real, sourced item you verified this session; never pad, "
-                "never invent. Send the batch once; follow-up discussion goes through send_chat_message."
+                "Deliver the session's consolidated result batch (e.g. qualified candidates) to the user as "
+                "structured cards in web chat. Use this — not a prose list — to hand over result items, and "
+                "deliver ONE consolidated batch per working session: the full rollup of everything that "
+                "qualified, best first. Do not drip several small batches; progress along the way goes "
+                "through send_chat_message as counts, never identities. Every row must be a real, sourced "
+                "item you verified this session; never pad, never invent."
             ),
             "parameters": {
                 "type": "object",
@@ -55,7 +57,7 @@ def get_deliver_results_tool() -> Dict[str, Any]:
                                 "primary": {"type": "string", "description": "The item itself, e.g. the candidate's name."},
                                 "secondary": {"type": "string", "description": "One-line context, e.g. 'Senior Backend Engineer · Plaid'."},
                                 "detail": {"type": "string", "description": "Evidence line: why this item qualifies."},
-                                "score": {"type": "string", "description": "Optional fit/quality marker, e.g. '94%'."},
+                                "score": {"type": "string", "description": "Optional fit marker: a percentage ('94%') or one-word tier ('strong'). Never a sentence or status phrase; omit when unknown."},
                                 "url": {"type": "string", "description": "Optional source URL for the item."},
                             },
                             "required": ["primary"],
