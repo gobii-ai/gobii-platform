@@ -3448,7 +3448,7 @@ def _execute_tool_call_runtime(
             resolved_entry,
             exec_params,
         )
-    if mock_result is not None:
+    if mock_result is not None and not blocked_provider_call:
         logger.info(
             "Agent %s: using mock for %s (eval_run_id=%s)",
             agent.id,

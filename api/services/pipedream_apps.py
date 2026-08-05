@@ -241,10 +241,18 @@ def _native_google_sheets_handoff_ready(agent: Optional[PersistentAgent]) -> boo
     from api.models import PersistentAgentSystemSkillState
 
     try:
-        return PersistentAgentSystemSkillState.objects.filter(
+        skill_enabled = PersistentAgentSystemSkillState.objects.filter(
             agent=agent,
             skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
             is_enabled=True,
+        ).exists()
+        if not skill_enabled:
+            return False
+        # A skill state can outlive an LRU-evicted tool row. Keep the legacy
+        # action visible until the native execution path is actually usable.
+        return PersistentAgentEnabledTool.objects.filter(
+            agent=agent,
+            tool_full_name="http_request",
         ).exists()
     except DatabaseError:
         logger.warning(

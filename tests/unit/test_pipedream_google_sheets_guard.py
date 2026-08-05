@@ -199,6 +199,31 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             ).exists()
         )
 
+    def test_eval_mock_cannot_bypass_guard(self):
+        entry = self._mcp_entry("google_sheets-read-rows")
+        self._enable(self.agent_a, entry)
+
+        with patch(
+            "api.agent.core.event_processing._resolve_eval_mock_result",
+            return_value={"status": "ok", "rows": [["mocked"]]},
+        ), patch(
+            "api.agent.core.event_processing.get_agent_tools",
+            return_value=[],
+        ), patch(
+            "api.agent.tools.tool_manager.execute_mcp_tool",
+        ) as executor:
+            result, _updated_tools = _execute_tool_call_runtime(
+                self.agent_a,
+                tool_name=entry.full_name,
+                exec_params={},
+                budget_ctx=None,
+                eval_run_id="guard-eval",
+                resolved_entry=entry,
+            )
+
+        self.assertEqual(result["error_code"], "deprecated_provider_blocked")
+        executor.assert_not_called()
+
     def test_explicitly_disabled_native_skill_is_not_reactivated(self):
         entry = self._mcp_entry("google_sheets-read-rows")
         self._enable(self.agent_a, entry)
@@ -481,6 +506,11 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             before_handoff = manager.get_enabled_tools_definitions(self.agent_a)
             handoff_status = prepare_google_sheets_native_handoff(self.agent_a)
             after_handoff = manager.get_enabled_tools_definitions(self.agent_a)
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent_a,
+                tool_full_name="http_request",
+            ).delete()
+            after_native_tool_eviction = manager.get_enabled_tools_definitions(self.agent_a)
 
         before_names = {
             definition["function"]["name"]
@@ -490,6 +520,10 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             definition["function"]["name"]
             for definition in after_handoff
         }
+        after_eviction_names = {
+            definition["function"]["name"]
+            for definition in after_native_tool_eviction
+        }
         self.assertEqual(handoff_status, "ready")
         self.assertIn(prefixed_entry.full_name, before_names)
         self.assertIn(metadata_entry.full_name, before_names)
@@ -497,6 +531,9 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self.assertNotIn(prefixed_entry.full_name, after_names)
         self.assertNotIn(metadata_entry.full_name, after_names)
         self.assertIn(other_app_entry.full_name, after_names)
+        self.assertIn(prefixed_entry.full_name, after_eviction_names)
+        self.assertIn(metadata_entry.full_name, after_eviction_names)
+        self.assertIn(other_app_entry.full_name, after_eviction_names)
 
     def test_metadata_only_pipedream_tool_cold_resolution_uses_effective_app_shards(self):
         entry = self._mcp_entry(

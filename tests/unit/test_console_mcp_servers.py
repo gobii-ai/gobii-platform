@@ -1399,6 +1399,7 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual([app["slug"] for app in payload["selected_apps"]], ["trello"])
         self.assertEqual([app["slug"] for app in payload["effective_apps"]], ["google_sheets", "google_docs", "trello"])
 
+    @override_switch(PIPEDREAM_GOOGLE_SHEETS_GUARD, active=True)
     @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
     def test_get_hides_deprecated_platform_apps(self, mock_get_apps):
         self._set_deprecated_apps("google_sheets")
