@@ -2123,3 +2123,22 @@ class TemplateIntakeBriefTests(TestCase):
         # Idempotent: a second fetch keeps the drawn name.
         second = self.client.get("/console/api/agents/spawn-intent/").json()
         self.assertEqual(second["prospective_agent_name"], payload["prospective_agent_name"])
+
+    @tag("batch_public_templates")
+    def test_launch_deep_link_redirects_to_brief_when_schema_exists(self):
+        template = self._create_sourcing_template()
+        from pages.public_template_urls import public_template_category_slug
+
+        response = self.client.get(
+            reverse(
+                "pages:public_template_launch",
+                kwargs={
+                    "category_slug": public_template_category_slug(template),
+                    "template_slug": template.slug,
+                },
+            )
+            + "?utm_source=ad"
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(self._brief_url(template), response["Location"])
+        self.assertIn("utm_source=ad", response["Location"])

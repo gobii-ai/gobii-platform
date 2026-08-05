@@ -2381,6 +2381,23 @@ class PublicTemplateLaunchView(View):
         ):
             return _public_template_redirect_with_query(request, canonical_launch_path)
 
+        # Launch deep links get the same intake brief as the hire CTA when the
+        # template has a schema — the quiz is the public entry, whatever door.
+        # Temporary redirect: whether a template has a schema can change, and a
+        # cached 301 would keep old visitors on a dead brief URL.
+        from pages.template_intake import get_intake_schema
+
+        if get_intake_schema(template.code):
+            brief_path = reverse(
+                "pages:public_template_brief",
+                kwargs={
+                    "category_slug": public_template_category_slug(template),
+                    "template_slug": public_template_route_slug(template),
+                },
+            )
+            query_string = request.META.get("QUERY_STRING")
+            return redirect(f"{brief_path}?{query_string}" if query_string else brief_path)
+
         previous_referrer_code = _seed_public_template_session(request, template)
         _set_template_launch_trial_onboarding_if_needed(request)
         _track_anonymous_public_template_capture(request, template, previous_referrer_code)
