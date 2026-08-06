@@ -538,10 +538,14 @@ def _auth_url_with_utms(base_url: str, request) -> str:
 
 
 def _cta_auth_url_with_utms(request) -> str:
-    """Resolve the auth destination for anonymous CTA flows."""
-    if is_waffle_flag_active(CTA_SIGNUP_FIRST, request, default=False):
-        return _auth_url_with_utms(reverse("account_signup"), request)
-    return _auth_url_with_utms(resolve_url(settings.LOGIN_URL), request)
+    """Resolve the auth destination for anonymous CTA flows.
+
+    New-customer CTAs land on account CREATION, unconditionally: a login page
+    shown to cold traffic is the canonical drop-off (NN/g login walls, Baymard
+    forced-account findings; every major funnel lands cold traffic on
+    registration). Returning users take the "Sign in" link on that page.
+    """
+    return _auth_url_with_utms(reverse("account_signup"), request)
 
 
 def _is_cta_signup_modal_enabled(request) -> bool:
