@@ -40,6 +40,7 @@ from api.services.persistent_agents import (
     PersistentAgentProvisioningError,
     PersistentAgentProvisioningService,
 )
+from api.services.task_credit_analytics import TaskCreditGrantSource
 from api.services.trial_promos import (
     TRIAL_PROMO_META_CREDIT_AMOUNT,
     TRIAL_PROMO_META_ACTIVATION_MODE,
@@ -642,6 +643,10 @@ class DirectTrialPromoServiceTests(TestCase):
         self.assertEqual(
             mock_grant_credits.call_args.kwargs["invoice_id"],
             "in_direct_trial",
+        )
+        self.assertEqual(
+            mock_grant_credits.call_args.kwargs["grant_source"],
+            TaskCreditGrantSource.DIRECT_TRIAL_PROMO,
         )
         _mock_subscription_sync.assert_called_once_with(
             mock_subscription_create.return_value,

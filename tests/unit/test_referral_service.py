@@ -20,6 +20,7 @@ from api.models import (
     TaskCredit,
 )
 from api.services.referral_service import ReferralService, ReferralType
+from api.services.task_credit_analytics import TaskCreditGrantOperation, TaskCreditGrantSource
 from middleware.utm_capture import UTMTrackingMiddleware
 
 User = get_user_model()
@@ -315,7 +316,8 @@ class DeferredReferralGrantTests(TestCase):
             user=self.new_user,
             referrer_code=self.referrer_referral.referral_code,
         )
-        result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
+        with patch("api.services.referral_service.track_task_credit_grant") as mock_track_grant:
+            result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
         self.assertTrue(result)
 
         # Verify it was marked as granted
@@ -323,6 +325,11 @@ class DeferredReferralGrantTests(TestCase):
         self.assertIsNotNone(attribution.referral_credit_granted_at)
         grant = ReferralGrant.objects.get(referred=self.new_user)
         self.assertIn(str(grant.id), grant.referred_task_credit.comments)
+        self.assertEqual(mock_track_grant.call_count, 2)
+        for call in mock_track_grant.call_args_list:
+            self.assertEqual(call.kwargs["operation"], TaskCreditGrantOperation.CREATED)
+            self.assertEqual(call.kwargs["grant_source"], TaskCreditGrantSource.REFERRAL)
+            self.assertTrue(call.kwargs["automated"])
 
     def test_check_and_grant_deferred_credits_no_completed_task(self):
         """Test that credits aren't granted without a completed task."""

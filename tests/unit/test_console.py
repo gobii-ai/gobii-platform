@@ -38,6 +38,7 @@ from console.agent_creation import (
 )
 from api.services.pipedream_apps import get_owner_apps_state
 from api.services.organization_permissions import ORG_SETTING_MEMBERS_CAN_CREATE_AGENTS
+from api.services.task_credit_analytics import TaskCreditGrantSource
 from util.analytics import AnalyticsEvent
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 
@@ -1025,17 +1026,18 @@ class ConsoleViewsTest(TestCase):
 
         self.client.force_login(admin_user)
         before = timezone.now()
-        response = self.client.post(
-            reverse("staff-org-task-credit-grant", kwargs={"org_id": organization.id}),
-            data=json.dumps(
-                {
-                    "credits": "22.5",
-                    "grantType": "Compensation",
-                    "expirationPreset": "one_year",
-                }
-            ),
-            content_type="application/json",
-        )
+        with patch("console.api_views.track_task_credit_grant") as mock_track:
+            response = self.client.post(
+                reverse("staff-org-task-credit-grant", kwargs={"org_id": organization.id}),
+                data=json.dumps(
+                    {
+                        "credits": "22.5",
+                        "grantType": "Compensation",
+                        "expirationPreset": "one_year",
+                    }
+                ),
+                content_type="application/json",
+            )
         after = timezone.now()
 
         self.assertEqual(response.status_code, 201)
@@ -1050,6 +1052,10 @@ class ConsoleViewsTest(TestCase):
         expiration_days = (task_credit.expiration_date - task_credit.granted_date).days
         self.assertGreaterEqual(expiration_days, 364)
         self.assertLessEqual(expiration_days, 366)
+        mock_track.assert_called_once()
+        self.assertEqual(mock_track.call_args.kwargs["grant_source"], TaskCreditGrantSource.STAFF_CONSOLE)
+        self.assertFalse(mock_track.call_args.kwargs["automated"])
+        self.assertEqual(mock_track.call_args.kwargs["grant_actor_user_id"], admin_user.id)
 
     @tag("batch_console_agents")
     def test_staff_user_email_verify_api_marks_current_email_verified_and_primary(self):
@@ -1109,17 +1115,18 @@ class ConsoleViewsTest(TestCase):
 
         self.client.force_login(admin_user)
         before = timezone.now()
-        response = self.client.post(
-            reverse("staff-user-task-credit-grant", kwargs={"user_id": target_user.id}),
-            data=json.dumps(
-                {
-                    "credits": "12.5",
-                    "grantType": "Promo",
-                    "expirationPreset": "one_month",
-                }
-            ),
-            content_type="application/json",
-        )
+        with patch("console.api_views.track_task_credit_grant") as mock_track:
+            response = self.client.post(
+                reverse("staff-user-task-credit-grant", kwargs={"user_id": target_user.id}),
+                data=json.dumps(
+                    {
+                        "credits": "12.5",
+                        "grantType": "Promo",
+                        "expirationPreset": "one_month",
+                    }
+                ),
+                content_type="application/json",
+            )
         after = timezone.now()
 
         self.assertEqual(response.status_code, 201)
@@ -1133,6 +1140,10 @@ class ConsoleViewsTest(TestCase):
         expiration_days = (task_credit.expiration_date - task_credit.granted_date).days
         self.assertGreaterEqual(expiration_days, 28)
         self.assertLessEqual(expiration_days, 31)
+        mock_track.assert_called_once()
+        self.assertEqual(mock_track.call_args.kwargs["grant_source"], TaskCreditGrantSource.STAFF_CONSOLE)
+        self.assertFalse(mock_track.call_args.kwargs["automated"])
+        self.assertEqual(mock_track.call_args.kwargs["grant_actor_user_id"], admin_user.id)
 
     @tag("batch_console_agents")
     def test_staff_user_task_credit_grant_api_rejects_non_finite_credits(self):

@@ -31,6 +31,7 @@ from constants.plans import PlanNames, PlanNamesChoices
 from constants.grant_types import GrantTypeChoices
 from dateutil.relativedelta import relativedelta
 from api.services.trial_abuse import SIGNAL_SOURCE_SIGNUP
+from api.services.task_credit_analytics import TaskCreditGrantSource
 from billing.checkout_metadata import (
     STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
@@ -1037,7 +1038,7 @@ class SubscriptionSignalTests(TestCase):
         with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
             patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
-            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
             patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan) as mock_mark_plan, \
             patch("pages.signals.Analytics.identify") as mock_identify, \
             patch("pages.signals.Analytics.track_event") as mock_track_event, \
@@ -1059,6 +1060,10 @@ class SubscriptionSignalTests(TestCase):
         track_kwargs = mock_track_event.call_args.kwargs
         self.assertEqual(track_kwargs["event"], AnalyticsEvent.SUBSCRIPTION_CREATED)
         self.assertEqual(track_kwargs["properties"]["plan"], PlanNamesChoices.STARTUP.value)
+        self.assertEqual(
+            mock_grant.call_args.kwargs["grant_source"],
+            TaskCreditGrantSource.SUBSCRIPTION_CREATE,
+        )
         mock_logger_exception.assert_not_called()
 
         self.mock_capi.assert_not_called()
@@ -2334,6 +2339,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
         _, kwargs = mock_grant.call_args
         self.assertEqual(kwargs.get("seats"), 2)
         self.assertEqual(kwargs.get("invoice_id"), invoice_payload["id"])
+        self.assertEqual(kwargs.get("grant_source"), TaskCreditGrantSource.SUBSCRIPTION_CREATE)
         self.mock_capi.assert_not_called()
 
     @patch("pages.signals.stripe.SubscriptionItem.create")
@@ -2408,6 +2414,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
         _, kwargs = mock_grant.call_args
         self.assertEqual(kwargs.get("seats"), 1)
         self.assertEqual(kwargs.get("invoice_id"), "")
+        self.assertEqual(kwargs.get("grant_source"), TaskCreditGrantSource.SUBSCRIPTION_SEAT_INCREASE)
         self.mock_capi.assert_not_called()
 
     @patch("pages.signals.stripe.SubscriptionItem.create")

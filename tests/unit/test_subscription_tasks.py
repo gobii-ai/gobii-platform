@@ -10,6 +10,7 @@ from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.models import UserBilling
+from api.services.task_credit_analytics import TaskCreditGrantSource
 from api.tasks.subscription_tasks import grant_monthly_free_credits
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
@@ -77,6 +78,7 @@ class GrantMonthlyFreeCreditsTaskTests(TestCase):
         self.assertEqual(call_kwargs["expiration_date"], expected_expiration)
         self.assertEqual(call_kwargs["plan"]["id"], PlanNamesChoices.FREE)
         self.assertFalse(call_kwargs.get("free_trial_start", False))
+        self.assertEqual(call_kwargs["grant_source"], TaskCreditGrantSource.MONTHLY_FREE_GRANT)
 
     def test_fallback_ignores_compensation_grants(self):
         with timezone.override("UTC"):

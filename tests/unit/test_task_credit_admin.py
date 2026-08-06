@@ -1,12 +1,16 @@
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
+from django.contrib import admin
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import RequestFactory, TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 
 from api.models import TaskCredit
+from api.admin import TaskCreditAdmin
+from api.services.task_credit_analytics import TaskCreditGrantOperation, TaskCreditGrantSource
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 
@@ -63,26 +67,62 @@ class GrantCreditsByUserIdsAdminTests(TestCase):
         grant_date_date, grant_date_time = self._split_datetime(grant_date)
         expiration_date_date, expiration_date_time = self._split_datetime(expiration_date)
 
-        response = self.client.post(
-            url,
-            data={
-                "user_ids": str(self.recipient_user.id),
-                "plan": PlanNamesChoices.STARTUP,
-                "credits": "5",
-                "grant_type": GrantTypeChoices.PROMO,
-                "grant_date_0": grant_date_date,
-                "grant_date_1": grant_date_time,
-                "expiration_date_0": expiration_date_date,
-                "expiration_date_1": expiration_date_time,
-            },
-            follow=False,
-        )
+        with patch("api.admin.track_task_credit_grant") as mock_track:
+            response = self.client.post(
+                url,
+                data={
+                    "user_ids": str(self.recipient_user.id),
+                    "plan": PlanNamesChoices.STARTUP,
+                    "credits": "5",
+                    "grant_type": GrantTypeChoices.PROMO,
+                    "grant_date_0": grant_date_date,
+                    "grant_date_1": grant_date_time,
+                    "expiration_date_0": expiration_date_date,
+                    "expiration_date_1": expiration_date_time,
+                },
+                follow=False,
+            )
 
         self.assertEqual(response.status_code, 302)
         credits = TaskCredit.objects.filter(user=self.recipient_user)
         self.assertEqual(credits.count(), 1)
         credit = credits.get()
         self.assertEqual(credit.expiration_date, expiration_date)
+        mock_track.assert_called_once()
+        self.assertEqual(mock_track.call_args.kwargs["grant_source"], TaskCreditGrantSource.ADMIN_BULK_USER_IDS)
+        self.assertFalse(mock_track.call_args.kwargs["automated"])
+        self.assertEqual(mock_track.call_args.kwargs["grant_actor_user_id"], self.admin_user.id)
+
+    def test_direct_admin_add_tracks_manual_grant(self):
+        request = RequestFactory().post("/admin/api/taskcredit/add/")
+        request.user = self.admin_user
+        granted_at = timezone.now()
+        task_credit = TaskCredit(
+            user=self.recipient_user,
+            credits=Decimal("7"),
+            credits_used=0,
+            granted_date=granted_at,
+            expiration_date=granted_at + timedelta(days=30),
+            plan=PlanNamesChoices.STARTUP,
+            grant_type=GrantTypeChoices.COMPENSATION,
+        )
+
+        with patch("api.admin.track_task_credit_grant") as mock_track:
+            TaskCreditAdmin(TaskCredit, admin.site).save_model(
+                request,
+                task_credit,
+                form=None,
+                change=False,
+            )
+
+        mock_track.assert_called_once_with(
+            task_credit,
+            credits_granted=Decimal("7"),
+            operation=TaskCreditGrantOperation.CREATED,
+            grant_source=TaskCreditGrantSource.DJANGO_ADMIN,
+            automated=False,
+            grant_actor_user_id=self.admin_user.id,
+        )
 
 
 @tag("batch_task_credits")
