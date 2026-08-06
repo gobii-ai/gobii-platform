@@ -528,7 +528,7 @@ class HomePageTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(urlparse(response["Location"]).path, reverse("account_login"))
+        self.assertEqual(urlparse(response["Location"]).path, reverse("account_signup"))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_page_omits_stripe_js_without_checkout_cta(self):
@@ -1408,7 +1408,7 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("account_login"))
+        self.assertEqual(parsed.path, reverse("account_signup"))
 
         params = parse_qs(parsed.query)
         next_url = params.get("next")[0]
@@ -1531,7 +1531,7 @@ class HomePageTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("account_login"))
+        self.assertEqual(parsed.path, reverse("account_signup"))
         next_parts = urlparse(parse_qs(parsed.query)["next"][0])
         self.assertEqual(next_parts.path, "/app/agents/new")
         self.assertNotIn("spawn", parse_qs(next_parts.query))
@@ -1912,7 +1912,7 @@ class LandingPageLaunchTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("account_login"))
+        self.assertEqual(parsed.path, reverse("account_signup"))
         params = parse_qs(parsed.query)
         self.assertEqual(params.get("utm_source"), ["paid-social"])
         self.assertEqual(params.get("utm_medium"), ["paid_social"])
@@ -2030,7 +2030,7 @@ class LandingPageLaunchTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("account_login"))
+        self.assertEqual(parsed.path, reverse("account_signup"))
         params = parse_qs(parsed.query)
         self.assertEqual(params.get("utm_source"), ["newsletter"])
         self.assertEqual(params.get("utm_medium"), ["email"])
@@ -3897,7 +3897,7 @@ class EngineeringProSignupTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("account_login"))
+        self.assertEqual(parsed.path, reverse("account_signup"))
 
         params = parse_qs(parsed.query)
         next_url = params.get("next")[0]
@@ -5911,7 +5911,7 @@ class AuthLinkTests(TestCase):
 @tag("batch_pages")
 class LoginTurnstilePageTests(TestCase):
     def _login_request(self, *, ajax=False, user_agent="Chrome Mac Test/1.0"):
-        request = RequestFactory().post(reverse("account_login"))
+        request = RequestFactory().post(reverse("account_signup"))
         request.META["HTTP_USER_AGENT"] = user_agent
         if ajax:
             request.META["HTTP_X_REQUESTED_WITH"] = "XMLHttpRequest"
