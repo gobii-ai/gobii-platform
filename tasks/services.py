@@ -12,6 +12,11 @@ from django.utils.dateparse import parse_datetime, parse_date
 
 from billing.addons import AddonEntitlementService
 from billing.services import BillingService
+from api.services.task_credit_analytics import (
+    TaskCreditGrantOperation,
+    TaskCreditGrantSource,
+    track_task_credit_grant,
+)
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames, PlanNamesChoices
 from observability import traced, trace
@@ -204,6 +209,9 @@ class TaskCreditService:
         grant_date=None,
         expiration_date=None,
         free_trial_start: bool = False,
+        *,
+        grant_source: TaskCreditGrantSource = TaskCreditGrantSource.SUBSCRIPTION,
+        emit_grant_analytics: bool = True,
     ) -> int:
         # Stripe webhooks can race synchronous subscription activation. Serialize
         # grants per user so the invoice idempotency check and create are atomic.
@@ -217,6 +225,8 @@ class TaskCreditService:
                 grant_date=grant_date,
                 expiration_date=expiration_date,
                 free_trial_start=free_trial_start,
+                grant_source=grant_source,
+                emit_grant_analytics=emit_grant_analytics,
             )
 
     @staticmethod
@@ -228,6 +238,9 @@ class TaskCreditService:
         grant_date=None,
         expiration_date=None,
         free_trial_start: bool = False,
+        *,
+        grant_source: TaskCreditGrantSource = TaskCreditGrantSource.SUBSCRIPTION,
+        emit_grant_analytics: bool = True,
     ) -> int:
         """
         Grants task credits to a user based on their subscription plan.
@@ -390,6 +403,15 @@ class TaskCreditService:
                     plan_choice,
                     credits_to_grant,
                 )
+                credit_increase = Decimal(str(credits_to_grant)) - Decimal(str(existing_credits or 0))
+                if emit_grant_analytics and credit_increase > 0:
+                    track_task_credit_grant(
+                        existing_credit,
+                        credits_granted=credit_increase,
+                        operation=TaskCreditGrantOperation.INCREASED,
+                        grant_source=grant_source,
+                        automated=True,
+                    )
                 return credits_to_grant
 
             # Create the TaskCredit for the user
@@ -418,6 +440,15 @@ class TaskCreditService:
 
             logger.debug(f"grant_subscription_credits {user.id}: created TaskCredit {task_credit.id}")
 
+            if emit_grant_analytics:
+                track_task_credit_grant(
+                    task_credit,
+                    credits_granted=credits_to_grant,
+                    operation=TaskCreditGrantOperation.CREATED,
+                    grant_source=grant_source,
+                    automated=True,
+                )
+
             return credits_to_grant
 
     @staticmethod
@@ -431,6 +462,9 @@ class TaskCreditService:
         expiration_date=None,
         subscription=None,
         replace_current: bool = False,
+        *,
+        grant_source: TaskCreditGrantSource = TaskCreditGrantSource.SUBSCRIPTION,
+        emit_grant_analytics: bool = True,
     ) -> int:
         if seats <= 0:
             return 0
@@ -513,10 +547,18 @@ class TaskCreditService:
                             updates.append(field)
                     if updates:
                         existing_credit.save(update_fields=updates)
+                        if emit_grant_analytics:
+                            track_task_credit_grant(
+                                existing_credit,
+                                credits_granted=credits_to_grant,
+                                operation=TaskCreditGrantOperation.REPLENISHED,
+                                grant_source=grant_source,
+                                automated=True,
+                            )
 
                     return int(credits_to_grant)
 
-            TaskCredit.objects.create(
+            task_credit = TaskCredit.objects.create(
                 organization=organization,
                 credits=credits_to_grant,
                 credits_used=0,
@@ -527,6 +569,15 @@ class TaskCreditService:
                 grant_type=GrantTypeChoices.PLAN,
                 additional_task=False,
             )
+
+            if emit_grant_analytics:
+                track_task_credit_grant(
+                    task_credit,
+                    credits_granted=credits_to_grant,
+                    operation=TaskCreditGrantOperation.CREATED,
+                    grant_source=grant_source,
+                    automated=True,
+                )
 
             return int(credits_to_grant)
 

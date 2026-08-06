@@ -66,6 +66,7 @@ from api.services.owner_execution_pause import (
 )
 from api.services.referral_service import ReferralService
 from api.services.signup_preview import resume_signup_preview_agents_for_user_if_eligible
+from api.services.task_credit_analytics import TaskCreditGrantSource
 from api.services.trial_abuse import SIGNUP_GA_CLIENT_COOKIE_NAME, SIGNAL_SOURCE_LOGIN, SIGNAL_SOURCE_SIGNUP, capture_request_identity_signals_and_attribution, evaluate_user_trial_eligibility
 from api.services.trial_promos import mark_trial_promo_redemption_from_checkout_session, mark_trial_promo_redemption_subscription, parse_trial_promo_credit_amount
 from util.payments_helper import PaymentsHelper
@@ -3984,6 +3985,12 @@ def handle_subscription_event(event, **kwargs):
                         credit_override = None
 
                     if should_grant:
+                        if billing_reason == "subscription_create":
+                            credit_grant_source = TaskCreditGrantSource.SUBSCRIPTION_CREATE
+                        elif billing_reason == "subscription_cycle":
+                            credit_grant_source = TaskCreditGrantSource.SUBSCRIPTION_RENEWAL
+                        else:
+                            credit_grant_source = TaskCreditGrantSource.SUBSCRIPTION_TOPOFF
                         TaskCreditService.grant_subscription_credits(
                             owner,
                             plan=plan,
@@ -3991,6 +3998,7 @@ def handle_subscription_event(event, **kwargs):
                             credit_override=credit_override,
                             expiration_date=expiration_override,
                             free_trial_start=free_trial_start_grant,
+                            grant_source=credit_grant_source,
                         )
 
                 try:
@@ -4291,6 +4299,13 @@ def handle_subscription_event(event, **kwargs):
                         # instead of stacking an extra TaskCredit record.
                         replace_current = source_data.get("billing_reason") in {"subscription_create", "subscription_cycle"}
 
+                        if billing_reason == "subscription_create":
+                            credit_grant_source = TaskCreditGrantSource.SUBSCRIPTION_CREATE
+                        elif billing_reason == "subscription_cycle":
+                            credit_grant_source = TaskCreditGrantSource.SUBSCRIPTION_RENEWAL
+                        else:
+                            credit_grant_source = TaskCreditGrantSource.SUBSCRIPTION_SEAT_INCREASE
+
                         TaskCreditService.grant_subscription_credits_for_organization(
                             owner,
                             seats=seats_to_grant,
@@ -4298,6 +4313,7 @@ def handle_subscription_event(event, **kwargs):
                             invoice_id=grant_invoice_id,
                             subscription=sub,
                             replace_current=replace_current,
+                            grant_source=credit_grant_source,
                         )
 
             _sync_dedicated_ip_allocations(owner, owner_type, source_data, stripe_settings)

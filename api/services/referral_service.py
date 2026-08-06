@@ -27,6 +27,11 @@ from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, B
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from api.services.email_verification import has_verified_email
+from api.services.task_credit_analytics import (
+    TaskCreditGrantOperation,
+    TaskCreditGrantSource,
+    track_task_credit_grant,
+)
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.subscription_helper import get_user_plan
 
@@ -579,6 +584,23 @@ class ReferralService:
                 grant.referrer_task_credit = referrer_credit
                 grant.referred_task_credit = referred_credit
                 grant.save(update_fields=["referrer_task_credit", "referred_task_credit"])
+
+                if referrer_credit is not None:
+                    track_task_credit_grant(
+                        referrer_credit,
+                        credits_granted=referrer_credit.credits,
+                        operation=TaskCreditGrantOperation.CREATED,
+                        grant_source=TaskCreditGrantSource.REFERRAL,
+                        automated=True,
+                    )
+                if referred_credit is not None:
+                    track_task_credit_grant(
+                        referred_credit,
+                        credits_granted=referred_credit.credits,
+                        operation=TaskCreditGrantOperation.CREATED,
+                        grant_source=TaskCreditGrantSource.REFERRAL,
+                        automated=True,
+                    )
         except IntegrityError:
             logger.info(
                 "Referral grant skipped: duplicate grant for user=%s",

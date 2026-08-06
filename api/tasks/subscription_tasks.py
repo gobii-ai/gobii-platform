@@ -14,6 +14,7 @@ from tasks.services import TaskCreditService
 from util.subscription_helper import get_users_due_for_monthly_grant, filter_users_without_active_subscription
 from billing.services import BillingService
 from constants.grant_types import GrantTypeChoices
+from api.services.task_credit_analytics import TaskCreditGrantSource
 
 # --------------------------------------------------------------------------- #
 #  Optional djstripe import
@@ -115,4 +116,5 @@ def grant_monthly_free_credits() -> None:
                 plan=free_plan,
                 grant_date=grant_date,
                 expiration_date=expiration_date,
+                grant_source=TaskCreditGrantSource.MONTHLY_FREE_GRANT,
             )

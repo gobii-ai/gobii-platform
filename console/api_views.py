@@ -165,6 +165,11 @@ from api.services.agent_lifecycle import activate_agent, build_agent_inactive_pa
 from api.services.referral_service import ReferralService
 from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, end_web_session, heartbeat_web_session, start_web_session, touch_web_session
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
+from api.services.task_credit_analytics import (
+    TaskCreditGrantOperation,
+    TaskCreditGrantSource,
+    track_task_credit_grant,
+)
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import TRIAL_ONBOARDING_TARGET_AGENT_UI, set_trial_onboarding_intent, set_trial_onboarding_requires_plan_selection
@@ -2486,7 +2491,7 @@ def _parse_staff_task_credit_grant_payload(request: HttpRequest) -> tuple[dict[s
     }, None
 
 
-def _create_staff_task_credit_grant(owner, payload: dict[str, Any]) -> TaskCredit:
+def _create_staff_task_credit_grant(owner, payload: dict[str, Any], *, actor_user_id: int) -> TaskCredit:
     granted_at = timezone.now()
     fields: dict[str, Any] = {
         "credits": payload["credits"],
@@ -2502,7 +2507,16 @@ def _create_staff_task_credit_grant(owner, payload: dict[str, Any]) -> TaskCredi
         fields.update(organization=owner, plan=(billing.subscription if billing and billing.subscription else PlanNamesChoices.FREE))
     else:
         fields.update(user=owner, plan=PlanNamesChoices.FREE)
-    return TaskCredit.objects.create(**fields)
+    task_credit = TaskCredit.objects.create(**fields)
+    track_task_credit_grant(
+        task_credit,
+        credits_granted=task_credit.credits,
+        operation=TaskCreditGrantOperation.CREATED,
+        grant_source=TaskCreditGrantSource.STAFF_CONSOLE,
+        automated=False,
+        grant_actor_user_id=actor_user_id,
+    )
+    return task_credit
 
 
 def _staff_user_target(*, user_id: int, **kwargs: Any):
@@ -2517,7 +2531,7 @@ def _staff_task_credit_grant_response(request: HttpRequest, owner):
     payload, error_response = _parse_staff_task_credit_grant_payload(request)
     if error_response is not None:
         return error_response
-    task_credit = _create_staff_task_credit_grant(owner, payload)
+    task_credit = _create_staff_task_credit_grant(owner, payload, actor_user_id=request.user.id)
     return JsonResponse({"ok": True, "taskCredit": _serialize_task_credit(task_credit)}, status=201)
 
 

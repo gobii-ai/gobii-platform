@@ -39,6 +39,7 @@ from api.services.trial_promos import (
     mark_direct_trial_promo_subscription,
     reserve_direct_trial_promo_redemption,
 )
+from api.services.task_credit_analytics import TaskCreditGrantSource
 from constants.plans import PlanNames
 from tasks.services import TaskCreditService
 from util.subscription_helper import (
@@ -953,6 +954,7 @@ def _sync_direct_trial_entitlements(
             credit_override=credit_amount,
             expiration_date=trial_end + relativedelta(months=1),
             free_trial_start=True,
+            grant_source=TaskCreditGrantSource.DIRECT_TRIAL_PROMO,
         )
     except (
         DatabaseError,

@@ -18,6 +18,11 @@ from api.services.bulk_proactive_outreach import trigger_bulk_proactive_outreach
 from api.services.proactive_activation import ProactiveActivationService
 from api.services.skill_analytics import track_global_agent_skill_event
 from api.services.owner_execution_pause import get_owner_execution_pause_state, pause_owner_execution, resume_owner_execution
+from api.services.task_credit_analytics import (
+    TaskCreditGrantOperation,
+    TaskCreditGrantSource,
+    track_task_credit_grant,
+)
 from api.services.user_fingerprint import (
     FingerprintConfigurationError,
     FingerprintTerminalError,
@@ -591,6 +596,18 @@ class TaskCreditAdmin(admin.ModelAdmin):
                 pass
         return queryset, use_distinct
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if not change:
+            track_task_credit_grant(
+                obj,
+                credits_granted=obj.credits,
+                operation=TaskCreditGrantOperation.CREATED,
+                grant_source=TaskCreditGrantSource.DJANGO_ADMIN,
+                automated=False,
+                grant_actor_user_id=request.user.id,
+            )
+
     def get_urls(self):
         from django.urls import path
         urls = super().get_urls()
@@ -706,7 +723,7 @@ class TaskCreditAdmin(admin.ModelAdmin):
             if not dry_run:
                 with transaction.atomic():
                     for user in matched_users:
-                        TaskCredit.objects.create(
+                        task_credit = TaskCredit.objects.create(
                             user=user,
                             credits=credits,
                             credits_used=0,
@@ -716,6 +733,14 @@ class TaskCreditAdmin(admin.ModelAdmin):
                             grant_type=grant_type,
                             additional_task=False,
                             voided=False,
+                        )
+                        track_task_credit_grant(
+                            task_credit,
+                            credits_granted=task_credit.credits,
+                            operation=TaskCreditGrantOperation.CREATED,
+                            grant_source=TaskCreditGrantSource.ADMIN_BULK_PLAN,
+                            automated=False,
+                            grant_actor_user_id=request.user.id,
                         )
                         created += 1
                 messages.success(request, f"Granted {credits} credits to {created} users on plan '{plan}'.")
@@ -819,7 +844,7 @@ class TaskCreditAdmin(admin.ModelAdmin):
                 with transaction.atomic():
                     for user in users:
                         plan_choice = PlanNamesChoices(selected_plan)
-                        TaskCredit.objects.create(
+                        task_credit = TaskCredit.objects.create(
                             user=user,
                             credits=credits,
                             credits_used=0,
@@ -829,6 +854,14 @@ class TaskCreditAdmin(admin.ModelAdmin):
                             grant_type=grant_type,
                             additional_task=False,
                             voided=False,
+                        )
+                        track_task_credit_grant(
+                            task_credit,
+                            credits_granted=task_credit.credits,
+                            operation=TaskCreditGrantOperation.CREATED,
+                            grant_source=TaskCreditGrantSource.ADMIN_BULK_USER_IDS,
+                            automated=False,
+                            grant_actor_user_id=request.user.id,
                         )
                         created += 1
                 messages.success(request, f"Granted {credits} credits to {created} users.")

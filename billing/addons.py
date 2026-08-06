@@ -527,6 +527,12 @@ class AddonEntitlementService:
     @staticmethod
     def _upsert_task_credit_block(owner, owner_type: str, plan_id: str, entitlement, period_end) -> None:
         """Ensure a TaskCredit block exists for the entitlement period."""
+        from api.services.task_credit_analytics import (
+            TaskCreditGrantOperation,
+            TaskCreditGrantSource,
+            track_task_credit_grant,
+        )
+
         TaskCredit = apps.get_model("api", "TaskCredit")
         now = timezone.now()
         grant_date = entitlement.starts_at or now
@@ -547,6 +553,7 @@ class AddonEntitlementService:
         obj = TaskCredit.objects.filter(**filters).first()
         update_fields: list[str] = []
         if obj:
+            previous_credits = Decimal(obj.credits)
             if obj.credits_used and credits_value < obj.credits_used:
                 credits_value = obj.credits_used
             if obj.credits != credits_value:
@@ -560,6 +567,15 @@ class AddonEntitlementService:
                 update_fields.append("granted_date")
             if update_fields:
                 obj.save(update_fields=update_fields)
+                credit_increase = credits_value - previous_credits
+                if credit_increase > 0:
+                    track_task_credit_grant(
+                        obj,
+                        credits_granted=credit_increase,
+                        operation=TaskCreditGrantOperation.INCREASED,
+                        grant_source=TaskCreditGrantSource.TASK_PACK_ENTITLEMENT,
+                        automated=True,
+                    )
             return
 
         create_kwargs = dict(
@@ -577,7 +593,14 @@ class AddonEntitlementService:
         else:
             create_kwargs["user"] = owner
 
-        TaskCredit.objects.create(**create_kwargs)
+        task_credit = TaskCredit.objects.create(**create_kwargs)
+        track_task_credit_grant(
+            task_credit,
+            credits_granted=credits_value,
+            operation=TaskCreditGrantOperation.CREATED,
+            grant_source=TaskCreditGrantSource.TASK_PACK_ENTITLEMENT,
+            automated=True,
+        )
 
     @staticmethod
     def _revoke_task_pack_credits(owner, owner_type: str, price_ids: Iterable[str]) -> None:

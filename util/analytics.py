@@ -334,6 +334,9 @@ class AnalyticsEvent(StrEnum):
     # Task Threshold Events
     TASK_THRESHOLD_REACHED = 'task_usage_threshold_reached'
 
+    # Task Credit Events
+    TASK_CREDITS_GRANTED = 'Task Credits Granted'
+
     # Subscription Events
     SUBSCRIPTION_CREATED = 'Subscription Created'
     SUBSCRIPTION_UPDATED = 'Subscription Updated'

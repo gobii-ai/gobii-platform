@@ -298,6 +298,11 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.services.sms_contact_purpose import track_sms_contact_approval
+from api.services.task_credit_analytics import (
+    TaskCreditGrantOperation,
+    TaskCreditGrantSource,
+    track_task_credit_grant,
+)
 from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import (
     CTA_CONTINUE_AGENT_BTN,
@@ -1703,7 +1708,7 @@ def grant_credits(request):
             grant_date = timezone.now()
             expiration_date = grant_date + timedelta(days=365)
 
-            TaskCredit.objects.create(
+            task_credit = TaskCredit.objects.create(
                 user=user,
                 credits=100,
                 credits_used=0,
@@ -1713,6 +1718,14 @@ def grant_credits(request):
                 grant_type=GrantTypeChoices.COMPENSATION,
                 additional_task=False,
                 voided=False,
+            )
+            track_task_credit_grant(
+                task_credit,
+                credits_granted=task_credit.credits,
+                operation=TaskCreditGrantOperation.CREATED,
+                grant_source=TaskCreditGrantSource.LEGACY_STAFF_ENDPOINT,
+                automated=False,
+                grant_actor_user_id=request.user.id,
             )
 
             logger.info("Admin %s granted 100 task credits to user %s", request.user.id, user.id)

@@ -44,6 +44,11 @@ from config.stripe_fields import (
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames, PlanNamesChoices, PlanSlugsChoices, UserPlanNamesChoices, OrganizationPlanNamesChoices
+from api.services.task_credit_analytics import (
+    TaskCreditGrantOperation,
+    TaskCreditGrantSource,
+    track_task_credit_grant,
+)
 from api.services.prompt_settings import (
     DEFAULT_INTERNAL_REASONING_HISTORY_LIMIT,
     DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
@@ -3046,12 +3051,13 @@ def initialize_new_user_resources(sender, instance, created, **kwargs):
                 ).exists()
 
             credit_amount = PLAN_CONFIG[PlanNames.FREE]["monthly_task_credits"]
+            initial_task_credit = None
 
             if should_grant_initial_free_credits and credit_amount > 0:
                 # Only create TaskCredit if the user has a positive credit limit
                 # This avoids creating TaskCredit with 0 credits
                 with traced("CREATE User TaskCredit", user_id=instance.id):
-                    TaskCredit.objects.create(
+                    initial_task_credit = TaskCredit.objects.create(
                         user=instance,
                         credits=credit_amount,
                         granted_date=now,
@@ -3075,6 +3081,15 @@ def initialize_new_user_resources(sender, instance, created, **kwargs):
                 except Exception as e:
                     logger.error(f"Error creating billing record for user {instance.id}: {e}")
                     pass
+
+            if initial_task_credit is not None:
+                track_task_credit_grant(
+                    initial_task_credit,
+                    credits_granted=credit_amount,
+                    operation=TaskCreditGrantOperation.CREATED,
+                    grant_source=TaskCreditGrantSource.SIGNUP_BOOTSTRAP,
+                    automated=True,
+                )
 
 
 class PaidPlanIntent(models.Model):
