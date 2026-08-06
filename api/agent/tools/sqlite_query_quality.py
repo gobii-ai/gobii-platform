@@ -41,6 +41,11 @@ CTE_NAME_RE = re.compile(
 MANUAL_INSERT_VALUES_RE = re.compile(r'\binsert\s+(?:or\s+\w+\s+)?into\s+"?(?P<name>[a-z_]\w*)"?\s*(?:\(\s*"?[a-z_]\w*"?(?:\s*,\s*"?[a-z_]\w*"?)*\s*\)\s*)?values\b', re.I)
 JSON_FUNCTION_RE = re.compile(r"\bjson_(?:extract|each)\s*\(", re.I)
 JSON_EACH_RE = re.compile(r"\bjson_each\s*\(", re.I)
+JSON_EXTRACT_RE = re.compile(r"\bjson_extract\s*\(", re.I)
+SOURCE_PAYLOAD_ALIAS_RE = re.compile(
+    r'\b(?:result_json|analysis_json)\b\s+as\s+"?(?P<name>[a-z_]\w*)"?',
+    re.I,
+)
 TOOL_PAYLOAD_RE = re.compile(r"\b(?:result_json|result_text|analysis_json)\b", re.I)
 BOUND_ROWS_RE = re.compile(r"\bjson_each\s*\(\s*[:@$][a-z_]\w*\s*\)", re.I)
 BOUND_ROWS_PROVENANCE_RE = re.compile(
@@ -159,7 +164,8 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
             if mentions:
                 working_sources.add(created_table)
         if index_match := CREATE_UNIQUE_INDEX_RE.search(statement):
-            explicit_table_identity[index_match.group("name").casefold()] = True
+            if not re.search(r"\bwhere\b", statement[index_match.end():], re.I):
+                explicit_table_identity[index_match.group("name").casefold()] = True
         if table := _manual_values_table_name(statement):
             manual_value_tables.append(table)
             manual_value_rows += _manual_values_row_count(statement)
@@ -182,6 +188,9 @@ def summarize_sqlite_tool_result_sql(sql_values: Iterable[str], *, sqlite_call_c
         manual_values_table_names=manual_values_unique,
         manual_values_rows=manual_value_rows,
         manual_values_working_tables=sum(1 for table in manual_values_unique if table in created_unique),
+        keyed_explicit_table_names=tuple(
+            table for table, keyed in explicit_table_identity.items() if keyed
+        ),
         unkeyed_explicit_table_names=tuple(table for table, keyed in explicit_table_identity.items() if not keyed),
         **{field: counts[field] for field in COUNT_FIELDS},
     )
@@ -277,7 +286,7 @@ def source_derived_model_mutation_tables(sql_values: Iterable[str]) -> tuple[str
             match = MODEL_MUTATION_RE.search(statement)
             if (
                 match
-                and _is_named_model_table(match.group("name"))
+                and is_named_model_table(match.group("name"))
                 and _mutation_derives_payload(statement, match)
             ):
                 tables.append(match.group("name").casefold())
@@ -295,7 +304,7 @@ def named_model_read_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
             for match in READ_TABLE_RE.finditer(statement):
                 table = match.group("name").casefold()
                 trailing = statement[match.end():].lstrip()
-                if not trailing.startswith("(") and table not in cte_names and _is_named_model_table(table):
+                if not trailing.startswith("(") and table not in cte_names and is_named_model_table(table):
                     tables.append(table)
     return tuple(dict.fromkeys(tables))
 
@@ -310,14 +319,14 @@ def named_model_reference_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
             tables.extend(named_model_read_tables((statement,)))
             if match := MODEL_MUTATION_RE.search(statement):
                 table = match.group("name").casefold()
-                if _is_named_model_table(table):
+                if is_named_model_table(table):
                     tables.append(table)
             if table := _created_table_name(statement):
-                if _is_named_model_table(table):
+                if is_named_model_table(table):
                     tables.append(table)
             if match := ALTER_TABLE_RE.search(statement):
                 table = match.group("name").casefold()
-                if _is_named_model_table(table):
+                if is_named_model_table(table):
                     tables.append(table)
     return tuple(dict.fromkeys(tables))
 
@@ -325,21 +334,176 @@ def named_model_reference_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
 def source_derived_model_reconciled_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
     """Return source-derived model targets read by a later statement."""
 
-    pending: set[str] = set()
-    reconciled: list[str] = []
+    return tuple(_source_derived_model_reconciliations(sql_values))
+
+
+def source_derived_model_reconciled_paths(sql_values: Iterable[str]) -> tuple[str, ...]:
+    """Return structured source-array paths persisted and read through a durable model."""
+
+    reconciled = _source_derived_model_reconciliations(sql_values)
+    return tuple(dict.fromkeys(
+        path
+        for paths in reconciled.values()
+        for path in sorted(paths)
+    ))
+
+
+def _source_derived_model_reconciliations(sql_values: Iterable[str]) -> dict[str, set[str]]:
+    """Map reconciled model tables to the source JSON paths persisted through them."""
+
+    pending: dict[str, set[str]] = {}
+    reconciled: dict[str, set[str]] = {}
     for sql in sql_values:
-        for statement in sqlparse.split(str(sql or "")):
-            for table in named_model_read_tables((statement,)):
+        for raw_statement in sqlparse.split(str(sql or "")):
+            for table in named_model_read_tables((raw_statement,)):
                 if table in pending:
-                    reconciled.append(table)
-                    pending.remove(table)
-            for table in source_derived_model_mutation_tables((statement,)):
-                pending.add(table)
-                reconciled = [reconciled_table for reconciled_table in reconciled if reconciled_table != table]
-    return tuple(dict.fromkeys(reconciled))
+                    reconciled[table] = pending.pop(table)
+            mutation_tables = source_derived_model_mutation_tables((raw_statement,))
+            if not mutation_tables:
+                continue
+            paths = set(_source_json_each_paths(raw_statement))
+            for table in mutation_tables:
+                pending[table] = (
+                    pending.get(table, set())
+                    | reconciled.pop(table, set())
+                    | paths
+                )
+    return reconciled
 
 
-def _is_named_model_table(table_name: str) -> bool:
+def _source_json_each_paths(statement: str) -> tuple[str, ...]:
+    """Return source paths iterated by json_each, including equivalent SQL forms."""
+
+    statement = sqlparse.format(statement or "", strip_comments=True)
+    paths: list[str] = []
+    for arguments in _function_arguments(statement, JSON_EACH_RE):
+        if not arguments:
+            continue
+        source_expression = arguments[0]
+        base_path = _json_extract_source_path(source_expression, statement)
+        if base_path is None and not _is_source_payload_expression(source_expression, statement):
+            continue
+        if len(arguments) > 1:
+            relative_path = _sql_string_literal_value(arguments[1])
+            if relative_path is None or not relative_path.startswith("$"):
+                continue
+            paths.append(_combine_json_paths(base_path or "$", relative_path))
+        else:
+            paths.append(base_path or "$")
+    return tuple(dict.fromkeys(paths))
+
+
+def _json_extract_source_path(expression: str, statement: str) -> str | None:
+    for arguments in _function_arguments(expression, JSON_EXTRACT_RE):
+        if len(arguments) < 2 or not _is_source_payload_expression(arguments[0], statement):
+            continue
+        path = _sql_string_literal_value(arguments[1])
+        if path is not None and path.startswith("$"):
+            return path
+    return None
+
+
+def _is_source_payload_expression(expression: str, statement: str) -> bool:
+    if TOOL_PAYLOAD_RE.search(expression):
+        return True
+    match = re.fullmatch(r'\s*(?:"?[a-z_]\w*"?\s*\.\s*)?"?(?P<name>[a-z_]\w*)"?\s*', expression, re.I)
+    if not match:
+        return False
+    aliases = {alias.group("name").casefold() for alias in SOURCE_PAYLOAD_ALIAS_RE.finditer(statement)}
+    return match.group("name").casefold() in aliases
+
+
+def _combine_json_paths(base_path: str, relative_path: str) -> str:
+    if base_path == "$":
+        return relative_path
+    if relative_path == "$":
+        return base_path
+    if relative_path.startswith(("$.", "$[")):
+        return base_path + relative_path[1:]
+    return relative_path
+
+
+def _function_arguments(statement: str, function_re: re.Pattern) -> tuple[tuple[str, ...], ...]:
+    calls: list[tuple[str, ...]] = []
+    for match in function_re.finditer(statement):
+        contents = _parenthesized_sql_contents(statement, match.end() - 1)
+        if contents is not None:
+            calls.append(_split_sql_arguments(contents))
+    return tuple(calls)
+
+
+def _parenthesized_sql_contents(statement: str, open_index: int) -> str | None:
+    depth = 1
+    quote = None
+    index = open_index + 1
+    while index < len(statement):
+        char = statement[index]
+        if quote is not None:
+            closing = "]" if quote == "[" else quote
+            if char == closing:
+                if quote != "[" and index + 1 < len(statement) and statement[index + 1] == closing:
+                    index += 2
+                    continue
+                quote = None
+        elif char in ("'", '"', "`", "["):
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return statement[open_index + 1:index]
+        index += 1
+    return None
+
+
+def _split_sql_arguments(arguments: str) -> tuple[str, ...]:
+    parts: list[str] = []
+    start = 0
+    depth = 0
+    quote = None
+    index = 0
+    while index < len(arguments):
+        char = arguments[index]
+        if quote is not None:
+            closing = "]" if quote == "[" else quote
+            if char == closing:
+                if quote != "[" and index + 1 < len(arguments) and arguments[index + 1] == closing:
+                    index += 2
+                    continue
+                quote = None
+        elif char in ("'", '"', "`", "["):
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        elif char == "," and depth == 0:
+            parts.append(arguments[start:index].strip())
+            start = index + 1
+        index += 1
+    parts.append(arguments[start:].strip())
+    return tuple(part for part in parts if part)
+
+
+def _sql_string_literal_value(expression: str) -> str | None:
+    expression = expression.strip()
+    if len(expression) < 2 or expression[0] not in ("'", '"') or expression[-1] != expression[0]:
+        return None
+    quote = expression[0]
+    value = expression[1:-1]
+    index = 0
+    while index < len(value):
+        if value[index] != quote:
+            index += 1
+            continue
+        if index + 1 >= len(value) or value[index + 1] != quote:
+            return None
+        index += 2
+    return value.replace(quote * 2, quote)
+
+
+def is_named_model_table(table_name: str) -> bool:
     normalized = str(table_name or "").casefold()
     return bool(normalized) and not normalized.startswith(NON_MODEL_TABLE_PREFIXES) and not normalized.endswith(
         NON_MODEL_TABLE_SUFFIXES
@@ -472,7 +636,7 @@ def _source_literal_copy_tables(
             raw_statement = str(statement)
             structural = _structural_sql(raw_statement)
             match = MODEL_MUTATION_RE.search(structural)
-            if not match or not _is_named_model_table(match.group("name")):
+            if not match or not is_named_model_table(match.group("name")):
                 continue
             matched_literals = set()
             copied_url = False
@@ -515,7 +679,7 @@ def _grounded_literal_insert_tables(
         for statement in sqlparse.parse(str(sql or "")):
             structural = _structural_sql(str(statement))
             match = MODEL_MUTATION_RE.search(structural)
-            if not match or not _is_named_model_table(match.group("name")):
+            if not match or not is_named_model_table(match.group("name")):
                 continue
             table = match.group("name").casefold()
             if table not in _source_literal_copy_tables((str(statement),), payloads):

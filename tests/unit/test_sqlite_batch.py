@@ -45,11 +45,16 @@ from api.agent.tools.sqlite_query_quality import (
     named_model_read_tables,
     named_model_reference_tables,
     source_derived_model_mutation_tables,
+    source_derived_model_reconciled_paths,
     source_derived_model_reconciled_tables,
     summarize_sqlite_tool_result_calls,
     summarize_sqlite_tool_result_sql,
 )
-from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
+from api.agent.tools.sqlite_state import (
+    get_sqlite_model_tables_with_identity,
+    reset_sqlite_db_path,
+    set_sqlite_db_path,
+)
 from api.models import BrowserUseAgent, PersistentAgent
 
 
@@ -1919,6 +1924,141 @@ class SqliteBatchQualityTests(SqliteBatchTestCase):
             ]),
             (),
         )
+
+        posts_import = (
+            "INSERT INTO reddit_subreddit_posts_current(post_id,title) "
+            "SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.title') "
+            "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j "
+            "WHERE t.is_current_batch=1 AND t.tool_name='http_request'; "
+            "SELECT post_id,title FROM reddit_subreddit_posts_current LIMIT 50"
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([posts_import]),
+            ("$.result.posts",),
+        )
+        equivalent_source_forms = {
+            "cte payload alias": (
+                "WITH src AS (SELECT result_json AS payload FROM __tool_results) "
+                "INSERT INTO reddit_subreddit_posts_current(post_id) "
+                "SELECT json_extract(j.value,'$.id') FROM src,json_each(src.payload,'$.result.posts') j; "
+                "SELECT * FROM reddit_subreddit_posts_current LIMIT 50"
+            ),
+            "subselect payload": (
+                "INSERT INTO reddit_subreddit_posts_current(post_id) "
+                "SELECT json_extract(j.value,'$.id') FROM json_each("
+                "(SELECT result_json FROM __tool_results LIMIT 1),'$.result.posts') j; "
+                "SELECT * FROM reddit_subreddit_posts_current LIMIT 50"
+            ),
+            "nested json_extract": (
+                "INSERT INTO reddit_subreddit_posts_current(post_id) "
+                "SELECT json_extract(j.value,'$.id') FROM __tool_results t,"
+                "json_each(json_extract(t.result_json,'$.result')) j; "
+                "SELECT * FROM reddit_subreddit_posts_current LIMIT 50"
+            ),
+        }
+        for label, sql in equivalent_source_forms.items():
+            with self.subTest(label=label):
+                self.assertEqual(
+                    source_derived_model_reconciled_paths([sql]),
+                    ("$.result.posts",) if label != "nested json_extract" else ("$.result",),
+                )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([
+                "INSERT INTO reddit_subreddit_posts_current(post_id) "
+                "SELECT json_extract(j.value,'$.id') FROM __tool_results t,json_each(t.result_json) j; "
+                "SELECT * FROM reddit_subreddit_posts_current LIMIT 50"
+            ]),
+            ("$",),
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([
+                "INSERT INTO reddit_subreddit_posts_current(post_id) "
+                "SELECT json_extract(j.value,'$.id') FROM __tool_results t,"
+                "json_each(t.result_json,'$.content.\"owner''s.items\"') j; "
+                "SELECT * FROM reddit_subreddit_posts_current LIMIT 50"
+            ]),
+            ('$.content."owner\'s.items"',),
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([
+                "INSERT INTO reddit_subreddit_posts_current(post_id,source_result_id) "
+                "SELECT json_extract(r.value,'$.id'),t.result_id FROM json_each(:rows,'$.result.posts') r "
+                "JOIN __tool_results t ON t.result_id=json_extract(r.value,'$.result_id'); "
+                "SELECT * FROM reddit_subreddit_posts_current LIMIT 50"
+            ]),
+            (),
+        )
+        self.assertEqual(
+            set(source_derived_model_reconciled_paths([
+                posts_import.rsplit(";", 1)[0] + "; "
+                "INSERT INTO reddit_subreddit_posts_current(post_id,title) "
+                "SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.title') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.pinned_posts') j; "
+                "SELECT * FROM reddit_subreddit_posts_current LIMIT 50"
+            ])),
+            {"$.result.posts", "$.result.pinned_posts"},
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([
+                posts_import.rsplit(";", 1)[0],
+            ]),
+            (),
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([
+                posts_import.rsplit(";", 1)[0] + "; SELECT * FROM unrelated_posts",
+            ]),
+            (),
+        )
+        self.assertEqual(
+            source_derived_model_reconciled_paths([
+                "INSERT INTO temp_posts(post_id) SELECT json_extract(j.value,'$.id') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM temp_posts"
+            ]),
+            (),
+        )
+
+    def test_new_model_identity_summary_excludes_ctas_temp_and_partial_indexes(self):
+        keyed = summarize_sqlite_tool_result_sql([
+            "CREATE TABLE durable_posts(post_id TEXT PRIMARY KEY); "
+            "INSERT INTO durable_posts SELECT json_extract(j.value,'$.id') "
+            "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j"
+        ])
+        ctas = summarize_sqlite_tool_result_sql([
+            "CREATE TABLE copied_posts AS SELECT * FROM __tool_results"
+        ])
+        temporary = summarize_sqlite_tool_result_sql([
+            "CREATE TEMP TABLE temp_posts(post_id TEXT PRIMARY KEY)"
+        ])
+        partial = summarize_sqlite_tool_result_sql([
+            "CREATE TABLE partial_posts(post_id TEXT); "
+            "CREATE UNIQUE INDEX partial_posts_key ON partial_posts(post_id) WHERE post_id IS NOT NULL"
+        ])
+
+        self.assertEqual(keyed.keyed_explicit_table_names, ("durable_posts",))
+        self.assertEqual(ctas.keyed_explicit_table_names, ())
+        self.assertEqual(temporary.keyed_explicit_table_names, ())
+        self.assertEqual(partial.keyed_explicit_table_names, ())
+
+    def test_sqlite_model_identity_is_casefolded_and_rejects_partial_unique_indexes(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            with sqlite3.connect(db_path) as conn:
+                conn.executescript(
+                    "CREATE TABLE Reddit_Posts(post_id TEXT PRIMARY KEY);"
+                    "CREATE TABLE unique_posts(post_id TEXT);"
+                    "CREATE UNIQUE INDEX unique_posts_key ON unique_posts(post_id);"
+                    "CREATE TABLE partial_posts(post_id TEXT);"
+                    "CREATE UNIQUE INDEX partial_posts_key ON partial_posts(post_id) "
+                    "WHERE post_id IS NOT NULL;"
+                    "CREATE TABLE staging_posts(post_id TEXT PRIMARY KEY);"
+                    "CREATE TABLE unkeyed_posts(post_id TEXT);"
+                )
+
+            self.assertEqual(
+                get_sqlite_model_tables_with_identity(),
+                {"reddit_posts", "unique_posts"},
+            )
 
     def test_source_facts_copied_into_model_receive_advice(self):
         payload = (

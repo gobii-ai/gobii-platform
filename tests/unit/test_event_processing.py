@@ -2527,6 +2527,119 @@ class PromptContextBuilderTests(TestCase):
             reset_sqlite_db_path(token)
             sqlite_tmp.cleanup()
 
+    def test_source_path_reconciliation_accepts_new_durable_target_and_rejects_invalid_attempts(self):
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(sqlite_tmp.cleanup)
+        token = set_sqlite_db_path(f"{sqlite_tmp.name}/state.db")
+        self.addCleanup(reset_sqlite_db_path, token)
+        with sqlite3.connect(f"{sqlite_tmp.name}/state.db") as conn:
+            conn.execute("CREATE TABLE posts(post_id TEXT PRIMARY KEY, title TEXT)")
+
+        source_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="fresh Reddit source",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=source_step,
+            tool_name="http_request",
+            tool_params={"url": "https://reddit.example.test/posts"},
+            result=json.dumps({
+                "status": "ok",
+                "result": {
+                    "posts": [{"id": "post-1", "title": "Fresh post"}],
+                },
+            }),
+            status="complete",
+        )
+
+        def build_metadata():
+            with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+                "api.agent.core.prompt_context.ensure_comms_compacted"
+            ):
+                return build_prompt_context(self.agent, include_metadata=True)[3]
+
+        def record_sql(sql, *, result_status="ok", tool_status="complete"):
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="SQLite source reconciliation attempt",
+            )
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name="sqlite_batch",
+                tool_params={"sql": sql},
+                result=json.dumps({"status": result_status, "results": []}),
+                status=tool_status,
+            )
+
+        with patch("api.agent.core.prompt_context.get_sqlite_model_tables_with_identity") as identity_probe:
+            self.assertIn("$.result.posts", build_metadata()["source_reconciliation_directive"])
+        identity_probe.assert_not_called()
+
+        source_insert = (
+            "INSERT INTO reddit_subreddit_posts_current(post_id,title) "
+            "SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.title') "
+            "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j "
+            "WHERE t.is_current_batch=1 AND t.tool_name='http_request'"
+        )
+        invalid_attempts = (
+            source_insert + "; SELECT * FROM unrelated_posts LIMIT 20",
+            source_insert,
+            (
+                "INSERT INTO staging_posts(post_id) SELECT json_extract(j.value,'$.id') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM staging_posts LIMIT 20"
+            ),
+            (
+                "INSERT INTO reddit_subreddit_posts_current(post_id,title) "
+                "VALUES ('post-1','Fresh post'); "
+                "SELECT * FROM reddit_subreddit_posts_current LIMIT 20"
+            ),
+            (
+                "CREATE TABLE unkeyed_posts(post_id TEXT,title TEXT); "
+                "INSERT INTO unkeyed_posts(post_id,title) "
+                "SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.title') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM unkeyed_posts LIMIT 20"
+            ),
+            (
+                "CREATE TABLE ctas_posts AS SELECT result_json FROM __tool_results WHERE 0; "
+                "INSERT INTO ctas_posts(result_json) SELECT j.value "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM ctas_posts LIMIT 20"
+            ),
+            (
+                "CREATE TEMP TABLE ephemeral_posts(post_id TEXT PRIMARY KEY); "
+                "INSERT INTO ephemeral_posts(post_id) SELECT json_extract(j.value,'$.id') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM ephemeral_posts LIMIT 20"
+            ),
+            (
+                "CREATE TABLE partial_posts(post_id TEXT); "
+                "CREATE UNIQUE INDEX partial_posts_key ON partial_posts(post_id) WHERE post_id IS NOT NULL; "
+                "INSERT INTO partial_posts(post_id) SELECT json_extract(j.value,'$.id') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM partial_posts LIMIT 20"
+            ),
+        )
+        for sql in invalid_attempts:
+            record_sql(sql)
+            self.assertIsNotNone(build_metadata()["source_reconciliation_directive"])
+
+        record_sql(
+            source_insert + "; SELECT * FROM reddit_subreddit_posts_current LIMIT 20",
+            result_status="error",
+            tool_status="error",
+        )
+        self.assertIsNotNone(build_metadata()["source_reconciliation_directive"])
+
+        record_sql(
+            "CREATE TABLE reddit_subreddit_posts_current("
+            "post_id TEXT PRIMARY KEY,title TEXT); "
+            + source_insert
+            + "; SELECT * FROM reddit_subreddit_posts_current LIMIT 20"
+        )
+        self.assertIsNone(build_metadata()["source_reconciliation_directive"])
+
     def test_current_source_batch_hides_stale_same_tool_event_from_prompt(self):
         sqlite_tmp = tempfile.TemporaryDirectory()
         self.addCleanup(sqlite_tmp.cleanup)

@@ -7,6 +7,7 @@ loop with LLM‑powered reasoning and tool execution using tiered failover.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import logging
@@ -1856,13 +1857,174 @@ def _source_reconciliation_parameters(directive: str) -> dict[str, Any]:
             },
             "sql": {
                 "type": "string",
-                "description": directive + " Start with source-derived model DDL/upserts; end with bounded task-relevant rows. No pre-read or copied values.",
+                "description": (
+                    directive
+                    + " Run one focused reconciliation batch: start with source-derived model DDL/upserts and "
+                    "end with bounded task-relevant rows. No pre-read or copied values. After validation, normal "
+                    "tool routing resumes."
+                ),
             },
             "will_continue_work": {"type": "boolean", "const": True},
         },
         "required": ["rows", "sql", "will_continue_work"],
         "additionalProperties": False,
     }
+
+
+SOURCE_RECONCILIATION_MAX_ATTEMPTS = 3
+SOURCE_RECONCILIATION_MAX_UNVERIFIED_SUCCESSES = 2
+SOURCE_RECONCILIATION_METADATA_KEY = "source_reconciliation"
+
+
+@dataclass(frozen=True)
+class _SourceReconciliationAttemptCounts:
+    total: int
+    successful_unverified: int
+
+    @property
+    def exhausted(self) -> bool:
+        return (
+            self.total >= SOURCE_RECONCILIATION_MAX_ATTEMPTS
+            or self.successful_unverified >= SOURCE_RECONCILIATION_MAX_UNVERIFIED_SUCCESSES
+        )
+
+
+def _source_reconciliation_directive_hash(
+    agent: PersistentAgent,
+    directive: str,
+    fresh_tool_call_step_ids: list[str],
+) -> str:
+    inbound = get_current_inbound_message(agent)
+    source_step_ids = []
+    if fresh_tool_call_step_ids:
+        rows = PersistentAgentToolCall.objects.filter(
+            step__agent=agent,
+            step_id__in=fresh_tool_call_step_ids,
+        ).values_list("step_id", "tool_name")
+        source_step_ids = sorted(
+            str(step_id)
+            for step_id, tool_name in rows
+            if is_source_bearing_tool(tool_name)
+        )
+    identity = json.dumps(
+        {
+            "directive": directive,
+            "inbound_message_id": str(inbound.id) if inbound is not None else None,
+            "source_step_ids": source_step_ids,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _source_reconciliation_attempt_counts(
+    agent: PersistentAgent,
+    directive_hash: str,
+) -> _SourceReconciliationAttemptCounts:
+    total = 0
+    successful_unverified = 0
+    rows = PersistentAgentToolCall.objects.filter(
+        step__agent=agent,
+        tool_name="sqlite_batch",
+        display_metadata__source_reconciliation__directive_hash=directive_hash,
+    ).order_by("step__created_at", "step_id").values_list(
+        "status",
+        "result",
+    )[:SOURCE_RECONCILIATION_MAX_ATTEMPTS]
+    for status, result_text in rows:
+        total += 1
+        if status != PersistentAgentToolCall.Status.COMPLETE:
+            continue
+        try:
+            result = json.loads(result_text)
+        except (TypeError, ValueError):
+            continue
+        if _tool_result_is_success(result):
+            successful_unverified += 1
+    return _SourceReconciliationAttemptCounts(
+        total=total,
+        successful_unverified=successful_unverified,
+    )
+
+
+def _source_reconciliation_release_history(
+    history: list[dict[str, Any]],
+    directive: str,
+) -> list[dict[str, Any]]:
+    released = [dict(message) for message in history]
+    directives = tuple(item for item in directive.splitlines() if item)
+    for message in released:
+        content = message.get("content")
+        if isinstance(content, str):
+            message["content"] = _strip_source_reconciliation_directives(content, directives)
+        elif isinstance(content, list):
+            parts = []
+            for part in content:
+                copied_part = dict(part) if isinstance(part, dict) else part
+                if isinstance(copied_part, dict) and isinstance(copied_part.get("text"), str):
+                    copied_part["text"] = _strip_source_reconciliation_directives(
+                        copied_part["text"],
+                        directives,
+                    )
+                parts.append(copied_part)
+            message["content"] = parts
+    instruction = (
+        "## SQLite Source Reconciliation Safety Release (CRITICAL)\n\n"
+        "Repeated focused SQLite attempts did not validate this source reconciliation. sqlite_batch is unavailable "
+        "for this completion. Continue with any remaining non-SQL action using the latest bounded result, or clearly "
+        "report that source reconciliation failed. Do not refetch or reconstruct source rows."
+    )
+    system_message = next((message for message in released if message.get("role") == "system"), None)
+    if system_message is None:
+        released.insert(0, {"role": "system", "content": instruction})
+    else:
+        system_content = system_message.get("content")
+        if isinstance(system_content, list):
+            system_message["content"] = [
+                *(dict(part) if isinstance(part, dict) else part for part in system_content),
+                {"type": "text", "text": instruction},
+            ]
+        else:
+            system_message["content"] = f"{system_content or ''}\n\n{instruction}".lstrip()
+    return released
+
+
+def _strip_source_reconciliation_directives(content: str, directives: tuple[str, ...]) -> str:
+    for source_directive in directives:
+        content = content.replace(source_directive, "")
+    return content
+
+
+def _record_source_reconciliation_guard_warning(
+    agent: PersistentAgent,
+    directive_hash: str,
+    counts: _SourceReconciliationAttemptCounts,
+) -> None:
+    _create_agent_system_step_once(
+        agent=agent,
+        description=(
+            "SQLite source reconciliation stopped after repeated focused attempts "
+            f"({counts.total} total, {counts.successful_unverified} successful but unverified)."
+        ),
+        code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE,
+        notes=f"sqlite_source_reconciliation_guard:{directive_hash}",
+    )
+
+
+def _annotate_source_reconciliation_attempt(
+    prepared_calls: list[_PreparedToolExecution],
+    directive_hash: str,
+) -> None:
+    for prepared in prepared_calls:
+        if prepared.tool_name != "sqlite_batch":
+            continue
+        prepared.display_metadata = {
+            **prepared.display_metadata,
+            SOURCE_RECONCILIATION_METADATA_KEY: {
+                "directive_hash": directive_hash,
+            },
+        }
 
 
 CHARTER_PATCH_PARAMETERS = {
@@ -2267,6 +2429,7 @@ class _PreparedToolExecution:
     parallel_ineligible_reason: Optional[str]
     resolved_entry: Optional[ToolCatalogEntry] = None
     pipedream_google_sheets_blocked: bool = False
+    display_metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -3520,15 +3683,16 @@ def _capture_tool_display_metadata(
     prepared: _PreparedToolExecution,
     result: Any,
 ) -> Dict[str, Any]:
+    display_metadata = dict(getattr(prepared, "display_metadata", None) or {})
     if prepared.tool_name != "sqlite_batch" or not _tool_result_is_success(result):
-        return {}
+        return display_metadata
     fields = _sqlite_batch_agent_config_attempted_fields(prepared.exec_params)
     if not fields:
-        return {}
+        return display_metadata
 
     snapshot = read_sqlite_agent_config_snapshot()
     if snapshot is None:
-        return {}
+        return display_metadata
     agent_config: Dict[str, Any] = {
         "charter": snapshot.charter,
         "schedule": snapshot.schedule,
@@ -3539,7 +3703,8 @@ def _capture_tool_display_metadata(
     if "emotion" in fields:
         agent_config["emotion"] = snapshot.emotion
         agent_config["emotion_timeout_seconds"] = snapshot.emotion_timeout_seconds
-    return {"agent_config": agent_config}
+    display_metadata["agent_config"] = agent_config
+    return display_metadata
 
 
 def _mark_tool_outcome_failed(
@@ -7581,6 +7746,8 @@ def _run_agent_loop(
                 request_tools = iteration_tools
                 focused_feedback_reply_tool_name = None
                 source_reconciliation_directive = prompt_metadata.get("source_reconciliation_directive")
+                source_reconciliation_directive_hash = None
+                source_reconciliation_focused_this_iteration = False
                 terminal_plan_cleanup_this_iteration = terminal_plan_cleanup_pending
                 if terminal_plan_cleanup_this_iteration:
                     terminal_plan_cleanup_pending = False
@@ -7611,12 +7778,52 @@ def _run_agent_loop(
                         parameters=CHARTER_PATCH_PARAMETERS,
                     )
                 elif source_reconciliation_directive and "sqlite_batch" in tool_names:
-                    request_tools, request_failover_configs = _focused_tool_completion_request(
-                        iteration_tools, request_failover_configs, "sqlite_batch",
+                    source_reconciliation_directive_hash = _source_reconciliation_directive_hash(
+                        agent,
                         source_reconciliation_directive,
-                        parameters=_source_reconciliation_parameters(source_reconciliation_directive),
-                        fixed_continue=True,
+                        fresh_tool_call_step_ids,
                     )
+                    attempt_counts = _source_reconciliation_attempt_counts(
+                        agent,
+                        source_reconciliation_directive_hash,
+                    )
+                    if attempt_counts.exhausted:
+                        try:
+                            _record_source_reconciliation_guard_warning(
+                                agent,
+                                source_reconciliation_directive_hash,
+                                attempt_counts,
+                            )
+                        except DatabaseError:
+                            logger.exception(
+                                "Agent %s: failed to persist SQLite source reconciliation guard warning",
+                                agent.id,
+                            )
+                        request_history = _source_reconciliation_release_history(
+                            request_history,
+                            source_reconciliation_directive,
+                        )
+                        request_tools = [
+                            tool for tool in iteration_tools
+                            if tool.get("function", {}).get("name") != "sqlite_batch"
+                        ]
+                        logger.warning(
+                            "Agent %s: released SQLite source reconciliation focus hash=%s "
+                            "after %s attempts (%s successful but unverified)",
+                            agent.id,
+                            source_reconciliation_directive_hash[:12],
+                            attempt_counts.total,
+                            attempt_counts.successful_unverified,
+                        )
+                        source_reconciliation_directive = None
+                    else:
+                        source_reconciliation_focused_this_iteration = True
+                        request_tools, request_failover_configs = _focused_tool_completion_request(
+                            iteration_tools, request_failover_configs, "sqlite_batch",
+                            source_reconciliation_directive,
+                            parameters=_source_reconciliation_parameters(source_reconciliation_directive),
+                            fixed_continue=True,
+                        )
                 elif feedback_reply_pending:
                     reply_tool_name = _same_channel_reply_tool_name(feedback_inbound)
                     if reply_tool_name in tool_names:
@@ -8137,6 +8344,14 @@ def _run_agent_loop(
                     attach_prompt_archive=_attach_prompt_archive,
                     stale_prompt_checker=_is_orchestrator_prompt_stale,
                 )
+                if (
+                    source_reconciliation_focused_this_iteration
+                    and source_reconciliation_directive_hash
+                ):
+                    _annotate_source_reconciliation_attempt(
+                        prepared_batch.prepared_calls,
+                        source_reconciliation_directive_hash,
+                    )
                 followup_required = prepared_batch.followup_required
                 all_calls_sleep = prepared_batch.all_calls_sleep
 
