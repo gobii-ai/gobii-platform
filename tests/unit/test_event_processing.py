@@ -2571,7 +2571,9 @@ class PromptContextBuilderTests(TestCase):
                 status=tool_status,
             )
 
-        self.assertIn("$.result.posts", build_metadata()["source_reconciliation_directive"])
+        with patch("api.agent.core.prompt_context.get_sqlite_model_tables_with_identity") as identity_probe:
+            self.assertIn("$.result.posts", build_metadata()["source_reconciliation_directive"])
+        identity_probe.assert_not_called()
 
         source_insert = (
             "INSERT INTO reddit_subreddit_posts_current(post_id,title) "
@@ -2598,6 +2600,25 @@ class PromptContextBuilderTests(TestCase):
                 "SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.title') "
                 "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
                 "SELECT * FROM unkeyed_posts LIMIT 20"
+            ),
+            (
+                "CREATE TABLE ctas_posts AS SELECT result_json FROM __tool_results WHERE 0; "
+                "INSERT INTO ctas_posts(result_json) SELECT j.value "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM ctas_posts LIMIT 20"
+            ),
+            (
+                "CREATE TEMP TABLE ephemeral_posts(post_id TEXT PRIMARY KEY); "
+                "INSERT INTO ephemeral_posts(post_id) SELECT json_extract(j.value,'$.id') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM ephemeral_posts LIMIT 20"
+            ),
+            (
+                "CREATE TABLE partial_posts(post_id TEXT); "
+                "CREATE UNIQUE INDEX partial_posts_key ON partial_posts(post_id) WHERE post_id IS NOT NULL; "
+                "INSERT INTO partial_posts(post_id) SELECT json_extract(j.value,'$.id') "
+                "FROM __tool_results t,json_each(t.result_json,'$.result.posts') j; "
+                "SELECT * FROM partial_posts LIMIT 20"
             ),
         )
         for sql in invalid_attempts:

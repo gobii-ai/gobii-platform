@@ -3861,6 +3861,38 @@ class ImpliedSendTests(TestCase):
             notes__startswith="sqlite_source_reconciliation_guard:",
         ).exists())
 
+    def test_source_reconciliation_release_preserves_multimodal_content_and_strips_each_directive(self):
+        first_directive = "[SOURCE ARRAYS; paths: $.result.posts(id)[stable_key=id].]"
+        second_directive = "[SOURCE ARRAYS; paths: $.result.comments(id)[stable_key=id].]"
+        image_part = {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,AAAA"},
+        }
+        history = [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Import these. {first_directive} More context. {second_directive}",
+                },
+                image_part,
+            ],
+        }]
+
+        released = ep._source_reconciliation_release_history(
+            history,
+            f"{first_directive}\n{second_directive}",
+        )
+
+        self.assertEqual(released[0]["role"], "system")
+        self.assertIn("SQLite Source Reconciliation Safety Release", released[0]["content"])
+        self.assertIsInstance(released[1]["content"], list)
+        self.assertNotIn(first_directive, released[1]["content"][0]["text"])
+        self.assertNotIn(second_directive, released[1]["content"][0]["text"])
+        self.assertEqual(released[1]["content"][1], image_part)
+        self.assertIn(first_directive, history[0]["content"][0]["text"])
+        self.assertIn(second_directive, history[0]["content"][0]["text"])
+
     def test_failed_source_reconciliation_guard_persists_across_followup_run(self):
         tools = [
             {"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}},

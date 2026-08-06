@@ -1927,12 +1927,12 @@ def _source_reconciliation_attempt_counts(
     rows = PersistentAgentToolCall.objects.filter(
         step__agent=agent,
         tool_name="sqlite_batch",
-    ).values_list("status", "result", "display_metadata")
-    for status, result_text, display_metadata in rows:
-        metadata = display_metadata if isinstance(display_metadata, dict) else {}
-        reconciliation = metadata.get(SOURCE_RECONCILIATION_METADATA_KEY)
-        if not isinstance(reconciliation, dict) or reconciliation.get("directive_hash") != directive_hash:
-            continue
+        display_metadata__source_reconciliation__directive_hash=directive_hash,
+    ).order_by("step__created_at", "step_id").values_list(
+        "status",
+        "result",
+    )[:SOURCE_RECONCILIATION_MAX_ATTEMPTS]
+    for status, result_text in rows:
         total += 1
         if status != PersistentAgentToolCall.Status.COMPLETE:
             continue
@@ -1953,10 +1953,22 @@ def _source_reconciliation_release_history(
     directive: str,
 ) -> list[dict[str, Any]]:
     released = [dict(message) for message in history]
+    directives = tuple(item for item in directive.splitlines() if item)
     for message in released:
-        content = str(message.get("content") or "")
-        if directive in content:
-            message["content"] = content.replace(directive, "")
+        content = message.get("content")
+        if isinstance(content, str):
+            message["content"] = _strip_source_reconciliation_directives(content, directives)
+        elif isinstance(content, list):
+            parts = []
+            for part in content:
+                copied_part = dict(part) if isinstance(part, dict) else part
+                if isinstance(copied_part, dict) and isinstance(copied_part.get("text"), str):
+                    copied_part["text"] = _strip_source_reconciliation_directives(
+                        copied_part["text"],
+                        directives,
+                    )
+                parts.append(copied_part)
+            message["content"] = parts
     instruction = (
         "## SQLite Source Reconciliation Safety Release (CRITICAL)\n\n"
         "Repeated focused SQLite attempts did not validate this source reconciliation. sqlite_batch is unavailable "
@@ -1967,8 +1979,21 @@ def _source_reconciliation_release_history(
     if system_message is None:
         released.insert(0, {"role": "system", "content": instruction})
     else:
-        system_message["content"] = str(system_message.get("content") or "") + "\n\n" + instruction
+        system_content = system_message.get("content")
+        if isinstance(system_content, list):
+            system_message["content"] = [
+                *(dict(part) if isinstance(part, dict) else part for part in system_content),
+                {"type": "text", "text": instruction},
+            ]
+        else:
+            system_message["content"] = f"{system_content or ''}\n\n{instruction}".lstrip()
     return released
+
+
+def _strip_source_reconciliation_directives(content: str, directives: tuple[str, ...]) -> str:
+    for source_directive in directives:
+        content = content.replace(source_directive, "")
+    return content
 
 
 def _record_source_reconciliation_guard_warning(

@@ -35,6 +35,7 @@ from api.utils.sqlite_files import (
 )
 
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
+from .sqlite_query_quality import is_named_model_table
 from .sqlite_recovery import (
     SQLITE_STATE_RECOVERED_ERROR,
     SQLITE_STATE_UNRECOVERABLE_ERROR,
@@ -292,11 +293,12 @@ def get_sqlite_model_tables_with_identity() -> set[str]:
     try:
         conn = open_guarded_sqlite_connection(db_path)
         table_names = {
-            str(row[0])
+            str(row[0]).casefold()
             for row in conn.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type='table' AND name NOT LIKE 'sqlite_%' AND substr(name, 1, 2) != '__'"
             ).fetchall()
+            if is_named_model_table(row[0])
         }
         keyed_tables = set()
         for table_name in table_names:
@@ -306,7 +308,7 @@ def get_sqlite_model_tables_with_identity() -> set[str]:
                 keyed_tables.add(table_name)
                 continue
             indexes = conn.execute(f'PRAGMA index_list("{quoted_name}")').fetchall()
-            if any(bool(index[2]) for index in indexes):
+            if any(bool(index[2]) and not bool(index[4]) for index in indexes):
                 keyed_tables.add(table_name)
         return keyed_tables
     except (OSError, sqlite3.Error):

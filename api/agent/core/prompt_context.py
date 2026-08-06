@@ -1797,7 +1797,6 @@ def _render_prompt_context_once(
     sqlite_table_priorities = _get_recent_sqlite_table_priorities(agent)
     sqlite_schema_block = get_sqlite_schema_prompt(sqlite_table_priorities)
     named_model_columns = get_sqlite_model_table_columns(sqlite_table_priorities)
-    keyed_model_tables = get_sqlite_model_tables_with_identity()
     named_model_tables = {
         match.group(1)
         for match in re.finditer(r"^Table ([^\s(]+)", sqlite_schema_block, re.MULTILINE)
@@ -1819,7 +1818,6 @@ def _render_prompt_context_once(
         run_cache=run_cache,
         named_model_tables=named_model_tables,
         named_model_columns=named_model_columns,
-        keyed_model_tables=keyed_model_tables,
         has_peer_links=has_peer_links,
     )
 
@@ -4956,7 +4954,6 @@ def _get_unified_history_prompt(
     run_cache: PromptRunCache | None = None,
     named_model_tables: Set[str] | None = None,
     named_model_columns: Mapping[str, Set[str]] | None = None,
-    keyed_model_tables: Set[str] | None = None,
     has_peer_links: bool = False,
 ) -> Tuple[Set[str], bool, Tuple[str, ...], bool]:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
@@ -5081,6 +5078,7 @@ def _get_unified_history_prompt(
         tool_call_parent_ids: Dict[str, str] = {}
         tool_call_parent_names: Dict[str, str] = {}
         source_reconciliations: list[tuple[datetime, str, set[str]]] = []
+        keyed_model_tables: set[str] | None = None
         for row in tool_call_results:
             step_id = str(row["step_id"])
             step = step_lookup.get(step_id)
@@ -5113,12 +5111,16 @@ def _get_unified_history_prompt(
             if row.get("tool_name") == "sqlite_batch" and str(row.get("status") or "").casefold() == "complete" and _tool_result_status_is_ok(result_text):
                 sql_values = _sql_values_from_params(row.get("tool_params") or {})
                 reconciled_tables = source_derived_model_reconciled_tables(sql_values)
-                sql_summary = summarize_sqlite_tool_result_sql(sql_values)
-                newly_created_keyed_tables = (
-                    set(sql_summary.working_table_names)
-                    - set(sql_summary.unkeyed_explicit_table_names)
-                )
-                eligible_tables = set(keyed_model_tables or ()) | newly_created_keyed_tables
+                if reconciled_tables:
+                    if keyed_model_tables is None:
+                        keyed_model_tables = {
+                            table.casefold()
+                            for table in get_sqlite_model_tables_with_identity()
+                        }
+                    sql_summary = summarize_sqlite_tool_result_sql(sql_values)
+                    eligible_tables = keyed_model_tables | set(sql_summary.keyed_explicit_table_names)
+                else:
+                    eligible_tables = set()
                 if set(reconciled_tables).intersection(eligible_tables):
                     reconciled_paths = source_derived_model_reconciled_paths(sql_values)
                     reconciled_entities = {
