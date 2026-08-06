@@ -12,6 +12,7 @@ from api.models import Organization, TaskCredit
 from api.services.task_credit_analytics import (
     TaskCreditGrantOperation,
     TaskCreditGrantSource,
+    capture_task_credit_billing_context,
     track_task_credit_grant,
 )
 from constants.grant_types import GrantTypeChoices
@@ -23,6 +24,9 @@ from util.analytics_billing import (
     AnalyticsAccessType,
     AnalyticsBillingContext,
     AnalyticsBillingStatus,
+    bind_request_billing_context_cache,
+    reset_request_billing_context_cache,
+    resolve_analytics_billing_context_safely,
 )
 
 
@@ -115,6 +119,26 @@ class TaskCreditGrantAnalyticsTests(TestCase):
         properties = mock_segment_track.call_args.args[2]
         self.assertEqual(properties["plan_at_event"], PlanNames.FREE)
         self.assertFalse(properties["is_trial"])
+
+    def test_grant_snapshot_ignores_stale_request_and_owner_caches(self):
+        task_credit = self._personal_credit(grant_type=GrantTypeChoices.PLAN)
+        token = bind_request_billing_context_cache()
+        try:
+            stale_context = resolve_analytics_billing_context_safely(
+                self.user.id,
+                actor_user=self.user,
+                billing_owner=self.user,
+            )
+            self.assertEqual(stale_context.plan_at_event, PlanNames.FREE)
+
+            type(self.user.billing).objects.filter(user=self.user).update(
+                subscription=PlanNames.SCALE,
+            )
+            captured_context = capture_task_credit_billing_context(task_credit)
+        finally:
+            reset_request_billing_context_cache(token)
+
+        self.assertEqual(captured_context.plan_at_event, "scale")
 
     def test_organization_grant_uses_creator_and_org_billing_context(self):
         organization = Organization.objects.create(

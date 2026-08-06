@@ -55,10 +55,15 @@ def _grant_owner(task_credit):
 def capture_task_credit_billing_context(task_credit) -> AnalyticsBillingContext:
     """Capture billing state now so a later on-commit send cannot change it."""
     billing_owner, analytics_user = _grant_owner(task_credit)
+    account_id = (
+        str(billing_owner.pk)
+        if task_credit.organization_id
+        else f"user:{billing_owner.pk}"
+    )
     return resolve_analytics_billing_context_safely(
         analytics_user.pk,
-        actor_user=analytics_user,
-        billing_owner=billing_owner,
+        organization_id=account_id,
+        use_request_cache=False,
     )
 
 

@@ -1068,6 +1068,33 @@ class SubscriptionSignalTests(TestCase):
 
         self.mock_capi.assert_not_called()
 
+    @tag("batch_task_credits")
+    def test_subscription_created_without_billing_reason_uses_create_grant_source(self):
+        payload = _build_event_payload(billing_reason=None, invoice_id=None)
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=17, subscriber=fresh_user)
+        sub.stripe_data.pop("billing_reason", None)
+        sub.stripe_data["latest_invoice"] = None
+        sub.billing_reason = None
+        sub.latest_invoice = None
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+             patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+             patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+             patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+             patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+             patch("pages.signals.Analytics.identify"), \
+             patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.assertEqual(
+            mock_grant.call_args.kwargs["grant_source"],
+            TaskCreditGrantSource.SUBSCRIPTION_CREATE,
+        )
+
     @tag("batch_pages_signals")
     def test_subscription_event_resumes_signup_preview_agents_after_personal_plan_activation(self):
         payload = _build_event_payload(billing_reason="subscription_create")

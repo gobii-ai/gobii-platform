@@ -3985,7 +3985,10 @@ def handle_subscription_event(event, **kwargs):
                         credit_override = None
 
                     if should_grant:
-                        if billing_reason == "subscription_create":
+                        if billing_reason == "subscription_create" or (
+                            not billing_reason
+                            and event_type == "customer.subscription.created"
+                        ):
                             credit_grant_source = TaskCreditGrantSource.SUBSCRIPTION_CREATE
                         elif billing_reason == "subscription_cycle":
                             credit_grant_source = TaskCreditGrantSource.SUBSCRIPTION_RENEWAL

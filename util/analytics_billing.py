@@ -438,8 +438,9 @@ def resolve_analytics_billing_context_safely(
     actor_user: object | None = None,
     billing_owner: object | None = None,
     organization_id: object | None = None,
+    use_request_cache: bool = True,
 ) -> AnalyticsBillingContext:
-    cache = _request_billing_context_cache.get()
+    cache = _request_billing_context_cache.get() if use_request_cache else None
     cache_key = _billing_context_cache_key(
         user_id,
         actor_user=actor_user,
