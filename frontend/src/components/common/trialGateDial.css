@@ -218,3 +218,25 @@
     text-underline-offset: 2px;
 }
 .trial-gate__prohatch button:hover { color: #c026d3; }
+
+.trial-gate__promise { margin: 0.8rem 0 0.7rem; font-size: 0.82rem; color: #4c4368; line-height: 1.5; }
+
+.trial-gate__timeline {
+    max-width: 22rem;
+    margin: 0 auto 1rem;
+    border-radius: 0.8rem;
+    border: 1px solid rgba(124, 58, 237, 0.14);
+    background: rgba(250, 247, 255, 0.7);
+    padding: 0.55rem 0.9rem;
+    text-align: left;
+}
+.trial-gate__tl-row {
+    display: flex;
+    gap: 0.7rem;
+    padding: 0.32rem 0;
+    font-size: 0.75rem;
+    color: #6f6590;
+    align-items: baseline;
+}
+.trial-gate__tl-row + .trial-gate__tl-row { border-top: 1px solid rgba(124, 58, 237, 0.08); }
+.trial-gate__tl-row b { flex: none; width: 3.4rem; color: #7c3aed; font-weight: 650; font-variant-numeric: tabular-nums; }

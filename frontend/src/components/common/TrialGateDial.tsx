@@ -97,9 +97,27 @@ export function TrialGateDial({
         </p>
       ) : null}
 
-      <p className="trial-gate__zero">
-        <b>$0 today</b> · everything in Scale included · then ${PLAN_META.scale.price}/mo
+      <p className="trial-gate__promise">
+        {agentReadyName ? `${agentReadyName.split(' ')[0]} starts` : 'Your agent starts'} the moment your
+        trial begins — first {estimate.isOutcome ? estimate.unit : 'results'} typically arrive within hours.
       </p>
+
+      <div className="trial-gate__timeline" aria-label="Trial timeline">
+        <div className="trial-gate__tl-row">
+          <b>Today</b>
+          <span>$0 — agent starts, first results by email</span>
+        </div>
+        {trialDays > 2 ? (
+          <div className="trial-gate__tl-row">
+            <b>Day {trialDays - 2}</b>
+            <span>reminder email before your trial ends</span>
+          </div>
+        ) : null}
+        <div className="trial-gate__tl-row">
+          <b>Day {trialDays + 1}</b>
+          <span>first charge — ${PLAN_META.scale.price}/mo Scale (everything included)</span>
+        </div>
+      </div>
 
       <button
         type="button"

@@ -1298,6 +1298,43 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
         # to this view (which would fail since agent_charter was consumed)
         return_to = request.GET.get("return_to") or session_return_to or f"{IMMERSIVE_APP_BASE_PATH}/agents"
         invalidate_account_info_cache(request.user.id)
+
+        # Template-intake funnel spawns land on the "your agent is working"
+        # hand-off instead of the live chat: the recruiter's surface is email,
+        # the chat is opt-in for steering — not a waiting room.
+        from pages.template_intake import INTAKE_ANSWERS_SESSION_KEY
+
+        funnel_spawn = request.session.pop(INTAKE_ANSWERS_SESSION_KEY, None) is not None
+        if funnel_spawn:
+            request.session.modified = True
+            # The bridge email: the inbox thread must exist from minute zero,
+            # because email is this funnel's primary surface. Best-effort.
+            try:
+                from django.core.mail import send_mail
+
+                agent_first = (result.agent.name or "Your agent").split(" ")[0]
+                send_mail(
+                    subject=f"{result.agent.name} is on the job",
+                    message=(
+                        f"{result.agent.name} has started working on your brief.\n\n"
+                        f"Your first results will arrive in this inbox — usually within a few hours. "
+                        f"{agent_first} keeps working around the clock either way.\n\n"
+                        f"Reply to any email from {agent_first} to refine the search.\n\n"
+                        f"— Gobii"
+                    ),
+                    from_email=None,
+                    recipient_list=[request.user.email],
+                    fail_silently=True,
+                )
+            except Exception:
+                logger.exception("Funnel bridge email failed for agent %s", result.agent.id)
+            response = redirect("agent_working", agent_id=result.agent.id)
+            if OAUTH_CHARTER_COOKIE in request.COOKIES:
+                response.delete_cookie(OAUTH_CHARTER_COOKIE)
+            if OAUTH_ATTRIBUTION_COOKIE in request.COOKIES:
+                response.delete_cookie(OAUTH_ATTRIBUTION_COOKIE)
+            return response
+
         app_url = build_immersive_chat_url(
             request,
             result.agent.id,
@@ -1313,6 +1350,49 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             response.delete_cookie(OAUTH_ATTRIBUTION_COOKIE)
 
         return response
+
+
+class AgentWorkingView(LoginRequiredMixin, View):
+    """Post-checkout hand-off for funnel spawns: the agent is on the job, the
+    user can close the window, results arrive by email. Chat is opt-in."""
+
+    def get(self, request, agent_id, *args, **kwargs):
+        agent = get_object_or_404(
+            PersistentAgent,
+            id=agent_id,
+            user=request.user,
+            organization__isnull=True,
+        )
+        from api.models import PersistentAgentMessage
+
+        mission = ""
+        first_inbound = (
+            PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+            .order_by("timestamp")
+            .first()
+        )
+        if first_inbound and isinstance(first_inbound.raw_payload, dict):
+            briefing = first_inbound.raw_payload.get("gobii_briefing")
+            if isinstance(briefing, dict):
+                mission = str(briefing.get("title") or "").strip()
+        chat_url = build_immersive_chat_url(
+            request,
+            agent.id,
+            return_to=f"{IMMERSIVE_APP_BASE_PATH}/agents",
+        )
+        first_name = (agent.name or "Your agent").split(" ")[0]
+        return render(
+            request,
+            "console/agent_working.html",
+            {
+                "agent_name": agent.name or "Your agent",
+                "agent_first_name": first_name,
+                "mission": mission,
+                "started_at": timezone.localtime(agent.created_at).strftime("%-I:%M %p"),
+                "user_email": request.user.email,
+                "chat_url": chat_url,
+            },
+        )
 
 
 class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):

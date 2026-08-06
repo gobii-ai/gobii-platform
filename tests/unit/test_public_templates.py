@@ -2142,3 +2142,66 @@ class TemplateIntakeBriefTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(self._brief_url(template), response["Location"])
         self.assertIn("utm_source=ad", response["Location"])
+
+    @tag("batch_public_templates")
+    def test_agent_working_page_renders_mission(self):
+        from api.models import (
+            BrowserUseAgent,
+            CommsChannel,
+            PersistentAgent,
+            PersistentAgentCommsEndpoint,
+            PersistentAgentConversation,
+            PersistentAgentMessage,
+        )
+        from api.agent.comms.message_service import build_web_agent_address, build_web_user_address
+
+        user = get_user_model().objects.create_user(
+            username="working-page-user",
+            email="working-page@example.com",
+            password="pw",
+        )
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="WP Browser")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Nova Reyes",
+            charter="Source candidates",
+            browser_use_agent=browser_agent,
+        )
+        agent_ep = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(agent.id),
+        )
+        user_addr = build_web_user_address(user.id, agent.id)
+        user_ep = PersistentAgentCommsEndpoint.objects.create(channel=CommsChannel.WEB, address=user_addr)
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=agent, channel=CommsChannel.WEB, address=user_addr,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=user_ep,
+            to_endpoint=agent_ep,
+            conversation=conversation,
+            is_outbound=False,
+            body="brief",
+            raw_payload={"gobii_briefing": {"title": "Senior Data Engineer", "rows": []}},
+        )
+
+        self.client.force_login(user)
+        response = self.client.get(reverse("agent_working", kwargs={"agent_id": agent.id}))
+        content = response.content.decode()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Nova Reyes", content)
+        self.assertIn("Senior Data Engineer", content)
+        self.assertIn("You can close this window", content)
+        self.assertIn("working-page@example.com", content)
+
+        # Other users cannot see it.
+        other = get_user_model().objects.create_user(
+            username="working-other", email="working-other@example.com", password="pw",
+        )
+        self.client.force_login(other)
+        self.assertEqual(
+            self.client.get(reverse("agent_working", kwargs={"agent_id": agent.id})).status_code,
+            404,
+        )
