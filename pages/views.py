@@ -2689,7 +2689,13 @@ class PublicTemplateBriefView(View):
 
         if request.user.is_authenticated:
             return redirect(next_url)
-        response = _build_anonymous_cta_auth_response(request, next_url=next_url)
+        # New customers land on account CREATION, never a login page — cold
+        # traffic on a login wall is the canonical drop-off (NN/g, Baymard);
+        # returning users take the "Sign in" link on that page.
+        response = redirect_to_login(
+            next=next_url,
+            login_url=_auth_url_with_utms(reverse("account_signup"), request),
+        )
         charter_data = _build_oauth_charter_cookie_payload(
             request,
             charter=brief_message,
