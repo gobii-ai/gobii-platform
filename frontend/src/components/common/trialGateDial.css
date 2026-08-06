@@ -1,242 +1,201 @@
-/* Trial gate dial — the signup-funnel plan gate. Light luxe: violet ramp,
-   light-weight type, no blue anywhere. */
+/* Trial gate — the "what happens next" receipt in the locked night-luxe
+   language: dark card on the light modal, gradient hairline, grain, conic
+   CTA. No gauge; the ledger carries the pitch. */
+
+@property --trial-gate-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
 
 .trial-gate {
-    max-width: 26rem;
+    position: relative;
+    max-width: 27rem;
     margin: 0 auto;
-    padding: 0.25rem 0 0.5rem;
+    padding: 26px 30px 22px;
     text-align: center;
-    color: #3f3859;
+    color: #b7aed4;
+    border-radius: 20px;
+    border: 1px solid transparent;
+    background: linear-gradient(rgba(23, 14, 42, 0.95), rgba(19, 12, 36, 0.96)) padding-box,
+    linear-gradient(130deg, rgba(124, 58, 237, 0.65), rgba(240, 171, 252, 0.35), rgba(124, 58, 237, 0.5)) border-box;
+    box-shadow: 0 40px 110px -40px rgba(124, 58, 237, 0.55),
+    0 10px 40px -18px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.trial-gate::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 20px;
+    pointer-events: none;
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 .trial-gate__who {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    max-width: 20rem;
-    margin: 0 auto 0.9rem;
-    padding: 0.5rem 0.85rem;
-    border-radius: 0.75rem;
-    background: rgba(139, 92, 246, 0.08);
-    border: 1px solid rgba(139, 92, 246, 0.22);
+    gap: 10px;
+    max-width: 330px;
+    margin: 0 auto 16px;
+    padding: 9px 14px;
+    border-radius: 12px;
     text-align: left;
+    background: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(196, 181, 253, 0.3);
 }
 .trial-gate__avatar {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.9rem;
-    height: 1.9rem;
-    flex: none;
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
     background: linear-gradient(135deg, #8b5cf6, #c026d3);
     color: #fff;
-    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
     font-weight: 700;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6), 0 4px 12px -4px rgba(124, 58, 237, 0.5);
+    flex: none;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15), 0 4px 12px -4px rgba(124, 58, 237, 0.6);
 }
 .trial-gate__who-text { display: flex; flex-direction: column; min-width: 0; }
-.trial-gate__who-text b { font-size: 0.82rem; color: #241a4a; font-weight: 650; }
+.trial-gate__who-text b { font-size: 13px; color: #fff; font-weight: 650; }
 .trial-gate__who-text small {
-    font-size: 0.7rem;
-    color: #7c6fa8;
+    font-size: 11px;
+    color: #9a8fc0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 .trial-gate__pulse {
-    width: 0.45rem;
-    height: 0.45rem;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #7ee2b8;
     margin-left: auto;
     flex: none;
-    border-radius: 50%;
-    background: #10b981;
     animation: trial-gate-pulse 2s ease-in-out infinite;
 }
 @keyframes trial-gate-pulse { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { .trial-gate__pulse { animation: none; } }
 
 .trial-gate__title {
-    margin: 0 0 0.9rem;
-    font-size: 1.45rem;
+    position: relative;
+    font-size: 23px;
     font-weight: 300;
-    letter-spacing: -0.02em;
-    color: #241a4a;
+    letter-spacing: -0.5px;
+    color: #fff;
+    margin: 0;
 }
 .trial-gate__accent {
     font-weight: 400;
-    background: linear-gradient(90deg, #7c3aed, #c026d3);
+    background: linear-gradient(90deg, #c4b5fd, #f0abfc);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
 }
 
-.trial-gate__plans {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-}
-.trial-gate__plan {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    padding: 0.65rem 0.75rem;
-    border-radius: 0.8rem;
-    border: 1px solid rgba(124, 58, 237, 0.18);
-    background: #fff;
-    cursor: pointer;
-    text-align: left;
-    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
-}
-.trial-gate__plan:hover { border-color: rgba(124, 58, 237, 0.4); }
-.trial-gate__plan--on {
-    background: linear-gradient(rgba(250, 247, 255, 0.9), rgba(243, 237, 253, 0.9)) padding-box,
-    linear-gradient(130deg, rgba(124, 58, 237, 0.6), rgba(240, 171, 252, 0.4)) border-box;
-    border-color: transparent;
-    box-shadow: 0 10px 26px -14px rgba(124, 58, 237, 0.45);
-}
-.trial-gate__plan-name { font-size: 0.9rem; font-weight: 650; color: #241a4a; }
-.trial-gate__plan-price { font-size: 0.8rem; color: #4c4368; font-variant-numeric: tabular-nums; }
-.trial-gate__plan-hint { font-size: 0.68rem; color: #8a80a8; }
-.trial-gate__plan--on .trial-gate__plan-hint { color: #7c3aed; }
-
-.trial-gate__dial {
+.trial-gate__ledger {
     position: relative;
-    height: 7rem;
-    margin-top: 0.3rem;
+    margin: 16px 0 6px;
+    border-radius: 14px;
+    text-align: left;
+    background: rgba(9, 5, 20, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    padding: 4px 16px;
 }
-.trial-gate__arc {
-    position: absolute;
-    left: 50%;
-    bottom: 0.2rem;
-    transform: translateX(-50%);
-    width: 13.5rem;
-    height: 6.75rem;
-    border-radius: 13.5rem 13.5rem 0 0;
-    background: conic-gradient(from -90deg at 50% 100%,
-        #7c3aed 0deg,
-        #c026d3 calc(var(--sweep, 0.5) * 180deg),
-        rgba(124, 58, 237, 0.12) calc(var(--sweep, 0.5) * 180deg),
-        rgba(124, 58, 237, 0.12) 180deg,
-        transparent 180deg);
-}
-/* The ring hole: a plain cover, not a mask — masks over conic gradients have
-   spotty support and a solid blob here hides the reading entirely. */
-.trial-gate__arc::after {
-    content: '';
-    position: absolute;
-    left: 0.95rem;
-    right: 0.95rem;
-    top: 0.95rem;
-    bottom: 0;
-    border-radius: inherit;
-    background: #fff;
-}
-.trial-gate__reading {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0.2rem;
+.trial-gate__lrow {
     display: flex;
-    flex-direction: column;
-    align-items: center;
+    gap: 13px;
+    padding: 10px 0;
+    align-items: baseline;
 }
-.trial-gate__value {
-    font-size: 1.8rem;
-    font-weight: 300;
-    letter-spacing: -0.03em;
-    color: #241a4a;
+.trial-gate__lrow + .trial-gate__lrow { border-top: 1px solid rgba(196, 181, 253, 0.12); }
+.trial-gate__lrow b {
+    flex: none;
+    width: 88px;
+    font-size: 11.5px;
+    letter-spacing: 0.2px;
+    color: #c4b5fd;
+    font-weight: 650;
     font-variant-numeric: tabular-nums;
 }
-.trial-gate__unit { font-size: 0.68rem; color: #7c6fa8; max-width: 10rem; }
-.trial-gate__estimate-tag {
-    margin-top: 0.3rem;
-    padding: 0.1rem 0.5rem;
-    border-radius: 999px;
-    font-size: 0.62rem;
-    letter-spacing: 0.06em;
-    font-weight: 600;
-    color: #7c3aed;
-    background: rgba(139, 92, 246, 0.12);
-    border: 1px solid rgba(139, 92, 246, 0.25);
+.trial-gate__lrow span { font-size: 12.5px; color: #cfc2ee; line-height: 1.45; }
+.trial-gate__lrow span i { font-style: normal; color: #7ee2b8; font-weight: 650; }
+.trial-gate__lrow--rec span em { font-style: normal; color: #fff; font-weight: 550; }
+
+.trial-gate__estnote { position: relative; font-size: 10.5px; color: #8a80a8; margin: 8px 0 14px; }
+.trial-gate__estnote a {
+    color: #9a8fc0;
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(196, 181, 253, 0.4);
 }
-
-.trial-gate__hatch { margin: 0.55rem 0 0; font-size: 0.72rem; color: #8a80a8; }
-.trial-gate__hatch a { color: #7c3aed; text-decoration: none; }
-.trial-gate__hatch a:hover { text-decoration: underline; }
-
-.trial-gate__zero { margin: 0.9rem 0 0.8rem; font-size: 0.85rem; color: #4c4368; }
-.trial-gate__zero b { color: #047857; font-weight: 650; }
+.trial-gate__estnote a:hover { color: #c4b5fd; }
 
 .trial-gate__go {
+    --trial-gate-angle: 0deg;
+    position: relative;
     display: block;
     width: 100%;
-    padding: 0.8rem;
-    border: 0;
-    border-radius: 0.8rem;
-    background: linear-gradient(180deg, #7c3aed, #6d28d9);
-    color: #fff;
-    font-size: 0.95rem;
+    font: inherit;
+    font-size: 15px;
     font-weight: 650;
+    color: #fff;
+    background: linear-gradient(180deg, #3b2270, #2a1854);
+    border: 0;
+    border-radius: 13px;
+    padding: 14px;
     cursor: pointer;
-    box-shadow: 0 12px 28px -12px rgba(124, 58, 237, 0.7);
-    transition: filter 0.15s ease, box-shadow 0.15s ease;
 }
-.trial-gate__go:hover { filter: brightness(1.06); box-shadow: 0 14px 32px -12px rgba(124, 58, 237, 0.8); }
-
-.trial-gate__wallets {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-    margin-top: 0.7rem;
-    flex-wrap: wrap;
+.trial-gate__go::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 15px;
+    padding: 2px;
+    background: conic-gradient(from var(--trial-gate-angle), #7c3aed, #f0abfc, #a855f7, #7c3aed);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: trial-gate-spin 3.2s linear infinite;
 }
-.trial-gate__wchip {
-    padding: 0.25rem 0.7rem;
-    border-radius: 0.5rem;
-    font-size: 0.68rem;
-    font-weight: 600;
-    color: #4c4368;
-    background: rgba(124, 58, 237, 0.06);
-    border: 1px solid rgba(124, 58, 237, 0.16);
-}
-.trial-gate__wsec { font-size: 0.66rem; color: #8a80a8; }
+@keyframes trial-gate-spin { to { --trial-gate-angle: 360deg; } }
 
-.trial-gate__under { margin: 0.6rem 0 0; font-size: 0.7rem; color: #8a80a8; }
-
-.trial-gate__prohatch { margin: 0.7rem 0 0; font-size: 0.72rem; color: #8a80a8; }
+.trial-gate__prohatch { position: relative; font-size: 11.5px; color: #8a80a8; margin-top: 12px; }
 .trial-gate__prohatch button {
     font: inherit;
     background: none;
     border: 0;
     padding: 0;
-    color: #7c3aed;
+    color: #c4b5fd;
     cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
+    border-bottom: 1px solid rgba(196, 181, 253, 0.4);
 }
-.trial-gate__prohatch button:hover { color: #c026d3; }
+.trial-gate__prohatch button:hover { color: #f0abfc; }
 
-.trial-gate__promise { margin: 0.8rem 0 0.7rem; font-size: 0.82rem; color: #4c4368; line-height: 1.5; }
-
-.trial-gate__timeline {
-    max-width: 22rem;
-    margin: 0 auto 1rem;
-    border-radius: 0.8rem;
-    border: 1px solid rgba(124, 58, 237, 0.14);
-    background: rgba(250, 247, 255, 0.7);
-    padding: 0.55rem 0.9rem;
-    text-align: left;
-}
-.trial-gate__tl-row {
+.trial-gate__wallets {
+    position: relative;
     display: flex;
-    gap: 0.7rem;
-    padding: 0.32rem 0;
-    font-size: 0.75rem;
-    color: #6f6590;
-    align-items: baseline;
+    gap: 7px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 12px;
+    flex-wrap: wrap;
 }
-.trial-gate__tl-row + .trial-gate__tl-row { border-top: 1px solid rgba(124, 58, 237, 0.08); }
-.trial-gate__tl-row b { flex: none; width: 3.4rem; color: #7c3aed; font-weight: 650; font-variant-numeric: tabular-nums; }
+.trial-gate__wchip {
+    font-size: 11px;
+    font-weight: 600;
+    color: #e9dcff;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    padding: 5px 12px;
+}
+.trial-gate__wsec { font-size: 10.5px; color: #8a80a8; }
+
+@media (prefers-reduced-motion: reduce) {
+    .trial-gate__go::before,
+    .trial-gate__pulse { animation: none; }
+}

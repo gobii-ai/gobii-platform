@@ -9200,7 +9200,10 @@
 .agent-chat-page--framed :where(div:has(> .agent-chat-workspace-main)) {
     overflow: hidden;
 }
-.agent-chat-timeline-region {
+/* The canvas paints the WHOLE workspace — timeline, composer, and the docked
+   plan column — one continuous surface. Painting only the timeline region
+   left a flat white band behind the expanded plan panel. */
+#agent-workspace-root {
     background:
         radial-gradient(1100px 460px at 82% -8%, rgba(196, 181, 253, 0.16), transparent 60%),
         radial-gradient(900px 420px at -10% 110%, rgba(196, 181, 253, 0.10), transparent 55%),
@@ -9484,69 +9487,67 @@
     grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
-/* The plan/progress panel still wore its old dark-grey glass (#685d7e), which
-   reads as an unwanted dark slab on the elevated-light canvas. Restyle it as a
-   light glass card — same family as the briefing card. */
+/* The plan/progress panel: violet night glass — deep brand violet (never the
+   old grey), floating on the continuous light canvas. */
 .plan-panel {
-    background: linear-gradient(rgba(255, 255, 255, 0.93), rgba(252, 250, 255, 0.9)) padding-box,
-    linear-gradient(150deg, rgba(124, 58, 237, 0.42), rgba(240, 171, 252, 0.25)) border-box;
-    border: 1px solid transparent;
-    color: #3f3859;
-    box-shadow: 0 18px 44px -18px rgba(88, 64, 160, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
-}
-.plan-panel::before {
-    background: none;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015)),
+    linear-gradient(165deg, #241a4a, #1a1236);
+    border: 1px solid rgba(196, 181, 253, 0.3);
+    color: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 18px 44px -16px rgba(36, 26, 74, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 .plan-panel-header h2 {
-    color: #7c6fa8;
+    color: #c4b5fd;
+    opacity: 0.8;
 }
 .plan-panel-task {
-    color: #4c4368;
+    color: rgba(255, 255, 255, 0.78);
 }
 .plan-panel-task-icon,
 .plan-panel-task[data-status='todo'] .plan-panel-task-icon {
-    color: #b9aed6;
+    color: rgba(196, 181, 253, 0.6);
 }
 .plan-panel-task[data-status='done'] .plan-panel-task-icon {
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 .plan-panel-task[data-status='doing'] .plan-panel-task-icon {
-    color: #7c3aed;
+    color: #f0abfc;
 }
 .plan-panel-task[data-status='doing'][data-work-state='paused'] .plan-panel-task-icon {
-    color: #b9aed6;
+    color: rgba(196, 181, 253, 0.5);
 }
 .plan-panel-task[data-status='done'] .plan-panel-task-title {
-    color: #8a80a8;
+    color: rgba(255, 255, 255, 0.55);
 }
 .plan-panel-task[data-status='doing'] .plan-panel-task-title {
-    color: #241a4a;
+    color: #fff;
     font-weight: 550;
 }
 .plan-panel-task[data-status='todo'] .plan-panel-task-title {
-    color: #6f6590;
+    color: rgba(255, 255, 255, 0.72);
 }
 .plan-panel-empty {
-    color: #6f6590;
+    color: rgba(255, 255, 255, 0.55);
 }
 .plan-panel-deliverables {
-    border-top: 1px solid rgba(124, 58, 237, 0.14);
+    border-top: 1px solid rgba(196, 181, 253, 0.2);
 }
 .plan-panel-deliverables-title {
-    color: #7c6fa8;
+    color: #c4b5fd;
+    opacity: 0.8;
 }
 .plan-panel-deliverable {
-    color: #4c4368;
+    color: rgba(255, 255, 255, 0.78);
 }
 .plan-panel-deliverable:hover,
 .plan-panel-deliverable-download:hover {
-    color: #241a4a;
+    color: #fff;
 }
 .plan-panel-deliverable-download {
-    color: #8a80a8;
+    color: rgba(255, 255, 255, 0.62);
 }
 .plan-panel-deliverable-download:hover,
 .plan-panel-deliverable-download:focus-visible {
-    background: rgba(124, 58, 237, 0.08);
+    background: rgba(255, 255, 255, 0.1);
 }

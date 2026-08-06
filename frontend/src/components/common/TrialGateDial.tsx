@@ -20,10 +20,10 @@ const PLAN_META: Record<'startup' | 'scale', { label: string; price: number }> =
 }
 
 /**
- * The trial gate for the signup funnel: one decision, one dial. Scale is the
- * default; the toggle sweeps the outcome needle. Estimates are template-derived
- * and labeled as estimates. Checkout mechanics stay upstream — this only calls
- * onSelectPlan, which routes to the existing Stripe Checkout.
+ * The trial gate as a "what happens next" receipt: the quiz-derived brief,
+ * then a ledger — today's start, the recurring engine, the reminder, the
+ * first charge. One Scale CTA with a quiet Pro hatch; evidence says the
+ * ledger (not a gauge) carries the conversion. Checkout stays upstream.
  */
 export function TrialGateDial({
   onSelectPlan,
@@ -33,30 +33,23 @@ export function TrialGateDial({
   briefTitle,
   outcomeEstimate,
 }: TrialGateDialProps) {
-  // Evidence (comps + friction data): one predetermined top-tier trial with a
-  // quiet cheaper-plan hatch beats a plan chooser at the card moment. The
-  // real decision stays switchable during the trial.
-  const estimate = useMemo(() => {
+  const firstName = agentReadyName ? agentReadyName.split(' ')[0] : 'Your agent'
+
+  const recurring = useMemo(() => {
     if (outcomeEstimate) {
+      const cadence = outcomeEstimate.per === 'day' ? 'Every day' : `Every ${outcomeEstimate.per}`
       return {
-        value: outcomeEstimate.scale,
-        max: Math.max(outcomeEstimate.scale, outcomeEstimate.startup),
-        unit: outcomeEstimate.unit,
-        per: outcomeEstimate.per,
-        isOutcome: true,
+        cadence,
+        line: `~${outcomeEstimate.scale.toLocaleString()} ${outcomeEstimate.unit}, screened & delivered to your inbox`,
+        isEstimate: true,
       }
     }
     return {
-      value: planTaskCreditsByPlan.scale,
-      max: Math.max(planTaskCreditsByPlan.scale, planTaskCreditsByPlan.startup),
-      unit: 'tasks included',
-      per: 'month',
-      isOutcome: false,
+      cadence: 'Every month',
+      line: `${planTaskCreditsByPlan.scale.toLocaleString()} tasks included — your agent works around the clock`,
+      isEstimate: false,
     }
   }, [outcomeEstimate, planTaskCreditsByPlan])
-
-  const sweep = estimate.max > 0 ? Math.max(0.12, estimate.value / estimate.max) : 0.5
-  const trialLabel = trialDays > 0 ? `${trialDays}-day free trial` : 'free trial'
 
   return (
     <div className="trial-gate" data-testid="subscription-plans-grid">
@@ -72,52 +65,43 @@ export function TrialGateDial({
       ) : null}
 
       <h2 className="trial-gate__title">
-        Start your <span className="trial-gate__accent">{trialLabel}</span>
+        Here&rsquo;s <span className="trial-gate__accent">what happens next</span>
       </h2>
 
-      <div className="trial-gate__dial" data-plan="scale">
-        <div className="trial-gate__arc" style={{ ['--sweep' as string]: String(sweep) }} aria-hidden="true" />
-        <div className="trial-gate__reading">
-          <span className="trial-gate__value">
-            {estimate.isOutcome ? '~' : ''}
-            {estimate.value.toLocaleString()}
-          </span>
-          <span className="trial-gate__unit">
-            {estimate.unit} / {estimate.per}
-          </span>
-          {estimate.isOutcome ? <span className="trial-gate__estimate-tag">Estimate</span> : null}
-        </div>
-      </div>
-      {estimate.isOutcome ? (
-        <p className="trial-gate__hatch">
-          Estimates vary by brief.{' '}
-          <a href="/contact" data-analytics-cta-id="trial_gate_talk_to_sales">
-            For guaranteed results, talk to sales
-          </a>
-        </p>
-      ) : null}
-
-      <p className="trial-gate__promise">
-        {agentReadyName ? `${agentReadyName.split(' ')[0]} starts` : 'Your agent starts'} the moment your
-        trial begins — first {estimate.isOutcome ? estimate.unit : 'results'} typically arrive within hours.
-      </p>
-
-      <div className="trial-gate__timeline" aria-label="Trial timeline">
-        <div className="trial-gate__tl-row">
+      <div className="trial-gate__ledger" aria-label="Trial timeline">
+        <div className="trial-gate__lrow">
           <b>Today</b>
-          <span>$0 — agent starts, first results by email</span>
+          <span>
+            <i>$0</i> — {firstName} starts · first {outcomeEstimate ? outcomeEstimate.unit : 'results'} by email
+            within hours
+          </span>
+        </div>
+        <div className="trial-gate__lrow trial-gate__lrow--rec">
+          <b>{recurring.cadence}</b>
+          <span>
+            <em>{recurring.line}</em>
+          </span>
         </div>
         {trialDays > 2 ? (
-          <div className="trial-gate__tl-row">
+          <div className="trial-gate__lrow">
             <b>Day {trialDays - 2}</b>
             <span>reminder email before your trial ends</span>
           </div>
         ) : null}
-        <div className="trial-gate__tl-row">
+        <div className="trial-gate__lrow">
           <b>Day {trialDays + 1}</b>
-          <span>first charge — ${PLAN_META.scale.price}/mo Scale (everything included)</span>
+          <span>first charge — ${PLAN_META.scale.price}/mo Scale, everything included</span>
         </div>
       </div>
+
+      {recurring.isEstimate ? (
+        <p className="trial-gate__estnote">
+          Volumes are calibrated estimates for your brief ·{' '}
+          <a href="/contact" data-analytics-cta-id="trial_gate_talk_to_sales">
+            for guaranteed results, talk to sales
+          </a>
+        </p>
+      ) : null}
 
       <button
         type="button"
@@ -141,11 +125,6 @@ export function TrialGateDial({
         <span className="trial-gate__wchip">Card</span>
         <span className="trial-gate__wsec">via Stripe Checkout</span>
       </div>
-      {trialDays > 0 ? (
-        <p className="trial-gate__under">
-          Not charged until day {trialDays + 1} · reminder email first
-        </p>
-      ) : null}
     </div>
   )
 }

@@ -59,7 +59,8 @@ describe('SubscriptionUpgradePlans mobile layout', () => {
 
     expect(screen.getByTestId('subscription-plans-grid')).toBeInTheDocument()
     expect(screen.getByTestId('subscription-plan-startup')).toBeInTheDocument()
-    expect(screen.getByText(/\$0 — agent starts/)).toBeInTheDocument()
+    expect(screen.getByText(/what happens next/i)).toBeInTheDocument()
+    expect(screen.getByText(/first charge/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId('subscription-plan-scale'))
     expect(onUpgrade).toHaveBeenCalledWith('scale')
