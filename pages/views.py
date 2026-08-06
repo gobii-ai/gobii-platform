@@ -4476,6 +4476,7 @@ class PublicTemplateSitemap(sitemaps.Sitemap):
         return (
             PersistentAgentTemplate.objects.select_related("public_profile")
             .filter(organization__isnull=True, is_active=True, is_listed=True)
+            .filter(no_index=False)
             .exclude(code="")
             .order_by("priority", Lower("display_name"), "id")
         )

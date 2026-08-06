@@ -2583,6 +2583,28 @@ class CanonicalLinkTests(TestCase):
 @tag("batch_pages")
 class SitemapTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_sitemap_excludes_noindex_public_template(self):
+        PersistentAgentTemplate.objects.create(
+            code="no-index-sitemap-template",
+            display_name="No Index Sitemap Template",
+            tagline="Keep this template out of search results.",
+            description="A public template that should not be indexed.",
+            charter="Run the no-index template.",
+            category="Team Ops",
+            is_active=True,
+            is_listed=True,
+            no_index=True,
+        )
+
+        response = self.client.get("/sitemap.xml")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(
+            response,
+            "/library/team-ops/no-index-sitemap-template/",
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_sitemap_includes_library_category_template_and_solution_urls(self):
         PersistentAgentTemplate.objects.update_or_create(
             code="sitemap-project-manager",

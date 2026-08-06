@@ -6149,6 +6149,11 @@ class PersistentAgentTemplate(models.Model):
             "instead of appending 'AI Agent Template'."
         ),
     )
+    no_index = models.BooleanField(
+        "No Index",
+        default=False,
+        help_text="Add a noindex directive to the public detail page and exclude it from the sitemap.",
+    )
     description = models.TextField()
     description_markdown = models.TextField(
         blank=True,
