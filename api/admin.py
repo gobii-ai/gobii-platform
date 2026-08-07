@@ -5982,7 +5982,7 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
             'fields': ('description', 'description_markdown', 'charter')
         }),
         ('SEO', {
-            'fields': ('seo_meta_description', 'omit_ai_agent_template_title_suffix', 'social_image')
+            'fields': ('seo_meta_description', 'omit_ai_agent_template_title_suffix', 'no_index', 'social_image')
         }),
         ('Detail Page Sections', {
             'fields': (

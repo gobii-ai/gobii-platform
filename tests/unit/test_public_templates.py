@@ -994,6 +994,20 @@ class PublicTemplateRouteTests(TestCase):
         self.assertNotContains(response, f"{template.display_name} AI Employee Template | Gobii")
 
     @tag("batch_public_templates")
+    def test_public_template_detail_adds_noindex_meta_when_configured(self):
+        self.create_public_template(
+            code="no-index-template",
+            display_name="No Index Template",
+            handle="no-index-template",
+            no_index=True,
+        )
+
+        response = self.client.get("/library/finance/no-index-template/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<meta name="robots" content="noindex, follow">')
+
+    @tag("batch_public_templates")
     def test_public_template_metadata_escapes_html_and_preserves_unicode(self):
         template = self.create_public_template(
             code="escaped-seo-description-template",

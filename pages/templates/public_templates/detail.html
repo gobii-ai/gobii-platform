@@ -2,6 +2,9 @@
 {% block title %}{{ template_seo_title }}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
+  {% if template.no_index %}
+  <meta name="robots" content="noindex, follow">
+  {% endif %}
   <meta name="description" content="{{ template_seo_description }}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{{ template_social_title }}">
