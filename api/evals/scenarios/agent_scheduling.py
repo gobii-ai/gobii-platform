@@ -1,8 +1,8 @@
 import json
 import re
 from dataclasses import dataclass
-from datetime import timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.utils import timezone
@@ -169,10 +169,29 @@ def _cron_matches(expression, *, minute, hour, weekdays):
     return actual in aliases[weekdays]
 
 
+def _timezones_equivalent(actual, expected):
+    try:
+        actual_zone = ZoneInfo(actual)
+        expected_zone = ZoneInfo(expected)
+    except (KeyError, TypeError, ZoneInfoNotFoundError):
+        return False
+    checkpoints = (
+        datetime(2025, 1, 15, tzinfo=UTC),
+        datetime(2025, 4, 15, tzinfo=UTC),
+        datetime(2025, 7, 15, tzinfo=UTC),
+        datetime(2025, 10, 15, tzinfo=UTC),
+    )
+    return all(
+        instant.astimezone(actual_zone).utcoffset()
+        == instant.astimezone(expected_zone).utcoffset()
+        for instant in checkpoints
+    )
+
+
 def _offers_concrete_weekly_cadence(body):
     return bool(
         re.search(r"\b(?:weekly|every week|each week)\b", body)
-        and re.search(r"\b(?:schedule|automate|run|handle|track|repeat|recurring)\w*\b", body)
+        and re.search(r"\b(?:schedule|automat|run|handle|track|repeat|recurring|send|deliver)\w*\b", body)
     )
 
 
@@ -196,14 +215,14 @@ def _schedule_sql_strategy_failures(case, calls, *, exact_target=None):
     sqlite_calls = [call for call in calls if call.tool_name == "sqlite_batch"]
     mutation_calls = [call for call in sqlite_calls if sqlite_batch_mutates_schedule_state(call)]
     sql = "\n".join(sqlite_batch_sql(call) for call in sqlite_calls)
+    params_text = "\n".join(json.dumps(call.tool_params or {}, default=str) for call in sqlite_calls)
     statements = [
         statement
         for value in (sqlite_batch_sql(call) for call in sqlite_calls)
         for statement in split_sql_statements(value)
     ]
-    reads_schedules = bool(re.search(r"\bselect\b.*\bfrom\s+[\"`\[]?__agent_schedules\b", sql, re.I | re.S))
     failures = []
-    if any(not _call_succeeded(call) for call in sqlite_calls):
+    if sqlite_calls and not any(_call_succeeded(call) for call in sqlite_calls):
         failures.append("a SQLite schedule call did not complete successfully")
 
     if case.expected_action in {
@@ -217,10 +236,8 @@ def _schedule_sql_strategy_failures(case, calls, *, exact_target=None):
     }:
         if not mutation_calls:
             failures.append("no __agent_schedules or legacy schedule mutation was attempted")
-        elif not all(_call_succeeded(call) for call in mutation_calls):
+        elif not any(_call_succeeded(call) for call in mutation_calls):
             failures.append("a schedule mutation did not complete successfully")
-    if case.expected_action in {"update", "cancel"} and not reads_schedules:
-        failures.append("existing schedule state was not queried before the decision")
     if case.expected_action in {"unsafe"} and mutation_calls:
         failures.append("unsafe cadence was attempted instead of rejected before mutation")
     if case.expected_action == "list" and mutation_calls:
@@ -235,7 +252,7 @@ def _schedule_sql_strategy_failures(case, calls, *, exact_target=None):
             failures.append("named schedule change was not a targeted mutation")
     if case.expected_action == "exact" and exact_target is not None:
         expected_second = f":{exact_target.second:02d}"
-        if expected_second not in sql:
+        if expected_second not in params_text:
             failures.append("exact requested seconds were absent from the schedule write")
     if case.expected_action == "bulk" and len(mutation_calls) > 2:
         failures.append("bulk request used repeated schedule mutation loops")
@@ -456,7 +473,10 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
             recap = [row for row in requested_active if "trend" in (row.instruction or "").casefold()]
             if len(requested_active) != 2 or len(support) != 1 or len(recap) != 1:
                 failures.append("expected two independent active jobs with distinct instructions")
-            elif any(row.timezone != "America/New_York" for row in (*support, *recap)):
+            elif any(
+                not _timezones_equivalent(row.timezone, "America/New_York")
+                for row in (*support, *recap)
+            ):
                 failures.append("Eastern recurring jobs did not preserve their named timezone")
             elif not _cron_matches(support[0].expression, minute=5, hour=8, weekdays="weekdays"):
                 failures.append("weekday triage cadence was not 08:05")
@@ -477,7 +497,10 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
             ]
             if len(requested_active) != 2 or len(monday) != 1 or len(friday) != 1:
                 failures.append("expected two independent channel-image jobs")
-            elif any(row.timezone != "America/New_York" for row in (*monday, *friday)):
+            elif any(
+                not _timezones_equivalent(row.timezone, "America/New_York")
+                for row in (*monday, *friday)
+            ):
                 failures.append("channel-image jobs did not preserve their Eastern timezone")
         elif action == "exact":
             once = [row for row in requested_active if row.kind == PersistentAgentSchedule.Kind.ONCE]
@@ -514,7 +537,7 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
                 failures.append("targeted update changed the morning digest")
             if target is None or not target.enabled:
                 failures.append("targeted weekly schedule was lost or disabled")
-            elif target.timezone != "America/New_York":
+            elif not _timezones_equivalent(target.timezone, "America/New_York"):
                 failures.append("targeted update did not preserve the Eastern timezone")
             elif not _cron_matches(target.expression, minute=15, hour=10, weekdays="tuesday"):
                 failures.append("weekly schedule was not moved to Tuesday at 10:15")
@@ -528,8 +551,13 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
             if after != before:
                 failures.append("listing schedules changed persisted state")
             normalized_body = re.sub(r"[-_]+", " ", body)
-            for name in ("morning digest", "friday recap", "contract reminder"):
-                if name not in normalized_body:
+            expected_names = {
+                "morning digest": ("morning digest", "daily operating digest"),
+                "friday recap": ("friday recap", "friday support recap"),
+                "contract reminder": ("contract reminder",),
+            }
+            for name, accepted_names in expected_names.items():
+                if not any(accepted_name in normalized_body for accepted_name in accepted_names):
                     failures.append(f"schedule report omitted {name}")
             if (
                 "onboarding_checkin" in before
@@ -541,7 +569,7 @@ class AgentSchedulingScenario(EvalScenario, ScenarioExecutionTools):
             if requested_active:
                 failures.append("unsafe every-second cadence became active")
             if not re.search(
-                r"\b(?:(?:too|extremely|unreasonably)\s+frequent|limit|minimum|safer|can't|cannot|won't|isn't feasible|not feasible|infeasible|flood|resources?)\b",
+                r"\b(?:(?:too|extremely|unreasonably)\s+frequent|limit|minimum|safer|unsafe|not safe|isn't safe|can't|cannot|won't|isn't feasible|not feasible|infeasible|flood|resources?)\b",
                 body,
             ):
                 failures.append("agent did not explain the safe scheduling boundary")

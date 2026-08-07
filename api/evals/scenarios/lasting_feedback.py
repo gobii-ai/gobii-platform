@@ -134,11 +134,9 @@ class LastingFeedbackMetaInstructionKeepsWorkScenario(LastingFeedbackScenario):
         "Keep source provenance attached to every draft."
     )
     prompt = (
-        "Lasting operating update: reviewer feedback is teammate coaching, not central permission. "
-        "For a valid assigned batch, prepare the work and send it for asynchronous review. "
-        "If no concrete revision arrives, continue after your normal quality checks. "
-        "Prepare the next follow-up batch now. "
-        "Update your charter once in your own words without replacing unrelated instructions."
+        "Going forward, reviewer feedback is coaching, not permission. Prepare assigned batches and send them for "
+        "asynchronous review. If no changes arrive, continue after your quality checks. The next assigned follow-up "
+        "batch is ready; prepare it now. Update your charter once without changing unrelated guidance."
     )
     verification_task_name = "verify_operating_rule_saved"
     success_summary = "The charter captured the operating correction without storing charter-editing instructions."

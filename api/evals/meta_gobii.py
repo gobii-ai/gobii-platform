@@ -298,8 +298,8 @@ META_GOBII_NO_SCHEDULE_CASES = (
     MetaGobiiEvalCase(
         slug="no_schedule_sales_team_setup_only",
         prompt=(
-            "Set up a small sales Gobii team for outbound experiments: one for account research, one for list "
-            "cleanup, and one for drafting handoffs. Create, link, and brief them only."
+            "Create three sales Gobiis for outbound experiments: Account Research, List Cleanup, and Drafting "
+            "Handoff. Link them and send each an initial briefing. Do nothing else."
         ),
         expect_skill=True,
         expect_skill_search=True,
@@ -784,7 +784,7 @@ META_GOBII_EXPLICIT_SCHEDULE_CASES = (
     MetaGobiiEvalCase(
         slug="schedule_monthly_board_report",
         prompt=(
-            "Create an operations reporting Gobii that compiles a monthly board packet summary from our dashboards."
+            "Create an operations reporting Gobii that compiles a board packet summary from our dashboards every month."
         ),
         expect_skill=True,
         expect_skill_search=True,
@@ -1064,7 +1064,15 @@ def _score_schedule_scope(
         explicit_intent = bool(policy.get("explicit_user_intent") and schedule_in_scope)
     else:
         explicit_intent = bool(explicit_schedule_intent)
-    approval_includes_schedule = bool(policy.get("included_in_approval_scope"))
+    response_text = str(response_args.get("response_text") or "").casefold()
+    response_includes_schedule = (
+        case.schedule_expectation == SCHEDULE_EXPECTATION_EXPLICIT
+        and bool(case.required_schedule_terms)
+        and bool(response_args.get("asks_for_approval"))
+        and any(term in response_text for term in ("schedule", "recurring", "every ", "daily", "weekly", "monthly"))
+        and all(term.casefold() in response_text for term in case.required_schedule_terms)
+    )
+    approval_includes_schedule = bool(policy.get("included_in_approval_scope")) or response_includes_schedule
     asks_clarifying_question = bool(policy.get("asks_clarifying_question"))
     schedule_action = str(policy.get("schedule_action") or "none").strip().lower()
     cadence_or_schedule = str(policy.get("cadence_or_schedule") or "").strip().lower()
@@ -1234,9 +1242,19 @@ def _planned_extra_scope_items(raw_items: Any, *, user_prompt: str = "") -> list
         if not text:
             continue
         normalized = text.lower()
-        if normalized.startswith(ignored_prefixes):
+        contrasts_with_exclusion = re.search(r"\b(?:but|however|yet|nevertheless)\b", normalized)
+        if normalized.startswith(ignored_prefixes) and not contrasts_with_exclusion:
             continue
-        if "not requested" in normalized or "will not " in normalized:
+        if any(
+            phrase in normalized
+            for phrase in ("not requested", "did not ask", "didn't ask", "has not asked", "will not ")
+        ) and not contrasts_with_exclusion:
+            continue
+        exclusion_only = re.search(
+            r"\b(?:not\s+(?:an?\s+)?[^.]{0,80}?request|no\s+[^.]{0,100}?\b(?:is|are|was|were)?\s*requested)\b",
+            normalized,
+        )
+        if exclusion_only and not contrasts_with_exclusion:
             continue
         if _scope_item_was_explicitly_requested(normalized, user_prompt):
             continue
@@ -1247,6 +1265,8 @@ def _planned_extra_scope_items(raw_items: Any, *, user_prompt: str = "") -> list
 def _scope_item_was_explicitly_requested(normalized_item: str, user_prompt: str) -> bool:
     prompt = user_prompt.lower()
     requested_action_stems = (
+        ("deploy", ("deploy", "team", "create")),
+        ("team", ("deploy", "team", "create")),
         ("archive", ("archive", "archiv")),
         ("relink", ("relink", "re-link")),
         ("rewire", ("rewire", "rewiring")),

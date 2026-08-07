@@ -1188,15 +1188,19 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
     """Return tool definitions for all enabled tools (MCP, built-ins, custom)."""
     manager = _get_manager()
     blacklisted_tools = get_agent_tool_blacklist(agent)
-    enabled_eval_tool_names = list(
-        PersistentAgentEnabledTool.objects
-        .filter(
-            agent=agent,
-            tool_full_name__in=list(EVAL_SYNTHETIC_TOOL_DEFINITIONS.keys()),
-            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+    enabled_eval_tool_names = (
+        list(
+            PersistentAgentEnabledTool.objects
+            .filter(
+                agent=agent,
+                tool_full_name__in=list(EVAL_SYNTHETIC_TOOL_DEFINITIONS.keys()),
+                tool_server__in=[EVAL_SYNTHETIC_TOOL_SERVER, PIPEDREAM_TOOL_SERVER_NAME],
+            )
+            .exclude(tool_full_name__in=list(blacklisted_tools))
+            .values_list("tool_full_name", flat=True)
         )
-        .exclude(tool_full_name__in=list(blacklisted_tools))
-        .values_list("tool_full_name", flat=True)
+        if is_eval_agent(agent)
+        else []
     )
     eval_tool_name_set = set(enabled_eval_tool_names)
     enabled_pipedream_tool_names = set(

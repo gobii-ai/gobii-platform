@@ -7,7 +7,7 @@ import contextvars
 
 from litellm.exceptions import APIError, BadRequestError, NotFoundError, OpenAIError, ServiceUnavailableError
 
-from api.models import BrowserUseAgentTask, PersistentAgent, PersistentAgentMessage, PersistentAgentStep, EvalRunTask, EvalRun, CommsAllowlistEntry
+from api.models import BrowserUseAgentTask, PersistentAgent, PersistentAgentMessage, PersistentAgentStep, PersistentAgentSystemStep, EvalRunTask, EvalRun, CommsAllowlistEntry
 from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.core.llm_utils import LiteLLMResponseError, run_completion
 from api.agent.events import AgentEventType, get_agent_event_stream
@@ -51,6 +51,26 @@ def _is_missing_judgment_tool_reason(reasoning: Any) -> bool:
         "did not call the judgment tool" in message
         or "did not call submit_judgment" in message
     )
+
+
+def _judge_reasoning_contradicts_choice(choice: str, reasoning: str, options: Iterable[str]) -> bool:
+    final_sentence = re.split(r"[.!?]\s+|\n+", (reasoning or "").strip())[-1]
+    for option in options:
+        if option == choice:
+            continue
+        if re.search(
+            rf"\b(?:therefore|thus|overall|so|conclusion|finally)\b[^.!?\n]*\b{re.escape(option)}\b[.!]?\s*$",
+            reasoning or "",
+            re.IGNORECASE,
+        ):
+            return True
+        if re.search(
+            rf"\b(?:is|was|appears|seems|remains)\s+(?:fully\s+|clearly\s+)?{re.escape(option)}\b",
+            final_sentence,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
 
 
 def _preview_text(value: Any, *, limit: int = 1200) -> str:
@@ -738,6 +758,8 @@ class ScenarioExecutionTools:
                     )
                 if choice not in options:
                     raise ValueError(f"LLM judge returned invalid choice {choice!r}: {reasoning}")
+                if _judge_reasoning_contradicts_choice(choice, reasoning, options):
+                    raise ValueError(f"LLM judge choice contradicted its conclusion: {choice!r}: {reasoning}")
                 return choice, reasoning
             except _JUDGE_RETRYABLE_ERRORS as exc:
                 if _is_structured_judge_grammar_error(exc):
@@ -909,12 +931,30 @@ class WaitForIdleContext:
         self.agent_id = agent_id
         self.timeout = timeout
         self.listener: Optional[AgentEventListener] = None
+        self.started_at = None
         self.idle = False
         self.timed_out = False
 
     def __enter__(self):
-        self.listener = AgentEventListener(self.agent_id, start_time=time.time())
+        self.started_at = timezone.now()
+        self.listener = AgentEventListener(self.agent_id, start_time=self.started_at.timestamp())
         return self
+
+    def _has_durable_completion(self) -> bool:
+        """Confirm completion when the ephemeral event stream misses its notification."""
+        if self.started_at is None:
+            return False
+        from api.agent.core.budget import AgentBudgetManager
+
+        processing_finished = PersistentAgentStep.objects.filter(
+            agent_id=self.agent_id,
+            created_at__gte=self.started_at,
+            system_step__code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            system_step__notes="simplified",
+        ).exists()
+        return processing_finished and AgentBudgetManager.get_total_outstanding_work(
+            agent_id=str(self.agent_id)
+        ) == 0
 
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type:
@@ -926,13 +966,20 @@ class WaitForIdleContext:
         deadline = time.time() + self.timeout
         remaining = self.timeout
         while remaining > 0:
-            event = self.listener.wait_for(AgentEventType.PROCESSING_COMPLETE, timeout=int(remaining))
+            event = self.listener.wait_for(
+                AgentEventType.PROCESSING_COMPLETE,
+                timeout=max(1, min(5, int(remaining))),
+            )
             if not event:
-                break
+                if self._has_durable_completion():
+                    self.idle = True
+                    return False
+                remaining = max(0, deadline - time.time())
+                continue
             outstanding = int((event.get("payload") or {}).get("outstanding_tasks", 0) or 0)
             if outstanding == 0:
                 self.idle = True
-                return True  # Success
+                return False
             remaining = max(0, deadline - time.time())
 
         self.timed_out = True

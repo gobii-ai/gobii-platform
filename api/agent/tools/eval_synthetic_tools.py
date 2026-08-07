@@ -74,7 +74,15 @@ _GENERIC_BATCH_WORK_SCHEMA = {
         "limit": {"type": "integer"},
         "status": {"type": "string"},
         "query": {"type": "string"},
+        "will_continue_work": {
+            "type": "boolean",
+            "description": (
+                "Set true when another action is needed after this call. Set false only when this call itself "
+                "finishes the request."
+            ),
+        },
     },
+    "required": ["will_continue_work"],
     "additionalProperties": True,
 }
 
@@ -266,8 +274,9 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "eval_send_outreach_batch": {
         "description": (
-            "Deterministic eval tool for sending the next bounded outreach batch from an already-approved queue. "
-            "Use this directly; do not call search_tools first. "
+            "Send the next bounded batch from its already-approved outreach queue. The tool owns the queue, recipient "
+            "verification, and send state: use it directly, including after interruption, without inspecting messages, "
+            "SQLite, or search first. "
             "The result may include remaining_work or next_cursor; if work remains and no schedule exists, continue "
             "bounded work or set a resume schedule before stopping."
         ),
@@ -275,19 +284,19 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "eval_verify_candidate_batch": {
         "description": (
-            "Deterministic eval tool for verifying a bounded batch of sourcing candidates against location, company, "
-            "and tenure constraints. Use this directly; do not call search_tools first. Partial results may include "
-            "remaining_work or next_cursor."
+            "Verify the current queued candidate batch against location, company, and tenure constraints. This tool owns "
+            "the queue context: call it directly when asked to verify a queued batch, without search or storage. Use it "
+            "once, then send its returned candidates. A partial result is final for this turn; preserve any remaining_work "
+            "or next_cursor once, then report instead of calling again."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },
     "eval_prepare_next_batch": {
         "description": (
-            "Deterministic eval tool for checking, wrapping up, or preparing the current bounded work batch and "
-            "returning its completion and remaining-work state. When the request names the current batch, this is the "
-            "authoritative first work tool; do not infer batch state from SQLite or call search_tools. If it says to "
-            "wait for the next scheduled run while returning "
-            "remaining_work, that guidance only makes sense when a schedule exists or is being set."
+            "Prepare or continue the assigned work batch. Call it directly because it owns the batch context; do not "
+            "inspect SQLite or messages, search, or ask first. Its result is ready to use and is not saved automatically; "
+            "do not read it back. If work remains, continue now or save its cursor and remaining_work before replying. "
+            "Wait for a scheduled run only when a schedule exists."
         ),
         "parameters": _GENERIC_BATCH_WORK_SCHEMA,
     },

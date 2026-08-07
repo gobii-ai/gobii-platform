@@ -920,7 +920,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("<discord_message_id>500</discord_message_id>", user_prompt)
         self.assertIn("<discord_channel_id>10</discord_channel_id>", user_prompt)
         self.assertIn("<discord_shared_channel_context>", user_prompt)
-        self.assertIn("The message may or may not be for you", user_prompt)
+        self.assertIn("Answer a room-wide question or request", user_prompt)
         self.assertIn("<discord_reply_context>", user_prompt)
         self.assertIn("Discord reply addressee: Ada.", user_prompt)
         self.assertIn("instructions and second-person language belong to this addressee", user_prompt)

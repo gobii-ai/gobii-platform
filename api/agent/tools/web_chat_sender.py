@@ -130,7 +130,7 @@ def _strip_leading_routine_preamble(body: str) -> str:
     preamble, separator, report = (body or "").partition("\n\n")
     if not separator or not report.strip() or not _looks_like_routine_progress_message(preamble):
         return body
-    if not re.match(r"\s*(?:#{1,6}\s|\*\*[^*\n]+\*\*)", report):
+    if not re.match(r"\s*(?:#{1,6}\s|\*\*[^*\n]+\*\*|here(?:'s| is)\b)", report, re.IGNORECASE):
         return body
     return report.lstrip()
 
@@ -284,12 +284,11 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send web chat. For new substantial multi-source work, send one brief kickoff(true) first; work next response. "
-                "Follow Work Updates for later milestone timing. "
-                "Tracked blocking choices use request_human_input cards, never prose. During GUIDED INTAKE, at most "
-                "one concise orientation note is allowed; "
-                "if one is already in history, the next user-visible action must be the choice cards, not another note. "
-                "Never narrate tools or phases. "
+                "Send web chat. For new substantial multi-source work, send one brief kickoff(true), then start work "
+                "next response. If work continues after an evidence batch, one later update may report the strongest "
+                "finding and remaining work. Never send a generic second kickoff or narrate searches, tools, or phases. "
+                "Missing required recipient details and tracked blocking choices use request_human_input, never this tool. "
+                "During GUIDED INTAKE, do not send a standalone orientation note; call the lookup or choice cards directly. "
                 "Do not use this to simulate or confirm an email/SMS delivery; use available send_email/send_sms. No generic/internal progress."
             ),
             "parameters": {
@@ -299,8 +298,11 @@ def get_send_chat_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "No dash punctuation/pre-work status for short work. Owner report with 4+ items: "
-                            "include `Covered N/N` and one requested-field "
-                            "Markdown table; link entity names via adjacent handles or exact raw URLs. Keep other chat/outreach light. "
+                            "`Covered N/N` counts table rows, not filled fields. Use one requested-field Markdown table; "
+                            "link entity names once in matching rows; unlinked names stay plain. Do not use a separate link list or column. "
+                            "Source links use each provided $[link:L...] unchanged as the Markdown destination. If no "
+                            "handle exists, copy the exact raw URL. Never invent, alter, or shorten URLs. "
+                            "Keep other chat/outreach light. "
                             "Markdown only; raw HTML is rejected. Use code formatting to show HTML literally."
                         ),
                     },
@@ -318,9 +320,9 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. true only if work for this active request remains after this message; false "
-                            "for a complete answer. Plan cleanup or queued work never justify true. Never message "
-                            "just to continue."
+                            "REQUIRED. Does work for this active request remain after this message? false for a complete "
+                            "answer; true only for a kickoff or evidence update. Plan cleanup or queued work never justify true. "
+                            "Never set true merely to deliver a completed result."
                         ),
                     },
                 },
@@ -356,7 +358,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
                 "Message body must contain actual user-facing content, not raw tool-call markup. "
                 "Use the tool_calls field to invoke tools."
             ),
-            "retryable": False,
+            "retryable": True,
         }
     will_continue = _should_continue_work(params)
     if agent.execution_environment == "eval" and will_continue:

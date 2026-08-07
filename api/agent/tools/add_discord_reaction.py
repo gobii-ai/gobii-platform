@@ -18,8 +18,9 @@ def get_add_discord_reaction_tool() -> Dict[str, Any]:
         "function": {
             "name": "add_discord_reaction",
             "description": (
-                "Add one emoji reaction to a message in a Discord channel subscribed by this agent. "
-                "Use the discord_message_id and channel ID from Discord message context."
+                "React to the current inbound Discord message. For a lightweight social moment, add one fitting emoji, "
+                "set will_continue_work=false, and send no reply. Use the current message's discord_message_id and "
+                "channel ID, not the message ID inside discord_reply_to."
             ),
             "parameters": {
                 "type": "object",
@@ -30,7 +31,7 @@ def get_add_discord_reaction_tool() -> Dict[str, Any]:
                     },
                     "message_id": {
                         "type": "string",
-                        "description": "Discord message ID to react to.",
+                        "description": "Current inbound discord_message_id; never use discord_reply_to.message_id.",
                     },
                     "emoji": {
                         "type": "string",

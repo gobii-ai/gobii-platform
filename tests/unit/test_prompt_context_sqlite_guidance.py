@@ -229,55 +229,62 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
 
     def test_sqlite_guidance_tracks_bounded_set_coverage(self):
         guidance = prompt_context._get_sqlite_guidance()
-        self.assertIn("Never transcribe visible preview facts into SQL", guidance)
-        self.assertIn("Submit no draft/superseded statements", guidance)
+        self.assertIn("Before submitting, keep one final write", guidance)
 
-        self.assertIn("Named tables hold keyed entities", guidance)
-        self.assertIn("tool results never update them", guidance)
+        self.assertIn("Reusable named tables need PRIMARY KEY or UNIQUE identity", guidance)
+        self.assertIn("Built-in __ snapshots are read-only and reset", guidance)
         self.assertIn("Ready routes", guidance)
         self.assertIn("opaque auth refs only for the requested operation", guidance)
         self.assertIn("no preflight", guidance)
         self.assertIn("current sources", guidance)
         self.assertIn("one sqlite_batch upserts all relevant rows", guidance)
-        self.assertIn("exact answer SELECTs", guidance)
-        self.assertIn("never combine separate results in prose", guidance)
+        self.assertIn("ends with the full answer SELECT", guidance)
+        self.assertIn("all requested details and the source_url", guidance)
+        self.assertIn("Do not use it to summarize visible facts or format a comparison table", guidance)
+        self.assertIn("sourced rows keep result_id and nullable source_url", guidance)
+        self.assertIn("HTTP bodies are under $.content", guidance)
+        self.assertIn("map wrapper fields from t.result_json and array-item fields from j.value", guidance)
+        self.assertIn("Never expand `$.content` itself", guidance)
         self.assertIn("Follow-ups query named tables", guidance)
         self.assertIn(
             "is_current_batch=1 AND tool_name='exact visible name'",
             guidance,
         )
-        self.assertIn("with no result_id/URL filter and no pre-read", guidance)
-        self.assertIn("keep non-key fields nullable", guidance)
-        self.assertIn("Parent fields come from result_json", guidance)
-        self.assertIn("children from json_each(actual array)", guidance)
-        self.assertIn("every supported field in one top-level row per result_id", guidance)
-        self.assertIn("join rows to __tool_results", guidance)
-        self.assertIn("Never type sourced facts/URLs/classifications into SQL", guidance)
-        self.assertIn("Bound interpretations only transcribe evidence", guidance)
-        self.assertIn("INSERT SELECT directly from the latest __messages payload", guidance)
-        self.assertIn("derive every field plus message_id", guidance)
-        self.assertIn("never pre-read or quote state/status", guidance)
+        self.assertIn("fill every table, including parent tables, with one INSERT SELECT over all current results", guidance)
+        self.assertIn("never add a result_id, URL, source, vendor, or content filter", guidance)
+        self.assertIn("No trial INSERT, DELETE, or replacement INSERT", guidance)
+        self.assertIn("t.source_url is the original request URL, never a $[link] token", guidance)
+        self.assertIn("Incremental schemas keep non-key fields nullable", guidance)
+        self.assertIn("Keep same-named target and source fields aligned", guidance)
+        self.assertIn("For string arrays, use the alias value directly", guidance)
+        self.assertIn("map every target column to the source field with the same meaning", guidance)
+        self.assertIn("first model write passes every source as top-level", guidance)
+        self.assertIn("Never put visible source facts or URLs in SQL VALUES", guidance)
+        self.assertIn("If result_json.content is text, parse result_text with", guidance)
+        self.assertIn("Read result_id and provenance from t", guidance)
+        self.assertIn("top-level `rows=[{result_id,fields:{...}},...]`", guidance)
+        self.assertIn("joins `json_each(:rows) r` to __tool_results", guidance)
+        self.assertIn("Omit unsupported fields", guidance)
+        self.assertIn("write directly from the latest __messages row", guidance)
+        self.assertIn("Every saved payload value, including status/state, must use json_extract", guidance)
+        self.assertIn("Never type, bind, filter, or pre-read payload values", guidance)
         self.assertIn("never import siblings singly", guidance)
         self.assertIn("Upsert stable keys and mutable provenance", guidance)
         self.assertIn("Affected 0 plus empty readback is failure", guidance)
-        self.assertIn("Bind authored/messy values as :name", guidance)
-        self.assertIn("INSERT SELECT needs WHERE 1=1 before ON CONFLICT", guidance)
-        self.assertIn("UNION top-one needs a scalar subquery/CTE", guidance)
-        self.assertIn("Reads that may trigger another tool use will_continue_work=true", guidance)
-        self.assertIn("LIVE SCHEMA is authoritative", guidance)
-        self.assertIn("do not rediscover them", guidance)
-        self.assertIn("shown durable domain table", guidance)
-        self.assertIn("compute task filters/grouping/ranking", guidance)
-        self.assertIn("do not SELECT whole tables and assemble the answer yourself", guidance)
-        self.assertIn("first sqlite_batch", guidance)
-        self.assertIn("call 1 only targeted sqlite_master", guidance)
-        self.assertIn("meaningful domain noun from the request", guidance)
-        self.assertIn("call 2 PRAGMA table_info alone", guidance)
-        self.assertIn("columns are unavailable until that returns", guidance)
-        self.assertIn("call 3 uses only returned columns/keys", guidance)
+        self.assertIn("Bind authored text as :name", guidance)
+        self.assertIn("SELECT value FROM json_each(:name)", guidance)
+        self.assertIn("SELECT's single WHERE clause", guidance)
+        self.assertIn("Set will_continue_work=true while a reply or action remains", guidance)
+        self.assertIn("Each SELECT must list every alias it uses in its own FROM/JOIN", guidance)
+        self.assertIn("Use shown names exactly; rename with AS", guidance)
+        self.assertIn("Do not pre-read a shown schema", guidance)
+        self.assertIn("reply from those rows", guidance)
+        self.assertIn("one sqlite_batch upserts all relevant rows", guidance)
+        self.assertIn("query targeted sqlite_master, then PRAGMA alone", guidance)
+        self.assertIn("including booleans as 1/0", guidance)
+        self.assertIn("never CTAS", guidance)
         self.assertIn("`_` is a LIKE wildcard", guidance)
-        self.assertIn("json_each aliases expose key/value, not seq", guidance)
-        self.assertIn("group_concat(DISTINCT x)", guidance)
+        self.assertIn("group_concat takes one argument", guidance)
         self.assertNotIn("Copy names/paths/values/URLs", guidance)
 
     def test_low_iteration_warning_keeps_unfinished_work_active(self):
@@ -522,26 +529,25 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         first_source = ("mcp_brightdata_search_engine", {"query": "company roster"}, "complete")
         second_source = ("mcp_brightdata_search_engine", {"query": "founder roster"}, "complete")
 
-        self.assertEqual(
-            prompt_context._build_unreconciled_source_model_warning([first_source]),
-            "",
-        )
+        single_source_warning = prompt_context._build_unreconciled_source_model_warning([first_source])
+        self.assertIn("One visible source", single_source_warning)
+        self.assertIn("reused or queried later", single_source_warning)
         warning = prompt_context._build_unreconciled_source_model_warning([
             first_source,
             second_source,
         ])
 
-        self.assertIn("may form a reusable working set", warning)
-        self.assertIn("bounded small report", warning)
-        self.assertIn("Otherwise the next action is sqlite_batch", warning)
-        self.assertIn("durable named entity/relationship tables", warning)
-        self.assertIn("PRIMARY KEY/UNIQUE and provenance (not TEMP/CTAS)", warning)
-        self.assertIn("reconcile this source batch", warning)
-        self.assertIn("query coverage gaps", warning)
-        self.assertIn("Import same-shaped siblings with `is_current_batch=1`", warning)
-        self.assertIn("never filter result_id, source_url, or link handles", warning)
-        self.assertIn("separate statements only for different entity shapes", warning)
-        self.assertIn("Do not answer or act from a reusable transient work set", warning)
+        self.assertIn("needs reuse, follow-ups, comparison", warning)
+        self.assertIn("bounded report", warning)
+        self.assertIn("use sqlite_batch now", warning)
+        self.assertIn("Structured JSON", warning)
+        self.assertIn("create keyed tables", warning)
+        self.assertIn("exact tool_name", warning)
+        self.assertIn("Prose", warning)
+        self.assertIn("`{result_id, fields:{...}}`", warning)
+        self.assertIn("joining json_each(:rows) to __tool_results", warning)
+        self.assertIn("Never type source facts or use VALUES", warning)
+        self.assertIn("t.result_id/t.source_url", warning)
         self.assertNotIn("FIRST-RUN GUIDED INTAKE", warning)
 
         inspection = (
@@ -554,13 +560,11 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
             second_source,
             inspection,
         ])
-        self.assertIn("already inspected this complete source set", post_inspection)
-        self.assertIn("Do not query raw __tool_results again", post_inspection)
-        self.assertIn("non-empty top-level `rows`", post_inspection)
+        self.assertIn("already inspected all prose sources", post_inspection)
+        self.assertIn("per source in top-level `rows`", post_inspection)
         self.assertIn("json_each(:rows)", post_inspection)
-        self.assertIn("r has no named fields", post_inspection)
-        self.assertIn("Empty rows", post_inspection)
-        self.assertIn("another inspection are invalid strategies", post_inspection)
+        self.assertIn("reading facts from r.value", post_inspection)
+        self.assertIn("Never use VALUES or inspect again", post_inspection)
 
         modeled_without_read = (
             "sqlite_batch",
@@ -707,15 +711,15 @@ class PromptContextContactsGuidanceTests(TestCase):
         content = "\n".join(message["content"] for message in context)
         self.assertIn("patch_text=lasting owner rules", content)
         self.assertIn(
-            "appearance=full person after authorized changes: age/skin/hair/eyes/style, not scene/vibe; preserve unspecified; confirm briefly",
+            "authorized appearance: UPDATE appearance once with the person's age, face, hair, clothes, and accessories",
             content,
         )
-        self.assertIn("temporary feedback/ordinary tasks never config", content)
+        self.assertIn("Never store surroundings, pose, mood, vibe, or temporary feedback", content)
         self.assertIn(
-            "For clear ongoing/monitoring intent, first write one safe default __agent_schedules cadence",
+            "For a new recurring or monitoring request, choose safe defaults",
             content,
         )
-        self.assertIn("Clear ongoing requests such as monitor", content)
+        self.assertIn("do not ask", content)
         self.assertIn("Emotion is one SQLite update", content)
         self.assertNotIn("Without a schedule, you die", content)
 
@@ -734,9 +738,10 @@ class PromptContextContactsGuidanceTests(TestCase):
             content,
         )
         self.assertIn("weekly=cron; @every only s/m/h", content)
+        self.assertIn("Read rows only to change, cancel, or list an existing schedule", content)
         self.assertIn("exceeds 12 active jobs", content)
         self.assertIn("one bounded alternative; no SQLite", content)
-        self.assertIn("never repurpose primary", content)
+        self.assertIn("Never update or delete primary", content)
         self.assertNotIn("Task scope changed? Adjust timing", content)
 
     def test_large_allowed_contacts_are_compacted_in_prompt(self):
@@ -776,6 +781,8 @@ class PromptContextContactsGuidanceTests(TestCase):
         self.assertIn("person-29@example.com", allowed_contacts)
         self.assertNotIn("person-00@example.com", allowed_contacts)
         self.assertIn("status='allowed' AND allow_outbound=1", allowed_contacts)
+        self.assertIn("not shown as allowed above, call request_contact_permission directly", allowed_contacts)
+        self.assertIn("do not query contacts", allowed_contacts)
 
     def test_auto_approval_prompt_sends_email_directly_but_keeps_sms_approval(self):
         self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL

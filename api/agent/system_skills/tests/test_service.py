@@ -4,12 +4,12 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
 from api.agent.system_skills.defaults import HUBSPOT_NATIVE_SYSTEM_SKILL_KEY, WEBHOOKS_SYSTEM_SKILL_KEY
-from api.agent.system_skills.registry import shortlist_system_skills
+from api.agent.system_skills.registry import get_system_skill_definition, shortlist_system_skills
 from api.agent.system_skills.service import (
     enable_system_skills,
     get_available_system_skill_tool_names,
 )
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentEnabledTool
+from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
 from api.services.pipedream_apps import PIPEDREAM_RUNTIME_NAME
 
 
@@ -90,3 +90,44 @@ class PlanningSystemSkillDiscoveryTests(TestCase):
         )
 
         self.assertIn(WEBHOOKS_SYSTEM_SKILL_KEY, [skill.skill_key for skill in shortlisted_skills])
+
+    def test_secure_delegation_shortlists_meta_gobii_dependency(self):
+        secure = get_system_skill_definition("secure_credential_delegation")
+        meta = get_system_skill_definition("meta_gobii")
+
+        shortlisted_skills = shortlist_system_skills(
+            "secure credential delegation",
+            available_tool_names={*secure.tool_names, *meta.tool_names},
+        )
+
+        self.assertIn(secure.skill_key, [skill.skill_key for skill in shortlisted_skills])
+        self.assertIn(meta.skill_key, [skill.skill_key for skill in shortlisted_skills])
+
+    def test_enabling_secure_delegation_enables_meta_gobii_dependency(self):
+        User = get_user_model()
+        user = User.objects.create_user(username=f"secure-dependency-{uuid.uuid4().hex[:8]}")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Secure Dependency Browser")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Secure Dependency Agent",
+            charter="Provision credentials for child Gobiis.",
+            browser_use_agent=browser_agent,
+        )
+        secure = get_system_skill_definition("secure_credential_delegation")
+        meta = get_system_skill_definition("meta_gobii")
+
+        result = enable_system_skills(agent, [secure.skill_key], available_skills=[secure, meta])
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(
+            set(result["enabled"]),
+            {secure.skill_key, meta.skill_key},
+        )
+        self.assertEqual(
+            set(
+                PersistentAgentSystemSkillState.objects.filter(agent=agent, is_enabled=True).values_list(
+                    "skill_key", flat=True
+                )
+            ),
+            {secure.skill_key, meta.skill_key},
+        )

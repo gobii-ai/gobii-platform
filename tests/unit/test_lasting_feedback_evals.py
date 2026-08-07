@@ -30,6 +30,11 @@ class LastingFeedbackEvalTests(SimpleTestCase):
             task_names = {task.name for task in ScenarioRegistry.get(slug).tasks}
             self.assertIn("verify_active_work_completed", task_names)
 
+    def test_active_batch_prompt_is_explicitly_assigned_and_ready(self):
+        scenario = ScenarioRegistry.get(LASTING_FEEDBACK_META_INSTRUCTION_KEEPS_WORK)
+
+        self.assertIn("next assigned follow-up batch is ready", scenario.prompt)
+
     def test_existing_immediate_work_eval_parses_multiline_charter_patch(self):
         call = SimpleNamespace(tool_params={
             "sql": (

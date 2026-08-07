@@ -249,6 +249,17 @@ class TextAnalysisTests(SimpleTestCase):
         self.assertNotEqual(analysis.format, "csv")
         self.assertIsNone(analysis.csv_info)
 
+    def test_pipe_delimited_key_value_records_are_not_csv(self):
+        text = """DOCUMENT METADATA
+document_id=doc_1 | title=Annual report | summary=Final report.
+document_id=doc_2 | title=Working draft | summary=Current draft.
+document_id=doc_3 | title=Methodology | summary=Scoring method."""
+
+        analysis = analyze_text(text)
+
+        self.assertNotEqual(analysis.format, "csv")
+        self.assertIsNone(analysis.csv_info)
+
     def test_detects_markdown_format(self):
         text = """# Main Heading
 

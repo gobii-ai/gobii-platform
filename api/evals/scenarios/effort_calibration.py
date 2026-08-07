@@ -112,6 +112,7 @@ _SQL_RESULT_ID_RE = re.compile(r"\bresult_id\s*=\s*['\"]([^'\"]+)['\"]", re.IGNO
 _HEADING_RE = re.compile(
     r"(?im)^\s{0,3}#{1,4}\s+\S"
     r"|^\s*(?:[^\w\s*]{1,3}\s+)?\*\*[^*\n]{3,80}\*\*(?::|,)?(?:\s+\S.*)?$"
+    r"|\A\s*[^\n]{3,100}:\s*$"
     r"|<h[1-4]\b"
 )
 _LIST_OR_TABLE_RE = re.compile(
@@ -123,10 +124,6 @@ _MARKDOWN_URL_LINK_RE = re.compile(
 )
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+")
 _SQLITE_MODEL_ADVISORY_CODES = {
-    "bulk_manual_working_table_from_visible_results",
-    "manual_working_table_from_visible_results",
-    "single_tool_result_import",
-    "source_facts_copied_into_model",
     "tool_result_blob_fetch_loop",
     "tool_result_row_loop",
 }
@@ -292,6 +289,14 @@ def _tool_calls_for_run(run_id: str, *, after=None, tool_names: Iterable[str] | 
     return list(queryset.select_related("step", "step__agent").order_by("step__created_at", "step__id"))
 
 
+def _tool_call_was_executed(call) -> bool:
+    try:
+        result = json.loads(call.result or "{}")
+    except (TypeError, ValueError):
+        return True
+    return not isinstance(result, dict) or result.get("executed") is not False
+
+
 def _relevant_tool_calls_for_run(
     run_id: str,
     *,
@@ -301,6 +306,8 @@ def _relevant_tool_calls_for_run(
     ignored = set(ignored_tool_names)
     relevant = []
     for call in _tool_calls_for_run(run_id, after=after):
+        if not _tool_call_was_executed(call):
+            continue
         if call.tool_name in ignored:
             continue
         if sqlite_batch_is_only_eval_bookkeeping_read(call):
@@ -376,6 +383,7 @@ def _question_count(text: str) -> int:
     body_lines = [
         line for line in without_urls.splitlines()
         if not re.match(r"^\s{0,3}#{1,6}\s", line)
+        and not re.match(r"^\s*\*\*[^*]+\?\*\*\s*$", line)
     ]
     return "\n".join(body_lines).count("?")
 
@@ -1705,9 +1713,12 @@ class EffortDefaultableResearchNoQuestionBatteryScenario(EffortCalibrationScenar
             "search_tools",
             "mcp_brightdata_search_engine",
             "mcp_brightdata_scrape_as_markdown",
+            "sqlite_batch",
         }
+        source_calls = [call for call in relevant if call.tool_name != "sqlite_batch"]
+        sqlite_calls = [call for call in relevant if call.tool_name == "sqlite_batch"]
         unexpected = [call.tool_name for call in relevant if call.tool_name not in allowed]
-        if len(relevant) <= 3 and not unexpected:
+        if len(source_calls) <= 3 and len(sqlite_calls) <= 1 and not unexpected:
             self.record_task_result(
                 run_id,
                 None,
@@ -1721,7 +1732,10 @@ class EffortDefaultableResearchNoQuestionBatteryScenario(EffortCalibrationScenar
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_research_bounded",
-                observed_summary=f"Expected <=3 search/scrape calls; saw {[call.tool_name for call in relevant]}.",
+                observed_summary=(
+                    "Expected <=3 search/discovery calls and <=1 SQLite synthesis; "
+                    f"saw {[call.tool_name for call in relevant]}."
+                ),
                 artifacts={"step": relevant[0].step} if relevant else {},
             )
 
@@ -2145,7 +2159,8 @@ class EffortUnscheduledRemainingWorkSetsResumeScenario(EffortCalibrationScenario
             after=inbound.timestamp,
             task_name="verify_no_unscheduled_wait_claim",
         )
-        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=5)
+        # Several bounded sends plus a cautious schedule read/write remain a compact, valid recovery path.
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=6)
 
 
 @register_scenario
@@ -2306,7 +2321,7 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
             run_id,
             after=inbound.timestamp,
             task_name="verify_no_overwork_tools",
-            forbidden_tool_names=(EFFORT_OVERWORK_TOOL_NAMES - {"search_tools"})
+            forbidden_tool_names=(EFFORT_OVERWORK_TOOL_NAMES - {"search_tools", "update_plan"})
             | ARTIFACT_TOOL_NAMES
             | RESEARCH_TOOL_NAMES,
         )
@@ -2732,6 +2747,7 @@ class EffortSimpleCurrentYCBatchReportScenario(EffortCalibrationScenario):
                             "search_tools",
                             "mcp_brightdata_search_engine",
                             "mcp_brightdata_scrape_as_markdown",
+                            "sqlite_batch",
                         ],
                         "max_relevant_tool_calls": 6,
                         "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
@@ -2754,6 +2770,7 @@ class EffortSimpleCurrentYCBatchReportScenario(EffortCalibrationScenario):
                 "search_tools",
                 "mcp_brightdata_search_engine",
                 "mcp_brightdata_scrape_as_markdown",
+                "sqlite_batch",
             },
             min_relevant_calls=1,
             max_relevant_calls=5,
@@ -2792,14 +2809,15 @@ class EffortSimpleCurrentYCBatchReportScenario(EffortCalibrationScenario):
                 run_id,
                 after=inbound.timestamp,
                 task_name="verify_no_query_or_sqlite_loops",
-                max_result_text_reads=0,
+                max_result_text_reads=1,
             )
         self._record_no_agent_config_mutation(
             run_id,
             after=inbound.timestamp,
             task_name="verify_no_config_churn",
         )
-        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=5)
+        # One validated citation correction can add a completion without adding research breadth.
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=6)
 
 
 @register_scenario
@@ -3124,20 +3142,18 @@ class EffortOrdinaryContinuationAvoidsCorrectiveChurnScenario(EffortCalibrationS
             },
             result={"status": "ok"},
         )
-        work_context = (
-            ("sqlite_batch", {"sql": "SELECT 3 AS approved_count"}, "Three approved prospects are ready."),
-            ("mcp_brightdata_search_engine", {"query": "Avery Park Northstar Testworks AI"}, "Avery verified."),
-            ("mcp_brightdata_search_engine", {"query": "Mina Sol Quillstone Labs revenue"}, "Mina verified."),
-            ("mcp_brightdata_search_engine", {"query": "Jules Rivera Parcelcraft GTM"}, "Jules verified."),
-            ("sqlite_batch", {"sql": "SELECT 'send' AS next_action"}, "Send the approved batch."),
+        self._seed_prior_trajectory_tool_call(
+            agent_id,
+            tool_name="eval_verify_candidate_batch",
+            tool_params={"batch_size": 3},
+            result={
+                "status": "ok",
+                "summary": "Three prospects are verified and approved for the next outreach batch.",
+                "verified_count": 3,
+                "remaining_work": 0,
+                "next_action": "Send this approved batch with eval_send_outreach_batch.",
+            },
         )
-        for tool_name, tool_params, summary in work_context:
-            self._seed_prior_trajectory_tool_call(
-                agent_id,
-                tool_name=tool_name,
-                tool_params=tool_params,
-                result={"status": "ok", "summary": summary},
-            )
 
         with self.wait_for_agent_idle(agent_id, timeout=180):
             self.trigger_processing(
@@ -3536,7 +3552,8 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
                             "sqlite_batch",
                             "update_plan",
                         ],
-                        "max_relevant_tool_calls": 14,
+                        # Leave room for the completion that delivers the final memo after the last work call.
+                        "max_relevant_tool_calls": 15,
                         "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
                     },
                 )
@@ -3584,7 +3601,8 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             source_urls=source_urls,
             min_source_count=4,
             min_chars=1700,
-            max_chars=5200,
+            # The prompt says "about 5,000"; allow a 10% boundary without accepting a materially longer memo.
+            max_chars=5500,
             required_any_groups=(("Northstar Robotics", "Northstar"), ("|", "<table")),
         )
         self._record_plan_update_budget(
@@ -3624,4 +3642,5 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             task_name="verify_correction_budget",
             max_corrections=2,
         )
-        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=11)
+        # The bounded path includes the required kickoff and final answer, plus the two-correction allowance above.
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=15)

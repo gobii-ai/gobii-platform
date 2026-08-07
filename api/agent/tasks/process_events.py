@@ -58,7 +58,7 @@ _queue_latency_histogram = None
 
 
 def _schedule_trigger_description(name: str, schedule_key: str, instruction: str) -> str:
-    description = f"Scheduled trigger: {name} [{schedule_key}]"
+    description = f"Scheduled trigger due now: {name} [{schedule_key}]"
     if instruction:
         return f"{description}\nInstruction: {instruction}"
     return description

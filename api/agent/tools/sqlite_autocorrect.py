@@ -77,6 +77,83 @@ def build_cte_column_candidates(sql: str, error_msg: str) -> list[tuple[str, lis
     return []
 
 
+def build_json_each_value_candidates(sql: str, error_msg: str) -> list[tuple[str, list[str]]]:
+    """Use json_each.value when a scalar-array subquery invents a column name."""
+    match = _MISSING_COLUMN_RE.search(error_msg)
+    if not match or "." in match.group(1):
+        return []
+    missing = match.group(1).strip('"`[]')
+    try:
+        tree = sqlglot.parse_one(sql, read="sqlite")
+    except sqlglot_errors.ParseError:
+        return []
+
+    changed = False
+    for select in tree.find_all(exp.Select):
+        source = select.args.get("from_")
+        table = source.this if source is not None else None
+        function = table.this if isinstance(table, exp.Table) else None
+        if not isinstance(function, exp.Anonymous) or function.name.casefold() != "json_each":
+            continue
+        alias = table.alias
+        for column in tuple(select.find_all(exp.Column)):
+            owner = column.parent
+            while owner is not None and not isinstance(owner, exp.Select):
+                owner = owner.parent
+            if owner is select and not column.table and column.name.casefold() == missing.casefold():
+                column.replace(exp.column("value", table=alias or None))
+                changed = True
+
+    if not changed:
+        return []
+    return [(tree.sql(dialect="sqlite"), [f"json_each scalar column '{missing}' -> value"])]
+
+
+def build_derived_table_alias_candidates(sql: str, error_msg: str) -> list[tuple[str, list[str]]]:
+    """Use a derived table's output alias when an outer query uses its source name."""
+    match = _MISSING_COLUMN_RE.search(error_msg)
+    if not match or "." in match.group(1):
+        return []
+    missing = match.group(1).strip('"`[]')
+    try:
+        tree = sqlglot.parse_one(sql, read="sqlite")
+    except sqlglot_errors.ParseError:
+        return []
+
+    for select in tree.find_all(exp.Select):
+        source = select.args.get("from_")
+        subquery = source.this if source is not None else None
+        inner = subquery.this if isinstance(subquery, exp.Subquery) else None
+        if not isinstance(inner, exp.Select):
+            continue
+        replacement = next(
+            (
+                projection.alias
+                for projection in inner.expressions
+                if projection.alias
+                and isinstance(projection.this, exp.Column)
+                and projection.this.name.casefold() == missing.casefold()
+            ),
+            "",
+        )
+        if not replacement:
+            continue
+        changed = False
+        for column in tuple(select.find_all(exp.Column)):
+            owner = column.parent
+            while owner is not None and not isinstance(owner, exp.Select):
+                owner = owner.parent
+            if owner is select and not column.table and column.name.casefold() == missing.casefold():
+                column.replace(exp.column(replacement))
+                changed = True
+        if changed:
+            return [(
+                tree.sql(dialect="sqlite"),
+                [f"derived-table column '{missing}' -> output alias '{replacement}'"],
+            )]
+    return []
+
+
 def _should_attempt_sqlglot(error_msg: str) -> bool:
     if not error_msg:
         return False

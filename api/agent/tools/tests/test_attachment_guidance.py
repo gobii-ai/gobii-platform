@@ -107,9 +107,10 @@ class AttachmentGuidanceTests(SimpleTestCase):
         body_guidance = chat_tool["function"]["parameters"]["properties"]["body"]["description"]
         self.assertIn("Owner report with 4+ items", body_guidance)
         self.assertIn("Covered N/N", body_guidance)
+        self.assertIn("counts table rows, not filled fields", body_guidance)
         self.assertIn("one requested-field Markdown table", body_guidance)
         self.assertIn("link entity names", body_guidance)
-        self.assertIn("adjacent handles or exact raw URLs", body_guidance)
+        self.assertIn("If no handle exists, copy the exact raw URL", body_guidance)
         self.assertIn("other chat/outreach light", body_guidance)
         self.assertNotIn("$[link:id]", body_guidance)
         delivery_fields = (
@@ -164,9 +165,10 @@ class AttachmentGuidanceTests(SimpleTestCase):
         )
 
         self.assertEqual(result["attach"], "$[/exports/report.txt]")
-        self.assertIn("send_email.attachments", result["message"])
+        self.assertIn('attachments: ["$[/exports/report.txt]"]', result["message"])
+        self.assertIn("parameter name is plural", result["message"])
         self.assertIn("$[/exports/report.txt]", result["message"])
-        self.assertIn("Body text does not attach files", result["message"])
+        self.assertIn("Body text or a structured payload does not attach files", result["message"])
         self.assertIn("<img src='cid:filename'>", result["message"])
         write_bytes_to_dir_mock.assert_called_once()
         build_signed_url_mock.assert_called_once_with(
@@ -205,9 +207,10 @@ class AttachmentGuidanceTests(SimpleTestCase):
         )
 
         self.assertEqual(result["attach"], "$[/exports/report.csv]")
-        self.assertIn("send_email.attachments", result["message"])
+        self.assertIn('attachments: ["$[/exports/report.csv]"]', result["message"])
+        self.assertIn("parameter name is plural", result["message"])
         self.assertIn("$[/exports/report.csv]", result["message"])
-        self.assertIn("Body text does not attach files", result["message"])
+        self.assertIn("Body text or a structured payload does not attach files", result["message"])
         self.assertIn("<img src='cid:filename'>", result["message"])
         write_bytes_to_dir_mock.assert_called_once()
         build_signed_url_mock.assert_called_once_with(
@@ -233,7 +236,7 @@ class AttachmentGuidanceTests(SimpleTestCase):
 
         result = execution["result"]
         self.assertEqual(result["attach"], "$[/exports/transcript.txt]")
-        self.assertIn("send_email.attachments", result["message"])
+        self.assertIn('attachments: ["$[/exports/transcript.txt]"]', result["message"])
         self.assertEqual(result["inline"], "[Download]($[/exports/transcript.txt])")
         self.assertEqual(result["inline_html"], "<a href='$[/exports/transcript.txt]'>Download</a>")
 

@@ -80,7 +80,10 @@ class ImageGenerationScenarioTests(SimpleTestCase):
 
         source_edit = by_slug[IMAGE_GENERATION_SOURCE_EDIT]
         self.assertEqual(source_edit.required_source_images, ("/Inbox/product.png",))
-        self.assertIn(("change only",), source_edit.required_prompt_groups)
+        self.assertIn(
+            ("change only", "only the background", "background changes"),
+            source_edit.required_prompt_groups,
+        )
         self.assertEqual(set(source_edit.mock_config), {"read_file", "create_image"})
 
         exact_text = by_slug[IMAGE_GENERATION_EXACT_TEXT]

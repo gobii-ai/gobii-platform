@@ -267,6 +267,13 @@ class EventProcessingHumanInputTests(TestCase):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         self.assertEqual(mock_completion.call_count, 2)
+        self.assertEqual(
+            [
+                tool["function"]["name"]
+                for tool in mock_completion.call_args_list[1].kwargs["tools"]
+            ],
+            ["send_email"],
+        )
         mock_request_human_input.assert_called_once_with(
             self.agent,
             {

@@ -358,6 +358,8 @@ class AgentScheduleServiceTests(TestCase):
         self.assertEqual(first.id, second.id)
         self.assertEqual(first.kind, PersistentAgentSchedule.Kind.ONCE)
         self.assertEqual(first.run_at, self.now + timedelta(days=1))
+        self.assertIn("current charter", first.instruction)
+        self.assertNotIn("your owner", first.instruction)
         self.assertEqual(
             self.agent.additional_schedules.filter(schedule_key="onboarding_checkin").count(),
             1,
@@ -518,7 +520,7 @@ class AgentScheduleTriggerTaskTests(TestCase):
         )
         self.assertEqual(
             trigger.step.description,
-            "Scheduled trigger: Operations review [operations_review]\n"
+            "Scheduled trigger due now: Operations review [operations_review]\n"
             "Instruction: Review the open incidents and report material changes.",
         )
         self.assertEqual(trigger.scheduled_for, self.scheduled_for)

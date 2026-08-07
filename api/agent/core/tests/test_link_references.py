@@ -101,6 +101,22 @@ class LinkReferenceTests(TestCase):
             ),
         )
 
+    def test_extracts_bold_markdown_link_without_formatting_suffix(self):
+        url = "https://northstar.example.test/blog/atlas-launch"
+
+        self.assertEqual(extract_http_urls(f"**[Atlas launch]({url})**,"), (url,))
+
+        rendered = rewrite_prompt_urls(
+            f"**[Atlas launch]({url})**;",
+            self.agent,
+            create=True,
+        )
+        reference = PersistentAgentLinkReference.objects.get(agent=self.agent)
+        self.assertEqual(
+            rendered,
+            f"**[Atlas launch]($[link:{reference.public_id}])**;",
+        )
+
     def test_html_escaped_query_preserves_only_the_original_suffix(self):
         raw_url = "https://items.example.test/42?first=one&amp;second=two#details"
 
@@ -716,6 +732,27 @@ class LinkReferenceTests(TestCase):
         self.assertIn("TERMINAL RESULT (`retryable=false`)", prompt_info.meta)
         self.assertIn("do not call this tool again", prompt_info.meta)
         self.assertIn('"retryable":false', prompt_info.preview_text)
+
+    def test_pending_approval_gets_no_retry_contract(self):
+        record = ToolCallResultRecord(
+            step_id="00000000-0000-4000-8000-000000000098",
+            tool_name="send_email",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({
+                "status": "pending_approval",
+                "delivery_status": "not_sent",
+                "message": "Email is in review.",
+            }),
+        )
+
+        prompt_info = prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={record.step_id: 0},
+            fresh_tool_call_step_ids={record.step_id},
+        )[record.step_id]
+
+        self.assertIn("PENDING APPROVAL", prompt_info.meta)
+        self.assertIn("Do not call this send tool again", prompt_info.meta)
 
     def test_source_result_preview_pairs_raw_url_with_reference_without_mutating_result(self):
         url = "https://profiles.example.test/avery?view=full#bio"

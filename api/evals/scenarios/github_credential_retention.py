@@ -1,4 +1,5 @@
 import json
+import re
 from unittest.mock import patch
 
 from api.agent.core.agent_judge import build_manual_judge_trigger, run_manual_agent_judge
@@ -127,10 +128,12 @@ def github_guidance_blocks_configured_cli_path(text):
             "stop using shell",
         )
     )
-    reconnect_gated = (
-        ("reconnect" in normalized or "authoriz" in normalized)
-        and any(
-            phrase in normalized
+    reconnect_gated = False
+    for sentence in re.split(r"(?<=[.!?])\s+", normalized):
+        mentions_reconnect = "reconnect" in sentence or "authoriz" in sentence
+        negates_wait = bool(re.search(r"\b(?:do not|don't|never)\s+wait\b", sentence))
+        requires_wait = any(
+            phrase in sentence
             for phrase in (
                 "must reconnect",
                 "needs reconnect",
@@ -143,7 +146,9 @@ def github_guidance_blocks_configured_cli_path(text):
                 "immediately send the connection",
             )
         )
-    )
+        if mentions_reconnect and requires_wait and not negates_wait:
+            reconnect_gated = True
+            break
     mentions_missing_credentials = (
         any(term in normalized for term in ("secret", "credential"))
         and any(term in normalized for term in ("is missing", "are missing", "not configured", "provide the"))

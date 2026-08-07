@@ -474,8 +474,8 @@ def create_default_onboarding_schedule(
             defaults={
                 "name": "First check-in",
                 "instruction": (
-                    "Check in with your owner about how things are going and whether "
-                    "this timing or cadence should be adjusted."
+                    "Check in about how things are going and whether this timing or cadence should be adjusted. "
+                    "Use the current charter to choose the recipient."
                 ),
                 "kind": PersistentAgentSchedule.Kind.ONCE,
                 "expression": None,

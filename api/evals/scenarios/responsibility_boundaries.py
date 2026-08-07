@@ -406,6 +406,7 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             charter=peer_charter,
             browser_use_agent=peer_browser_agent,
             planning_state=PersistentAgent.PlanningState.SKIPPED,
+            execution_environment=agent.execution_environment,
             is_active=False,
         )
         link = AgentPeerLink.objects.create(agent_a=agent, agent_b=peer, created_by=agent.user)

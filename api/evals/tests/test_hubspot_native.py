@@ -41,6 +41,13 @@ class HubSpotNativeScenarioTests(SimpleTestCase):
         self.assertNotIn("API cookbook:", instructions)
         self.assertNotIn("crm/v3/objects", instructions)
 
+    @patch("api.agent.system_skills.defaults._native_integration_connected", return_value=True)
+    def test_connected_hubspot_prompt_preserves_supplied_object_ids(self, _mock_connected):
+        instructions = _hubspot_native_prompt_instructions(SimpleNamespace())
+
+        self.assertIn("Put a supplied object ID verbatim", instructions)
+        self.assertIn("Search only when the ID is unknown", instructions)
+
     def test_generated_scenarios_have_expected_metadata(self):
         registered = ScenarioRegistry.list_all()
 

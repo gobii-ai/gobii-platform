@@ -23,6 +23,12 @@ from api.agent.comms.message_service import _ensure_participant, _get_or_create_
 from api.agent.core.event_processing import process_agent_events
 
 
+def _isolated_sms_addresses(agent_id) -> tuple[str, str]:
+    """Return a stable synthetic sender/recipient pair unique to this eval agent."""
+    pair_base = (int(str(agent_id).replace("-", ""), 16) % 5_000_000) * 2
+    return f"+1555{pair_base:07d}", f"+1555{pair_base + 1:07d}"
+
+
 @register_scenario
 class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
     slug = "permit_followup_single_reply"
@@ -135,8 +141,7 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
             comm_snap.summary = comms_summary_text
             comm_snap.save(update_fields=["summary"])
 
-        agent_sms = "+15550100001"
-        user_sms = "+15550100002"
+        agent_sms, user_sms = _isolated_sms_addresses(agent.id)
         agent_endpoint = (
             PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.SMS, address=agent_sms).first()
             or PersistentAgentCommsEndpoint.objects.create(

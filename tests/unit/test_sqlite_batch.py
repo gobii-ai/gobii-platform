@@ -34,6 +34,7 @@ from api.agent.tools.sqlite_batch import (
     _fix_singular_plural_tables,
     _is_redundant_transaction_wrapper,
     _is_typo,
+    _nonterminal_result_guidance,
     _non_persisting_agent_config_patch,
     _SqliteBatchLimits,
     _should_skip_memory_limits_for_virtualapple_emulation,
@@ -224,30 +225,37 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
     def test_tool_contract_explains_batch_and_upsert_shapes(self):
         tool = get_sqlite_batch_tool()["function"]
 
-        self.assertIn("upsert rows set-wise", tool["description"])
-        self.assertIn("WHERE 1=1 before ON CONFLICT", tool["description"])
-        self.assertIn("expand real arrays with json_each", tool["description"])
-        self.assertIn("Do not filter by result_id or URL", tool["description"])
-        self.assertIn("derive every field and message_id", tool["description"])
-        self.assertIn("Do not reread those rows before delivering", tool["description"])
-        self.assertIn("Use SQLite for reusable data", tool["description"])
-        self.assertIn("filtered answer rows", tool["description"])
-        self.assertIn("inspect the full current set once", tool["description"])
-        self.assertIn("source_url as provenance", tool["description"])
+        self.assertIn("PRIMARY KEY or UNIQUE identity", tool["description"])
+        self.assertIn("set-wise upserts", tool["description"])
+        self.assertIn("Use SQLite for filtering", tool["description"])
+        self.assertIn("comparison table is formatting", tool["description"])
+        self.assertIn("Bind __agent_config patch text", tool["description"])
+        self.assertIn("Use one batch", tool["description"])
+        self.assertIn("Structured JSON: fill each table", tool["description"])
+        self.assertIn("never rows=[]", tool["description"])
+        self.assertIn("one rows item per source", tool["description"])
+        self.assertIn("never copy source facts or URLs into SQL literals", tool["description"])
+        self.assertIn("every needed field, URL, and count", tool["description"])
+        self.assertIn("without another query", tool["description"])
+        self.assertLessEqual(len(tool["description"].split()), 175)
         self.assertEqual(tool["parameters"]["properties"]["rows"]["type"], "array")
         self.assertEqual(tool["parameters"]["properties"]["bindings"]["type"], "object")
+        self.assertIn(
+            "When rows is nonempty, use INSERT SELECT",
+            tool["parameters"]["properties"]["sql"]["description"],
+        )
 
     def test_tool_contract_steers_messy_text_to_named_bindings(self):
         function = get_sqlite_batch_tool()["function"]
         sql_description = function["parameters"]["properties"]["sql"]["description"]
 
-        self.assertIn("bound parameters for authored or messy text", function["description"])
-        self.assertIn("patch_text(charter,:old,:new)", sql_description)
         self.assertIn(
-            "config old/new",
+            "authored or config values",
             function["parameters"]["properties"]["bindings"]["description"],
         )
-        self.assertIn("requested decision/evidence SELECT", sql_description)
+        self.assertIn("every requested answer field", sql_description)
+        self.assertIn("use the explicit send tool next without rereading", sql_description)
+        self.assertIn("SELECT the updated field, not patch_text again", sql_description)
 
     def test_rows_schema_requires_source_specificity_without_enrichment(self):
         rows = (
@@ -258,6 +266,8 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         self.assertIn("Facts explicitly supported by that source", fields_description)
         self.assertIn("Preserve the source's specificity", fields_description)
         self.assertIn("never enrich or infer values", fields_description)
+        self.assertIn("Do not repeat result_id or source_url", fields_description)
+        self.assertIn("never a $[link:...] handle", rows["items"]["properties"]["result_id"]["description"])
 
     def test_named_bindings_encode_nested_json_for_sql_json_functions(self):
         with self._with_temp_db():
@@ -298,24 +308,53 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
                     "bindings": {"rows": [{"result_id": "r2"}]},
                 },
             )
+            malformed = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT 1 FROM json_each(:rows)",
+                    "rows": [{"result_id": "r1", "company": "Acme"}],
+                },
+            )
 
         self.assertEqual(invalid.get("status"), "error")
         self.assertIn("array of objects", invalid.get("message", ""))
         self.assertEqual(duplicate.get("status"), "error")
         self.assertIn("not both", duplicate.get("message", ""))
+        self.assertEqual(malformed.get("status"), "error")
+        self.assertIn("only `result_id` and `fields`", malformed.get("message", ""))
+
+    def test_empty_top_level_and_binding_rows_are_one_empty_source(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT count(*) AS count FROM json_each(:rows)",
+                    "rows": [],
+                    "bindings": {"rows": []},
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(out["results"][0]["result"], [{"count": 0}])
 
     def test_unstructured_rows_bind_once_and_join_tool_result_provenance(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             with sqlite3.connect(db_path) as conn:
                 conn.execute(
                     "CREATE TABLE __tool_results ("
-                    "result_id TEXT PRIMARY KEY, legacy_result_id TEXT, tool_name TEXT, result_text TEXT)"
+                    "result_id TEXT PRIMARY KEY, legacy_result_id TEXT, tool_name TEXT, source_url TEXT, result_text TEXT)"
                 )
                 conn.executemany(
-                    "INSERT INTO __tool_results VALUES (?, ?, ?, ?)",
+                    "INSERT INTO __tool_results VALUES (?, ?, ?, ?, ?)",
                     (
-                        ("source-a", "legacy-a", "page_scrape", "Company: Northstar Growth"),
-                        ("source-b", "legacy-b", "page_scrape", "Company: O'Brien Advisory"),
+                        (
+                            "source-a", "legacy-a", "page_scrape",
+                            "https://research.example.test/northstar", "Company: Northstar Growth",
+                        ),
+                        (
+                            "source-b", "legacy-b", "page_scrape",
+                            "https://research.example.test/obrien", "Company: O'Brien Advisory",
+                        ),
                     ),
                 )
 
@@ -327,8 +366,8 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
                         "interview_id TEXT PRIMARY KEY, company TEXT NOT NULL, source_url TEXT NOT NULL, "
                         "source_result_id TEXT NOT NULL);"
                         "INSERT INTO interviews(interview_id,company,source_url,source_result_id) "
-                        "SELECT json_extract(r.value,'$.interview_id'),"
-                        "json_extract(r.value,'$.company'),json_extract(r.value,'$.source_url'),t.result_id "
+                        "SELECT json_extract(r.value,'$.fields.interview_id'),"
+                        "json_extract(r.value,'$.fields.company'),t.source_url,t.result_id "
                         "FROM json_each(:rows) r JOIN __tool_results t "
                         "ON t.result_id=json_extract(r.value,'$.result_id') "
                         "WHERE t.tool_name=:tool;"
@@ -339,15 +378,11 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
                     "rows": [
                         {
                             "result_id": "source-a",
-                            "interview_id": "int-1",
-                            "company": "Northstar Growth",
-                            "source_url": "https://research.example.test/northstar",
+                            "fields": {"interview_id": "int-1", "company": "Northstar Growth"},
                         },
                         {
-                            "result_id": "legacy-b",
-                            "interview_id": "int-2",
-                            "company": "O'Brien Advisory",
-                            "source_url": "https://research.example.test/obrien",
+                            "result_id": "source-b",
+                            "fields": {"interview_id": "int-2", "company": "O'Brien Advisory"},
                         },
                     ],
                 },
@@ -420,7 +455,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
         self.assertEqual(missing.get("status"), "error")
         self.assertIn("replacement target was not found", missing.get("message", ""))
-        self.assertIn("source text already in context", missing.get("message", ""))
+        self.assertIn("exact source text already shown", missing.get("message", ""))
         self.assertEqual(ambiguous.get("status"), "error")
         self.assertIn("matched 2 times", ambiguous.get("message", ""))
 
@@ -768,6 +803,39 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             result = out["results"][0]
             self.assertNotIn("reporting_note", result)
             self.assertNotIn("Item URL column(s)", result["message"])
+            self.assertIn("Use the explicit send tool with these rows now; do not query again", out["message"])
+            self.assertIn("Include every returned URL", out["message"])
+
+    def test_nonterminal_result_points_to_next_action_without_repeat(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT 'evidence' AS value;", "will_continue_work": True},
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertIn("Use these rows for the next required action", out["message"])
+            self.assertNotIn("Use the explicit send tool with these rows now", out["message"])
+
+    def test_delivery_status_result_preserves_provider_state_boundary(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT 'sent' AS delivery_status, 'provider-301' AS provider_message_id;"},
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertIn("State delivery_status exactly", out["message"])
+        self.assertIn("sent or provider-accepted is not delivered", out["message"])
+
+    def test_prose_inspection_result_points_to_bound_rows_import(self):
+        guidance = _nonterminal_result_guidance(
+            [{"result": [{"result_id": "a1", "source_url": "https://example.test", "evidence": "Fact"}]}],
+            ["SELECT result_id, source_url, evidence FROM __tool_results"],
+        )
+
+        self.assertIn("top-level rows=[{result_id,fields:{...}},...]", guidance)
+        self.assertIn("Never copy evidence into VALUES", guidance)
 
     def test_splits_multi_statement_string(self):
         with self._with_temp_db():
@@ -841,7 +909,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
             self.assertEqual(out.get("status"), "ok")
             self.assertNotIn("auto_sleep_ok", out)
 
-    def test_empty_action_source_can_auto_sleep(self):
+    def test_empty_action_source_still_requires_delivery(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(
                 self.agent,
@@ -851,7 +919,7 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
                 },
             )
             self.assertEqual(out.get("status"), "ok")
-            self.assertTrue(out.get("auto_sleep_ok"))
+            self.assertNotIn("auto_sleep_ok", out)
 
     def test_invalid_queries_are_rejected(self):
         with self._with_temp_db():
@@ -869,38 +937,27 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         description = definition["function"]["description"]
 
         for expected in (
-            "create keyed tables",
-            "upsert rows set-wise",
-            "filtered answer rows",
-            "every current row for the exact tool name",
-            "result_id and source_url as provenance",
-            "inspect the full current set once",
-            "split repeated sections set-wise",
-            "one row per result_id",
-            "latest non-outbound non-null __messages payload",
-            "do not pre-read it",
-            "INSERT SELECT needs WHERE 1=1 before ON CONFLICT",
-            "per-item writes",
-            "historical rows",
-            "SELECT-all readbacks",
-            "Do not call it to find a missing email/SMS recipient",
+            "PRIMARY KEY or UNIQUE identity",
+            "set-wise upserts",
+            "every needed field, URL, and count",
+            "all current __tool_results",
+            "never rows=[]",
+            "never copy source facts or URLs into SQL literals",
         ):
             self.assertIn(expected, description)
         continuation_description = (
             definition["function"]["parameters"]["properties"]["will_continue_work"]["description"]
         )
-        self.assertIn("True for action-producing queue reads", continuation_description)
-        self.assertIn("false for answer SELECTs", continuation_description)
-        self.assertIn(
-            "before replying",
-            continuation_description,
-        )
+        self.assertIn("True when any action or reply", continuation_description)
+        self.assertIn("user-facing message in this response", continuation_description)
         self.assertIn("Never reread SQLite", continuation_description)
         rows_schema = definition["function"]["parameters"]["properties"]["rows"]
         self.assertEqual(rows_schema["type"], "array")
-        self.assertIn("need nonempty exact result_id/fields", rows_schema["description"])
-        self.assertIn("SQL-derived prose work", rows_schema["description"])
-        self.assertIn("SQL receives :rows", rows_schema["description"])
+        self.assertIn("pass one item per source on the first call", rows_schema["description"])
+        self.assertIn("put every fact inside fields", rows_schema["description"])
+        self.assertIn("never r.name or $.name", rows_schema["description"])
+        self.assertIn("exact result_id", rows_schema["description"])
+        self.assertIn("SQL receives this array as :rows", rows_schema["description"])
         self.assertEqual(rows_schema["items"]["required"], ["result_id", "fields"])
         self.assertEqual(
             rows_schema["items"]["properties"]["result_id"]["minLength"],
@@ -913,15 +970,17 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
         )
         sql_description = definition["function"]["parameters"]["properties"]["sql"]["description"]
         self.assertNotIn("Upsert stable keys; put WHERE 1=1 before ON CONFLICT", description)
+        self.assertIn("exact tool name", description)
+        self.assertIn("End with answer rows", description)
         self.assertIn("json_each(:rows)", sql_description)
         self.assertIn("$.fields.*", sql_description)
-        self.assertIn("Message writes derive payload/message_id from __messages", sql_description)
-        self.assertIn("latest non-outbound non-null __messages payload", description)
-        self.assertIn("derive every field and message_id", description)
-        self.assertIn("requested decision/evidence SELECT", sql_description)
+        self.assertIn("add WHERE 1=1 only if none exists", sql_description)
+        self.assertIn("every requested answer field", sql_description)
+        self.assertIn("use the explicit send tool next without rereading", sql_description)
         bindings_description = definition["function"]["parameters"]["properties"]["bindings"]["description"]
-        self.assertIn("one complete payload unavailable in __messages", bindings_description)
-        self.assertIn("JSON object, never array/list", bindings_description)
+        self.assertIn("authored or config values", bindings_description)
+        self.assertIn("include `rows` here", bindings_description)
+        self.assertIn("Other lists are JSON strings", bindings_description)
         self.assertIn("bindings", definition["function"]["parameters"]["required"])
         self.assertNotIn("before one terminal send", description)
 
@@ -1105,6 +1164,41 @@ class SqliteBatchCoreTests(SqliteBatchTestCase):
 
 @tag("batch_sqlite_quality")
 class SqliteBatchQualityTests(SqliteBatchTestCase):
+    def test_source_literal_copy_from_tool_results_is_rejected_before_execution(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            payload = json.dumps({
+                "content": {
+                    "vendor": "AxonFlow",
+                    "source_url": "https://api.example.test/products/axonflow.json",
+                    "plans": [{"plan": "Enterprise"}],
+                }
+            })
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT, result_text TEXT)"
+                )
+                conn.execute("INSERT INTO __tool_results VALUES ('r1', ?, ?)", (payload, payload))
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE plans(vendor_id TEXT, vendor TEXT, plan TEXT, PRIMARY KEY(vendor_id, plan));"
+                        "INSERT INTO plans(vendor_id, vendor, plan) "
+                        "SELECT 'axonflow', 'AxonFlow', json_extract(j.value,'$.plan') "
+                        "FROM __tool_results t, json_each(t.result_json,'$.content.plans') j"
+                    )
+                },
+            )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertEqual(out.get("error_code"), "source_model_write_not_derived")
+            self.assertTrue(out.get("retryable"))
+            with sqlite3.connect(db_path) as conn:
+                self.assertIsNone(
+                    conn.execute("SELECT name FROM sqlite_master WHERE name='plans'").fetchone()
+                )
+
     def test_bulk_manual_tool_result_copy_executes_with_advice(self):
         with self._with_temp_db() as (db_path, _token, _tmp):
             conn = sqlite3.connect(db_path)
@@ -2093,6 +2187,16 @@ class SqliteBatchQualityTests(SqliteBatchTestCase):
             self.assertEqual(out.get("status"), "error")
             self.assertIn("vacuum", out.get("message", "").lower())
 
+    def test_builtin_snapshots_are_read_only(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {"queries": "INSERT INTO __tool_results (result_id) VALUES ('saved')"},
+            )
+
+            self.assertEqual(out.get("status"), "error")
+            self.assertIn("read-only snapshot", out.get("message", "").lower())
+
     def test_database_list_pragma_is_blocked(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"queries": "PRAGMA database_list"})
@@ -2466,6 +2570,41 @@ class SqliteBatchQualityTests(SqliteBatchTestCase):
 
 @tag("batch_sqlite_autocorrect")
 class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
+    def test_autocorrect_outer_reference_to_derived_table_alias(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "CREATE TABLE catalog(monthly_price_usd INTEGER, included_seats INTEGER);"
+                        "INSERT INTO catalog VALUES (720, 50);"
+                        "SELECT * FROM (SELECT monthly_price_usd AS price, included_seats AS seats FROM catalog) source "
+                        "WHERE monthly_price_usd <= 900 AND included_seats >= 40"
+                    )
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(out["results"][-1]["result"], [{"price": 720, "seats": 50}])
+
+    def test_autocorrect_json_each_scalar_column_to_value(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "SELECT (SELECT group_concat(comp, ', ') "
+                        "FROM json_each('[\"SOC 2\",\"SAML\"]')) AS compliance"
+                    )
+                },
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(out["results"][0]["result"], [{"compliance": "SOC 2, SAML"}])
+        correction = out["results"][0]["auto_correction"]
+        self.assertFalse(correction["semantic_change"])
+        self.assertIn("json_each scalar column 'comp' -> value", correction["fixes"])
+
     def test_autocorrect_multi_pass_cte_and_alias(self):
         """Fixes multiple typos across retries (CTE + alias)."""
         with self._with_temp_db() as (db_path, token, tmp):
@@ -3145,6 +3284,15 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
         self.assertIn('"AI Engineer"', hint)
         self.assertIn("O''Brien", hint)
 
+    def test_error_hint_explains_sqlite_data_changing_cte(self):
+        hint = _get_error_hint(
+            'near "INSERT": syntax error',
+            "WITH saved AS (INSERT INTO items(name) SELECT name FROM source RETURNING *) SELECT * FROM saved",
+        )
+
+        self.assertIn("CTEs cannot contain INSERT/UPDATE/DELETE", hint)
+        self.assertIn("standalone statement", hint)
+
     def test_missing_schema_hints_require_inspection_before_retry(self):
         column_hint = _get_error_hint(
             "no such column: owner_name",
@@ -3171,6 +3319,15 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
         self.assertIn("r is a json_each alias", hint)
         self.assertIn("r.value", hint)
         self.assertIn("json_extract(r.value, '$.result_id')", hint)
+
+    def test_malformed_json_hint_uses_json_each_value_extraction(self):
+        hint = _get_error_hint(
+            "malformed JSON",
+            "SELECT j.value->>'plan' FROM json_each(payload) j",
+        )
+
+        self.assertIn("json_extract(j.value,'$.field')", hint)
+        self.assertIn("not with -> or ->>", hint)
 
     def test_missing_qualified_alias_hint_does_not_misdiagnose_schema(self):
         hint = _get_error_hint(
@@ -3219,6 +3376,12 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
         self.assertIn("AND", fixed)
         self.assertNotIn("&&", fixed)
 
+    def test_fix_python_operators_preserves_strings_and_comments(self):
+        sql = "SELECT '=== section ===' AS label; -- x == 1 && y == 2\nSELECT 1"
+        fixed, fix = _fix_python_operators(sql)
+        self.assertEqual(fixed, sql)
+        self.assertIsNone(fix)
+
     def test_fix_python_operators_preserves_valid(self):
         """Doesn't modify valid SQL."""
         sql = "SELECT * FROM t WHERE x = 5 AND y = 10"
@@ -3265,6 +3428,38 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
         fixed, fix = _fix_dialect_functions(sql)
         self.assertIn("GROUP_CONCAT", fixed)
         self.assertNotIn("STRING_AGG", fixed)
+
+    def test_fix_dialect_functions_removes_distinct_group_concat_separator(self):
+        sql = "SELECT group_concat(DISTINCT substr(url,1,60), ' | ') FROM links"
+
+        fixed, fix = _fix_dialect_functions(sql)
+
+        self.assertEqual(fixed, "SELECT group_concat(DISTINCT substr(url,1,60)) FROM links")
+        self.assertIn("GROUP_CONCAT(DISTINCT x, separator)", fix)
+
+    def test_apply_all_fixes_normalizes_json_each_alias_value(self):
+        sql = "SELECT json_extract(p.val, '$.id') FROM json_each(:prospects) p"
+
+        fixed, fixes = _apply_all_sql_fixes(sql)
+
+        self.assertEqual(fixed, "SELECT json_extract(p.value, '$.id') FROM json_each(:prospects) p")
+        self.assertIn("p.val -> p.value", fixes)
+
+    def test_insert_select_disambiguation_is_marked_semantics_preserving(self):
+        from api.agent.tools.sqlite_batch import _sql_fixes_change_semantics
+
+        self.assertFalse(_sql_fixes_change_semantics([
+            "added WHERE 1=1 to disambiguate INSERT ... SELECT ... ON CONFLICT",
+        ]))
+        self.assertTrue(_sql_fixes_change_semantics(["ILIKE -> LIKE"]))
+
+    def test_apply_all_fixes_normalizes_simple_json_each_sequence_column(self):
+        sql = "SELECT seq, json_extract(value, '$.id') FROM json_each(:candidates)"
+
+        fixed, fixes = _apply_all_sql_fixes(sql)
+
+        self.assertIn("SELECT key,", fixed)
+        self.assertIn("json_each seq -> key", fixes)
 
     def test_fix_dialect_functions_nvl2(self):
         """Fixes NVL2(x, y, z) to IIF(x IS NOT NULL, y, z)."""
@@ -3405,6 +3600,19 @@ class SqliteBatchAutocorrectTests(SqliteBatchTestCase):
 
         self.assertEqual(fixed, sql)
         self.assertIsNone(correction)
+
+    def test_apply_all_fixes_removes_where_before_from(self):
+        sql = (
+            "INSERT INTO accounts(account_id) SELECT t.account_id WHERE 1=1 "
+            "FROM incoming t WHERE t.active=1 "
+            "ON CONFLICT(account_id) DO NOTHING"
+        )
+
+        fixed, corrections = _apply_all_sql_fixes(sql)
+
+        self.assertIn("SELECT t.account_id FROM incoming", fixed)
+        self.assertIn("WHERE t.active=1 ON CONFLICT", fixed)
+        self.assertIn("removed misplaced WHERE 1=1 before FROM", corrections)
 
     def test_fix_insert_select_upsert_preserves_values_form(self):
         sql = "INSERT INTO accounts(account_id) VALUES ('acct-1') ON CONFLICT(account_id) DO NOTHING"

@@ -20,6 +20,28 @@ INITIAL_PROCESSING_TIMEOUT_SECONDS = 300
 BACKGROUND_DRAIN_TIMEOUT_SECONDS = 2400
 
 
+def _sim_weather_mock_config(sim_url: str) -> dict:
+    weather_text = "Washington DC pollution index: Moderate (55)."
+    return {
+        "http_request": {
+            "status": "ok",
+            "status_code": 200,
+            "content": {
+                "location": "Washington DC",
+                "pollution_index": 55,
+                "pollution_status": "Moderate",
+            },
+        },
+        "mcp_brightdata_scrape_as_markdown": {
+            "status": "ok",
+            "content": {
+                "url": sim_url,
+                "markdown": weather_text,
+            },
+        },
+    }
+
+
 def _charter_mentions_pollution_monitoring(charter: str | None) -> tuple[bool, str]:
     text = (charter or "").lower()
     has_monitoring = any(term in text for term in ("monitor", "check", "track", "watch"))
@@ -159,7 +181,13 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         # Inject message and capture events using a listener that subscribes before any processing starts
         msg = None
         with self.agent_event_listener(agent_id, start_time=time.time()) as events:
-            msg = self.inject_message(agent_id, instruction, trigger_processing=True)
+            msg = self.inject_message(
+                agent_id,
+                instruction,
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=_sim_weather_mock_config(sim_url),
+            )
 
             first_event = events.wait_for(
                 AgentEventType.PROCESSING_COMPLETE,
@@ -191,7 +219,7 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
                     if not completion_event:
                         break
                     outstanding = int((completion_event.get("payload") or {}).get("outstanding_tasks", 0) or 0)
-                    if outstanding == 0:
+                    if outstanding == 0 or (msg and self._has_completed_expected_work(agent_id, after=msg.timestamp)):
                         break
                     remaining = max(0, BACKGROUND_DRAIN_TIMEOUT_SECONDS - int(time.time() - idle_wait_start))
 

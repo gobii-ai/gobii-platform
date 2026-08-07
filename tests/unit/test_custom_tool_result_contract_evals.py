@@ -185,10 +185,21 @@ class CustomToolResultContractEvalTests(TestCase):
 
         self.assertEqual(policy["max_relevant_tool_calls"], 24)
         self.assertEqual(
-            policy["stop_on_tool_names_after_execution"],
-            ["custom_sheets_backlog_sync"],
+            policy["stop_when_all_seen"],
+            [{
+                "tool_name": "custom_sheets_backlog_sync",
+                "required_params_any": [
+                    "batch_size",
+                    "batch_limit",
+                    "limit",
+                    "max_items",
+                    "max_rows",
+                    "row_limit",
+                ],
+                "after_execution": True,
+            }],
         )
-        self.assertNotIn("stop_when_all_seen", policy)
+        self.assertNotIn("stop_on_tool_names_after_execution", policy)
 
     def test_local_create_tool_check_requires_good_params_and_result_fields(self):
         case = _case("sheets_final_sync")

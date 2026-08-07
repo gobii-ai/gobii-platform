@@ -722,16 +722,30 @@ def _build_unstructured_focus_hint(
 
     available = max_bytes - header_bytes
     lines = text.splitlines()
-    link_indexes = {
-        line_index
-        for url_index, line in enumerate(lines)
+    url_indexes = [
+        index for index, line in enumerate(lines)
         if re.search(r"https?://", line, re.IGNORECASE)
-        for line_index in range(max(0, url_index - 7), url_index + 1)
-    }
-    link_context = "\n".join(line for index, line in enumerate(lines) if index in link_indexes)
-    link_context = _enforce_limit_bytes(link_context, available * 2 // 3)
+    ]
+    link_budget = available * 2 // 3
+    per_url_budget = max(link_budget // max(len(url_indexes), 1), 1)
+    link_segments = []
+    for url_index in url_indexes:
+        url_line = lines[url_index]
+        prefix = re.split(r"https?://", url_line, maxsplit=1, flags=re.IGNORECASE)[0]
+        nearby_context = [] if "|" in prefix else [
+            line
+            for line in lines[max(0, url_index - 7):url_index]
+            if not re.search(r"https?://", line, re.IGNORECASE)
+        ]
+        segment = "\n".join([*nearby_context, url_line])
+        encoded = segment.encode("utf-8")
+        if len(encoded) > per_url_budget:
+            segment = encoded[-per_url_budget:].decode("utf-8", errors="ignore")
+        link_segments.append(segment)
+    link_context = _enforce_limit_bytes("\n".join(link_segments), link_budget)
     focus_budget = available - len(link_context.encode("utf-8")) - len(DEFAULT_SEPARATOR.encode("utf-8"))
-    focused = barbell_focus(text, target_bytes=max(focus_budget, 0))
+    non_link_text = "\n".join(line for index, line in enumerate(lines) if index not in url_indexes)
+    focused = barbell_focus(non_link_text, target_bytes=max(focus_budget, 0))
     if link_context:
         focused = f"{link_context}{DEFAULT_SEPARATOR}{focused or ''}".rstrip()
     if not focused:

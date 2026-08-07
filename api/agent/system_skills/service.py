@@ -177,6 +177,19 @@ def enable_system_skills(
         }
     )
 
+    dependency_index = 0
+    while dependency_index < len(requested):
+        skill_key = requested[dependency_index]
+        definition = catalog.get(skill_key) or get_system_skill_definition(skill_key)
+        if definition is not None:
+            catalog[skill_key] = definition
+            for dependency_key in definition.required_system_skill_keys:
+                normalized_dependency = normalize_system_skill_key(dependency_key)
+                if normalized_dependency and normalized_dependency not in seen:
+                    seen.add(normalized_dependency)
+                    requested.append(normalized_dependency)
+        dependency_index += 1
+
     enabled: list[str] = []
     already_enabled: list[str] = []
     invalid: list[str] = []

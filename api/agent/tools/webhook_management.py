@@ -25,14 +25,14 @@ def _tool_definition(direction: str) -> dict[str, Any]:
             "description": (
                 f"List, inspect, create, update, {'rotate, ' if inbound else ''}or delete {direction} webhooks. "
                 "Lists omit secret or destination URLs; use get only when the exact URL is needed. "
-                "Only mutate configuration when the user clearly requested that exact change."
+                "Create needs a name and, outbound, a url; other item actions need webhook_id. Mutate only as requested."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": actions},
                     "webhook_id": {"type": "string", "description": f"Agent-scoped {direction} webhook ID."},
-                    "name": {"type": "string", "description": "Webhook name."},
+                    "name": {"type": "string", "description": "Required descriptive name for create."},
                     extra_name: extra,
                     "will_continue_work": {
                         "type": "boolean",
@@ -65,7 +65,7 @@ def _execute(agent: PersistentAgent, params: dict[str, Any], direction: str) -> 
         )
         result = {"status": "success", **result}
     except AgentWebhookError as exc:
-        result = {"status": "error", "message": str(exc)}
+        result = {"status": "error", "message": str(exc), "retryable": True}
     if params.get("will_continue_work") is False:
         result["auto_sleep_ok"] = True
     return result

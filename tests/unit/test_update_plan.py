@@ -88,8 +88,23 @@ class UpdatePlanToolTests(TestCase):
         self.assertIn("path", properties["files"]["items"]["properties"])
         self.assertIn("message_id", properties["messages"]["items"]["properties"])
         self.assertIn("returned by the send tool", properties["messages"]["items"]["properties"]["message_id"]["description"])
+        self.assertIn("do not add a send", properties["plan"]["description"])
 
-    def test_update_plan_returns_auto_sleep_hint_for_explicit_stop(self):
+    def test_incomplete_plan_result_says_to_skip_intermediate_updates(self):
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research sources", "status": "doing"},
+                    {"step": "Write report", "status": "todo"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertIn("without another plan update", result["message"])
+
+    def test_completed_plan_keeps_running_until_final_delivery(self):
         result = execute_update_plan(
             self.agent,
             {
@@ -101,7 +116,7 @@ class UpdatePlanToolTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertIs(result["auto_sleep_ok"], True)
+        self.assertIs(result["auto_sleep_ok"], False)
 
     def test_update_plan_without_continue_flag_preserves_legacy_followup_behavior(self):
         result = execute_update_plan(

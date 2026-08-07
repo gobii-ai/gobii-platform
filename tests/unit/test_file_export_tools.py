@@ -296,9 +296,10 @@ class FileExportToolTests(TestCase):
 
         self.assertIn("do not use it for image analysis, OCR", description)
         self.assertIn("pass `source_images` to preserve subject", description)
-        self.assertIn("do not invent image URLs or file paths", description)
+        self.assertIn("never call create_image again or invent URLs/paths", description)
         self.assertIn("/exports/", properties["file_path"]["description"])
-        self.assertIn("$[/Inbox/photo.png]", properties["source_images"]["description"])
+        self.assertIn("For `$[/Inbox/photo.png]`", properties["source_images"]["description"])
+        self.assertIn("pass `/Inbox/photo.png`", properties["source_images"]["description"])
         self.assertIn("same person, product, logo", properties["source_images"]["description"])
 
     @patch("api.agent.tools.create_image.run_completion")

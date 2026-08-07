@@ -1551,6 +1551,14 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
     header_row = rows[0]
     columns = [c.strip().strip('"\'') for c in header_row]
 
+    key_value_header_cells = sum(
+        bool(re.match(r"^[A-Za-z_][\w.-]*\s*=", column))
+        for column in columns
+    )
+    if key_value_header_cells == common_width:
+        # Delimited key=value records are line-oriented data, not a header row.
+        return False, CsvInfo()
+
     # Check if first row looks like a header (non-numeric, reasonable names).
     try:
         looks_like_header = csv.Sniffer().has_header(sample_text)

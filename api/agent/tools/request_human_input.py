@@ -7,6 +7,10 @@ from api.models import CommsChannel, PersistentAgent
 from .credential_solicitation import CREDENTIAL_SOLICITATION_ERROR_MESSAGE, request_solicits_credential_value
 
 
+def _validation_error(message: str) -> dict[str, Any]:
+    return {"status": "error", "message": message, "retryable": True}
+
+
 def _coerce_optional_bool(raw: Any) -> bool | None:
     if raw is None:
         return None
@@ -64,11 +68,12 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "options": {
                 "type": "array",
                 "items": option_schema,
+                "minItems": 2,
                 "maxItems": MAX_OPTION_COUNT,
-                "description": f"Distinct choices, usually 2-3 and at most {MAX_OPTION_COUNT}; omit only for a free-text blocker.",
+                "description": f"Distinct choices, usually 2-3 and at most {MAX_OPTION_COUNT}.",
             },
         },
-        "required": ["question"],
+        "required": ["question", "options"],
     }
 
     return {
@@ -76,18 +81,16 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Tracked non-credential choices; credentials use secure_credentials_request. Guided intake makes one "
-                "tool call after orientation, alone with empty content: top-level question/options for one decision or "
-                "requests for several independent decisions. Count follows the real ambiguity, not a quota. Each intake "
-                f"card has 2-{MAX_OPTION_COUNT} options (usually 2-3), each with title and one-sentence description; "
-                "never bundle decisions, say select-all, mix free text, survey preferences, or silently default a "
-                "material boundary. category example choices are not blockers: when a user asks for targets/scope "
-                "before setup or they would block a recurring monitor, choose and disclose a sensible example rather "
-                "than asking which vendor/company. Web cards stay pending; follow result guidance to mirror exact cards "
-                "to a separate preferred email/SMS. Ask later only when evidence reveals a consequential choice. Outside intake, "
-                "omit options only for a genuine free-text blocker; use message tools for non-blocking questions. "
-                "Missing email/SMS recipient/detail blocks content lookup: call once with false; no preflight/search/chat/SQLite; "
-                "generic roles do not count. "
+                "Use when required non-credential information is missing and work must wait; credentials use "
+                "secure_credentials_request. Missing email/SMS recipient/detail is a free-text blocker: call once with "
+                "will_continue_work=false; do not search, message, or inspect SQLite first, and a generic role is not a recipient. "
+                "For guided intake, use one call after the single required lookup for a named subject; otherwise call directly. "
+                "Use question/options for one decision "
+                "or requests for several. Each request asks one question; its options are alternative answers to that question, "
+                "not labels for other questions. Use 2-3 clear choices unless more are truly needed; do not bundle decisions "
+                "or silently choose a material boundary. Choose and disclose sensible defaults for reversible details instead "
+                "of asking a survey. Web cards stay pending; mirror them to email/SMS only when result guidance says to. "
+                "Outside intake, omit options only for a genuine free-text blocker; use message tools for non-blocking questions. "
                 f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
             "parameters": {
@@ -101,6 +104,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "options": {
                         "type": "array",
                         "items": option_schema,
+                        "minItems": 2,
                         "maxItems": MAX_OPTION_COUNT,
                         "description": f"Intake requires 2-{MAX_OPTION_COUNT} distinct choices; omit only for a free-text blocker.",
                     },
@@ -134,30 +138,22 @@ def _normalize_request_options(raw_options: Any) -> tuple[list[dict[str, Any]] |
     if raw_options is None:
         return None, None
     if not isinstance(raw_options, list):
-        return None, {
-            "status": "error",
-            "message": "Invalid parameter: options must be an array when provided.",
-        }
+        return None, _validation_error("Invalid parameter: options must be an array when provided.")
+    if len(raw_options) == 1:
+        return None, _validation_error(
+            "Options must be omitted for a free-text question or include at least 2 distinct choices."
+        )
     if raw_options and len(raw_options) > MAX_OPTION_COUNT:
-        return None, {
-            "status": "error",
-            "message": f"Options cannot exceed {MAX_OPTION_COUNT} items.",
-        }
+        return None, _validation_error(f"Options cannot exceed {MAX_OPTION_COUNT} items.")
 
     options: list[dict[str, Any]] = []
     for raw_option in raw_options or []:
         if not isinstance(raw_option, dict):
-            return None, {
-                "status": "error",
-                "message": "Invalid option payload. Each option must be an object.",
-            }
+            return None, _validation_error("Invalid option payload. Each option must be an object.")
         option_title = str(raw_option.get("title") or "").strip()
         option_description = str(raw_option.get("description") or "").strip()
         if not option_title or not option_description:
-            return None, {
-                "status": "error",
-                "message": "Each option must include title and description.",
-            }
+            return None, _validation_error("Each option must include title and description.")
         options.append(
             {
                 "title": option_title,
@@ -171,23 +167,14 @@ def _normalize_recipient(raw_recipient: Any) -> tuple[dict[str, str] | None, dic
     if raw_recipient is None:
         return None, None
     if not isinstance(raw_recipient, dict):
-        return None, {
-            "status": "error",
-            "message": "Invalid parameter: recipient must be an object when provided.",
-        }
+        return None, _validation_error("Invalid parameter: recipient must be an object when provided.")
 
     channel = str(raw_recipient.get("channel") or "").strip().lower()
     address = str(raw_recipient.get("address") or "").strip()
     if channel not in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}:
-        return None, {
-            "status": "error",
-            "message": "Recipient channel must be one of: web, email, sms.",
-        }
+        return None, _validation_error("Recipient channel must be one of: web, email, sms.")
     if not address:
-        return None, {
-            "status": "error",
-            "message": "Recipient address is required when recipient is provided.",
-        }
+        return None, _validation_error("Recipient address is required when recipient is provided.")
 
     return {
         "channel": channel,
@@ -208,24 +195,15 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
         raw_requests = params.get("questions")
     if raw_requests is not None:
         if not isinstance(raw_requests, list) or not raw_requests:
-            return {
-                "status": "error",
-                "message": "Invalid parameter: requests must be a non-empty array when provided.",
-            }
+            return _validation_error("Invalid parameter: requests must be a non-empty array when provided.")
 
         requests: list[dict[str, Any]] = []
         for raw_request in raw_requests:
             if not isinstance(raw_request, dict):
-                return {
-                    "status": "error",
-                    "message": "Each request must be an object.",
-                }
+                return _validation_error("Each request must be an object.")
             question = str(raw_request.get("question") or "").strip()
             if not question:
-                return {
-                    "status": "error",
-                    "message": "Each request must include question.",
-                }
+                return _validation_error("Each request must include question.")
             options, error = _normalize_request_options(raw_request.get("options"))
             if error:
                 return error
@@ -249,10 +227,7 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
 
     question = str(params.get("question") or "").strip()
     if not question:
-        return {
-            "status": "error",
-            "message": "Missing required parameter: question.",
-        }
+        return _validation_error("Missing required parameter: question.")
 
     options, error = _normalize_request_options(params.get("options"))
     if error:

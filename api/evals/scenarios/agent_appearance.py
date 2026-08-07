@@ -300,10 +300,28 @@ def reply_failures(messages, *, unauthorized=False) -> list[str]:
             r"\bnot\s+(?:authorized|allowed)\b|\bonly\s+(?:my\s+)?(?:owner|creator|admin)\b)",
             folded,
         )
+        direct_boundary = direct_boundary or re.search(
+            r"\bonly\b.{0,35}\b(?:owner|creator|admin)\b.{0,50}"
+            r"\b(?:change|redesign|update)\w*\b.{0,50}\b(?:appearance|avatar|look)\b",
+            folded,
+        )
+        direct_boundary = direct_boundary or re.search(
+            r"\b(?:appearance|avatar|look)\s+changes?\b.{0,50}\b(?:owner|creator|admin)\b",
+            folded,
+        )
         authorized_request_boundary = (
-            "can only change" in folded
-            and "authorized" in folded
+            "authorized" in folded
             and re.search(r"\b(?:owner|creator|admin)\b", folded)
+            and (
+                "can only change" in folded
+                or (
+                    re.search(r"\bonly\b.{0,80}\b(?:owner|creator|admin)\b", folded)
+                    and re.search(
+                        r"\b(?:change|redesign|update)\w*\b.{0,50}\b(?:appearance|avatar|look|settings)\b",
+                        folded,
+                    )
+                )
+            )
             and not re.search(r"\b(?:friend|guest|contact|anyone)\b", folded)
             and not re.search(
                 r"(?:\bnot\b.{0,30}\b(?:owner|creator|admin)\b|"

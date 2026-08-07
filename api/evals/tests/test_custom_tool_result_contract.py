@@ -75,7 +75,8 @@ class CustomToolResultContractEvaluatorTests(SimpleTestCase):
             )
         )
 
-        self.assertIn("whose correct result is clear", prompt)
+        self.assertIn("test its main work path", prompt)
+        self.assertIn("whose result is clear", prompt)
         self.assertIn("fix the same source file and retest it", prompt)
 
 

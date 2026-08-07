@@ -119,7 +119,7 @@ DISCORD_REACTION_CASES = (
         description="A lightweight shared win should receive a natural celebratory reaction.",
         body="The checkout fix is live and CI is green now 🎉",
         expected_action="reaction",
-        allowed_emojis=("🎉", "🥳", "🙌", "🔥", "✅", "🚀", "💚", "❤️", "👍"),
+        allowed_emojis=("🎉", "🎊", "🥳", "🙌", "🔥", "✅", "🚀", "💚", "❤️", "👍"),
     ),
     DiscordReactionCase(
         slug=DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,

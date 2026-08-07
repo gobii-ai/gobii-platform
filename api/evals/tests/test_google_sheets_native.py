@@ -79,6 +79,8 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         policy = scenario._eval_stop_policy()
 
         self.assertIn("update_plan", policy["ignored_tool_names"])
+        self.assertEqual(policy["stop_on_tool_names_after_execution"], ["send_chat_message"])
+        self.assertNotIn("stop_on_tool_names_after_finish", policy)
 
     def test_format_responses_accept_consistent_formatting_language(self):
         create_case = next(case for case in GOOGLE_SHEETS_NATIVE_CASES if case.slug == GOOGLE_SHEETS_NATIVE_CREATE_AND_FORMAT)
@@ -97,9 +99,23 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         with patch("api.agent.system_skills.defaults._native_integration_connected", return_value=True):
             instructions = GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.prompt_instructions_renderer(SimpleNamespace())
 
-        self.assertIn("one metadata inspection is usually enough", instructions)
-        self.assertIn("after a successful `batchUpdate`", instructions)
-        self.assertIn("instead of doing extra readback verification", instructions)
+        self.assertIn("inspect metadata once", instructions)
+        self.assertIn("make one `batchUpdate` and reply", instructions)
+        self.assertIn("do not verify a successful update", instructions)
+
+    def test_native_guidance_has_simple_non_overlapping_paths(self):
+        with patch("api.agent.system_skills.defaults._native_integration_connected", return_value=True):
+            instructions = GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.prompt_instructions_renderer(SimpleNamespace())
+
+        self.assertIn("Exact spreadsheet ID and A1 range", instructions)
+        self.assertIn("build URLs from that ID", instructions)
+        self.assertIn("If no file is returned", instructions)
+        self.assertIn("PUT all requested cells once", instructions)
+        self.assertIn("never reuse a result URL or link", instructions)
+        self.assertIn("containing four request objects", instructions)
+        self.assertIn("do not read back, rewrite a column, or repeat a call", instructions)
+        self.assertIn("`updateSheetProperties` to freeze row 1", instructions)
+        self.assertIn("`repeatCell`", instructions)
 
     def test_existing_format_mock_returns_one_reply_per_request(self):
         case = next(
@@ -197,6 +213,22 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
             )
         )
 
+    def test_chart_helper_write_mock_rejects_missing_values_body(self):
+        case = next(
+            case for case in GOOGLE_SHEETS_NATIVE_CASES
+            if case.slug == GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA
+        )
+        put_rules = [
+            rule for rule in case.http_rules
+            if (rule.get("param_equals") or {}).get("method") == "PUT"
+        ]
+        url = "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Models!D1:D4"
+
+        empty_match = next(rule for rule in put_rules if _eval_mock_rule_matches(rule, {"method": "PUT", "url": url, "body": ""}))
+        values_match = next(rule for rule in put_rules if _eval_mock_rule_matches(rule, {"method": "PUT", "url": url, "body": '{"values":[[8],[7],[7]]}'}))
+        self.assertEqual(empty_match["result"]["status"], "error")
+        self.assertEqual(values_match["result"]["status"], "ok")
+
     def test_create_default_columns_prompt_provides_source_rows(self):
         case = next(
             case
@@ -241,6 +273,7 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
             {
                 "method": "PUT",
                 "url": "https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/Leads!F1:F10",
+                "body": '{"values":[[8]]}',
             },
         )
 

@@ -595,7 +595,7 @@ class AgentSkillsPersistenceTests(TestCase):
 
         self.assertIn("System Skill: Custom Tool Development", block)
         self.assertIn(f"Tools: {CREATE_CUSTOM_TOOL_NAME}", block)
-        self.assertIn("Use `create_custom_tool` to create or update sandboxed Python tools", block)
+        self.assertIn("Use a custom tool for repeated API/MCP calls", block)
         self.assertIn("Current custom-tool state:", block)
         self.assertIn("Custom tools: 1 saved, 1 enabled.", block)
         self.assertIn("custom_alpha", block)

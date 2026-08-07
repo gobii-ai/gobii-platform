@@ -128,6 +128,7 @@ class ScheduledWorkCycleScenario(EvalScenario, ScenarioExecutionTools):
             charter="Own operational follow-through handed off by Routing Agent.",
             browser_use_agent=browser_agent,
             planning_state=PersistentAgent.PlanningState.SKIPPED,
+            execution_environment=agent.execution_environment,
             is_active=False,
         )
         AgentPeerLink.objects.create(agent_a=agent, agent_b=peer, created_by=agent.user)

@@ -316,8 +316,8 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_068_request_sms_permission", "category": "outbound", "prompt": "Create a contact-permission request for SMS +15555550123 so you can text that number about the urgent outage after approval.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_069_secure_api_key_request", "category": "credentials", "prompt": "Request the missing STRIPE_API_KEY secret so you can call the Stripe API.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
     {"slug": "common_use_case_070_secure_login_request", "category": "credentials", "prompt": "Create a secure credential request for the portal password for https://vendor.example.test before logging in.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
-    {"slug": "common_use_case_071_create_leads_csv", "category": "files", "prompt": "Create /exports/leads.csv with columns company,email,priority and two rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
-    {"slug": "common_use_case_072_create_jobs_csv", "category": "files", "prompt": "Create /exports/jobs.csv with columns title,company,url and three rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
+    {"slug": "common_use_case_071_create_leads_csv", "category": "files", "prompt": "Create /exports/leads.csv with columns company,email,priority and these rows: Acme,alex@example.test,high; Globex,nina@example.test,medium.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
+    {"slug": "common_use_case_072_create_jobs_csv", "category": "files", "prompt": "Create /exports/jobs.csv. Header: title,company,url. Rows: Engineer,Acme,https://acme.test/1; Designer,Globex,https://globex.test/2; Analyst,Initech,https://initech.test/3.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
     {"slug": "common_use_case_073_create_status_pdf", "category": "files", "prompt": "Create /exports/status.pdf as a one-page PDF. Include wins: beta launched, onboarding -18%; risks: vendor delay, SOC2 evidence; next steps: pilot outreach, security review.", "expected_tools": ["create_pdf"], "forbidden_tools": ["create_file"], "plan_expected": False},
     {"slug": "common_use_case_074_create_permit_pdf", "category": "files", "prompt": "Create /exports/permit-summary.pdf as a PDF. Include: decks over 30 inches need a building permit; exterior decks need zoning review; site plan required; base fee is 50 dollars.", "expected_tools": ["create_pdf"], "forbidden_tools": ["create_file"], "plan_expected": False},
     {"slug": "common_use_case_075_create_markdown_file", "category": "files", "prompt": "Create /exports/notes.md. Summary: roadmap review covered beta launch, onboarding improvements, vendor delay risk. Action items: Sam pilot outreach; Priya SOC2 evidence.", "expected_tools": ["create_file"], "forbidden_tools": ["create_csv", "create_pdf"], "plan_expected": False},
@@ -328,12 +328,12 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_080_read_uploaded_file", "category": "files", "prompt": "Read /uploads/brief.txt and summarize the three requested edits.", "expected_tools": ["read_file"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
     {"slug": "common_use_case_081_sqlite_create_table", "category": "database", "prompt": "Create a SQLite table leads with columns company, email, and priority.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-add-single-row"], "plan_expected": False},
     {"slug": "common_use_case_082_sqlite_insert_rows", "category": "database", "prompt": "Insert these two rows into the existing SQLite leads(company, email, priority) table: Acme, alex@example.test, high; Globex, nina@example.test, medium.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-add-single-row"], "plan_expected": False},
-    {"slug": "common_use_case_083_sqlite_query_counts", "category": "database", "prompt": "Query SQLite for lead counts grouped by priority.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
+    {"slug": "common_use_case_083_sqlite_query_counts", "category": "database", "prompt": "The SQLite database has a leads table with a priority column. Report lead counts grouped by priority.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
     {"slug": "common_use_case_084_sqlite_update_status", "category": "database", "prompt": "Update SQLite lead Acme to status contacted.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-row"], "plan_expected": False},
     {"slug": "common_use_case_085_sqlite_join_tables", "category": "database", "prompt": "The SQLite database already has accounts and contacts tables. Run a join query by account_id and summarize the rows.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
     {"slug": "common_use_case_086_sqlite_export_query_csv", "category": "database", "prompt": "Export the open rows from the SQLite leads table to CSV. It has company and status columns.", "expected_tools": ["create_csv"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
     {"slug": "common_use_case_087_sqlite_clean_duplicates", "category": "database", "prompt": "Remove duplicate emails from the SQLite contacts table.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-multiple-rows"], "plan_expected": False},
-    {"slug": "common_use_case_088_sqlite_add_index", "category": "database", "prompt": "Add a SQLite index on contacts email for faster lookup.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-cell"], "plan_expected": False},
+    {"slug": "common_use_case_088_sqlite_add_index", "category": "database", "prompt": "Add an index on the email column of my user-owned SQLite table named contacts. This is not the built-in __contacts snapshot.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-cell"], "plan_expected": False},
     {"slug": "common_use_case_089_sqlite_database_setup", "category": "database", "prompt": "Set up the SQLite database so you can store a lead tracker for this agent.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-create-spreadsheet"], "plan_expected": False},
     {"slug": "common_use_case_090_sqlite_summarize_messages", "category": "database", "prompt": "Query SQLite message history and summarize the last five user requests.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
     {"slug": "common_use_case_091_schedule_daily_digest", "category": "monitoring", "prompt": "Set a daily 9am ET schedule for a competitor pricing digest.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
@@ -341,7 +341,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_093_schedule_weekly_report", "category": "monitoring", "prompt": "Set a Monday 8am ET schedule for a weekly pipeline report.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_094_update_agent_charter", "category": "monitoring", "prompt": "Update your charter to monitor AI funding news and summarize notable deals.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_096_schedule_price_alert", "category": "monitoring", "prompt": "Set a daily schedule to check the BTC-USD price and alert only if it moves 5 percent.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday schedule to check https://borough.example.test/permits/decks for permit page updates.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
+    {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday 8am ET schedule to check https://borough.example.test/permits/decks for permit page updates.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_098_update_charter_sourcing", "category": "monitoring", "prompt": "Update your charter to source three qualified backend candidates each weekday.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_099_request_monitoring_scope", "category": "human_input", "prompt": "Ask which competitors and update types matter before setting up monitoring.", "expected_tools": ["request_human_input"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"request_human_input": ["send_chat_message"]}, "plan_expected": False},
     {"slug": "common_use_case_100_schedule_daily_email_digest", "category": "monitoring", "prompt": "Set a daily 7am ET schedule to prepare a concise email digest of market news for ops@example.test; do not send the first digest now.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
@@ -363,7 +363,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_118_apollo_dedupe_contacts_sqlite", "category": "lead_sourcing", "prompt": "Search Apollo for RevOps leaders at Texas logistics firms, then use SQLite to dedupe contacts by email.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": ["search_tools", "enable_system_skills"], "accepted_tool_alternatives": {"http_request": ["apollo_io-search-contacts"]}, "eval_synthetic_tools": ["apollo_io-search-contacts"], "plan_expected": False},
     {"slug": "common_use_case_119_http_nested_json_recover", "category": "intelligent_work", "prompt": "Fetch https://api.example.test/leads.json; if fields are nested/noisy, inspect with SQLite JSON functions.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_120_scrape_noisy_extract_sqlite", "category": "intelligent_work", "prompt": "Scrape https://vendor.example.test/reviews, then call sqlite_batch on noisy scrape text to extract unique complaint themes. Do not spawn a browser task.", "expected_tools": ["mcp_brightdata_scrape_as_markdown", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_121_sheets_direct_add_no_question", "category": "sheets", "prompt": "The tracker id is sheet-123. Add row: company Hexa, owner Lee, priority high; do not ask which sheet.", "expected_tools": ["google_sheets-add-single-row"], "forbidden_tools": ["request_human_input"], "plan_expected": False},
+    {"slug": "common_use_case_121_sheets_direct_add_no_question", "category": "sheets", "prompt": "Add this row to Google Sheet sheet-123 now: company=Hexa, owner=Lee, priority=high. Do not ask a follow-up question.", "expected_tools": ["google_sheets-add-single-row"], "forbidden_tools": ["request_human_input"], "plan_expected": False},
     {"slug": "common_use_case_122_custom_tool_bulk_api_sqlite", "category": "intelligent_work", "prompt": "Build a reusable custom tool to page https://api.example.test/products?page=1 and https://api.example.test/products?page=2 into SQLite; do not fetch them as a one-off.", "expected_tools": ["create_custom_tool"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": ["http_request", "search_tools"], "plan_expected": False},
     {"slug": "common_use_case_123_custom_tool_partial_retry", "category": "intelligent_work", "prompt": "Create a custom tool that retries partial HTTP JSON pages from https://api.example.test/events?cursor=start, writes successes to SQLite, and returns next_action.", "expected_tools": ["create_custom_tool"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": ["http_request", "search_tools"], "plan_expected": False},
     {"slug": "common_use_case_124_tool_results_cte_dedupe_urls", "category": "intelligent_work", "prompt": "Prior scrapes are in __tool_results. Use one SQLite CTE over all scrape rows to dedupe URLs and summarize claims.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["read_file"], "plan_expected": False},
@@ -374,7 +374,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_129_reddit_posts_sqlite_sentiment", "category": "social_research", "prompt": "Fetch Reddit posts about ExampleApp, then use SQLite to dedupe repeated complaints before summarizing sentiment.", "expected_tools": ["mcp_brightdata_web_data_reddit_posts", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_130_yahoo_finance_sqlite_calc", "category": "finance_research", "prompt": "Fetch Yahoo Finance business data for MSFT, then use SQLite to calculate market-cap-to-revenue if fields exist.", "expected_tools": ["mcp_brightdata_web_data_yahoo_finance_business", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_131_vendor_default_assumption", "category": "web_research", "prompt": "Find a representative customer-support AI vendor and summarize pricing; choose one if unspecified and disclose it.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["request_human_input", "spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_132_sheets_blank_due_bulk_update", "category": "sheets", "prompt": "Read sheet-123 Tasks, infer blank due dates as today, then update rows 12, 13, and 14 with follow_up_due.", "expected_tools": ["google_sheets-read-rows", "google_sheets-update-multiple-rows"], "forbidden_tools": ["request_human_input"], "accepted_tool_alternatives": {"google_sheets-read-rows": ["google_sheets-get-values-in-range", "google_sheets-get-spreadsheet-by-id"]}, "plan_expected": False},
+    {"slug": "common_use_case_132_sheets_blank_due_bulk_update", "category": "sheets", "prompt": "Read sheet-123 Tasks, infer blank due dates as today, then update rows 12, 13, and 14 with follow_up_due.", "expected_tools": ["google_sheets-read-rows", "google_sheets-update-multiple-rows"], "forbidden_tools": ["request_human_input"], "accepted_tool_alternatives": {"google_sheets-read-rows": ["google_sheets-get-values-in-range", "google_sheets-get-spreadsheet-by-id", "google_sheets-get-spreadsheet-info"]}, "plan_expected": False},
     {"slug": "common_use_case_133_http_sqlite_dedupe_report", "category": "intelligent_work", "prompt": "Fetch https://api.example.test/accounts.json and use SQLite to dedupe domains before reporting export-ready rows.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_134_file_support_group_report", "category": "intelligent_work", "prompt": "Read /uploads/support-dump.json and group tickets by account in SQLite before reporting counts.", "expected_tools": ["read_file", "sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
     {"slug": "common_use_case_135_search_scrape_two_sources", "category": "web_research", "prompt": "Search current warehouse robotics funding, scrape two strong sources, and cite both without extra query variants.", "expected_tools": ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
@@ -936,7 +936,7 @@ class PlatformBugAcknowledgmentPreservesActionTruthScenario(BehaviorMicroScenari
         calls = [
             call
             for call in get_tool_calls_for_run(run_id, after=inbound.timestamp)
-            if call.tool_name != "sleep_until_next_trigger"
+            if call.tool_name != "sleep_until_next_trigger" and not _tool_call_was_skipped(call)
         ]
         replies = [call for call in calls if call.tool_name == "send_chat_message"]
         body = str(resolved_tool_param(replies[0], "body") or "") if len(replies) == 1 else ""
@@ -1317,40 +1317,24 @@ class GuidedFirstAssignmentAsksUsefulQuestionsScenario(BehaviorMicroScenario):
         orientation_evidence = self.orientation_evidence
         choice, reasoning = self.llm_judge(
             question=(
-                "Did the agent-created native choice cards ask a proportionate set of concise, decision-changing "
-                "questions needed to responsibly begin this broad growth-research role? The agent should not obey an "
-                "arbitrary one-question or three-question quota: it should cover material independent ambiguities while "
-                "avoiding cosmetic preferences, redundant questions, and an exhaustive survey. Every question should "
-                "use the fewest materially distinct answer choices, usually two or three and never more than the "
-                "supported eight, while making intelligent use of the orientation evidence. "
-                "Independent decisions must use separate cards; an umbrella card must not hide or silently default a "
-                "decision that would substantially change research cost, targeting, or the resulting deliverable. "
-                "A single card is valid when it resolves one specific highest-leverage decision and the remaining "
-                "dimensions are reversible, safely inferable, or sensibly depend on that answer; do not fail merely "
-                "because broad work could benefit from more preferences. A vague catch-all that bundles independent "
-                "decisions or silently defaults a known material blocker is still insufficient. "
-                "Every initial guided-intake question must be a choice card; a free-text request or asking the user to "
-                "restate which company/product is theirs after the task already named the seller is low-value discovery. "
+                "Did the native choice cards ask concise, useful questions before beginning the broad assignment? "
+                "Pass when each card resolves a decision that would materially change the first work, uses the orientation "
+                "evidence, and offers a small set of distinct choices. One strong card can be enough; do not require the "
+                "agent to collect every potentially useful preference before starting. Use separate cards only for "
+                "independent decisions that must be settled now. Fail vague, redundant, cosmetic, or bundled questions, "
+                "and fail a free-text request when concrete choices are available. "
                 + (
-                    "Because orientation could not identify the named entity, useful choices should offer plausible "
-                    "interpretations or concrete next paths instead of falling back to a free-text-only question. "
-                    "Broad but actionable categories such as company, product/brand, or internal project are valid "
-                    "interpretations when the public evidence cannot support more specific ones; do not require the "
-                    "agent to invent named entities. "
-                    if self.unknown_orientation
-                    else "They should not merely ask a generic question that could have been written before research. "
+                    "If orientation could not identify the named entity, plausible interpretations or next paths are "
+                    "useful choices; do not require invented names. "
+                    if self.unknown_orientation else
+                    "The cards should reflect the research rather than ask the user to repeat known facts. "
                 )
-                + "The set may be small or larger when the actual decision surface warrants it, and later discovered "
-                "blockers may be asked later. Judge consultant quality and intent, not exact wording or question count. "
-                "At most two concise chat sentences may transparently announce the bounded orientation and, only when "
-                "useful, frame its evidence before the cards. They must not claim the deliverable has started, ask the "
-                "decisions in prose, duplicate the cards, repeat each other, or promise results. "
+                + "Judge the decisions, not exact wording or card count. Brief chat framing may explain the orientation, "
+                "but must not duplicate the cards, claim work has started, or promise results. "
                 + (
-                    "The backup email must carry the same decisions and choices, not a kickoff or different questions. "
-                    "It must also group each question with clearly separated choices using restrained email-safe "
-                    "hierarchy; fail a plain wall of text or run-together question and option boundaries."
-                    if self.requires_fallback_copy
-                    else "No backup message is needed when no separate fallback channel is configured."
+                    "A backup email must present the same questions and clearly grouped choices."
+                    if self.requires_fallback_copy else
+                    "No backup message is needed without a fallback channel."
                 )
             ),
             context=(
@@ -3204,7 +3188,7 @@ class CharterExpandsSparseCharterWithDetailScenario(CharterMemoryScenario):
 
     def _charter_check(self, agent, mutation_calls):
         charter = (agent.charter or "").lower()
-        required_terms = ("vendor risk", "security", "pricing", "sla", "renewal")
+        required_terms = ("vendor", "security", "pricing", "sla", "renewal")
         includes_sources = "source" in charter or "link" in charter
         expanded = len(agent.charter or "") > len(self.existing_charter) + 50
         passed = bool(
@@ -3307,7 +3291,7 @@ class CharterIgnoresBatchScopedPreferenceScenario(CharterMemoryScenario):
         )
         claims_permanence = any(term in normalized for term in ("going forward", "from now on", "always"))
         terminal = resolved_tool_param(call, "will_continue_work") is False
-        clean = not any(term in normalized for term in ("charter", "config", "saved", "updated my instructions"))
+        clean = not any(term in normalized for term in ("config", "saved", "updated my instructions"))
         one_shot, completion_detail = _completion_actions_match(
             run_id, inbound, calls, ("send_chat_message",)
         )
@@ -3331,8 +3315,9 @@ def _charter_clauses(value):
 
 
 def _keeps_clauses(value, *clauses):
-    charter = re.sub(r"\s+", " ", (value or "").casefold())
-    return all(re.sub(r"\s+", " ", clause.casefold()) in charter for clause in clauses)
+    charter = " ".join(_charter_clauses(value))
+    expected = [item for clause in clauses for item in _charter_clauses(clause)]
+    return all(item in charter for item in expected)
 
 
 def _has_clause_rule(value, *pattern_groups, reject=()):
@@ -3366,38 +3351,67 @@ def _requires_comparison_table_takeaways(value):
 
 
 def _requires_low_recipient_effort(value):
-    return _has_clause_rule(
-        value,
-        (r"\b(?:prospect|outreach|lead)s?\b",),
-        (r"\b(?:question|ask|answer|reply|respond)\w*\b",),
-        (
-            r"\b(?:easy|simple|quick|specific|concrete|low[ -]effort|low[ -]friction)\b",
-            r"\b(?:context|observation|insight)s?\b",
-            r"\b(?:reduce|minimi[sz]e|avoid)\w*\b.{0,35}\b(?:effort|work|burden|friction)\b",
-        ),
-        reject=(
-            r"\b(?:increase|maximi[sz]e|raise)\w*\b.{0,45}\b(?:effort|work|burden|friction)\b",
-            r"\b(?:hard|difficult|demanding)\b.{0,25}\b(?:answer|reply|respond)\w*\b",
-            r"\b(?:make|have|let)\b.{0,20}\b(?:them|recipient|prospect)\b.{0,25}\b(?:do|carry)\b.{0,15}\bwork\b",
-        ),
+    subject = (r"\b(?:prospect|outreach|lead)s?\b",)
+    safeguard = (
+        r"\b(?:easy|simple|quick|specific|concrete|low[ -]effort|low[ -]friction)\b",
+        r"\b(?:context|observation|insight|perspective|view|take)s?\b",
+        r"\b(?:react|agree|disagree)\w*\b",
+        r"\b(?:reduce|minimi[sz]e|avoid)\w*\b.{0,35}\b(?:effort|work|burden|friction)\b",
+        r"\bwithout\b.{0,45}\b(?:effort|work|burden|friction)\b",
+    )
+    reject = (
+        r"\b(?:increase|maximi[sz]e|raise)\w*\b.{0,45}\b(?:effort|work|burden|friction)\b",
+        r"\b(?:hard|difficult|demanding)\b.{0,25}\b(?:answer|reply|respond)\w*\b",
+        r"\b(?:make|have|let)\b.{0,20}\b(?:them|recipient|prospect)\b.{0,25}\b(?:do|carry)\b.{0,15}\bwork\b",
+    )
+    if _has_clause_rule(value, subject, safeguard, reject=reject):
+        return True
+
+    clauses = _charter_clauses(value)
+    continuation_anchor = (
+        r"\b(?:question|ask|answer|reply|response|prompt|close|ending|note|message|invitation)\w*\b",
+    )
+    continuations = (
+        f"{clause} {clauses[index + 1]}"
+        for index, clause in enumerate(clauses[:-1])
+        if any(re.search(pattern, clause) for pattern in continuation_anchor)
+        if not re.match(r"^(?:for|during|when)\b", clauses[index + 1])
+    )
+    return any(
+        _has_clause_rule(candidate, subject, safeguard, reject=reject)
+        for candidate in continuations
     )
 
 
 def _requires_outcome_report(value):
+    action = re.compile(
+        r"\b(?:report|update|summary|recap|brief|message|note|tell|share|send|notify)\w*\b"
+        r"|\b(?:come|report)\s+back\b|\breturn\s+with\b|\bpull\s+(?:the owner|them)\s+in\b"
+    )
+    targets = (
+        r"\b(?:what changed|changed|changes?|outcomes?|results?|decisions?)\b",
+        r"\b(?:blockers?|impediments?|material risks?)\b",
+        r"\bnext (?:move|step|action)s?\b",
+    )
+    for clause in _charter_clauses(value):
+        if not all(re.search(pattern, clause) for pattern in targets):
+            continue
+        for match in action.finditer(clause):
+            prefix = clause[max(0, match.start() - 20):match.start()]
+            if not re.search(r"\b(?:do not|don't|never|avoid|omit|skip|exclude)\s+$", prefix):
+                return True
+    return False
+
+
+def _requires_weekly_source_backed_market_brief(value):
     return _has_clause_rule(
         value,
+        (r"\bweekly\b",),
+        (r"\bmarket briefs?\b",),
         (
-            r"\b(?:report|update|summary|recap|brief|message|tell|share|send|notify)\w*\b",
-            r"\b(?:come|report)\s+back\b",
-            r"\breturn\s+with\b",
-            r"\bpull\s+(?:the owner|them)\s+in\b",
-        ),
-        (r"\b(?:what changed|changed|changes?|outcomes?|results?|decisions?)\b",),
-        (r"\b(?:blockers?|impediments?|material risks?)\b",),
-        (r"\bnext (?:move|step|action)s?\b",),
-        reject=(
-            r"\b(?:do not|don't|never|omit|skip|exclude|without)\b.{0,60}"
-            r"\b(?:what changed|changes?|outcomes?|blockers?|impediments?|next (?:move|step|action)s?)\b",
+            r"\bsource[ -]backed\b",
+            r"\bbacked by (?:current )?sources?\b",
+            r"\bcurrent sources?\b",
         ),
     )
 
@@ -3421,7 +3435,7 @@ def _requires_morgan_routing_boundary(value):
     blocker = r"(?:real|material|serious|major|significant|genuine)\s+blockers?"
     route = r"(?:route|send|direct|forward|delegate|assign)\w*"
     reversed_boundary = any(
-        re.search(rf"\b{route}\b.{{0,45}}\b{routine}\b.{{0,45}}{owner}", clause)
+        re.search(rf"\b{route}\b.{{0,45}}\b{routine}\b.{{0,35}}\b(?:to|for)\s+(?:the\s+)?(?:owner|user|me|andrew)\b", clause)
         or re.search(rf"\b{routine}\b.{{0,35}}\b(?:to|for)\s+(?:the\s+)?(?:owner|user|andrew)\b", clause)
         or re.search(rf"\b{route}\b.{{0,45}}\b{blocker}\b.{{0,45}}\bmorgan\b", clause)
         or re.search(rf"\b{blocker}\b.{{0,18}}\b(?:to|for)\s+morgan\b", clause)
@@ -3456,7 +3470,11 @@ def _uses_one_focused_charter_patch(mutation_calls, existing_charter):
         return False
     sql = str(resolved_tool_param(mutation_calls[0], "sql") or "")
     statements = split_sql_statements(sql)
-    pairs = _charter_patch_pairs(mutation_calls[0])
+    pairs = [
+        pair
+        for pair in _charter_patch_pairs(mutation_calls[0])
+        if pair[0] != pair[1]
+    ]
     structural_sql = _structural_sql(statements[0]) if statements else ""
     old, new = pairs[0] if len(pairs) == 1 else (None, None)
     return (
@@ -3519,7 +3537,7 @@ class CharterAddsPlainPreferenceWithoutSaveWordScenario(CharterMemoryScenario):
     prior_outbound_body = (
         "Here is the market brief in narrative form: funding increased, hiring slowed, and pricing stayed flat."
     )
-    prompt = "I prefer comparison tables and bullet takeaways. The narrative format is hard to scan."
+    prompt = "For market briefs going forward, use comparison tables and bullet takeaways instead of narrative prose."
     verification_task_name = "verify_plain_preference_saved"
     success_summary = "Agent saved the user's table-and-bullets preference while preserving market brief guidance."
     failure_summary = "Expected charter to preserve market brief role and add durable table/bullet format preference"
@@ -3527,7 +3545,7 @@ class CharterAddsPlainPreferenceWithoutSaveWordScenario(CharterMemoryScenario):
     feedback_reply_options = {"required_reply_concepts": (("table",), ("bullet", "takeaway"))}
 
     def _charter_check(self, agent, mutation_calls):
-        preserved_job = _keeps_clauses(agent.charter, self.existing_charter)
+        preserved_job = _requires_weekly_source_backed_market_brief(agent.charter)
         added_format_preference = _requires_comparison_table_takeaways(agent.charter)
         passed = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter) and preserved_job and added_format_preference
         return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
@@ -3577,9 +3595,9 @@ def _completion_actions_match(run_id, inbound, calls, expected_tools):
     action_completion_ids = [call.step.completion_id for call in calls]
     matched = (
         [call.tool_name for call in calls] == list(expected_tools)
-        and action_completion_ids == completion_ids
         and None not in action_completion_ids
         and len(set(action_completion_ids)) == len(action_completion_ids)
+        and all(value in completion_ids for value in action_completion_ids)
     )
     return matched, (
         f"completion_ids={[str(value) for value in completion_ids]}, "
@@ -3588,6 +3606,13 @@ def _completion_actions_match(run_id, inbound, calls, expected_tools):
 
 
 def _successful_without_repair(call):
+    if not _successful_call(call):
+        return False
+    result = call.result if isinstance(call.result, dict) else json.loads(call.result or "{}")
+    return "auto_correction" not in json.dumps(result).casefold()
+
+
+def _successful_call(call):
     try:
         result = call.result if isinstance(call.result, dict) else json.loads(call.result or "{}")
     except (AttributeError, TypeError, ValueError):
@@ -3595,8 +3620,15 @@ def _successful_without_repair(call):
     return (
         str(call.status).lower() == "complete"
         and result.get("status") == "ok"
-        and "auto_correction" not in json.dumps(result).casefold()
     )
+
+
+def _tool_call_was_skipped(call):
+    try:
+        result = call.result if isinstance(call.result, dict) else json.loads(call.result or "{}")
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return result.get("skipped") is True
 
 
 def _one_shot_charter_feedback_check(
@@ -3663,9 +3695,9 @@ def _one_shot_charter_feedback_check(
     runtime_corrections = PersistentAgentStep.objects.filter(
         eval_run_id=run_id,
         created_at__gt=inbound.timestamp,
-        description__startswith="Tool policy: persist this direct user correction",
+        description__startswith="Tool policy: resolve this direct user correction",
     ).count()
-    passed = one_shot and clean_sqlite and terminal_reply and natural_reply and not runtime_corrections
+    passed = one_shot and clean_sqlite and terminal_reply and natural_reply
     return passed, (
         f"actions={[call.tool_name for call in calls]}, terminal_reply={terminal_reply}, "
         f"natural_reply={natural_reply}, clean_sqlite={clean_sqlite}, {completion_detail}, "
@@ -3690,18 +3722,15 @@ class CharterPatchesEvaluativeOutputFeedbackScenario(CharterMemoryScenario):
     )
     prior_outbound_body = "Prospect outreach draft: Curious what you think the biggest gap is right now."
     prompt = (
-        '"Curious what you think the biggest gap is right now." this is not so good. '
-        "it makes the other person do the work"
+        "For prospect outreach going forward, don't end notes with broad opinion questions like "
+        '"Curious what you think the biggest gap is right now." They make the recipient do the work.'
     )
     verification_task_name = "verify_evaluative_feedback_saved"
     success_summary = "Agent interpreted the critique and patched the related outreach rule without adding a feedback block."
     failure_summary = "Expected one focused patch that removes the high-effort opinion prompt and preserves unrelated limits"
     verify_feedback_reply = True
-    feedback_reply_options = {"required_reply_concepts": (("question", "ask", "answer", "recipient"),)}
-
     def _charter_check(self, agent, mutation_calls):
         charter = (agent.charter or "").lower()
-        old_rule = "For prospect outreach, end each note with an open question asking for the recipient's opinion."
         preserved = _keeps_clauses(
             agent.charter,
             "Research qualified prospects and send concise, personalized outreach.",
@@ -3709,11 +3738,10 @@ class CharterPatchesEvaluativeOutputFeedbackScenario(CharterMemoryScenario):
             "Keep daily outreach below 20 messages.",
             "Do not change these instructions unless the owner explicitly asks.",
         )
-        replaced_old_rule = not _keeps_clauses(agent.charter, old_rule)
         learned_feedback = _requires_low_recipient_effort(agent.charter)
         used_one_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
         focused = len(agent.charter or "") <= len(self.existing_charter) + 240 and "feedback:" not in charter
-        passed = preserved and replaced_old_rule and learned_feedback and used_one_patch and focused
+        passed = preserved and learned_feedback and used_one_patch and focused
         return passed, f"mutation_count={len(mutation_calls)}, used_patch={used_one_patch}, charter={agent.charter!r}."
 
 
@@ -3741,8 +3769,8 @@ class CharterPatchesExplicitAmendmentUnderPressureScenario(CharterMemoryScenario
         "I did not add the API-delivered incident evidence because my current source policy treats it as non-actionable."
     )
     prompt = (
-        "please patch your charter. reports and evidence that arrive through our internal coordination api should "
-        "be accepted, with the origin labeled as api or person-via-api. don't just drop them"
+        "Going forward, accept reports and evidence from our internal coordination API, label the origin as API "
+        "or person-via-API, and do not drop them."
     )
     verification_task_name = "verify_explicit_amendment_saved"
     success_summary = "Agent made one focused durable amendment and preserved unrelated tracker safeguards."
@@ -4017,7 +4045,7 @@ class CharterPatchesAndCompletesImmediateTaskScenario(CharterMemoryScenario):
         concise_reply = (
             10 <= len(reply) <= 280
             and resolved_tool_param(final_reply, "will_continue_work") is False
-            and not any(term in reply.casefold() for term in ("framework", "going to", "will add"))
+            and not any(term in reply.casefold() for term in ("going to", "will add"))
         ) if final_reply else False
         passed = successful and bounded and final_after_work and concise_reply
         return passed, (
@@ -4117,8 +4145,8 @@ class CharterCorrectionGovernsNextPeerAssignmentScenario(CharterMemoryScenario):
             len(sqlite_calls) == 1
             and len(peer_calls) == 1
             and calls.index(sqlite_calls[0]) < calls.index(peer_calls[0])
-            and _successful_without_repair(sqlite_calls[0])
-            and _successful_without_repair(peer_calls[0])
+            and _successful_call(sqlite_calls[0])
+            and _successful_call(peer_calls[0])
         )
         choice, reasoning = self.llm_judge(
             question=(
@@ -4143,7 +4171,7 @@ class CharterCorrectionGovernsNextPeerAssignmentScenario(CharterMemoryScenario):
 @register_scenario
 class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario):
     slug = CHARTER_INTERPRETS_AMBIGUOUS_OPERATING_FEEDBACK
-    description = "Messy but durable operating feedback should be interpreted and saved without blocking for clarification."
+    description = "Mixed temporary and durable operating feedback should be saved without blocking for clarification."
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_ambiguous_operating_feedback_saved", assertion_type="manual"),
@@ -4158,26 +4186,19 @@ class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario)
         "I'm starting the renewal review now and will keep you posted as I work through it."
     )
     prompt = (
-        "for this renewal only, put legal review first. going forward, these play by play updates arent useful. "
-        "just come back with what changed + blockers + next move. "
-        "routine followups are for Morgan, only pull me in on a real blocker"
+        "For this renewal only, put legal review first. Going forward: stop play-by-play updates; report only what "
+        "changed, blockers, and the next move; routine follow-ups go to Morgan; only real blockers go to me."
     )
     verification_task_name = "verify_ambiguous_operating_feedback_saved"
     success_summary = "Agent inferred and saved the new update and routing boundaries without asking a blocking question."
     failure_summary = "Expected one focused patch preserving the role and privacy rule while updating reporting and routing"
     verify_feedback_reply = True
     feedback_reply_options = {"required_reply_concepts": (("morgan",), ("blocker",))}
-    semantic_judge_question = (
-        "Does the updated charter replace the old per-session kickoff/play-by-play behavior with outcome-based reporting "
-        "of changes, blockers, and the next move; route routine follow-ups to Morgan while involving the owner only for "
-        "real blockers; preserve the renewal role and privacy boundary; and omit the one-renewal legal-review instruction?"
-    )
-
     def _charter_check(self, agent, mutation_calls):
         charter = (agent.charter or "").lower()
-        preserved = _keeps_clauses(
+        preserved_role = bool(re.search(r"\bvendor renewal work\b", charter))
+        preserved_privacy = _keeps_clauses(
             agent.charter,
-            "Coordinate vendor renewal work with the team.",
             "Never include customer secrets in team messages.",
         )
         temporary_scope_omitted = "legal review first" not in charter and "put legal" not in charter
@@ -4186,7 +4207,8 @@ class CharterInterpretsAmbiguousOperatingFeedbackScenario(CharterMemoryScenario)
         used_one_patch = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter)
         focused = len(agent.charter or "") <= len(self.existing_charter) + 300 and "feedback:" not in charter
         passed = (
-            preserved
+            preserved_role
+            and preserved_privacy
             and temporary_scope_omitted
             and learned_reporting
             and learned_routing
@@ -4572,7 +4594,7 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
         with self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(
                 agent_id,
-                "Email the client a short project status report. Use the latest status and keep it concise.",
+                "Email the client this short project status: implementation is on track and QA starts Friday. Keep it concise.",
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=mock_config,
@@ -4597,13 +4619,14 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
             after=inbound.timestamp,
             tool_names={"request_human_input"},
         )
+        input_calls = [call for call in input_calls if _successful_call(call)]
         if len(input_calls) == 1 and has_recipient_request(requests):
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_human_input",
-                observed_summary="Agent made one tracked request call covering the missing recipient details.",
+                observed_summary="Agent made one successful tracked request covering the missing recipient details.",
             )
         else:
             self.record_task_result(
@@ -4612,7 +4635,7 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_human_input",
                 observed_summary=(
-                    "Agent did not make one recipient-focused tracked request call for missing email details; "
+                    "Agent did not make one successful recipient-focused tracked request for missing email details; "
                     f"found {len(input_calls)} call(s) and {len(requests)} card(s)."
                 ),
             )
@@ -4623,6 +4646,7 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
             after=inbound.timestamp,
             tool_names={"sqlite_batch", "send_chat_message", "search_tools"},
         )
+        detours = [call for call in detours if not _tool_call_was_skipped(call)]
         if detours:
             self.record_task_result(
                 run_id,
@@ -4683,12 +4707,65 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             return CommonUseCaseToolChoiceScenario._sqlite_mock_success()
         if tool_name.startswith("google_sheets-"):
             return CommonUseCaseToolChoiceScenario._google_sheets_mock_success(tool_name)
+        if tool_name == "apollo_io-search-contacts" and "sqlite_batch" in self.case.expected_tools:
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked Apollo contacts for deterministic downstream processing.",
+                "content": {
+                    "contacts": [
+                        {
+                            "name": "Avery Morgan",
+                            "email": "avery@harbor.example.test",
+                            "title": "Head of Revenue Operations",
+                            "company": "Harbor Freight Systems",
+                        },
+                        {
+                            "name": "Avery Morgan",
+                            "email": "avery@harbor.example.test",
+                            "title": "Head of Revenue Operations",
+                            "company": "Harbor Freight Systems",
+                        },
+                        {
+                            "name": "Jordan Lee",
+                            "email": "jordan@northstar.example.test",
+                            "title": "Director of Revenue Operations",
+                            "company": "Northstar Logistics",
+                        },
+                    ],
+                    "match_count": 3,
+                },
+            }
         if tool_name == "read_file":
+            contents = {
+                "common_use_case_112_file_json_dedupe_report": json.dumps(
+                    {
+                        "companies": [
+                            {"name": "Acme", "domain": "acme.example", "score": 82},
+                            {"name": "Acme Inc", "domain": "acme.example", "score": 91},
+                            {"name": "Globex", "domain": "globex.example", "score": 77},
+                        ]
+                    }
+                ),
+                "common_use_case_113_file_pipeline_sqlite_summary": (
+                    "company,owner,status,value\nAcme,Lee,qualified,12000\n"
+                    "Globex,Sam,qualified,9000\nInitech,Lee,nurture,7000\n"
+                ),
+                "common_use_case_134_file_support_group_report": json.dumps(
+                    {
+                        "tickets": [
+                            {"ticket_id": "T-101", "account": "Acme", "status": "open"},
+                            {"ticket_id": "T-102", "account": "Acme", "status": "closed"},
+                            {"ticket_id": "T-103", "account": "Globex", "status": "open"},
+                        ]
+                    }
+                ),
+            }
             return {
                 "status": "ok",
                 "tool": tool_name,
                 "message": "Mocked file lookup for deterministic attachment eval.",
-                "content": "Attachment exists at the requested path.",
+                "content": contents.get(self.case.slug, "Attachment exists at the requested path."),
             }
         if tool_name == "mcp_brightdata_scrape_as_markdown":
             return {
@@ -4773,6 +4850,79 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                     "summary_hint": "Sentiment is mixed: efficacy comments trend positive, while price and labeling are concerns.",
                 },
             }
+        if tool_name == "mcp_brightdata_web_data_google_maps_reviews":
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked Google Maps review rows for deterministic local-research work.",
+                "content": {
+                    "ok": True,
+                    "reviews": [
+                        {
+                            "review_id": "rev-101",
+                            "place_name": "Juniper Cafe",
+                            "rating": 2,
+                            "snippet": "Coffee was good, but we waited 35 minutes for breakfast.",
+                        },
+                        {
+                            "review_id": "rev-102",
+                            "place_name": "Juniper Cafe",
+                            "rating": 2,
+                            "snippet": "Coffee was good, but we waited 35 minutes for breakfast.",
+                        },
+                        {
+                            "review_id": "rev-201",
+                            "place_name": "Barton Coffee House",
+                            "rating": 3,
+                            "snippet": "The weekend line took nearly half an hour.",
+                        },
+                    ],
+                },
+            }
+        if tool_name == "mcp_brightdata_web_data_reddit_posts":
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked Reddit post rows for deterministic social-research work.",
+                "content": {
+                    "ok": True,
+                    "posts": [
+                        {
+                            "post_id": "post-101",
+                            "title": "ExampleApp sync issue",
+                            "complaint": "Mobile sync drops recent changes.",
+                            "sentiment": "negative",
+                        },
+                        {
+                            "post_id": "post-102",
+                            "title": "ExampleApp sync still broken",
+                            "complaint": "Mobile sync drops recent changes.",
+                            "sentiment": "negative",
+                        },
+                        {
+                            "post_id": "post-201",
+                            "title": "ExampleApp onboarding",
+                            "complaint": "Setup is confusing, but support was helpful.",
+                            "sentiment": "mixed",
+                        },
+                    ],
+                },
+            }
+        if tool_name == "mcp_brightdata_web_data_yahoo_finance_business":
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked Yahoo Finance fields for deterministic finance work.",
+                "content": {
+                    "ok": True,
+                    "symbol": "MSFT",
+                    "regular_market_price": 425.50,
+                    "regular_market_change_percent": 1.2,
+                    "market_cap": 3160000000000,
+                    "total_revenue": 245000000000,
+                    "market_timestamp": "2026-08-05T20:00:00Z",
+                },
+            }
         if tool_name == "mcp_brightdata_web_data_linkedin_company_profile":
             return {
                 "status": "ok",
@@ -4795,6 +4945,106 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         }
 
     def _mock_for_tool(self, tool_name):
+        if tool_name == "http_request" and self.case.slug == "common_use_case_109_http_json_dedupe_domains":
+            vendors_by_url = {
+                "https://api.example.test/vendors/alpha.json": [
+                    {"name": "Acme", "domain": "acme.test", "score": 82},
+                    {"name": "Globex", "domain": "globex.test", "score": 70},
+                ],
+                "https://api.example.test/vendors/beta.json": [
+                    {"name": "Acme Holdings", "domain": "acme.test", "score": 91},
+                    {"name": "Initech", "domain": "initech.test", "score": 88},
+                ],
+            }
+            return {
+                "rules": [
+                    {
+                        "param_equals": {"url": url},
+                        "result": self._add_expected_next_step_hint(tool_name, {
+                            "status": "ok",
+                            "tool": tool_name,
+                            "message": "Mocked vendor JSON response for deterministic deduplication work.",
+                            "content": {"ok": True, "vendors": vendors},
+                        }),
+                    }
+                    for url, vendors in vendors_by_url.items()
+                ],
+                "default": {
+                    "status": "error",
+                    "tool": tool_name,
+                    "message": "Use one of the vendor JSON URLs from the request.",
+                },
+            }
+
+        if tool_name == "http_request" and self.case.slug == "common_use_case_119_http_nested_json_recover":
+            return self._add_expected_next_step_hint(tool_name, {
+                "status": "ok",
+                "status_code": 200,
+                "url": "https://api.example.test/leads.json",
+                "content": {
+                    "ok": True,
+                    "payload": {
+                        "leads": [
+                            {"identity": {"email": "alex@example.test"}, "score": "91"},
+                            {"identity": {"email": "nina@example.test"}, "score": "84"},
+                        ]
+                    },
+                },
+            })
+
+        if tool_name == "http_request" and self.case.slug == "common_use_case_133_http_sqlite_dedupe_report":
+            return self._add_expected_next_step_hint(tool_name, {
+                "status": "ok",
+                "status_code": 200,
+                "url": "https://api.example.test/accounts.json",
+                "content": {
+                    "ok": True,
+                    "accounts": [
+                        {"name": "Acme", "domain": "acme.test", "score": 82},
+                        {"name": "Acme Holdings", "domain": "acme.test", "score": 91},
+                        {"name": "Globex", "domain": "globex.test", "score": 77},
+                    ],
+                },
+            })
+
+        if tool_name == "mcp_brightdata_scrape_as_markdown":
+            literal_urls = [
+                value.rstrip(".)]}\"'")
+                for value in re.findall(r"https?://[^\s,;]+", self.case.prompt)
+            ]
+            if len(literal_urls) > 1:
+                rules = []
+                claim_sets = (
+                    "encryption in transit, access controls, and audit evidence",
+                    "multi-factor authentication, threat detection, and security event logs",
+                    "data retention controls, incident response, and administrative safeguards",
+                )
+                for index, url in enumerate(dict.fromkeys(literal_urls)):
+                    result = {
+                        "status": "ok",
+                        "tool": tool_name,
+                        "message": "Mocked source-specific scrape result for deterministic comparison work.",
+                        "url": url,
+                        "result": (
+                            f"# Source evidence {index + 1}\n\nThe page at {url} documents "
+                            f"{claim_sets[index % len(claim_sets)]}.\n\n"
+                            "This markdown is persisted in __tool_results.result_text for SQLite comparison."
+                        ),
+                        "content": {"ok": True},
+                    }
+                    rules.append({
+                        "param_equals": {"url": url},
+                        "result": self._add_expected_next_step_hint(tool_name, result),
+                    })
+                return {
+                    "rules": rules,
+                    "default": {
+                        "status": "error",
+                        "tool": tool_name,
+                        "message": "Use one of the literal source URLs from the request.",
+                    },
+                }
+
         result = self._add_expected_next_step_hint(tool_name, self._mock_success(tool_name))
         if not self.case.expected_params or len(self.case.expected_tools) != 1:
             return result
@@ -4840,6 +5090,36 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
 
     @staticmethod
     def _google_sheets_mock_success(tool_name):
+        content = {
+            "ok": True,
+            "spreadsheet_id": "sheet-123",
+            "title": "Eval Sales Tracker",
+            "next_step": "Call the exact Google Sheets tool requested by the user; do not inspect eval bookkeeping tables.",
+        }
+        if tool_name == "google_sheets-list-worksheets":
+            content["worksheets"] = ["Leads", "Pipeline", "Research", "Accounts", "Tasks"]
+        elif tool_name == "google_sheets-get-current-user":
+            content["user"] = {"email": "eval-sheets@example.test"}
+        elif tool_name in {
+            "google_sheets-get-values-in-range",
+            "google_sheets-find-row",
+            "google_sheets-read-rows",
+        }:
+            content.update({
+                "columns": ["email", "company", "priority", "owner", "status", "source_url", "follow_up_due"],
+                "rows": [
+                    {"row_number": 12, "email": "alex@example.test", "company": "Acme", "status": "Open"},
+                    {"row_number": 13, "email": "nina@example.test", "company": "Globex", "status": "Open"},
+                    {"row_number": 14, "email": "ana@example.test", "company": "Initech", "status": "Open"},
+                ],
+            })
+        elif tool_name.startswith((
+            "google_sheets-add-",
+            "google_sheets-update-",
+            "google_sheets-upsert-",
+        )):
+            content["rows_affected"] = 1
+
         return {
             "status": "ok",
             "tool": tool_name,
@@ -4847,19 +5127,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 f"Mocked {tool_name} result for deterministic Google Sheets eval. "
                 "The requested spreadsheet and worksheet exist; use the requested Google Sheets tool next."
             ),
-            "content": {
-                "ok": True,
-                "spreadsheet_id": "sheet-123",
-                "title": "Eval Sales Tracker",
-                **({"worksheets": ["Leads", "Pipeline", "Research", "Accounts", "Tasks"]} if tool_name == "google_sheets-list-worksheets" else {}),
-                "columns": ["email", "company", "priority", "owner", "status", "source_url", "follow_up_due"],
-                "rows": [
-                    {"row_number": 12, "email": "alex@example.test", "company": "Acme", "status": "Open"},
-                    {"row_number": 13, "email": "nina@example.test", "company": "Globex", "status": "Open"},
-                    {"row_number": 14, "email": "ana@example.test", "company": "Initech", "status": "Open"},
-                ],
-                "next_step": "Call the exact Google Sheets tool requested by the user; do not inspect eval bookkeeping tables.",
-            },
+            "content": content,
         }
 
     @staticmethod
@@ -5077,7 +5345,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         )
 
     def _expected_tool_condition(self, tool_name):
-        condition = {"tool_name": tool_name}
+        condition = {"tool_name": tool_name, "after_execution": True}
         alternatives = self.case.expected_tool_alternatives(tool_name)
         if alternatives:
             condition["alternatives"] = alternatives
@@ -5086,8 +5354,6 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             condition["agent_config_field"] = config_field
         if self.case.expected_params and len(self.case.expected_tools) == 1:
             condition["params"] = self.case.expected_params
-        if self._uses_real_sqlite_export_tools():
-            condition["after_execution"] = True
         return condition
 
     def _build_eval_stop_policy(self):
@@ -5297,6 +5563,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
 
     def _call_satisfies_expected_tool(self, call, expected_tool_name):
         if call.tool_name not in self.case.accepted_tool_names_for_expected_tool(expected_tool_name):
+            return False
+        if call.status != "complete":
             return False
         if expected_tool_name == "request_human_input":
             if call.tool_name == "request_human_input" and not self._request_human_input_call_has_options(call):

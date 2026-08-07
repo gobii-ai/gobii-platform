@@ -70,6 +70,17 @@ _RETRYABLE_ERRORS = (
     EmptyLiteLLMResponseError,
     InvalidLiteLLMResponseError,
 )
+_POTENTIALLY_RETRYABLE_ERRORS = _RETRYABLE_ERRORS + (litellm.APIError,)
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    if isinstance(exc, _RETRYABLE_ERRORS):
+        return True
+    if not isinstance(exc, litellm.APIError):
+        return False
+    if int(getattr(exc, "status_code", 0) or 0) >= 500:
+        return True
+    return "unable to get json response" in str(exc).casefold()
 
 
 class _StreamIdleTimeoutIterator:
@@ -114,7 +125,9 @@ class _StreamIdleTimeoutIterator:
         while True:
             try:
                 result = self._read_next_chunk()
-            except _RETRYABLE_ERRORS as exc:
+            except _POTENTIALLY_RETRYABLE_ERRORS as exc:
+                if not _is_retryable_error(exc):
+                    raise
                 if self._received_first_chunk:
                     raise
                 self._replace_stream_or_raise(exc)
@@ -141,7 +154,9 @@ class _StreamIdleTimeoutIterator:
                 self._result_queue = None
                 self._timed_out = False
                 return
-            except _RETRYABLE_ERRORS as retry_exc:
+            except _POTENTIALLY_RETRYABLE_ERRORS as retry_exc:
+                if not _is_retryable_error(retry_exc):
+                    raise
                 exc = retry_exc
 
     def _start_reader(self) -> queue.Queue[Any]:
@@ -616,7 +631,9 @@ def run_completion(
                 raise_if_invalid_litellm_response(response, model=model, provider=provider_hint)
                 _attach_response_duration(response, duration_ms)
             return response
-        except _RETRYABLE_ERRORS as exc:
+        except _POTENTIALLY_RETRYABLE_ERRORS as exc:
+            if not _is_retryable_error(exc):
+                raise
             if attempt >= max_attempts:
                 raise
             logger.warning(

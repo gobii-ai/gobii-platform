@@ -192,6 +192,16 @@ class MetaGobiiEvalRegistrationTests(TestCase):
 
         self.assertTrue(_is_retryable_llm_error(error))
 
+    def test_openrouter_malformed_json_response_is_retryable(self):
+        error = APIError(
+            status_code=400,
+            message="Unable to get json response - Expecting value at line 1",
+            llm_provider="openrouter",
+            model="deepseek/deepseek-v4-flash",
+        )
+
+        self.assertTrue(_is_retryable_llm_error(error))
+
     def test_plan_intent_falls_back_on_retryable_api_error(self):
         scenario = MetaGobiiSystemSkillScenario()
         error = APIError(
@@ -373,7 +383,7 @@ class MetaGobiiEvalRegistrationTests(TestCase):
         schedule_policy = _record_plan_tool()["function"]["parameters"]["properties"]["schedule_policy"]
         schedule_action = schedule_policy["properties"]["schedule_action"]
 
-        self.assertIn("target Gobii lifecycle", schedule_action["description"])
+        self.assertIn("If ordered_tools contains meta_gobii_create_agent, use create", schedule_action["description"])
         self.assertIn("existing named Gobii", schedule_action["description"])
         self.assertIn("Use none whenever schedule_in_scope=false", schedule_action["description"])
         self.assertIn("explicit_schedule_intent", schedule_policy["properties"])
@@ -819,6 +829,23 @@ class MetaGobiiEvalScoringTests(TestCase):
 
         self.assertFalse(missing_schedule_scores["schedule_scope"][0])
         self.assertTrue(good_scores["schedule_scope"][0])
+
+    def test_explicit_schedule_accepts_schedule_written_in_approval_text(self):
+        case = _case("schedule_weekly_content_ideas")
+        policy = _explicit_schedule_policy(cadence="every Monday")
+        policy["included_in_approval_scope"] = False
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={"schedule_policy": policy},
+            response_args={
+                "asks_for_approval": True,
+                "response_text": "Approve a recurring schedule every Monday before the marketing standup.",
+            },
+        )
+
+        self.assertTrue(scores["schedule_scope"][0], scores["schedule_scope"][1])
 
     def test_required_role_terms_accept_basic_singular_plural_matches(self):
         case = _case("schedule_weekday_ops_checkin_team")

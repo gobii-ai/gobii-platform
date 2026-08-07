@@ -50,16 +50,17 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
     def test_peer_contract_is_compact_and_ownership_first(self):
         instruction = _get_peer_communication_instruction()
 
-        self.assertIn("work assigned to you or owned by your charter", instruction)
-        self.assertIn("FYIs, progress, and no-action decisions are read-only", instruction)
-        self.assertIn("Completion outcomes update canonical records", instruction)
+        self.assertIn("assigned or charter-owned work", instruction)
+        self.assertIn("In a peer DM, decline work owned by another agent", instruction)
+        self.assertIn("structured completion or correction changes canonical state", instruction)
         self.assertIn("`__messages.structured_payload_json`", instruction)
-        self.assertIn("extracted/bound fields rather than typed status values", instruction)
-        self.assertIn("another agent owns the request", instruction)
+        self.assertIn("extracted/bound fields, never typed status values", instruction)
+        self.assertIn("a request naming someone else needs no reply", instruction)
         self.assertIn("human reassigns it", instruction)
-        self.assertIn("out-of-charter work is handed off or declined", instruction)
-        self.assertIn("Never relay a shared-channel request by DM", instruction)
-        self.assertIn("Copy every supplied operational field", instruction)
+        self.assertIn("never do out-of-charter work", instruction)
+        self.assertIn("Never use peer DM to forward or remind about a request visible in a shared channel", instruction)
+        self.assertIn("Copy operational fields with the user's exact names and values", instruction)
+        self.assertIn("omit private or background reasons", instruction)
         self.assertLess(len(instruction), 1800)
         self.assertNotIn("freely", instruction)
         self.assertLessEqual(len(instruction.split()), 190)
@@ -68,9 +69,10 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         peer_description = get_send_agent_message_tool()["function"]["description"]
         discord_description = get_send_discord_message_tool()["function"]["description"]
 
-        self.assertIn("only necessary charter-boundary handoffs", peer_description)
-        self.assertIn("requested owned contributions", peer_description)
-        self.assertIn("Never relay a shared-channel request", peer_description)
+        self.assertIn("necessary charter handoffs", peer_description)
+        self.assertIn("owned contributions", peer_description)
+        self.assertIn("Never use peer DM to forward or remind about a request visible in a shared channel", peer_description)
+        self.assertIn("Omit private or background reasons from both prose and structured_payload", peer_description)
         self.assertIn("FYIs, completions, and final no-action decisions", peer_description)
         self.assertIn("final no-action decisions", peer_description)
         self.assertIn("adjacent evidence/status cannot upgrade a record", peer_description)
@@ -88,12 +90,11 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
     def test_shared_prompt_prioritizes_charter_reporting_lines_over_generic_owner_wording(self):
         instruction = _get_peer_communication_instruction()
 
-        self.assertIn("reporting/recipient boundaries override", instruction)
-        self.assertIn("never authority, reporting lines, or charter memory", instruction)
-        self.assertIn("Only an explicit schedule instruction or current charter authorizes", instruction)
-        self.assertIn("Ordinary recurring work or an idle wake does not authorize", instruction)
-        self.assertIn("charter's reachable peer manager", instruction)
-        self.assertIn("send_agent_message", instruction)
+        self.assertIn("reporting and recipients override", instruction)
+        self.assertIn("Schedules add timing, not authority or memory", instruction)
+        self.assertIn("Only an explicit schedule or current charter authorizes", instruction)
+        self.assertIn("No status ping for ordinary recurring work or an idle wake", instruction)
+        self.assertIn("reachable peer manager", instruction)
         self.assertIn("manager escalates", instruction)
         self.assertIn("material team decision is blocked", instruction)
         self.assertNotIn("At a scheduled check-in", instruction)
@@ -122,7 +123,8 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         instruction = _get_managed_peer_first_run_instruction()
 
         self.assertIn("named reachable peer manager", instruction)
-        self.assertIn("Handle a current inbound assignment or scheduled trigger first", instruction)
+        self.assertIn("Process an inbound assignment or schedule event first", instruction)
+        self.assertIn("trust its displayed timing", instruction)
         self.assertIn("send no welcome", instruction)
         self.assertIn("current check-in trigger goes to that manager", instruction)
 

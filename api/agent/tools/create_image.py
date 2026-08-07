@@ -434,8 +434,8 @@ def get_create_image_tool() -> Dict[str, Any]:
                 "When a source path is already provided, call this tool directly; do not query SQLite or read the file first. "
                 "For style or art-direction changes where no subject, logo, or layout needs preservation, refine the "
                 "prompt instead of adding source images. "
-                "Returns `file`, `inline`, `inline_html`, and `attach` placeholders for reuse in messages and "
-                "documents; reuse those exact placeholders and do not invent image URLs or file paths."
+                "Returns exact `file`, `inline`, `inline_html`, and `attach` placeholders. After success, reuse one; "
+                "never call create_image again or invent URLs/paths."
             ),
             "parameters": {
                 "type": "object",
@@ -462,8 +462,8 @@ def get_create_image_tool() -> Dict[str, Any]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "Optional filespace image paths to use as references or edit inputs, such as "
-                            "$[/Inbox/photo.png] or /exports/logo.png. Use this for image-to-image edits, style "
+                            "Optional plain reference/edit paths. For `$[/Inbox/photo.png]`, pass `/Inbox/photo.png`. "
+                            "Use this for image-to-image edits, style "
                             "transfer, or any request where the same person, product, logo, layout, text, or brand "
                             "element must be preserved."
                         ),

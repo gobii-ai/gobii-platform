@@ -126,7 +126,7 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
         }.issubset(required_mentions))
         self.assertEqual(set(extract_http_urls(pattern.source_text)), set(case.required_urls))
 
-    def test_owner_report_requires_one_complete_table_with_exact_entity_links(self):
+    def test_owner_report_requires_one_complete_comparison_with_exact_entity_links(self):
         requirements = (
             ("Atlas Forge", ("Mina Shah", "automation")),
             ("Meridian Care", ("Imani Brooks", "scheduling")),
@@ -151,10 +151,66 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
             unlinked_entities=("Threadline Robotics",),
         ), [])
 
+        prose = (
+            f"**Atlas Forge** Mina Shah, automation. {links[0][1]}\n"
+            f"**Meridian Care** Imani Brooks, scheduling. {links[1][1]}\n"
+            "**Threadline Robotics** Sara Okoye, robotics."
+        )
+        self.assertEqual(owner_report_table_failures(
+            prose,
+            row_requirements=requirements,
+            entity_urls=links,
+            unlinked_entities=("Threadline Robotics",),
+        ), [])
+
+        prose_blocks = (
+            f"**Atlas Forge**\nFounder: Mina Shah\nBuilding: automation\n{links[0][1]}\n\n"
+            f"**Meridian Care**\nFounder: Imani Brooks\nBuilding: scheduling\n{links[1][1]}\n\n"
+            "**Threadline Robotics**\nFounder: Sara Okoye\nBuilding: robotics."
+        )
+        self.assertEqual(owner_report_table_failures(
+            prose_blocks,
+            row_requirements=requirements,
+            entity_urls=links,
+            unlinked_entities=("Threadline Robotics",),
+        ), [])
+
+        linked_prose_blocks = (
+            f"**Atlas Forge**, Mina Shah, automation\n[Atlas Forge]({links[0][1]})\n\n"
+            f"**Meridian Care**, Imani Brooks, scheduling\n[Meridian Care]({links[1][1]})\n\n"
+            "**Threadline Robotics**, Sara Okoye, robotics."
+        )
+        self.assertEqual(owner_report_table_failures(
+            linked_prose_blocks,
+            row_requirements=requirements,
+            entity_urls=links,
+            unlinked_entities=("Threadline Robotics",),
+        ), [])
+        self.assertEqual(owner_report_table_failures(
+            prose_blocks + "\n\nCovered 3/3; Threadline Robotics had no item URL.",
+            row_requirements=requirements,
+            entity_urls=links,
+            unlinked_entities=("Threadline Robotics",),
+        ), [])
+        self.assertEqual(owner_report_table_failures(
+            table + "\n\nSource: https://api.example.test/cohort.json",
+            row_requirements=requirements,
+            entity_urls=links,
+            unlinked_entities=("Threadline Robotics",),
+            source_urls=("https://api.example.test/cohort.json",),
+        ), [])
+        duplicate_in_owning_row = table.replace(
+            f"[Atlas Forge]({links[0][1]}) |",
+            f"[Atlas Forge]({links[0][1]}) | [Team]({links[0][1]}) |",
+        )
+        self.assertEqual(owner_report_table_failures(
+            duplicate_in_owning_row,
+            row_requirements=requirements,
+            entity_urls=links,
+            unlinked_entities=("Threadline Robotics",),
+        ), [])
+
         regressions = {
-            "prose instead of table": "\n\n".join(
-                f"**{entity}** {', '.join(required)}" for entity, required in requirements
-            ),
             "missing requested field": table.replace(" | scheduling |", " | not returned |"),
             "misassociated link": table.replace(links[0][1], links[1][1]),
             "generic duplicate": table + f"\n\nSource: [company page]({links[0][1]})",
@@ -193,6 +249,7 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
             (True, f"## Cohort\nResolved: 4/4 companies\n\n{table}", 4),
             (True, f"Covered 4/4\n\n{table}", 4),
             (True, f"## Cohort\nAll four companies are included below.\n\n{table}", 4),
+            (True, f"Four companies covered.\n\n{table}", 4),
             (False, f"## Cohort\nAll four companies are included below.\n\n{table}", 3),
             (False, f"## Cohort\n4/4 companies\n\n{table}", 4),
             (True, f"{table}\n\nResolved: 4/4 companies", 4),
@@ -204,12 +261,14 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
                 )
 
     @staticmethod
-    def _owner_report_call(name, completion_id, *, result_status="ok", call_status="complete", terminal=None):
+    def _owner_report_call(
+        name, completion_id, *, result_status="ok", call_status="complete", terminal=None, retryable=False,
+    ):
         params = {} if terminal is None else {"will_continue_work": terminal}
         return SimpleNamespace(
             tool_name=name,
             status=call_status,
-            result={"status": result_status},
+            result={"status": result_status, "retryable": retryable},
             tool_params=params,
             step=SimpleNamespace(completion_id=completion_id),
         )
@@ -281,6 +340,28 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
         self.assertEqual(
             tool_delivery_execution_failures(
                 with_progress,
+                ("completion-1", "completion-2", "completion-3"),
+            ),
+            [],
+        )
+
+    def test_tool_delivery_execution_contract_accepts_one_retryable_send_correction(self):
+        calls = (
+            self._owner_report_call("http_request", "completion-1"),
+            self._owner_report_call(
+                "send_chat_message",
+                "completion-2",
+                result_status="error",
+                call_status="error",
+                terminal=False,
+                retryable=True,
+            ),
+            self._owner_report_call("send_chat_message", "completion-3", terminal=False),
+        )
+
+        self.assertEqual(
+            tool_delivery_execution_failures(
+                calls,
                 ("completion-1", "completion-2", "completion-3"),
             ),
             [],
@@ -482,6 +563,11 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
         self.assertEqual(unexpected, ())
         self.assertEqual(missing, ())
 
+    def test_bare_domain_markdown_label_is_not_a_destination(self):
+        text = "[api.example.test/evals/contacts.json]($[link:LSOURCE])"
+
+        self.assertEqual(extract_bare_link_like_destinations(text), ())
+
     def test_wait_for_idle_context_exposes_success_and_timeout_state(self):
         listener = MagicMock()
         listener.wait_for.return_value = {"payload": {"outstanding_tasks": 0}}
@@ -500,6 +586,20 @@ class HallucinatedLinkScenarioTests(SimpleTestCase):
 
         self.assertFalse(timed_out.idle)
         self.assertTrue(timed_out.timed_out)
+
+    def test_wait_for_idle_context_uses_durable_completion_if_event_is_lost(self):
+        listener = MagicMock()
+        listener.wait_for.return_value = None
+        with (
+            patch("api.evals.execution.AgentEventListener", return_value=listener),
+            patch.object(WaitForIdleContext, "_has_durable_completion", return_value=True),
+        ):
+            completed = WaitForIdleContext("agent-1", timeout=1)
+            with completed:
+                pass
+
+        self.assertTrue(completed.idle)
+        self.assertFalse(completed.timed_out)
 
     def test_running_suite_has_no_finished_at_even_when_a_child_errored(self):
         finished = datetime(2026, 7, 18, tzinfo=timezone.utc)

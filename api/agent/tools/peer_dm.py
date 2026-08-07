@@ -1,5 +1,6 @@
 """Peer agent direct messaging tool definition and execution."""
 
+import json
 import logging
 import re
 from typing import Any, Dict
@@ -78,12 +79,13 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_agent_message",
             "description": (
-                "Send only necessary charter-boundary handoffs, requested owned contributions, or substantive peer-work progress. Every message and structured_payload "
-                "value is delivered to the recipient: include only operational content its charter needs, never unrelated or owner-private source context. FYIs, completions, "
-                "and final no-action decisions are read-only: do not reply. Exact decisions govern; adjacent evidence/status cannot upgrade a record. Never relay a shared-channel request to people already there. "
-                "When transmitting a record, two or more named fields, a list of records, identifiers, statuses, or other "
-                "machine-consumed data, put the exact data in structured_payload; message may add prose context but must "
-                "not be its only carrier. Use message alone for an ordinary prose question or explanation. "
+                "Send necessary charter handoffs, owned contributions, or substantive progress. All content is recipient-visible: "
+                "include only needed operations, never unrelated or owner-private context. Omit private or background reasons from both prose and "
+                "structured_payload. FYIs, completions, "
+                "and final no-action decisions are read-only: do not reply. Direct requests need an answer or decline. "
+                "Exact decisions govern; adjacent evidence/status cannot upgrade a record. Never use peer DM to forward or remind about a request visible in a shared channel. "
+                "Put records, lists, identifiers, statuses, or other machine data in structured_payload; prose may add "
+                "context but cannot be its sole carrier. Use message alone for an ordinary prose question or explanation. "
                 "For repeats, send with will_continue_work=true first and await its result; rapid same-peer messages may be "
                 "debounced."
             ),
@@ -96,9 +98,10 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "structured_payload": {
                         "description": (
-                            "Optional recipient-visible, schema-free JSON object or array for exact operational records, "
-                            "identifiers, statuses, lists, or machine-consumed data. Preserve the source field names and "
-                            "values. Use this whenever the handoff contains two or more named fields or multiple records. "
+                            "Optional recipient-visible object or array for exact records, identifiers, statuses, or lists. "
+                            "Pass the object/array itself, not JSON text. Preserve the source field names and "
+                            "values. Include only fields the user named as operational data; never turn private/background "
+                            "text into a field. Use this whenever the handoff contains two or more named fields or multiple records. "
                             "For example, a record can be {\"id\": \"123\", \"state\": \"ready\"}. Arbitrary keys and "
                             "nesting are allowed. Maximum serialized size is 64 KB. Use an attached file for larger datasets."
                         ),
@@ -143,6 +146,14 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
 
     if not peer_agent_id_raw:
         return {"status": "error", "message": "Parameter 'peer_agent_id' is required."}
+
+    if isinstance(structured_payload, str):
+        try:
+            decoded_payload = json.loads(structured_payload)
+        except json.JSONDecodeError:
+            decoded_payload = None
+        if isinstance(decoded_payload, (dict, list)):
+            structured_payload = decoded_payload
 
     if message:
         message = substitute_variables_with_filespace(message, agent)

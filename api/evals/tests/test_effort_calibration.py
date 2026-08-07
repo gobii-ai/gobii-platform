@@ -20,6 +20,7 @@ from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS
 from api.agent.tools.plan import get_update_plan_tool
 from api.agent.tools.request_contact_permission import get_request_contact_permission_tool
 from api.agent.tools.request_human_input import execute_request_human_input, get_request_human_input_tool
+from api.agent.tools.sqlite_batch import _get_error_hint
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.evals.scenarios.effort_calibration import (
     ARTIFACT_TOOL_NAMES,
@@ -42,6 +43,7 @@ from api.evals.scenarios.effort_calibration import (
     _question_count,
     _sqlite_call_persists_resume_state,
     _sqlite_result_text_reads,
+    _tool_call_was_executed,
     _web_query_value,
 )
 from api.evals.scenarios.monitor_pollution import BACKGROUND_DRAIN_TIMEOUT_SECONDS
@@ -71,6 +73,7 @@ from api.evals.scenarios.sqlite_tool_results import (
     _catalog_plan_row_failures,
     _decision_model_tables,
     _first_shot_source_phase_failures,
+    _matches_weekday,
     _portfolio_mock,
     _source_write_effect_failures,
     _schema_grounded_read_failures,
@@ -106,6 +109,20 @@ def _eval_tool_call(tool_name, tool_params=None, *, step=None, result='{"status"
 
 @tag("eval_sim")
 class ResumeStateHeuristicTests(SimpleTestCase):
+    def test_cancelled_tool_call_does_not_count_as_executed(self):
+        call = _eval_tool_call(
+            "read_file",
+            result='{"status":"error","executed":false,"retryable":true}',
+            status="error",
+        )
+
+        self.assertFalse(_tool_call_was_executed(call))
+
+    def test_ordinary_error_still_counts_as_executed(self):
+        call = _eval_tool_call("read_file", result='{"status":"error"}', status="error")
+
+        self.assertTrue(_tool_call_was_executed(call))
+
     def test_patch_text_cursor_in_charter_is_not_domain_resume_state(self):
         call = _eval_tool_call(
             "sqlite_batch",
@@ -165,6 +182,11 @@ class ResumeStateHeuristicTests(SimpleTestCase):
 
 @tag("eval_sim")
 class EffortCalibrationSuiteTests(SimpleTestCase):
+    def test_normalized_due_date_matches_named_weekday(self):
+        self.assertTrue(_matches_weekday("Friday", "Friday"))
+        self.assertTrue(_matches_weekday("2026-08-07", "Friday"))
+        self.assertFalse(_matches_weekday("2026-08-08", "Friday"))
+
     def test_effort_calibration_suite_contains_expected_scenarios(self):
         suite = SuiteRegistry.get("effort_calibration")
 
@@ -940,6 +962,24 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertTrue(failures)
         self.assertIn("attempt 1", failures[0])
 
+    def test_source_ingest_accepts_corrected_non_persisted_source_model_rejection(self):
+        rejected = _eval_tool_call(
+            "sqlite_batch",
+            result=(
+                '{"status":"error","error_code":"source_model_write_not_derived",'
+                '"message":"Query not executed: derive source fields from tool results.",'
+                '"retryable":true}'
+            ),
+            status="error",
+        )
+        corrected = _eval_tool_call(
+            "sqlite_batch",
+            result='{"status":"ok","results":[{"message":"Query 0 affected 4 rows."}]}',
+        )
+
+        self.assertEqual(_sqlite_attempt_failures([rejected, corrected]), [])
+        self.assertTrue(_sqlite_attempt_failures([rejected]))
+
     def test_domain_refresh_phase_order_rejects_recovery(self):
         def call(tool_name, completion, params=None, **kwargs):
             return _eval_tool_call(
@@ -1455,7 +1495,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             conn.execute(
                 "CREATE TABLE vendor_plans("
                 "vendor TEXT, plan_name TEXT, monthly_price_usd INTEGER, included_seats INTEGER, "
-                "compliance_json TEXT, PRIMARY KEY(vendor, plan_name));"
+                "compliance_certs TEXT, PRIMARY KEY(vendor, plan_name));"
             )
             conn.executemany(
                 "INSERT INTO vendor_plans VALUES (?, ?, ?, ?, ?);",
@@ -1469,6 +1509,46 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
                 return_value=nullcontext(db_path),
             ):
                 failures = _catalog_plan_model_failures("agent", ("vendor_plans",))
+
+        self.assertEqual(failures, [])
+
+    def test_catalog_model_integrity_accepts_normalized_vendor_relationship(self):
+        vendors = list(enumerate(("AxonFlow", "BrightSupport", "CareMesh", "Dockwise"), start=1))
+        plans = [
+            (
+                vendor_id,
+                "Clinic" if vendor == "CareMesh" and index == 0 else f"Plan {index}",
+                720,
+                50,
+                "[]",
+            )
+            for vendor_id, vendor in vendors
+            for index in range(18)
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "catalog.sqlite3"
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            conn.execute(
+                "CREATE TABLE vendors("
+                "vendor_id INTEGER PRIMARY KEY, vendor_name TEXT NOT NULL UNIQUE);"
+            )
+            conn.execute(
+                "CREATE TABLE plans("
+                "vendor_id INTEGER NOT NULL REFERENCES vendors(vendor_id), plan_name TEXT NOT NULL, "
+                "monthly_price_usd INTEGER, included_seats INTEGER, compliance TEXT, "
+                "PRIMARY KEY(vendor_id, plan_name));"
+            )
+            conn.executemany("INSERT INTO vendors VALUES (?, ?);", vendors)
+            conn.executemany("INSERT INTO plans VALUES (?, ?, ?, ?, ?);", plans)
+            conn.commit()
+            conn.close()
+
+            with patch(
+                "api.evals.scenarios.sqlite_tool_results.agent_sqlite_db",
+                return_value=nullcontext(db_path),
+            ):
+                failures = _catalog_plan_model_failures("agent", ("vendors", "plans"))
 
         self.assertEqual(failures, [])
 
@@ -1603,6 +1683,13 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertEqual(
             _decision_model_tables(
                 "SELECT * FROM plans WHERE price <= 900 ORDER BY price;",
+                ("plans",),
+            ),
+            ("plans",),
+        )
+        self.assertEqual(
+            _decision_model_tables(
+                "SELECT *, CASE WHEN price <= 900 THEN 0 ELSE 1 END AS fit FROM plans ORDER BY fit, price;",
                 ("plans",),
             ),
             ("plans",),
@@ -1841,6 +1928,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             0,
         )
         self.assertEqual(_question_count("## What's the latest batch?\n\nHere is the answer."), 0)
+        self.assertEqual(_question_count("**Why only 3?**\n\nThe remaining sources lacked tenure."), 0)
         self.assertEqual(_question_count("Would you like a follow-up?"), 1)
 
     def test_chart_tool_description_requires_request_or_material_need(self):
@@ -1875,12 +1963,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         ):
             instructions = _get_system_instruction(agent)
 
-        self.assertIn("Use `update_plan` only for substantial multi-step work", instructions)
-        self.assertIn("where a visible plan helps", instructions)
-        self.assertIn("Keep plans short, current, and verifiable", instructions)
-        self.assertIn("each call replaces the full active plan", instructions)
-        self.assertIn("one closeout immediately before the final delivery", instructions)
-        self.assertIn("never update it between evidence batches", instructions)
+        self.assertIn("Use `update_plan` only before substantial multi-step work", instructions)
+        self.assertIn("Never create a plan after work has started", instructions)
+        self.assertIn("close it once before delivery", instructions)
+        self.assertIn("Plans include work only", instructions)
+        self.assertIn("Skip plans for quick lookups", instructions)
 
     def test_system_instruction_prioritizes_practical_handoffs_and_terminal_results(self):
         class NoContacts:
@@ -1906,6 +1993,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("without volunteering your identity", instructions)
         self.assertIn("`retryable=false` follows the adjacent terminal-result", instructions)
         self.assertIn("never `retryable=false`", instructions)
+        self.assertIn("Do not fetch or run the target unless the user asks to run now", instructions)
 
     def test_contact_permission_description_defers_setup_only_future_sends(self):
         description = get_request_contact_permission_tool()["function"]["description"]
@@ -1916,14 +2004,20 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
     def test_human_input_description_excludes_category_choice_surveys(self):
         description = get_request_human_input_tool()["function"]["description"]
 
-        self.assertIn("category example choices", description)
-        self.assertIn("which vendor/company", description)
-        self.assertIn("choose and disclose", description)
-        self.assertIn("user asks for targets/scope before setup", description)
-        self.assertIn("block a recurring monitor", description)
+        self.assertIn("Choose and disclose sensible defaults for reversible details", description)
+        self.assertIn("instead of asking a survey", description)
+        self.assertIn("Each request asks one question", description)
+        self.assertIn("not labels for other questions", description)
         self.assertIn("Missing email/SMS recipient/detail", description)
-        self.assertIn("no preflight/search/chat", description)
-        self.assertIn("generic roles do not count", description)
+        self.assertIn("do not search, message, or inspect SQLite first", description)
+        self.assertIn("generic role is not a recipient", description)
+
+    def test_human_input_validation_errors_can_be_corrected(self):
+        result = execute_request_human_input(SimpleNamespace(), {"will_continue_work": False})
+
+        self.assertEqual(result["status"], "error")
+        self.assertTrue(result["retryable"])
+        self.assertIn("question", result["message"])
 
     def test_linkedin_jobs_synthetic_tool_accepts_category_queries(self):
         description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_linkedin_job_listings"][
@@ -1940,10 +2034,14 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertIn("remaining_work", outreach_description)
         self.assertIn("set a resume schedule", outreach_description)
-        self.assertIn("checking, wrapping up, or preparing", schedule_description)
-        self.assertIn("authoritative first work tool", schedule_description)
-        self.assertIn("do not infer batch state from SQLite", schedule_description)
-        self.assertIn("only makes sense when a schedule exists", schedule_description)
+        self.assertIn("owns the queue", outreach_description)
+        self.assertIn("without inspecting messages, SQLite, or search", outreach_description)
+        self.assertIn("assigned work batch", schedule_description)
+        self.assertIn("owns the batch context", schedule_description)
+        self.assertIn("do not inspect SQLite or messages", schedule_description)
+        self.assertIn("is not saved automatically", schedule_description)
+        self.assertIn("do not read it back", schedule_description)
+        self.assertIn("Wait for a scheduled run only when a schedule exists", schedule_description)
 
     def test_fresh_full_tool_result_wrapper_only_describes_visibility(self):
         wrapped, is_inline = _build_prompt_preview(
@@ -2085,6 +2183,25 @@ class EvalStopPolicyBudgetTests(TestCase):
 
 @tag("eval_sim")
 class EffortCalibrationHarnessTests(TestCase):
+    def test_sqlite_missing_column_hint_retries_rolled_back_model_batch(self):
+        hint = _get_error_hint(
+            "no such column: c.source_url",
+            "SELECT c.source_url FROM staffing_companies c",
+            "CREATE TABLE staffing_companies (company_id TEXT PRIMARY KEY);\n"
+            "SELECT c.source_url FROM staffing_companies c",
+        )
+
+        self.assertIn("retry the whole batch", hint)
+        self.assertIn("do not inspect the rolled-back table", hint)
+
+    def test_sqlite_missing_column_hint_inspects_preexisting_table(self):
+        hint = _get_error_hint(
+            "no such column: c.source_url",
+            "SELECT c.source_url FROM staffing_companies c",
+        )
+
+        self.assertIn("PRAGMA table_info", hint)
+
     def test_ready_agent_seeds_completed_process_run(self):
         User = get_user_model()
         user = User.objects.create_user(username="effort_ready_user")
@@ -2144,6 +2261,7 @@ class EffortCalibrationHarnessTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("raw tool-call markup", result["message"])
+        self.assertIs(result["retryable"], True)
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
 
     def test_future_work_preserved_accepts_resume_schedule(self):
@@ -2647,7 +2765,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         system_prompt = next(message["content"] for message in context if message["role"] == "system")
         self.assertNotIn("## Planning Mode", system_prompt)
         self.assertNotIn("end_planning", system_prompt)
-        self.assertIn("Use `update_plan` only for substantial multi-step work", system_prompt)
+        self.assertIn("Use `update_plan` only before substantial multi-step work", system_prompt)
 
     def test_system_prompt_has_delivery_and_config_guardrails(self):
         User = get_user_model()
@@ -2690,7 +2808,7 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn(
-            "Owner correction or lasting preference",
+            "Owner refinement of ongoing guidance or your prior reply",
             system_prompt,
         )
         self.assertIn(
@@ -2701,39 +2819,46 @@ class FirstRunPromptCalibrationTests(TestCase):
             "Ask all missing recipient details together",
             system_prompt,
         )
-        self.assertIn("New substantial or explicit deep research", system_prompt)
-        self.assertIn("Use SQLite when the task needs filtering", system_prompt)
-        self.assertIn("For prose, inspect once", system_prompt)
-        self.assertIn("aggregate-only and SELECT-all are incomplete", system_prompt)
-        self.assertIn("Replace the related rule in one sqlite_batch charter patch", system_prompt)
-        self.assertIn("append only when no related rule exists", system_prompt)
+        self.assertIn("Research requested in Discord: first call send_discord_message", system_prompt)
+        self.assertIn("Use SQLite to calculate, filter, join, rank, reconcile, or save rows", system_prompt)
+        self.assertIn("If result_json.content is text, parse result_text with", system_prompt)
+        self.assertIn("Every final SELECT returns all requested details", system_prompt)
+        self.assertIn("Use only text inside <charter>", system_prompt)
+        self.assertIn("Copy all related changed clauses exactly to :old and only their replacements to :new", system_prompt)
+        self.assertIn("remove every old step it replaces", system_prompt)
+        self.assertIn("Apply every lasting correction from the message in one patch", system_prompt)
+        self.assertIn("Never store charter guidance as appearance", system_prompt)
+        self.assertIn("If there is no related clause, set :old='' and :new to the new rule", system_prompt)
+        self.assertIn("case-only preferences are temporary: do not save them or say 'going forward'", system_prompt)
+        self.assertIn("Unscoped preferences are lasting and saved", system_prompt)
         self.assertIn("A correction plus a task requires both the patch and the work", system_prompt)
         self.assertIn(
-            "A named task, batch, day, run, project, or case is finite",
+            "rewrite must recast the message in the new style, not only remove the named defect",
             system_prompt,
         )
-        self.assertIn(
-            "A preference, critique, access correction, or recurring role instruction",
-            system_prompt,
-        )
+        self.assertIn("Questions about current or past state", system_prompt)
+        self.assertIn("Questions about current or past state do not", system_prompt)
+        self.assertIn("corrections to your behavior change future charter guidance", system_prompt)
+        self.assertIn("leave rules elsewhere unchanged", system_prompt)
         self.assertIn("Set false after delivery/config; future schedules, queued conversations", system_prompt)
         self.assertIn(
-            "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
+            "Schedule only when the user requests recurrence, a reminder, or a future trigger",
             system_prompt,
         )
-        self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
-        self.assertIn("do not search for a SQLite/database tool", system_prompt)
-        self.assertIn("Named enabled tool: call it directly", system_prompt)
-        self.assertIn("Use SQLite when the task needs filtering", system_prompt)
+        self.assertIn("SQLite query/update -> sqlite_batch directly", system_prompt)
+        self.assertIn("call the listed tool that fits first", system_prompt)
+        self.assertIn("Use SQLite to calculate, filter, join, rank, reconcile, or save rows", system_prompt)
         self.assertIn("Ready routes", system_prompt)
         self.assertIn("opaque auth refs only for the requested operation", system_prompt)
         self.assertIn("no preflight", system_prompt)
         self.assertIn("credential-returning API -> search_tools('secure credential delegation') first", system_prompt)
         self.assertIn("fresh source for an existing SQLite table -> fetch once", system_prompt)
-        self.assertIn("Named tables hold keyed entities", system_prompt)
+        self.assertIn("Reusable named tables need PRIMARY KEY or UNIQUE identity", system_prompt)
+        self.assertIn("Keep reusable related entities in separate tables joined by their source IDs", system_prompt)
+        self.assertIn("read payload fields with `json_extract(item.value,'$.field')`, never `item.field`", system_prompt)
         self.assertIn("data/api/feed/file URL -> http_request", system_prompt)
         self.assertIn(
-            "current price/quote -> search_tools('HTTP API request') if http_request absent",
+            "live traded-asset price/quote -> API only: use http_request if listed",
             system_prompt,
         )
         self.assertIn("then one reconcile+SELECT sqlite_batch", system_prompt)
@@ -2742,13 +2867,13 @@ class FirstRunPromptCalibrationTests(TestCase):
             "collect missing API key/password/secret -> secure_credentials_request directly",
             system_prompt,
         )
-        self.assertIn("never read secret files to verify", system_prompt)
+        self.assertIn("never verify secret files", system_prompt)
         self.assertIn("exact docs/blog/changelog/release-notes URL", system_prompt)
         self.assertIn("opaque identifiers", system_prompt)
         self.assertIn("supplied endpoints/paths/IDs/placeholders character-for-character", system_prompt)
         self.assertIn("same URLs/items returned twice -> no new evidence", system_prompt)
         self.assertIn("Held/skipped/rejected means not run", system_prompt)
-        self.assertIn("internal SQLite/plans prove no external action", system_prompt)
+        self.assertIn("Internal SQLite/plans prove no external action", system_prompt)
         self.assertIn("Claim external action only after its tool succeeds", system_prompt)
         self.assertIn("Charts: create only when requested/materially useful", system_prompt)
         self.assertIn(
@@ -2765,7 +2890,8 @@ class FirstRunPromptCalibrationTests(TestCase):
             "If substantial work continues after a meaningful evidence batch",
             system_prompt,
         )
-        self.assertIn("upsert both in a normal domain-progress table", system_prompt)
+        self.assertIn("create a normal domain-progress table if needed", system_prompt)
+        self.assertIn("A SELECT does not save state", system_prompt)
         self.assertIn("inspect or mutate charter/schedules/config unless", system_prompt)
         self.assertIn("the next call must send the report", system_prompt)
         self.assertIn("Never send 'I'll save/update it' with will_continue_work=false", system_prompt)

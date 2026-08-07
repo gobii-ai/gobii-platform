@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from api.agent.comms.email_endpoint_routing import can_agent_send_to
 from api.agent.tasks.process_events import process_unseen_web_chat_followup_task
-from api.agent.tools.web_chat_sender import execute_send_chat_message
+from api.agent.tools.web_chat_sender import execute_send_chat_message, get_send_chat_tool
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -81,6 +81,12 @@ class DisabledUnseenWebChatFollowupTests(TestCase):
         self.assertEqual(message.to_endpoint.address, self.user_web_address)
         apply_async_mock.assert_not_called()
         self.assertFalse(PersistentAgentSystemMessage.objects.filter(agent=self.agent).exists())
+
+    def test_chat_contract_prefers_provided_link_handles(self):
+        body_description = get_send_chat_tool()["function"]["parameters"]["properties"]["body"]["description"]
+
+        self.assertIn("link entity names once with provided link handles", body_description)
+        self.assertIn("exact raw URL only when no handle exists", body_description)
 
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
     def test_legacy_followup_task_is_a_noop(self, process_events_mock):

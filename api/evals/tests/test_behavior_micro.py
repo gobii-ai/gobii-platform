@@ -22,6 +22,7 @@ from api.evals.scenarios.behavior_micro import (
     GUIDED_PLANNING_MICRO_SCENARIO_SLUGS,
     LEGACY_PLANNING_STATE_EXECUTES_DIRECTLY,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
+    _successful_call,
     _uses_one_focused_charter_patch,
 )
 from api.evals.suites import SuiteRegistry
@@ -38,6 +39,19 @@ SMALL_SOURCING_DELIVERS_BEFORE_AUTOMATION = (
 
 @tag("eval_sim")
 class BehaviorMicroScenarioTests(SimpleTestCase):
+    def test_successful_call_ignores_correctable_tool_retries(self):
+        failed_attempt = SimpleNamespace(
+            status="error",
+            result=json.dumps({"status": "error", "retryable": True}),
+        )
+        successful_attempt = SimpleNamespace(
+            status="complete",
+            result=json.dumps({"status": "ok"}),
+        )
+
+        self.assertFalse(_successful_call(failed_attempt))
+        self.assertTrue(_successful_call(successful_attempt))
+
     def test_guided_planning_scenarios_are_registered(self):
         suite = SuiteRegistry.get("guided_planning_micro")
 
@@ -77,7 +91,8 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
                 "sql": (
                     "UPDATE __agent_config "
                     "SET charter=patch_text(charter, 'old rule', 'new rule') WHERE id=1; "
-                    "SELECT charter FROM __agent_config WHERE id=1"
+                    "SELECT patch_text(charter, '', '') AS updated_charter "
+                    "FROM __agent_config WHERE id=1"
                 )
             }
         )
@@ -110,6 +125,12 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
         self.assertNotIn("sqlite_batch", scenario._build_mock_config())
         self.assertNotIn("create_csv", scenario._build_mock_config())
         self.assertIn("sqlite_batch", generic_sqlite_scenario._build_mock_config())
+
+    def test_sqlite_count_case_names_its_available_table_and_column(self):
+        scenario = ScenarioRegistry.get("common_use_case_083_sqlite_query_counts")
+
+        self.assertIn("leads table", scenario.case.prompt)
+        self.assertIn("priority column", scenario.case.prompt)
 
     def test_sqlite_export_stop_policy_waits_for_query_backed_csv(self):
         scenario = ScenarioRegistry.get(SQLITE_EXPORT_QUERY_CSV)
@@ -145,11 +166,37 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
         self.assertEqual(len(result["content"]["signups"]), 5)
         self.assertIn("call sqlite_batch next", result["content"]["next_step"])
 
+    def test_maps_review_mock_contains_rows_for_sqlite_dedupe(self):
+        scenario = ScenarioRegistry.get("common_use_case_128_maps_reviews_sqlite_dedupe")
+
+        result = scenario._mock_for_tool("mcp_brightdata_web_data_google_maps_reviews")
+
+        self.assertEqual(len(result["content"]["reviews"]), 3)
+        self.assertEqual(result["content"]["reviews"][0]["snippet"], result["content"]["reviews"][1]["snippet"])
+        self.assertIn("call sqlite_batch next", result["content"]["next_step"])
+
+    def test_downstream_sqlite_research_mocks_contain_processable_rows(self):
+        cases = (
+            ("common_use_case_129_reddit_posts_sqlite_sentiment", "mcp_brightdata_web_data_reddit_posts", "posts"),
+            ("common_use_case_130_yahoo_finance_sqlite_calc", "mcp_brightdata_web_data_yahoo_finance_business", "market_cap"),
+            ("common_use_case_133_http_sqlite_dedupe_report", "http_request", "accounts"),
+            ("common_use_case_134_file_support_group_report", "read_file", None),
+        )
+
+        for slug, tool_name, content_key in cases:
+            with self.subTest(slug=slug):
+                result = ScenarioRegistry.get(slug)._mock_for_tool(tool_name)
+                if content_key is None:
+                    self.assertIn("tickets", json.loads(result["content"]))
+                else:
+                    self.assertTrue(result["content"][content_key])
+
     def test_monitoring_scope_chat_alternative_is_relevant_and_satisfies_expectation(self):
         scenario = ScenarioRegistry.get(MONITORING_SCOPE_QUESTION)
         chat_call = SimpleNamespace(
             tool_name="send_chat_message",
             tool_params={"body": "Which competitors and update types should I monitor?"},
+            status="complete",
         )
 
         self.assertTrue(scenario._call_satisfies_expected_tool(chat_call, "request_human_input"))
@@ -200,7 +247,10 @@ class BehaviorMicroScenarioTests(SimpleTestCase):
             self.assertIn("request_human_input", policy["stop_on_tool_names"])
             self.assertIn("secure_credentials_request", policy["stop_on_tool_names"])
             self.assertIn("spawn_web_task", policy["stop_on_tool_names"])
-            self.assertEqual(policy["stop_when_all_seen"], [{"tool_name": "search_tools"}])
+            self.assertEqual(
+                policy["stop_when_all_seen"],
+                [{"tool_name": "search_tools", "after_execution": True}],
+            )
 
     def test_small_sourcing_prefers_direct_research_over_meta_work(self):
         cases = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}

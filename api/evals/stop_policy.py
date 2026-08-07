@@ -20,6 +20,7 @@ EVAL_BOOKKEEPING_TABLE_NAMES = {
     "__messages",
     "__tool_results",
 }
+SQL_READ_TABLE_RE = re.compile(r'\b(?:from|join)\s+[`"\[]?([A-Za-z_][\w$]*)', re.IGNORECASE)
 AGENT_CONFIG_FIELD_PATTERNS = {
     "appearance": re.compile(r"\bappearance\b", re.IGNORECASE),
     "charter": re.compile(r"\bcharter\b", re.IGNORECASE),
@@ -37,6 +38,11 @@ def sql_mentions_planning_state(statement: str) -> bool:
 def sql_mentions_eval_bookkeeping(statement: str) -> bool:
     lowered = statement.lower()
     return any(table in lowered for table in EVAL_BOOKKEEPING_TABLE_NAMES)
+
+
+def sql_reads_only_eval_bookkeeping(statement: str) -> bool:
+    table_names = {match.group(1).lower() for match in SQL_READ_TABLE_RE.finditer(statement or "")}
+    return bool(table_names) and table_names.issubset(EVAL_BOOKKEEPING_TABLE_NAMES)
 
 
 def sql_mutates(statement: str) -> bool:
@@ -107,7 +113,7 @@ def sqlite_batch_is_only_eval_bookkeeping_read(tool_call) -> bool:
     if not statements:
         return False
 
-    return all(sql_mentions_eval_bookkeeping(statement) for statement in statements) and not any(
+    return all(sql_reads_only_eval_bookkeeping(statement) for statement in statements) and not any(
         sql_mutates(statement) for statement in statements
     )
 

@@ -109,6 +109,8 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
             case.accepted_tool_alternatives["mcp_brightdata_web_data_linkedin_people_search"],
             ("apollo_io-search-contacts", "http_request"),
         )
+        self.assertEqual(case.allowed_extra_tool_names, ("mcp_brightdata_search_engine",))
+        self.assertIn("mcp_brightdata_search_engine", case.mock_config)
         self.assertIn("Mina Patel", names)
         self.assertIn("Evan Brooks", names)
         self.assertIn("Dana Lee", names)

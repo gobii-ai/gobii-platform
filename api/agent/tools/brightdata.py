@@ -53,8 +53,9 @@ def get_brightdata_search_engine_tool() -> dict[str, Any]:
             "name": BRIGHTDATA_SEARCH_ENGINE_TOOL_NAME,
             "description": (
                 "Scrape search results from Google, Bing or Yandex. Returns SERP results in JSON or Markdown "
-                "(URL, title, description). Ideal for gathering current information, news, and detailed search "
-                "results."
+                "(URL, title, description). Use it to locate sources. When a result gives an API or data URL, call "
+                "http_request on that URL. If http_request is absent, call search_tools('HTTP API request') once. "
+                "Never browse or scrape an API or data URL."
             ),
             "parameters": {
                 "type": "object",

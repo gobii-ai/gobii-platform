@@ -97,6 +97,14 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertEqual(len(channels_by_brief), 5)
         self.assertTrue(all(channels == {"email", "chat"} for channels in channels_by_brief.values()))
 
+    def test_report_prompt_treats_schedule_facts_as_content_only(self):
+        scenario = ScenarioRegistry.get("message_quality_chat_colorist_sources")
+
+        prompt = scenario._prompt(scenario.case)
+
+        self.assertIn("Use these only as report content", prompt)
+        self.assertIn("Do not browse, create files, change settings or schedules", prompt)
+
     def test_simple_email_cases_are_restrained_outreach_counterexamples(self):
         self.assertEqual(len(SIMPLE_EMAIL_QUALITY_CASES), 2)
 
@@ -406,6 +414,34 @@ class MessageQualityScenarioTests(SimpleTestCase):
         scenario = MessageQualityScenario()
 
         self.assertIsNone(scenario._mock_config(case))
+
+    def test_supplied_report_fails_when_agent_changes_configuration(self):
+        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "chat")
+        send_call = SimpleNamespace(
+            tool_name="send_chat_message",
+            tool_params={"body": "Report", "will_continue_work": False},
+            result='{"status":"ok","message_id":"eval-send"}',
+            step="send-step",
+        )
+        config_call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={},
+            result=(
+                '{"status":"ok","agent_config_update":'
+                '{"updated_fields":["schedules"],"errors":{}}}'
+            ),
+            step="config-step",
+        )
+        scenario = MessageQualityScenario()
+        recorded = []
+        scenario._tool_calls_for_run = lambda *args, **kwargs: [config_call, send_call]
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+
+        result = scenario._record_expected_send_tool("run", case, after=None)
+
+        self.assertIsNone(result)
+        self.assertEqual(recorded[-1][0][2], "failed")
+        self.assertIn("1 unintended configuration changes", recorded[-1][1]["observed_summary"])
 
     def test_email_delivery_stays_mocked_to_avoid_external_send(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")

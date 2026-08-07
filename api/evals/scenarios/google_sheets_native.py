@@ -183,8 +183,8 @@ def _local_llms_values_update_rule() -> dict[str, Any]:
         "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
         **_method_equals("PUT"),
         "result": _http_result(
-            f"https://sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values/Models!A1:F10",
-            {"spreadsheetId": LOCAL_LLMS_SHEET_ID, "updatedRows": 6, "updatedCells": 30},
+            f"https://sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values/Models!A1:E4",
+            {"spreadsheetId": LOCAL_LLMS_SHEET_ID, "updatedRows": 4, "updatedCells": 20},
         ),
     }
 
@@ -407,9 +407,11 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         slug=GOOGLE_SHEETS_NATIVE_CREATE_DEFAULT_COLUMNS,
         description="Create a useful spreadsheet with safe default columns instead of asking for preferences.",
         prompt=(
-            "Create a Google Sheet named Top Local LLM Models with sensible default columns. "
-            "Use these rows: Llama 3.1 8B, Qwen2.5 7B, and Mistral 7B. Include columns for name, size, "
-            "license, and links."
+            "Create a Google Sheet named Top Local LLM Models with columns for name, size, license, and link. "
+            "Use these rows and no other data: Llama 3.1 8B | 8B | Llama 3.1 Community License | "
+            "https://huggingface.co/meta-llama/Llama-3.1-8B; Qwen2.5 7B | 7B | Apache 2.0 | "
+            "https://huggingface.co/Qwen/Qwen2.5-7B; Mistral 7B | 7B | Apache 2.0 | "
+            "https://huggingface.co/mistralai/Mistral-7B-v0.1."
         ),
         http_rules=(
             _local_llms_values_update_rule(),
@@ -430,8 +432,8 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                     f"sheets.googleapis.com/v4/spreadsheets/{LOCAL_LLMS_SHEET_ID}/values",
                     "valueinputoption=user_entered",
                 ),
-                body_terms=("name", "license", "link"),
-                body_term_groups=(("size", "parameters"),),
+                body_terms=("license", "link"),
+                body_term_groups=(("name", "model"), ("size", "parameters")),
             ),
         ),
         response_term_groups=(("Top Local LLM Models", "created", "ready"),),
@@ -554,7 +556,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         slug=GOOGLE_SHEETS_NATIVE_CHART_WITH_HELPER_DATA,
         description="Create a chart that binds numeric helper data even when helper columns are hidden.",
         prompt=(
-            "In Google spreadsheet sheet-123, the Models tab has model names in A and size labels in B. "
+            "In the Google spreadsheet with ID sheet-123, the Models tab has model names in A and size labels in B. "
             "Add numeric helper values for the sizes to empty helper column D, then add a chart visualizing model sizes. "
             "Make sure the chart reads the helper values even if that helper column is hidden."
         ),
@@ -565,6 +567,18 @@ GOOGLE_SHEETS_NATIVE_CASES = (
             {
                 "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
                 **_method_equals("PUT"),
+                "param_equals": {"method": "PUT", "body": ""},
+                "result": {
+                    "status": "error",
+                    "status_code": 400,
+                    "message": "A Sheets values update requires a ValueRange JSON body with a values array.",
+                    "retryable": True,
+                },
+            },
+            {
+                "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+                **_method_equals("PUT"),
+                "param_contains": {"body": "values"},
                 "result": _http_result(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Models!D1:D10",
                     {"spreadsheetId": GENERIC_TRACKER_ID, "updatedRows": 6, "updatedCells": 6},

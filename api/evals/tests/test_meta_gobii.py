@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
+from litellm.exceptions import APIError
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError
@@ -24,6 +25,7 @@ from api.evals.scenarios.meta_gobii import (
     MetaGobiiImplicitResearchTeamRealHarnessScenario,
     MetaGobiiSpecialistAgentLaunchRealHarnessScenario,
     MetaGobiiSystemSkillScenario,
+    _is_retryable_llm_error,
     _record_plan_tool,
 )
 from api.evals.suites import SuiteRegistry
@@ -130,6 +132,25 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
 
         self.assertTrue(MetaGobiiSystemSkillScenario._plan_args_need_fallback(case, plan_args))
 
+    def test_inconsistent_schedule_action_uses_deterministic_fallback(self):
+        case = next(
+            eval_case
+            for eval_case in META_GOBII_EVAL_CASES
+            if eval_case.slug == "schedule_proactive_daily_market_digest"
+        )
+        scenario = MetaGobiiSystemSkillScenario()
+        plan_args = scenario._simulated_plan_args(case)
+        plan_args["schedule_policy"]["schedule_action"] = "create"
+
+        self.assertTrue(MetaGobiiSystemSkillScenario._plan_args_need_fallback(case, plan_args))
+
+    def test_internally_inconsistent_schedule_scope_uses_deterministic_fallback(self):
+        case = _implicit_research_team_case()
+        plan_args = _implicit_research_team_plan_args()
+        plan_args["schedule_policy"]["included_in_approval_scope"] = True
+
+        self.assertTrue(MetaGobiiSystemSkillScenario._plan_args_need_fallback(case, plan_args))
+
     def test_extra_scope_filter_allows_explicit_resource_limit_request(self):
         prompt = (
             "Archive every inactive Gobii you can find and raise the daily credit limit on all remaining Gobiis "
@@ -145,6 +166,37 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
         )
 
         self.assertEqual(extra_scope_items, ["Add a weekly market digest schedule"])
+
+    def test_extra_scope_filter_allows_explicit_team_deployment(self):
+        prompt = "Deploy a whole team to investigate and report back."
+
+        extra_scope_items = _planned_extra_scope_items(
+            ["Deploy a new team", "Add a weekly schedule"],
+            user_prompt=prompt,
+        )
+
+        self.assertEqual(extra_scope_items, ["Add a weekly schedule"])
+
+    def test_extra_scope_filter_ignores_explanation_of_excluded_team_scope(self):
+        explanation = (
+            "The user wants a research Gobii; this is a single-Gobii request, not a team request. "
+            "No peer agents or legal Gobii are requested."
+        )
+
+        self.assertEqual(_planned_extra_scope_items([explanation]), [])
+
+    def test_extra_scope_filter_ignores_plain_did_not_ask_exclusion(self):
+        explanation = (
+            "User did not ask to change names, charters, schedules, tiers, policies, links, contacts, files, "
+            "or secrets on any Gobii."
+        )
+
+        self.assertEqual(_planned_extra_scope_items([explanation]), [])
+
+    def test_extra_scope_filter_keeps_action_that_contrasts_with_exclusion(self):
+        item = "No schedule was requested, but add a weekly digest schedule."
+
+        self.assertEqual(_planned_extra_scope_items([item]), [item])
 
     def test_skill_discovery_uses_deterministic_fallback_for_retryable_llm_error(self):
         case = next(
@@ -166,6 +218,19 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
             [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME],
         )
         self.assertEqual(calls[1]["arguments"]["skill_keys"], [META_GOBII_SYSTEM_SKILL_KEY])
+
+    def test_openrouter_exhausted_provider_aggregate_is_retryable(self):
+        error = APIError(
+            400,
+            (
+                'OpenrouterException: {"message":"Multi-turn conversations are not supported",'
+                '"previous_errors":[{"message":"Provider returned error: temporarily rate-limited upstream"}]}'
+            ),
+            "openrouter",
+            "test-model",
+        )
+
+        self.assertTrue(_is_retryable_llm_error(error))
 
     def test_implicit_research_team_real_harness_scenario_is_registered(self):
         scenario = ScenarioRegistry.get(META_GOBII_IMPLICIT_RESEARCH_TEAM_REAL_HARNESS)
@@ -349,6 +414,27 @@ class MetaGobiiEvalJudgeTests(SimpleTestCase):
         )
 
         self.assertFalse(scores["schedule_scope"][0])
+
+    def test_no_schedule_exclusion_is_not_scored_as_approval_scope(self):
+        case = _implicit_research_team_case()
+        response_args = _implicit_research_team_response_args()
+        response_args["response_text"] += " No schedules will be added."
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            discovery_calls=[
+                {"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "research team management"}},
+                {
+                    "name": ENABLE_SYSTEM_SKILLS_TOOL_NAME,
+                    "arguments": {"skill_keys": [META_GOBII_SYSTEM_SKILL_KEY]},
+                },
+            ],
+            plan_args=_implicit_research_team_plan_args(),
+            response_args=response_args,
+        )
+
+        self.assertTrue(scores["schedule_scope"][0], scores["schedule_scope"][1])
 
     def test_skill_discovery_uses_deterministic_fallback_after_missing_expected_search(self):
         case = next(

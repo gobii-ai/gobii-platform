@@ -36,7 +36,7 @@ class PeerStructuredPayloadPromptTests(SimpleTestCase):
         self.assertLess(list(components).index("structured_payload"), list(components).index("structured_payload_sql_source"))
         self.assertEqual(json.loads(components["structured_payload"]), payload)
 
-    def test_delivery_status_requires_payload_derived_state(self):
+    def test_payload_values_and_joins_are_derived_from_the_message(self):
         components = _build_peer_message_prompt_components(
             header="Peer DM received from Seller:",
             body="Reconcile this outcome.",
@@ -47,12 +47,11 @@ class PeerStructuredPayloadPromptTests(SimpleTestCase):
         )
 
         self.assertIn("__messages", components["structured_payload_sql_source"])
-        self.assertIn("ORDER BY seq DESC LIMIT 1", components["structured_payload_sql_source"])
-        self.assertIn(
-            "state=json_extract(m.structured_payload_json,'$.delivery_status')",
-            components["structured_payload_sql_source"],
-        )
-        self.assertIn("`state='bounced'` is invalid", components["structured_payload_sql_source"])
+        self.assertIn("latest inbound", components["structured_payload_sql_source"])
+        self.assertIn("json_extract(m.structured_payload_json", components["structured_payload_sql_source"])
+        self.assertIn("including WHERE and SET values", components["structured_payload_sql_source"])
+        self.assertIn("without a matching payload field NULL", components["structured_payload_sql_source"])
+        self.assertIn("Never type a preview value", components["structured_payload_sql_source"])
         self.assertNotIn(":source_payload", components["structured_payload_sql_source"])
 
     def test_prose_and_payload_remain_distinct_components(self):

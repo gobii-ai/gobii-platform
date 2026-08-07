@@ -29,6 +29,8 @@ from api.agent.core.event_processing import (
     _execute_tool_call_runtime,
     _execute_prepared_tool_call,
     _execute_prepared_tool_batch,
+    _find_successful_duplicate_exact_tool_call,
+    _find_completed_tool_discovery,
     _finalize_tool_batch,
     _latest_inbound_message_needs_reply,
     _should_continue_for_pending_progress_reply,
@@ -181,9 +183,10 @@ class ToolDisplayMetadataTests(TestCase):
             SimpleNamespace(updated_fields=("charter",), errors={}),
         )
 
-        self.assertIn("brief natural acknowledgment", updated_charter.result["reply_guidance"])
-        self.assertIn("Non-config reads or writes", updated_charter.result["reply_guidance"])
-        self.assertIn("do not read or verify config again", updated_charter.result["reply_guidance"])
+        self.assertIn("Finish any attached task now", updated_charter.result["reply_guidance"])
+        self.assertIn("briefly acknowledge the behavior", updated_charter.result["reply_guidance"])
+        self.assertIn("Keep the reply user-facing", updated_charter.result["reply_guidance"])
+        self.assertIn("do not describe internal changes", updated_charter.result["reply_guidance"])
         self.assertNotIn("reply_guidance", updated_charter.result["agent_config_update"])
 
     def test_failed_charter_update_does_not_include_reply_guidance(self):
@@ -207,6 +210,33 @@ class ToolDisplayMetadataTests(TestCase):
         )
 
         self.assertNotIn("reply_guidance", failed_charter.result)
+        self.assertEqual(failed_charter.result["status"], "error")
+        self.assertIs(failed_charter.result["retryable"], True)
+        self.assertIn("charter: Charter update failed.", failed_charter.result["message"])
+
+    def test_non_charter_config_update_requires_a_reply_before_sleep(self):
+        updated_emotion = SimpleNamespace(
+            prepared=SimpleNamespace(
+                idx=0,
+                tool_name="sqlite_batch",
+                exec_params={
+                    "sql": (
+                        "UPDATE __agent_config SET emotion='🔥', "
+                        "emotion_timeout_seconds=7200 WHERE id=1"
+                    )
+                },
+            ),
+            result={"status": "ok"},
+        )
+
+        _annotate_agent_config_update_result(
+            [updated_emotion],
+            SimpleNamespace(updated_fields=("emotion",), errors={}),
+        )
+
+        guidance = updated_emotion.result["reply_guidance"]
+        self.assertIn("Reply now", guidance)
+        self.assertIn("Do not sleep", guidance)
 
     def test_failed_config_attempt_does_not_gain_confirmation_from_a_later_update(self):
         failed_charter = SimpleNamespace(
@@ -857,11 +887,10 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(system_message)
         assert system_message is not None
         system_content = system_message["content"]
-        self.assertIn("Use `update_plan` only for substantial multi-step work", system_content)
-        self.assertIn("Keep plans short, current, and verifiable", system_content)
-        self.assertIn("each call replaces the full active plan", system_content)
-        self.assertIn("one closeout immediately before the final delivery", system_content)
-        self.assertIn("never update it between evidence batches", system_content)
+        self.assertIn("Use `update_plan` only before substantial multi-step work", system_content)
+        self.assertIn("Never create a plan after work has started", system_content)
+        self.assertIn("close it once before delivery", system_content)
+        self.assertIn("Plans include work only, never sending or replying", system_content)
 
     def test_update_plan_tool_execution_does_not_refresh_runtime_planning_system_skill(self):
         prepared = _PreparedToolExecution(
@@ -1240,7 +1269,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(system_message)
         self.assertIsNotNone(user_message)
         self.assertIn("configure-authorized organization members", system_message["content"])
-        self.assertIn("durable config (charter, schedule, appearance)", system_message["content"])
+        self.assertIn("charter, schedules, or appearance", system_message["content"])
         self.assertIn(f"- email: {admin.email} [org admin - can configure] - Admin User", user_message["content"])
         self.assertIn(
             f"- email: {solutions_partner.email} [org solutions_partner - can configure] - Solutions Partner",
@@ -1469,6 +1498,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<current_datetime>', content)
         self.assertIn('</current_datetime>', content)
         self.assertIn('<pacing_guidance>', content)
+        self.assertIn('Never run a second batch or read schedules first', content)
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
 
@@ -1621,10 +1651,10 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("end_planning", system_message["content"])
         self.assertNotIn("## Signup Preview Handoff", system_message["content"])
         self.assertIn(
-            "No task: send one short, natural welcome.",
+            "No task: briefly acknowledge it; do not offer help or follow-up.",
             system_message["content"],
         )
-        self.assertIn("Broad task missing a material scope", system_message["content"])
+        self.assertIn("A broad goal or named subject alone does not make a task executable", system_message["content"])
         self.assertNotIn("## Signup Preview First-Run Override", system_message["content"])
         self.assertNotIn("limited preview", system_message["content"])
         self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
@@ -5549,6 +5579,123 @@ class EventProcessingRuntimeGuardTests(TestCase):
         message.refresh_from_db()
         return message
 
+    def test_exact_successful_image_generation_is_deduplicated_within_task(self):
+        inbound = self._create_inbound_email_message(
+            body="Create one hero image.",
+            timestamp=timezone.now(),
+        )
+        step = PersistentAgentStep.objects.create(agent=self.agent)
+        PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=inbound.timestamp + timedelta(seconds=1))
+        call = PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="create_image",
+            tool_params={"file_path": "/exports/hero.png", "prompt": "Coffee hero"},
+            result=json.dumps({"status": "ok", "file": "$[/exports/hero.png]"}),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+
+        duplicate = _find_successful_duplicate_exact_tool_call(
+            self.agent,
+            "create_image",
+            {"prompt": "Coffee hero", "file_path": "/exports/hero.png"},
+            eval_run_id=None,
+        )
+
+        self.assertEqual(duplicate, call)
+
+    def test_exact_successful_sqlite_batch_is_deduplicated_within_task(self):
+        inbound = self._create_inbound_email_message(
+            body="Reconcile the current board.",
+            timestamp=timezone.now(),
+        )
+        step = PersistentAgentStep.objects.create(agent=self.agent)
+        PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=inbound.timestamp + timedelta(seconds=1))
+        call = PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT state, COUNT(*) FROM work GROUP BY state;", "bindings": {}},
+            result=json.dumps({"status": "ok", "results": [{"result": [{"state": "ready", "count": 1}]}]}),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+
+        duplicate = _find_successful_duplicate_exact_tool_call(
+            self.agent,
+            "sqlite_batch",
+            {"bindings": {}, "sql": "SELECT state, COUNT(*) FROM work GROUP BY state;"},
+            eval_run_id=None,
+        )
+
+        self.assertEqual(duplicate, call)
+
+    def test_sqlite_deduplication_ignores_continuation_control(self):
+        inbound = self._create_inbound_email_message(
+            body="Set the temporary mood.",
+            timestamp=timezone.now(),
+        )
+        step = PersistentAgentStep.objects.create(agent=self.agent)
+        PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=inbound.timestamp + timedelta(seconds=1))
+        sql = "UPDATE __agent_config SET emotion='😌', emotion_timeout_seconds=1800 WHERE id=1"
+        call = PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="sqlite_batch",
+            tool_params={"sql": sql, "bindings": {}, "will_continue_work": True},
+            result=json.dumps({"status": "ok", "results": [{"message": "Query affected 1 row."}]}),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+
+        duplicate = _find_successful_duplicate_exact_tool_call(
+            self.agent,
+            "sqlite_batch",
+            {"sql": sql, "bindings": {}, "will_continue_work": False},
+            eval_run_id=None,
+        )
+
+        self.assertEqual(duplicate, call)
+
+    def test_completed_tool_discovery_blocks_repeated_search(self):
+        inbound = self._create_inbound_email_message(
+            body="Tell me the next setup step.",
+            timestamp=timezone.now(),
+        )
+        step = PersistentAgentStep.objects.create(agent=self.agent)
+        PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=inbound.timestamp + timedelta(seconds=1))
+        call = PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="search_tools",
+            tool_params={"query": "Pipedream webhook"},
+            result=json.dumps({
+                "status": "success",
+                "tools": {"enabled": [], "already_enabled": []},
+                "next_action": "If none fits, explain the setup; do not call search_tools again.",
+            }),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+
+        self.assertEqual(
+            _find_completed_tool_discovery(self.agent, eval_run_id=None),
+            call,
+        )
+
+    def test_tool_discovery_allows_required_post_app_search(self):
+        inbound = self._create_inbound_email_message(
+            body="Use the connected Pipedream app.",
+            timestamp=timezone.now(),
+        )
+        step = PersistentAgentStep.objects.create(agent=self.agent)
+        PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=inbound.timestamp + timedelta(seconds=1))
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="search_tools",
+            tool_params={"query": "Connected app"},
+            result=json.dumps({
+                "status": "success",
+                "message": "Pipedream apps are ready. Run search_tools again to discover the specific tools.",
+            }),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+
+        self.assertIsNone(_find_completed_tool_discovery(self.agent, eval_run_id=None))
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_tool_call_runtime_rejects_tier_blacklisted_static_tool(self):
         tier = get_intelligence_tier("standard")
@@ -5985,6 +6132,39 @@ class EventProcessingRuntimeGuardTests(TestCase):
 
         self.assertTrue(finalized.followup_required)
 
+    def test_finalize_retryable_error_identifies_tool_for_one_retry(self):
+        prepared = _PreparedToolExecution(
+            idx=0,
+            tool_name="http_request",
+            tool_params={"method": "POST", "url": "https://example.test"},
+            exec_params={},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-http",
+            explicit_continue=False,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:http_request",
+        )
+        outcome = _ToolExecutionOutcome(
+            prepared=prepared,
+            result={"status": "error", "retryable": True, "message": "Use a literal URL."},
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [outcome],
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.followup_required)
+        self.assertEqual(finalized.retryable_tool_name, "http_request")
+
     @tag("batch_event_processing")
     def test_finalize_explicit_stop_without_auto_sleep_requires_followup(self):
         prepared = _PreparedToolExecution(
@@ -6023,6 +6203,45 @@ class EventProcessingRuntimeGuardTests(TestCase):
         self.assertTrue(finalized.followup_required)
         self.assertIs(finalized.last_explicit_continue, False)
 
+    def test_finalize_terminal_message_error_keeps_explicit_continuation(self):
+        prepared = _PreparedToolExecution(
+            idx=0,
+            tool_name="send_chat_message",
+            tool_params={"message": "Status update", "will_continue_work": True},
+            exec_params={"message": "Status update"},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-send",
+            explicit_continue=True,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:send_chat_message",
+        )
+        outcome = _ToolExecutionOutcome(
+            prepared=prepared,
+            result={
+                "status": "error",
+                "retryable": False,
+                "terminal_error": True,
+                "message": "No active web chat is available.",
+            },
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [outcome],
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.terminal_message_error)
+        self.assertTrue(finalized.followup_required)
+        self.assertIs(finalized.last_explicit_continue, True)
+
     def test_non_message_stop_continues_when_latest_inbound_is_unanswered(self):
         self._create_inbound_email_message(
             body="what's the weather in frederick md?",
@@ -6039,6 +6258,62 @@ class EventProcessingRuntimeGuardTests(TestCase):
 
         self.assertTrue(_latest_inbound_message_needs_reply(self.agent))
         self.assertTrue(_should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
+
+    def test_non_message_stop_with_tool_followup_still_marks_unanswered_reply(self):
+        self._create_inbound_email_message(
+            body="Save the recurring check and report today's result.",
+            timestamp=timezone.now(),
+        )
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=True,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        self.assertTrue(_should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
+
+    def test_non_message_stop_does_not_force_peer_status_reply(self):
+        inbound = SimpleNamespace(
+            conversation_id=self.conversation.id,
+            conversation=SimpleNamespace(is_peer_dm=True),
+        )
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        self.assertFalse(_latest_inbound_message_needs_reply(self.agent, inbound))
+        self.assertFalse(
+            _should_continue_for_unanswered_inbound_after_tools(self.agent, finalized, inbound)
+        )
+
+    def test_non_message_stop_retains_consumed_inbound_until_reply(self):
+        inbound = self._create_inbound_email_message(
+            body="Add these records and let me know when they're saved.",
+            timestamp=timezone.now(),
+        )
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        with patch("api.agent.core.event_processing.get_current_inbound_message", return_value=None):
+            self.assertFalse(_latest_inbound_message_needs_reply(self.agent))
+            self.assertTrue(_latest_inbound_message_needs_reply(self.agent, inbound))
+            self.assertTrue(
+                _should_continue_for_unanswered_inbound_after_tools(self.agent, finalized, inbound)
+            )
 
     def test_non_message_stop_does_not_continue_after_user_facing_reply(self):
         now = timezone.now()
@@ -7701,6 +7976,32 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
         )
 
         mock_apply_async.assert_not_called()
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
+    def test_agent_follow_up_preserves_turn_context(self, mock_apply_async):
+        from api.agent.core import event_processing as ep
+
+        ep._schedule_agent_follow_up(
+            agent_id=self.agent.id,
+            delay_seconds=0,
+            reason="Test",
+            queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+            task_kwargs={
+                "inbound_message_id": "message-id",
+                "eval_run_id": "eval-run-id",
+            },
+        )
+
+        mock_apply_async.assert_called_once_with(
+            args=[str(self.agent.id)],
+            countdown=0,
+            kwargs={
+                "inbound_message_id": "message-id",
+                "eval_run_id": "eval-run-id",
+            },
+            queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+        )
 
     @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
     @patch("api.agent.tasks.process_events.process_pending_agent_events_task.apply_async")

@@ -38,8 +38,8 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                     "channel_id": {
                         "type": "string",
                         "description": (
-                            "Subscribed Discord channel ID. When replying to the current Discord message, copy its "
-                            "discord_channel_id exactly; use channel_name only when no ID is available."
+                            "Subscribed Discord channel ID. For a reply, set this channel_id to the inbound message's "
+                            "discord_channel_id value. Use channel_name only when no ID is available."
                         ),
                     },
                     "channel_name": {

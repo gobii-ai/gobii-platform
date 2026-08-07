@@ -74,6 +74,9 @@ from api.evals.scenarios.behavior_micro import (
     get_planning_mutation_calls_before_end_planning,
     explicit_stop_is_bounded_to_plan_closeout,
     tool_call_is_plan_activity,
+    _successful_call,
+    _successful_without_repair,
+    _tool_call_was_skipped,
 )
 from api.evals.scenarios.effort_calibration import (
     _hierarchical_report_shape,
@@ -94,8 +97,12 @@ from api.evals.scenarios.monitor_pollution import (
     _agent_has_reasonable_pollution_schedule,
     _charter_mentions_pollution_monitoring,
     _schedule_is_reasonable_pollution_monitoring,
+    _sim_weather_mock_config,
 )
-from api.evals.scenarios.permit_followup_single_reply import PermitFollowupSingleReplyScenario
+from api.evals.scenarios.permit_followup_single_reply import (
+    PermitFollowupSingleReplyScenario,
+    _isolated_sms_addresses,
+)
 from api.evals.scenarios.sqlite_tool_results import _source_relationship_read_failures
 from api.evals.scenarios.weather_lookup import _is_free_weather_request, _weather_lookup_http_mock
 from api.evals.stop_policy import (
@@ -446,6 +453,12 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_118_apollo_dedupe_contacts_sqlite"].accepted_tool_alternatives,
             {"http_request": ("apollo_io-search-contacts",)},
         )
+
+        apollo_sqlite_scenario = ScenarioRegistry.get("common_use_case_118_apollo_dedupe_contacts_sqlite")
+        apollo_result = apollo_sqlite_scenario._mock_success("apollo_io-search-contacts")
+        contacts = apollo_result["content"]["contacts"]
+        self.assertEqual(len(contacts), 3)
+        self.assertEqual(len({contact["email"] for contact in contacts}), 2)
         self.assertEqual(
             by_slug["common_use_case_122_custom_tool_bulk_api_sqlite"].expected_tools,
             ("create_custom_tool",),
@@ -470,13 +483,34 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         structured_workflow_case = by_slug["common_use_case_109_http_json_dedupe_domains"]
         scenario.case = structured_workflow_case
         http_mock = scenario._mock_for_tool("http_request")
-        self.assertEqual(http_mock["content"]["next_step"], "http_request succeeded; call sqlite_batch next to continue the requested workflow.")
+        self.assertEqual(len(http_mock["rules"]), 2)
+        vendor_rows = [
+            vendor
+            for rule in http_mock["rules"]
+            for vendor in rule["result"]["content"]["vendors"]
+        ]
+        self.assertEqual(len(vendor_rows), 4)
+        self.assertEqual(len({vendor["domain"] for vendor in vendor_rows}), 3)
+        self.assertTrue(all(
+            rule["result"]["content"]["next_step"]
+            == "http_request succeeded; call sqlite_batch next to continue the requested workflow."
+            for rule in http_mock["rules"]
+        ))
         scrape_sqlite_case = by_slug["common_use_case_127_search_scrape_sqlite_extract"]
         scenario.case = scrape_sqlite_case
         scrape_mock = scenario._mock_for_tool("mcp_brightdata_scrape_as_markdown")
         self.assertIn("call sqlite_batch next", scrape_mock["message"])
         self.assertIn("ExamplePay Pricing", scrape_mock["result"])
         self.assertIn("__tool_results.result_text", scrape_mock["result"])
+        multi_source_case = by_slug["common_use_case_110_scrape_compare_with_sqlite"]
+        scenario.case = multi_source_case
+        multi_source_mock = scenario._mock_for_tool("mcp_brightdata_scrape_as_markdown")
+        self.assertEqual(len(multi_source_mock["rules"]), 2)
+        first_result = multi_source_mock["rules"][0]["result"]
+        second_result = multi_source_mock["rules"][1]["result"]
+        self.assertNotEqual(first_result["url"], second_result["url"])
+        self.assertNotEqual(first_result["result"], second_result["result"])
+        self.assertIn("call sqlite_batch next", second_result["message"])
         self.assertEqual(
             by_slug["common_use_case_020_search_reddit_mentions"].accepted_tool_alternatives,
             {"mcp_brightdata_web_data_reddit_posts": ("mcp_brightdata_search_engine",)},
@@ -512,6 +546,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 "google_sheets-read-rows": (
                     "google_sheets-get-values-in-range",
                     "google_sheets-get-spreadsheet-by-id",
+                    "google_sheets-get-spreadsheet-info",
                 )
             },
         )
@@ -691,6 +726,14 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         )
         self.assertTrue(sqlite_batch_is_only_eval_bookkeeping_read(messages_table_call))
 
+        mixed_call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={
+                "sql": "SELECT l.id FROM leads l JOIN __tool_results t ON t.result_id = l.result_id;"
+            },
+        )
+        self.assertFalse(sqlite_batch_is_only_eval_bookkeeping_read(mixed_call))
+
     def test_bitcoin_price_api_validation_accepts_supported_direct_price_apis(self):
         self.assertTrue(
             is_supported_bitcoin_price_api_url(
@@ -753,6 +796,19 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
 
         too_frequent_ok, too_frequent_reason = _schedule_is_reasonable_pollution_monitoring("* * * * *")
         self.assertFalse(too_frequent_ok, too_frequent_reason)
+
+    def test_monitor_pollution_mocks_each_accepted_direct_fetch_path(self):
+        sim_url = "http://127.0.0.1:8001/eval/sim/weather/"
+        mock_config = _sim_weather_mock_config(sim_url)
+
+        self.assertEqual(
+            set(mock_config),
+            {"http_request", "mcp_brightdata_scrape_as_markdown"},
+        )
+        self.assertEqual(mock_config["http_request"]["content"]["pollution_index"], 55)
+        scrape_content = mock_config["mcp_brightdata_scrape_as_markdown"]["content"]
+        self.assertEqual(scrape_content["url"], sim_url)
+        self.assertIn("Moderate (55)", scrape_content["markdown"])
 
 
 @tag("batch_eval_fingerprint")
@@ -1116,12 +1172,47 @@ class BehaviorMicroHelperTests(TestCase):
         old_question = "For prospect outreach, end each note with an open question asking for the recipient's opinion."
         easy_question = "For prospect outreach, use observations and ask a specific question that is easy to answer."
         good_evaluative = evaluative.existing_charter.replace(old_question, easy_question)
+        low_effort_observation = evaluative.existing_charter.replace(
+            old_question,
+            "For prospect outreach, use a thoughtful observation that invites a natural response.",
+        )
+        perspective_first = evaluative.existing_charter.replace(
+            old_question,
+            "For prospect outreach, share a perspective first and ask a question the recipient can react to.",
+        )
+        low_effort_close = evaluative.existing_charter.replace(
+            old_question,
+            "For prospect outreach, use a low-effort close that does not put work on the recipient.",
+        )
+        no_recipient_work = evaluative.existing_charter.replace(
+            old_question,
+            "For prospect outreach, end each note without asking the recipient to do work.",
+        )
+        scoped_continuation = evaluative.existing_charter.replace(
+            old_question,
+            (
+                "For prospect outreach, end each note with an open question. "
+                "Share an observation first so the recipient can react."
+            ),
+        )
         self._assert_charter_cases(
             evaluative.slug,
             old=old_question,
             new=easy_question,
-            passing=[good_evaluative],
+            passing=[
+                good_evaluative,
+                low_effort_observation,
+                perspective_first,
+                low_effort_close,
+                no_recipient_work,
+                scoped_continuation,
+            ],
             failing=[
+                evaluative.existing_charter,
+                (
+                    "For prospect outreach, ask an open question. "
+                    "For customer interviews, use a low-effort prompt."
+                ),
                 evaluative.existing_charter.replace(old_question, "Make every question easy to answer."),
                 evaluative.existing_charter.replace(
                     old_question,
@@ -1291,12 +1382,38 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(row.tool_name, "apollo_io-search-accounts")
         self.assertIn("apollo_io-search-accounts", self._tool_definition_names(self.agent))
 
+    def test_eval_batch_tool_exposes_explicit_continuation_choice(self):
+        definition = EVAL_SYNTHETIC_TOOL_DEFINITIONS["eval_verify_candidate_batch"]
+        parameters = definition["parameters"]
+
+        self.assertIn("will_continue_work", parameters["required"])
+        self.assertIn("another action is needed", parameters["properties"]["will_continue_work"]["description"])
+        self.assertIn("Use it once, then send", definition["description"])
+
     def test_common_use_case_stop_policy_allows_tool_discovery_for_eval_synthetic_tools(self):
         scenario = ScenarioRegistry.get("common_use_case_046_sheets_read_range")
 
         policy = scenario._build_eval_stop_policy()
 
         self.assertIn("search_tools", policy["allowed_tool_names"])
+        self.assertTrue(policy["stop_when_all_seen"][0]["after_execution"])
+
+    def test_common_use_case_verifier_rejects_canceled_expected_tool(self):
+        scenario = ScenarioRegistry.get("common_use_case_118_apollo_dedupe_contacts_sqlite")
+        canceled = SimpleNamespace(tool_name="sqlite_batch", status="error", tool_params={})
+        completed = SimpleNamespace(tool_name="sqlite_batch", status="complete", tool_params={})
+
+        self.assertFalse(scenario._call_satisfies_expected_tool(canceled, "sqlite_batch"))
+        self.assertTrue(scenario._call_satisfies_expected_tool(completed, "sqlite_batch"))
+
+    def test_sheets_metadata_mock_does_not_leak_worksheet_rows(self):
+        scenario = ScenarioRegistry.get("common_use_case_047_sheets_find_row")
+
+        metadata = scenario._google_sheets_mock_success("google_sheets-get-spreadsheet-by-id")
+        find_result = scenario._google_sheets_mock_success("google_sheets-find-row")
+
+        self.assertNotIn("rows", metadata["content"])
+        self.assertEqual(find_result["content"]["rows"][2]["email"], "ana@example.test")
 
     def test_outbound_contact_lookup_cases_allow_sqlite_preamble(self):
         for slug, expected_tool in (
@@ -1531,7 +1648,7 @@ class BehaviorMicroHelperTests(TestCase):
         PersistentAgentEnabledTool.objects.create(
             agent=self.agent,
             tool_full_name=tool_name,
-            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+            tool_server="pipedream",
             tool_name=tool_name,
         )
         mock_manager = MagicMock()
@@ -1836,6 +1953,16 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(statuses["inject_prompt"], EvalRunTask.Status.PASSED)
         self.assertEqual(statuses["verify_single_reply"], EvalRunTask.Status.PASSED)
 
+    def test_permit_followup_uses_isolated_valid_sms_addresses(self):
+        first = _isolated_sms_addresses("00000000-0000-0000-0000-000000000001")
+        second = _isolated_sms_addresses("00000000-0000-0000-0000-000000000002")
+
+        self.assertNotEqual(first, second)
+        for sender, recipient in (first, second):
+            self.assertRegex(sender, r"^\+1\d{10}$")
+            self.assertRegex(recipient, r"^\+1\d{10}$")
+            self.assertNotEqual(sender, recipient)
+
     def test_common_eval_definition_rejects_expected_params_for_multi_tool_cases(self):
         with self.assertRaisesMessage(
             ValueError,
@@ -1851,6 +1978,14 @@ class BehaviorMicroHelperTests(TestCase):
                     "plan_expected": True,
                 }
             )
+
+    def test_csv_creation_cases_include_the_requested_row_data(self):
+        by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
+
+        self.assertIn("Acme,alex@example.test,high", by_slug["common_use_case_071_create_leads_csv"].prompt)
+        self.assertIn("Globex,nina@example.test,medium", by_slug["common_use_case_071_create_leads_csv"].prompt)
+        self.assertIn("Engineer,Acme,https://acme.test/1", by_slug["common_use_case_072_create_jobs_csv"].prompt)
+        self.assertIn("Analyst,Initech,https://initech.test/3", by_slug["common_use_case_072_create_jobs_csv"].prompt)
 
     def test_common_use_case_expected_params_mock_requires_exact_http_url(self):
         scenario = ScenarioRegistry.get("common_use_case_010_fetch_form_json")
@@ -1960,7 +2095,7 @@ class BehaviorMicroHelperTests(TestCase):
             self.assertFalse(scenario._charter_check(unchanged, [mutation])[0])
             self.assertFalse(scenario._charter_check(changed, [])[0])
 
-    def test_durable_charter_eval_requires_a_clean_two_completion_first_shot(self):
+    def test_durable_charter_eval_requires_clean_actions_with_distinct_completions(self):
         scenario = ScenarioRegistry.get(CHARTER_PATCHES_EVALUATIVE_OUTPUT_FEEDBACK)
         inbound = SimpleNamespace(timestamp=timezone.now() - timedelta(seconds=1))
         old = "For prospect outreach, end each note with an open question asking for the recipient's opinion."
@@ -2005,14 +2140,14 @@ class BehaviorMicroHelperTests(TestCase):
         reply.step.save(update_fields=["completion"])
 
         extra_completion = self._add_orchestrator_completion()
-        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        self.assertTrue(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
         extra_completion.delete()
         correction = PersistentAgentStep.objects.create(
             agent=self.agent,
             eval_run=self.run,
-            description="Tool policy: persist this direct user correction before replying.",
+            description="Tool policy: resolve this direct user correction before replying.",
         )
-        self.assertFalse(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
+        self.assertTrue(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
         correction.delete()
         self.assertTrue(scenario._additional_charter_check(self.agent, self.run.id, inbound)[0])
 
@@ -2502,6 +2637,17 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(has_recipient_request([focused_option]))
         self.assertTrue(has_recipient_request([focused, unrelated]))
         self.assertFalse(has_recipient_request([unrelated]))
+
+    def test_delivery_and_mutation_checks_distinguish_skips_and_safe_repairs(self):
+        skipped = SimpleNamespace(result=json.dumps({"status": "ok", "skipped": True}))
+        repaired = SimpleNamespace(
+            status="complete",
+            result=json.dumps({"status": "ok", "auto_correction": {"fixes": ["normalized guard"]}}),
+        )
+
+        self.assertTrue(_tool_call_was_skipped(skipped))
+        self.assertTrue(_successful_call(repaired))
+        self.assertFalse(_successful_without_repair(repaired))
 
     def test_planning_request_check_allows_one_free_text_identity_question(self):
         options = SimpleNamespace(

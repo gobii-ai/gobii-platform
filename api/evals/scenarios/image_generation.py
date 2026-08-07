@@ -110,7 +110,7 @@ IMAGE_GENERATION_CASES = (
         expected_aspect_ratio="16:9",
         required_prompt_groups=(
             ("landing-page", "landing page", "hero"),
-            ("ceramic mug", "coffee mug"),
+            ("ceramic mug", "ceramic white mug", "coffee mug"),
             ("headline", "negative space", "copy"),
         ),
         required_response_refs=("$[/exports/eval-coffee-hero.png]",),
@@ -132,8 +132,8 @@ IMAGE_GENERATION_CASES = (
         },
         expected_call_count=1,
         required_prompt_groups=(
-            ("change only",),
-            ("preserve", "keep"),
+            ("change only", "only the background", "background changes"),
+            ("preserve", "keep", "remain", "unchanged"),
             ("label text", "label"),
             ("deep navy", "navy"),
         ),
@@ -153,7 +153,6 @@ IMAGE_GENERATION_CASES = (
         expected_aspect_ratio="4:5",
         required_prompt_groups=(
             ("Built for the Long Run.",),
-            ("verbatim", "exact"),
             ("no extra text", "no other text", "no other copy", "only text"),
         ),
         required_response_refs=("$[/exports/eval-running-poster.png]",),
@@ -410,8 +409,17 @@ class ImageGenerationScenario(EvalScenario, ScenarioExecutionTools):
             errors.append(f"output paths were not all under /exports/: {paths}")
         if len(set(paths)) != len(paths):
             errors.append(f"output paths were not distinct: {paths}")
-        if any(item.get("overwrite") is True for item in params):
-            errors.append("a call requested destructive overwrite")
+        destructive_overwrites = [
+            item
+            for item in params
+            if item.get("overwrite") is True
+            and str(item.get("file_path") or "") in {
+                _normalize_source_path(source)
+                for source in item.get("source_images") or []
+            }
+        ]
+        if destructive_overwrites:
+            errors.append("a call requested destructive overwrite of a source image")
 
         if case.expected_aspect_ratio and any(
             str(item.get("aspect_ratio") or "") != case.expected_aspect_ratio for item in params

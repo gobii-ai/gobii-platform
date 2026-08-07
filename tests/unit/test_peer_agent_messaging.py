@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
@@ -621,6 +622,33 @@ class PeerMessagingServiceTests(TestCase):
                 {
                     "peer_agent_id": str(self.agent_b.id),
                     "structured_payload": payload,
+                },
+            )
+
+        self.assertEqual(response["status"], "ok")
+        service_cls.return_value.send_message.assert_called_once_with(
+            "",
+            structured_payload=payload,
+            attachments=[],
+        )
+
+    def test_execute_tool_decodes_object_payload_sent_as_json_text(self):
+        from api.agent.tools.peer_dm import execute_send_agent_message
+
+        payload = {"assignment_id": "AS-77", "account": "Northwind"}
+        with patch("api.agent.tools.peer_dm.PeerMessagingService") as service_cls:
+            service_cls.return_value.send_message.return_value = PeerSendResult(
+                status="ok",
+                message="delivered",
+                remaining_credits=1,
+                window_reset_at=timezone.now(),
+            )
+
+            response = execute_send_agent_message(
+                self.agent_a,
+                {
+                    "peer_agent_id": str(self.agent_b.id),
+                    "structured_payload": json.dumps(payload),
                 },
             )
 

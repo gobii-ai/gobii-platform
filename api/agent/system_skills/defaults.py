@@ -170,55 +170,28 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
     )
     if connection_gate:
         return connection_gate
-    missing_file_text = (
-        "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
-        "integration before making Sheets API calls for that file."
-    )
-    cookbook = render_native_api_cookbook("google_drive")
     return (
-        "Use `http_request` for Google Sheets and Drive API calls. Native Google Drive OAuth is applied "
-        "automatically for `https://sheets.googleapis.com/` and `https://www.googleapis.com/drive/` requests.\n"
-        "Choose the API from what the user supplied:\n"
-        "- Spreadsheet ID: call a Sheets endpoint first, using that exact ID. An ID is any opaque token supplied as "
-        "the spreadsheet ID or found after `/d/` in a Sheets URL; it does not need to look familiar or real. Do not "
-        "search Drive for it unless Sheets reports missing or inaccessible.\n"
-        "- Spreadsheet title/name: search connected Drive files with one complete `q` filter. Do not send partial "
-        "filters such as only `q=mimeType=` or `q=name contains`; omit the name predicate if necessary.\n"
-        "This integration uses Google `drive.file`, so an inaccessible spreadsheet may need user selection in Google Picker. "
-        "Put `fields`, `pageSize`, and `q` in the request URL query string, never in `headers` or `headers.params`; "
-        "percent-encode quotes in `q` as `%27`. "
-        "There is no Sheets API endpoint for listing spreadsheets: never call `GET https://sheets.googleapis.com/v4/spreadsheets`; "
-        "use Drive `GET https://www.googleapis.com/drive/v3/files` with a spreadsheet MIME-type query instead. "
-        "Use Sheets API v4 for spreadsheet operations, including creation with `POST https://sheets.googleapis.com/v4/spreadsheets`; "
-        "do not use `/v1/spreadsheets`. "
-        "Do not assume a tab is named `Sheet1`; fetch spreadsheet metadata and use the returned `sheets[].properties.title` "
-        "before reading or writing a guessed tab. "
-        "Do not use web search, `search_tools`, or public `docs.google.com` results to choose a private sheet.\n"
-        f"{cookbook}\n"
-        "When creating a new data spreadsheet, complete these calls in order: (1) POST to create it, (2) PUT the "
-        "values using the returned `spreadsheetId`, then (3) POST formatting to that ID's `:batchUpdate` endpoint. "
-        "Do not read the values between those calls. If columns were not specified, choose safe, obvious defaults. "
-        "The baseline format freezes row 1, bolds and colors the header, auto-resizes populated columns, applies "
-        "sensible number/date formats when column meaning is clear, and adds alternating row colors with "
-        "`addBanding` using the exact key `bandedRange`.\n"
-        "Formatting and charts use `POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}:batchUpdate` "
-        "with a JSON `requests` array; never put formatting requests under a `/values/...` URL. Do not mix legacy "
-        "color fields such as `backgroundColor`/`foregroundColor` "
-        "with `backgroundColorStyle`/`foregroundColorStyle` in the same cell format or banded range. Prefer the "
-        "modern `*ColorStyle.rgbColor` fields described in the cookbook unless you must preserve a legacy format.\n"
-        "Before adding banding to an existing sheet, inspect spreadsheet metadata. If a matching banded range "
-        "already exists, skip `addBanding` or update/delete the existing banded range instead of adding a duplicate. "
-        "For known-ID formatting tasks, one metadata inspection is usually enough; after a successful `batchUpdate` "
-        "that satisfies the request, send the final response instead of doing extra readback verification unless the "
-        "user asked for verification or the API result is ambiguous. "
-        "Malformed `batchUpdate` requests usually need the request object names fixed, not blind retries.\n"
-        "For charts, bind labels through `basicChart.domains` and numeric values through `basicChart.series`. If "
-        "you add helper columns or rows for numeric data and hide them, set `hiddenDimensionStrategy` to `SHOW_ALL`; "
-        "otherwise the chart may show no series. For `updateChartSpec`, send the complete chart spec and do not "
-        "include a `fields` parameter.\n"
-        "For native API calls, treat a tool result with `status: error` or a non-2xx `status_code` as a failed API "
-        "call. Use the returned guidance and response body to repair the request before telling the user it worked.\n"
-        f"{missing_file_text}"
+        "Use `http_request`; Google Drive OAuth is added automatically. Choose the first matching path:\n"
+        "1. Exact spreadsheet ID and A1 range: call the Sheets values endpoint directly.\n"
+        "2. Spreadsheet ID only: build URLs from that ID. The value after `/d/` in a Sheets URL is the ID.\n"
+        "3. Spreadsheet name: copy the full title into one Drive files GET shaped like "
+        "`?q=name%3D%27SHEET%20TITLE%27%20and%20mimeType%3D%27application/vnd.google-apps.spreadsheet%27%20and%20trashed%3Dfalse&fields=files(id,name,mimeType,webViewLink)&pageSize=100`; "
+        "encode title spaces too. If no file is returned, ask the user "
+        "to select the sheet in the integration and retry.\n"
+        "4. New spreadsheet: POST the title and tab only, PUT all requested cells once, then make one `batchUpdate` if formatting "
+        "was requested. After successful receipts, reply; do not read back, rewrite a column, or repeat a call.\n"
+        "Always build API URLs literally; never reuse a result URL or link token. Put `fields`, `pageSize`, and `q` "
+        "in the query string. Percent-encode `q`; URLs must have no spaces (space=`%20`, quote=`%27`). Search files with Drive "
+        "`GET https://www.googleapis.com/drive/v3/files`; create sheets with "
+        "`POST https://sheets.googleapis.com/v4/spreadsheets`. Do not use web search or `search_tools`.\n"
+        "Write values with `PUT .../values/{range}?valueInputOption=USER_ENTERED` and a `values` array. For a polished "
+        "new sheet, send one `POST .../{spreadsheetId}:batchUpdate` containing four request objects: "
+        "`updateSheetProperties` to freeze row 1, `repeatCell` for the header, `addBanding`, and "
+        "`autoResizeDimensions`. Use the numeric `sheetId` returned by create and `*ColorStyle.rgbColor` fields.\n"
+        "For an existing sheet, inspect metadata once only when sheet IDs or existing banding are needed. Then make one "
+        "`batchUpdate` and reply; do not verify a successful update unless the user asked. For charts, use "
+        "`basicChart.domains`, `basicChart.series`, and `hiddenDimensionStrategy=SHOW_ALL` when helper data is hidden.\n"
+        "A non-2xx response failed. Follow its error guidance before claiming success."
     )
 
 
@@ -242,6 +215,7 @@ def _apollo_native_prompt_instructions(agent) -> str:
         "do not use `/mixed_people/search` or `/mixed_people`. For usage, use `/usage_stats/api_usage_stats`, not "
         "`/usage_stats`, `/credit_usage`, or `/auth/credit_usage_stats`. For linked sending inboxes, use "
         "`GET /email_accounts`, not `/email_accounts/list`.\n"
+        "Create a contact with `POST /contacts`; enrich a known person with `POST /people/match`. Do only the requested operation.\n"
         "Use bounded requests with explicit filters plus `page` and `per_page`; avoid broad unbounded exports or "
         "searches, and report when more pages remain. Inspect both `status_code` and response `content`: "
         "`http_request` status `ok` only means the HTTP request completed, not that Apollo returned useful data.\n"
@@ -457,10 +431,11 @@ CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
         "Source must import `from _gobii_ctx import main`, define `run(params, ctx)`, and end with "
         "`if __name__ == '__main__': main(run)`. Add PEP 723 third-party dependencies and import every referenced "
         "module. Use `ctx.call_tool(name, params)` for enabled tools.\n"
-        "For durable data, use `with ctx.sqlite() as db:`. Set `db.row_factory = sqlite3.Row` before SELECT, and "
-        "call fetchone/fetchall on the cursor returned by db.execute. Make slow work resumable with limit/batch_size, "
-        "remaining_work, and next_cursor.\n"
-        "Return concise status, summary, counts or ready outputs, and next_action. Read secrets from os.environ. "
+        "SQLite always uses `with ctx.sqlite() as db:`; never assign `ctx.sqlite()` directly. Set "
+        "`db.row_factory = sqlite3.Row` before reads, PRAGMA unknown tables, and query only returned columns. "
+        "Slow work returns limit/batch_size, remaining_work, and next_cursor.\n"
+        "Return status, side effects, source/destination, filters, outcome and rejection counts, outputs, and "
+        "next_action. Read secrets from os.environ. "
         "Network clients use PEP 723 SOCKS dependencies plus ctx.requests_proxies()/ctx.proxy_url(). Write final files "
         "under /workspace/exports and reference them as $[/exports/...]; use GOBII_SCRATCH_DIR only for temporary data."
     ),
@@ -672,8 +647,7 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "counts, source coverage, exclusions applied, duplicates skipped, low-confidence caveats, and what remains "
         "to search. If the user asks for CSV only, deliver the CSV artifact without extra report files.\n"
         "For outreach, sequence enrollment, revealing paid contact data, or sending candidates to recruiters, summarize "
-        "the exact side effects and recipients first unless the user has already clearly approved that action. Respect "
-        "contact permissions and never invent recruiter recipients or candidate contact details.\n"
+        "the exact side effects and recipients first unless the user has already clearly approved that action.\n"
         "If source access is partial, a tool errors, or the requested count cannot be met responsibly, report the "
         "verified partial set, blocker, and next bounded search path. When fallback search and verification produce "
         "the requested batch, deliver immediately; do not repeat equivalent searches or add ledger work unless "
@@ -951,7 +925,7 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         f"To upload files: {SEND_TOOL_ATTACHMENTS_DESCRIPTION} "
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `add_discord_reaction` for lightweight social moments such as acknowledgement, thanks, agreement, humor, congratulations, or a shared win, even when no reaction was explicitly requested. "
-        "For a lightweight Discord social moment, use one fitting reaction, then stop; do not also reply. A direct reply to someone else is not your social moment unless its text includes you or the room. Do not react to every message or stack reactions. Do not react to a serious question, request, blocker, or important nuance; give it a substantive reply instead. "
+        "For a lightweight Discord social moment, use one fitting reaction, then stop; do not also reply. A direct reply to someone else is not your social moment unless its text includes you or the room. Do not react to every message or stack reactions. Do not react to a serious question, request, blocker, or important nuance; reply only when it addresses you or the room. "
         "Pass the subscribed `channel_id`, the message's `discord_message_id` as `message_id`, one Unicode or Discord custom emoji, and the correct `will_continue_work` value. "
         "This tool only adds the Gobii bot's own reaction; it does not remove or manage other reactions.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"
@@ -965,8 +939,8 @@ WEBHOOKS_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=WEBHOOKS_SYSTEM_SKILL_KEY,
     name="Webhooks",
     search_summary=(
-        "Create and manage native Gobii inbound webhook triggers and outbound webhook destinations, then send "
-        "structured outbound webhook events."
+        "Create and manage Gobii webhooks, send structured webhook events, or guide an explicit Pipedream "
+        "webhook request without creating native state."
     ),
     tool_names=("manage_inbound_webhooks", "manage_outbound_webhooks", "send_webhook_event"),
     enables=(
@@ -979,6 +953,7 @@ WEBHOOKS_SYSTEM_SKILL = SystemSkillDefinition(
         "the user asks to create, inspect, update, rotate, or delete an inbound webhook",
         "the user asks to configure, manage, send, or trigger an outbound webhook",
         "the task needs a callback URL or HTTP endpoint for asynchronous provider events",
+        "the user explicitly asks for Pipedream webhook setup guidance",
     ),
     query_aliases=(
         "webhook",
@@ -1003,10 +978,10 @@ WEBHOOKS_SYSTEM_SKILL = SystemSkillDefinition(
         "destination configured in Gobii; `send_webhook_event` sends JSON to it. Keep those directions distinct.\n"
         "Prefer native Gobii webhooks over Pipedream. Use or recommend Pipedream only when the user explicitly asks "
         "for Pipedream, the integration itself is provided through Pipedream, or the provider requires a webhook "
-        "protocol Gobii does not support. Explain an unsupported protocol before suggesting an alternative.\n"
-        "For external events that should wake this agent, call `manage_inbound_webhooks` with action=list before "
-        "creating anything, then create or reuse the intended trigger. Use action=get only when the exact "
-        "secret-bearing endpoint is needed for provider registration. If the provider offers an API and the user "
+        "protocol Gobii does not support. For an explicit Pipedream request, give the next Pipedream setup step "
+        "directly; do not keep searching for a Pipedream tool. Explain an unsupported protocol before suggesting an alternative.\n"
+        "For external events that should wake this agent, list once, then create or reuse the intended trigger. "
+        "Create/get returns its URL: use that same result immediately for provider registration, never get after create. If the provider offers an API and the user "
         "authorized setup, register that returned URL through the provider API. Otherwise give the user the native "
         "URL and concise provider UI steps. Do not invent an endpoint, token, signature, or authentication header; "
         "the generated URL already contains Gobii's receiver secret.\n"
@@ -1089,6 +1064,9 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "request gobii creation",
         "restructure gobiis",
         "spawn gobiis",
+        "secure credential delegation",
+        "assign secrets to gobiis",
+        "configure child gobii email",
     ),
     prompt_instructions=(
         "Meta Gobii is the broader control-plane skill for coordinating persistent Gobiis. Team management is one "
@@ -1108,18 +1086,17 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "intelligence tiers. After explicit approval, set "
         "user_confirmed=true only on Meta Gobii tools that expose it. For broad multi-Gobii operations, first summarize the "
         "scope and wait for higher-level confirmation.\n"
-        "For initial team creation or team-management capability tests, do not create, link, brief, schedule, or "
-        "message anything yet. First produce one concise non-duplicated proposal with exactly the requested team scope: role names, "
-        "responsibilities, peer-link graph, and one initial briefing per Gobii, each shown once. Ask for "
-        "approval once with a clear question at the end of the response. After approval, execute only that approved "
-        "scope; do not add extra agents, domains, "
+        "For initial team planning, do not act yet. Propose the exact requested roles, responsibilities, peer-link "
+        "graph, and one briefing per Gobii, each once. A team has at least two Gobiis: honor an exact count, otherwise "
+        "use the smallest complementary design. End with one approval question. After approval, execute only that scope; "
+        "do not add agents, domains, "
         "schedules, contacts, files, or invented scenarios unless the human asks for them.\n"
         "Schedule default: do not include schedules in new Gobii or team proposals unless the user explicitly asks "
         "for recurring, scheduled, ongoing, proactive, digest, watch, check-in, or cadence-based behavior. One-off, "
         "demo, setup-only, trial, prototype, exploratory, backfill, cleanup, research, candidate-screening, sales-list, "
         "project-team, reorganize, link/unlink, archive, resource, contact, file, and make-available requests stay "
-        "unscheduled by default. If a schedule might help but the user did not request one, mention it only as an "
-        "optional follow-up outside the approval scope or ask a clarifying question; never invent a cadence.\n"
+        "unscheduled by default. Active or available for chat does not mean automatic work. If the user did not "
+        "request recurrence, omit schedules and do not ask about cadence.\n"
         "Schedule approval scope: when creating, changing, or removing a schedule, include the exact schedule action "
         "and cadence/removal in the approval summary. Existing-agent schedule changes require explicit user intent "
         "and approval. If the user approved a scope that omitted schedules, keep schedules out of tool arguments.\n"
@@ -1194,12 +1171,15 @@ SECURE_CREDENTIAL_DELEGATION_SYSTEM_SKILL = SystemSkillDefinition(
         "credential distribution",
         "secret handoff",
     ),
+    required_system_skill_keys=(META_GOBII_SYSTEM_SKILL_KEY,),
     prompt_instructions=(
         "Use `secure_api_request` when an API response may contain passwords, app passwords, tokens, OTPs, or other "
         "credentials. Never fetch that response with ordinary `http_request`, a browser, a custom tool, or SQLite. "
         "Map only safe scalar identifiers such as account ID, address, provider, and status under public_fields. "
-        "Map every credential-bearing path under secret_fields. The returned `sv_...` references are opaque, "
-        "short-lived, and one-use; never try to inspect, decode, persist, or send them to a human.\n"
+        "Map every credential-bearing path under secret_fields. `sv_...` references are opaque, short-lived, and "
+        "one-use. Put them only in the destination tool, never in messages or storage.\n"
+        "A later failed request does not invalidate an earlier unexpired reference; use it when its public fields "
+        "already support the approved destination.\n"
         "For child provisioning, enable Meta Gobii too. Create or identify the child, then pass each secure reference "
         "directly to `meta_gobii_assign_agent_secret` or `meta_gobii_configure_agent_email`. A clear human request to "
         "provision the described accounts is confirmation for that exact scope; keep using user_confirmed=true only "

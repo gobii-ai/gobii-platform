@@ -51,6 +51,7 @@ from django.urls import reverse
 from api.services.system_settings import get_mcp_http_timeout_seconds, get_mcp_stdio_timeout_seconds
 from django.utils import timezone
 
+from api.agent.eval_agents import is_eval_agent
 from .mcp_param_guards import MCPParamGuardRegistry
 from .mcp_error_normalizers import MCPErrorNormalizerRegistry
 from .mcp_result_adapters import MCPResultAdapterRegistry, mcp_result_owner_context
@@ -2127,6 +2128,12 @@ class MCPToolManager:
             allowed_config_ids=allowed_config_set,
             allowed_server_names=allowed_set,
         )
+        if is_eval_agent(agent):
+            configs = [
+                config
+                for config in configs
+                if str(getattr(config, "name", "")).lower() != self.PIPEDREAM_RUNTIME_NAME
+            ]
         desired_ids = {str(cfg.id) for cfg in configs}
 
         if not desired_ids:

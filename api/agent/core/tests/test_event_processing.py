@@ -17,10 +17,12 @@ from django.test import SimpleTestCase, TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.agent.core.event_processing import (
+    _agent_config_retry_is_resolved,
     _deep_work_update_gate_reason,
     _finalize_tool_batch,
     _filter_tools_after_non_retryable_result,
     _contact_permission_params_from_misrouted_human_input,
+    _compile_unfinished_work_save_tool_call,
     _ensure_credit_for_tool,
     _execute_prepared_tool_batch_inner,
     _process_agent_events_locked,
@@ -31,6 +33,7 @@ from api.agent.core.event_processing import (
     _normalize_tool_params,
     NON_RETRYABLE_BATCH_SKIP_REASON,
     _parse_tool_call_params,
+    _partition_batched_starting_plans,
     _partition_unresolved_custom_tool_sends,
     _prepare_tool_batch,
     _PreparedToolExecution,
@@ -38,8 +41,12 @@ from api.agent.core.event_processing import (
     _sanitize_tool_name,
     _should_infer_message_tool_continuation,
     _should_imply_continue,
+    _sqlite_batch_saved_unfinished_work,
     _ToolExecutionOutcome,
+    _retryable_agent_config_fields,
+    _tool_call_is_progress_update,
     _tool_call_likely_terminal_message,
+    _unfinished_work_state,
 )
 from api.agent.core.burn_control import BurnRateAction, handle_burn_rate_limit
 from api.agent.core.llm_config import AgentLLMTier, clear_runtime_tier_override, get_runtime_tier_override
@@ -79,8 +86,108 @@ class _DummySpan:
         return None
 
 
+@tag("batch_event_processing")
+class AgentConfigRetryTests(SimpleTestCase):
+    @staticmethod
+    def _tool_outcome(sql, result):
+        prepared = _PreparedToolExecution(
+            idx=0,
+            tool_name="sqlite_batch",
+            tool_params={"sql": sql},
+            exec_params={"sql": sql},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id=None,
+            explicit_continue=True,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason=None,
+        )
+        return _ToolExecutionOutcome(
+            prepared=prepared,
+            result=result,
+            duration_ms=0,
+            updated_tools=None,
+            variable_map={},
+        )
+
+    def test_retryable_config_failure_keeps_attempted_fields(self):
+        outcome = self._tool_outcome(
+            "UPDATE __agent_config SET charter=:charter WHERE id=1",
+            {"status": "error", "retryable": True},
+        )
+
+        self.assertEqual(_retryable_agent_config_fields([outcome], "sqlite_batch"), ("charter",))
+
+    def test_read_only_success_does_not_resolve_config_retry(self):
+        outcome = self._tool_outcome(
+            "SELECT charter FROM __agent_config WHERE id=1",
+            {"status": "ok", "result": [{"charter": "Existing"}]},
+        )
+
+        self.assertFalse(_agent_config_retry_is_resolved([outcome], ("charter",)))
+
+    def test_confirmed_config_write_resolves_retry(self):
+        outcome = self._tool_outcome(
+            "UPDATE __agent_config SET charter=:charter WHERE id=1",
+            {
+                "status": "ok",
+                "agent_config_update": {
+                    "updated_fields": ["charter"],
+                    "unchanged_fields": [],
+                    "errors": {},
+                },
+            },
+        )
+
+        self.assertTrue(_agent_config_retry_is_resolved([outcome], ("charter",)))
+
+
 def _tool_names(tools):
     return {tool.get("function", {}).get("name") for tool in tools}
+
+
+@tag("batch_event_processing")
+class BatchedStartingPlanTests(SimpleTestCase):
+    @staticmethod
+    def _call(name, arguments):
+        return {"function": {"name": name, "arguments": json.dumps(arguments)}}
+
+    def test_starting_plan_batched_with_work_is_skipped(self):
+        plan = self._call(
+            "update_plan",
+            {"plan": [{"step": "Research the company", "status": "doing"}]},
+        )
+        search = self._call("mcp_vendor_search", {"query": "current news"})
+
+        executable, skipped = _partition_batched_starting_plans([plan, search])
+
+        self.assertEqual(executable, [search])
+        self.assertEqual(skipped, [plan])
+
+    def test_standalone_starting_plan_is_kept(self):
+        plan = self._call(
+            "update_plan",
+            {"plan": [{"step": "Research the company", "status": "doing"}]},
+        )
+
+        executable, skipped = _partition_batched_starting_plans([plan])
+
+        self.assertEqual(executable, [plan])
+        self.assertEqual(skipped, [])
+
+    def test_completed_plan_batched_with_work_is_kept(self):
+        plan = self._call(
+            "update_plan",
+            {"plan": [{"step": "Research the company", "status": "done"}]},
+        )
+        search = self._call("mcp_vendor_search", {"query": "current news"})
+
+        executable, skipped = _partition_batched_starting_plans([plan, search])
+
+        self.assertEqual(executable, [plan, search])
+        self.assertEqual(skipped, [])
 
 
 @tag("batch_event_processing")
@@ -89,6 +196,7 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
         {"type": "function", "function": {"name": "mcp_vendor_search"}},
         {"type": "function", "function": {"name": "http_request"}},
         {"type": "function", "function": {"name": "send_chat_message"}},
+        {"type": "function", "function": {"name": "request_human_input"}},
         {"type": "function", "function": {"name": "sleep_until_next_trigger"}},
     ]
 
@@ -101,7 +209,7 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
 
         self.assertEqual(
             _tool_names(filtered),
-            {"http_request", "send_chat_message", "sleep_until_next_trigger"},
+            {"http_request", "send_chat_message", "request_human_input", "sleep_until_next_trigger"},
         )
 
     def test_terminal_result_leaves_only_delivery_and_stop_tools(self):
@@ -124,6 +232,28 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
         )
 
         self.assertEqual(filtered, self.tools)
+
+    def test_pending_approval_removes_only_the_send_tool(self):
+        tools = [
+            *self.tools,
+            {"type": "function", "function": {"name": "send_email"}},
+        ]
+        filtered = _filter_tools_after_non_retryable_result(
+            tools,
+            "send_email",
+            {"status": "pending_approval", "delivery_status": "not_sent"},
+        )
+
+        self.assertEqual(
+            _tool_names(filtered),
+            {
+                "mcp_vendor_search",
+                "http_request",
+                "send_chat_message",
+                "request_human_input",
+                "sleep_until_next_trigger",
+            },
+        )
 
     def test_tool_call_absent_from_latest_request_is_rejected(self):
         agent = SimpleNamespace(id=uuid4())
@@ -234,6 +364,133 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
                 )
 
             self.assertEqual(finalized.followup_required, expected_followup)
+            self.assertTrue(finalized.terminal_source_error)
+
+    def test_explicitly_stopped_batch_exposes_unfinished_work_for_persistence(self):
+        prepared = _PreparedToolExecution(
+            idx=1,
+            tool_name="eval_prepare_next_batch",
+            tool_params={"will_continue_work": False},
+            exec_params={},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call_batch",
+            explicit_continue=False,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe",
+        )
+        outcome = _ToolExecutionOutcome(
+            prepared=prepared,
+            result={
+                "status": "ok",
+                "remaining_work": 75,
+                "next_cursor": "lead-025",
+            },
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        with patch(
+            "api.agent.core.event_processing._persist_tool_execution_outcome",
+            return_value=(SimpleNamespace(id=uuid4()), json.dumps(outcome.result), "complete"),
+        ):
+            finalized = _finalize_tool_batch(
+                SimpleNamespace(id=uuid4()),
+                [outcome],
+                attach_completion=lambda _kwargs: None,
+                attach_prompt_archive=lambda _step: None,
+            )
+
+        self.assertEqual(
+            finalized.unfinished_work_state,
+            {"remaining_work": 75, "next_cursor": "lead-025"},
+        )
+        self.assertEqual(finalized.unfinished_work_tool_name, "eval_prepare_next_batch")
+
+    def test_nested_unfinished_work_state_requires_positive_remaining_work(self):
+        self.assertEqual(
+            _unfinished_work_state(
+                {"result": {"remaining_work": {"count": 3}, "next_cursor": "page-2"}}
+            ),
+            {"remaining_work": {"count": 3}, "next_cursor": "page-2"},
+        )
+        self.assertIsNone(
+            _unfinished_work_state(
+                {"result": {"remaining_work": 0, "next_cursor": "done"}}
+            )
+        )
+
+    def test_resume_state_save_requires_write_and_exact_readback(self):
+        def outcome(sql, results):
+            return _ToolExecutionOutcome(
+                prepared=_PreparedToolExecution(
+                    idx=1,
+                    tool_name="sqlite_batch",
+                    tool_params={"sql": sql, "rows": [], "bindings": {}},
+                    exec_params={},
+                    pending_step=None,
+                    credits_consumed=None,
+                    consumed_credit=None,
+                    call_id="call_save",
+                    explicit_continue=True,
+                    inferred_continue=False,
+                    parallel_safe=False,
+                    parallel_ineligible_reason="unsafe",
+                ),
+                result={"status": "ok", "results": results},
+                duration_ms=1,
+                updated_tools=None,
+                variable_map={},
+            )
+
+        expected = {"remaining_work": 75, "next_cursor": "lead-025"}
+        self.assertFalse(
+            _sqlite_batch_saved_unfinished_work(
+                outcome("SELECT 1", [{"result": [{"1": 1}]}]),
+                expected,
+            )
+        )
+        self.assertFalse(
+            _sqlite_batch_saved_unfinished_work(
+                outcome(
+                    "INSERT INTO progress(next_cursor, remaining_work) VALUES ('wrong', 1); "
+                    "SELECT next_cursor, remaining_work FROM progress",
+                    [{"message": "Query 0 affected 1 rows."}, {"result": [{"next_cursor": "wrong", "remaining_work": 1}]}],
+                ),
+                expected,
+            )
+        )
+        self.assertTrue(
+            _sqlite_batch_saved_unfinished_work(
+                outcome(
+                    "INSERT INTO progress(next_cursor, remaining_work) VALUES ('lead-025', 75); "
+                    "SELECT next_cursor, remaining_work FROM progress",
+                    [
+                        {"message": "Query 0 affected 1 rows."},
+                        {"result": [{"next_cursor": "lead-025", "remaining_work": 75}]},
+                    ],
+                ),
+                expected,
+            )
+        )
+
+    def test_resume_state_compiler_builds_keyed_exact_upsert(self):
+        compiled = _compile_unfinished_work_save_tool_call(
+            {"id": "call_save", "function": {"name": "sqlite_batch", "arguments": "{}"}},
+            {"remaining_work": 999, "next_cursor": "lead-004"},
+            "eval_send_outreach_batch",
+        )
+
+        params = json.loads(compiled["function"]["arguments"])
+        self.assertIn("INSERT INTO work_resume_state", params["sql"])
+        self.assertIn("ON CONFLICT(source_tool) DO UPDATE", params["sql"])
+        self.assertEqual(params["bindings"]["source_tool"], "eval_send_outreach_batch")
+        self.assertEqual(params["bindings"]["remaining_work_json"], "999")
+        self.assertEqual(params["bindings"]["next_cursor_json"], '"lead-004"')
+        self.assertIs(params["will_continue_work"], True)
 
     def test_same_batch_terminal_result_skips_unsafe_sibling_but_allows_delivery(self):
         for parallel_ineligible_reason in ("unsafe", None):
@@ -465,10 +722,40 @@ class ImpliedContinuationDecisionTests(SimpleTestCase):
 
 @tag("batch_event_processing")
 class DeepWorkUpdateGateTests(SimpleTestCase):
+    def test_discord_research_kickoff_accepts_plain_progress_wording(self):
+        kickoff = {
+            "function": {
+                "name": "send_discord_message",
+                "arguments": json.dumps({
+                    "message": "Let me research this and report back with sources.",
+                    "will_continue_work": True,
+                }),
+            }
+        }
+
+        self.assertFalse(_tool_call_is_progress_update(kickoff, "send_discord_message"))
+        self.assertTrue(
+            _tool_call_is_progress_update(
+                kickoff,
+                "send_discord_message",
+                allow_routine=True,
+            )
+        )
+
     def test_requires_kickoff_only_for_substantial_work(self):
         self.assertEqual(
             _deep_work_update_gate_reason(
                 "Do deep, exhaustive research on this market.",
+                ["mcp_brightdata_search_engine"],
+                prior_work_count=0,
+                prior_update_count=0,
+                batch_has_progress_update=False,
+            ),
+            "kickoff",
+        )
+        self.assertEqual(
+            _deep_work_update_gate_reason(
+                "Build a source-backed memo with enough depth, not a quick summary.",
                 ["mcp_brightdata_search_engine"],
                 prior_work_count=0,
                 prior_update_count=0,
@@ -489,6 +776,36 @@ class DeepWorkUpdateGateTests(SimpleTestCase):
             _deep_work_update_gate_reason(
                 "Build a line chart from these six points.",
                 ["create_chart"],
+                prior_work_count=0,
+                prior_update_count=0,
+                batch_has_progress_update=False,
+            )
+        )
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "Create a Deployment Status webhook.",
+                ["search_tools"],
+                prior_work_count=0,
+                prior_update_count=0,
+                batch_has_progress_update=False,
+            )
+        )
+
+    def test_kickoff_correction_is_not_repeated(self):
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "Do deep, exhaustive research on this market.",
+                ["mcp_brightdata_search_engine"],
+                prior_work_count=0,
+                prior_update_count=0,
+                batch_has_progress_update=False,
+                prior_kickoff_correction=True,
+            )
+        )
+        self.assertIsNone(
+            _deep_work_update_gate_reason(
+                "Change only the background to deep navy.",
+                ["create_image"],
                 prior_work_count=0,
                 prior_update_count=0,
                 batch_has_progress_update=False,
@@ -536,7 +853,7 @@ class DeepWorkUpdateGateTests(SimpleTestCase):
             )
         )
 
-    def test_each_checkpoint_fails_open_after_one_hold(self):
+    def test_communication_holds_fail_open_after_one_correction(self):
         self.assertIsNone(
             _deep_work_update_gate_reason(
                 "Do deep, exhaustive research on this market.",
@@ -961,6 +1278,15 @@ class ToolParamParsingTests(SimpleTestCase):
 
         self.assertEqual(normalized, {"url": "https://example.test/blog"})
 
+    def test_discord_reply_accepts_inbound_channel_field_name(self):
+        normalized = _normalize_tool_params(
+            "send_discord_message",
+            {"discord_channel_id": "channel-17", "message": "Reply", "will_continue_work": False},
+        )
+
+        self.assertEqual(normalized["channel_id"], "channel-17")
+        self.assertNotIn("discord_channel_id", normalized)
+
     def test_tool_name_normalization_strips_repeated_mcp_prefix(self):
         self.assertEqual(
             _sanitize_tool_name("mcp_brightdata_scrape_as_mcp_brightdata_scrape_as_markdown"),
@@ -995,6 +1321,19 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
         self.assertEqual(
             _strip_leading_routine_preamble(body),
             "**Northstar Robotics, Latest News**\n\nHere are the three material developments.",
+        )
+
+    def test_strips_process_preamble_before_plain_report_intro(self):
+        body = (
+            "I already have the search results. Let me compile the report directly.\n\n"
+            "Here's what's new with Northstar Robotics:\n\n"
+            "**Atlas launch:** Northstar released its mixed-fleet routing system."
+        )
+
+        self.assertEqual(
+            _strip_leading_routine_preamble(body),
+            "Here's what's new with Northstar Robotics:\n\n"
+            "**Atlas launch:** Northstar released its mixed-fleet routing system.",
         )
 
     def test_suppresses_current_research_progress_with_let_me_grab(self):

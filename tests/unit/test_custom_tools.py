@@ -28,6 +28,7 @@ from api.agent.system_skills.defaults import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKIL
 from api.agent.tools.custom_tools import (
     CUSTOM_TOOL_RESULT_MARKER,
     _GOBII_CTX_MODULE,
+    _eval_synthetic_results_for_custom_tool,
     _sync_workspace_source,
     build_custom_tool_bridge_token,
     execute_create_custom_tool,
@@ -109,6 +110,13 @@ class CustomToolsTests(TestCase):
             _custom_tool_description_for_llm("send_email", "Send email."),
             "Send email.",
         )
+
+    def test_eval_custom_tool_bridge_synthesizes_sqlite_batch(self):
+        self.agent.execution_environment = "eval"
+
+        results = _eval_synthetic_results_for_custom_tool(self.agent)
+
+        self.assertEqual(results["sqlite_batch"]["status"], "ok")
 
     def _create_env_var_secret(self, key: str, value: str) -> PersistentAgentSecret:
         secret = PersistentAgentSecret(
@@ -221,7 +229,7 @@ class CustomToolsTests(TestCase):
             "do not register it again",
             "Retry create_custom_tool only when creation itself is rejected",
             "from _gobii_ctx import main",
-            "with ctx.sqlite() as db:",
+            "ctx.sqlite()",
             "db.row_factory = sqlite3.Row",
             "remaining_work/next_cursor",
             "next_action",
@@ -238,7 +246,7 @@ class CustomToolsTests(TestCase):
             "Do not call create_custom_tool again after registration",
             "retry creation only if rejected",
             "from _gobii_ctx import main",
-            "with ctx.sqlite() as db:",
+            "ctx.sqlite()",
             "db.row_factory = sqlite3.Row",
             "remaining_work",
             "next_cursor",
@@ -864,6 +872,7 @@ def run(params, ctx):
         )
 
         self.assertEqual(result["status"], "error")
+        self.assertIs(result["retryable"], True)
         self.assertIn("actionable result guidance", result["message"])
         self.assertFalse(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_batch_sync").exists())
 
@@ -1595,6 +1604,50 @@ def run(params, ctx):
         )
         self.assertIn('export PATH="$UV_INSTALL_DIR:$PATH"', call.args[1])
         self.assertIn('uv run --no-project "$SOURCE_EXEC_PATH"', call.args[1])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    def test_execute_custom_tool_error_directs_patch_retry_without_reregistration(
+        self,
+        mock_service_cls,
+        _mock_bridge_url,
+        _mock_sandbox,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    return {'status': 'ok'}\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/retry_me.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Retry Me",
+            tool_name="custom_retry_me",
+            description="Exercise retry guidance.",
+            source_path="/tools/retry_me.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        mock_service = MagicMock()
+        mock_service.run_custom_tool_command.return_value = {
+            "status": "error",
+            "message": "Runtime failed.",
+        }
+        mock_service_cls.return_value = mock_service
+
+        result = execute_custom_tool(self.agent, tool, {})
+
+        self.assertEqual(result["status"], "error")
+        self.assertTrue(result["retryable"])
+        self.assertIn("Patch `/tools/retry_me.py` with apply_patch", result["message"])
+        self.assertIn("Never call create_custom_tool again", result["message"])
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")

@@ -19,6 +19,7 @@ from api.evals.scenarios.agent_scheduling import (
     _offers_concrete_weekly_cadence,
     _schedule_snapshot,
     _schedule_sql_strategy_failures,
+    _timezones_equivalent,
 )
 from api.evals.stop_policy import (
     sqlite_batch_is_only_planning_state_mutation,
@@ -86,6 +87,19 @@ class AgentSchedulingEvalTests(TestCase):
             self.assertNotIn("schedule_key", prompt)
             self.assertNotIn("insert into", prompt)
 
+    def test_repeatable_report_offer_accepts_concrete_delivery_language(self):
+        self.assertTrue(
+            _offers_concrete_weekly_cadence(
+                "I can send a weekly signup update so you do not need to calculate it by hand."
+            )
+        )
+        self.assertFalse(_offers_concrete_weekly_cadence("I can send another update."))
+
+    def test_timezone_match_accepts_equivalent_iana_aliases(self):
+        self.assertTrue(_timezones_equivalent("US/Eastern", "America/New_York"))
+        self.assertFalse(_timezones_equivalent("America/Chicago", "America/New_York"))
+        self.assertFalse(_timezones_equivalent("not/a-zone", "America/New_York"))
+
     def test_direct_common_schedule_cases_are_tagged(self):
         for slug in (
             "common_use_case_091_schedule_daily_digest",
@@ -150,10 +164,9 @@ class AgentSchedulingEvalTests(TestCase):
         self.assertTrue(sqlite_batch_is_only_planning_state_mutation(schedule_write))
         self.assertFalse(sqlite_batch_is_only_planning_state_mutation(mixed_write))
 
-    def test_targeted_strategy_requires_read_and_where_clause(self):
+    def test_targeted_strategy_accepts_authoritative_context_and_requires_where_clause(self):
         case = next(case for case in AGENT_SCHEDULING_CASES if case.expected_action == "update")
         good = _sqlite_call(
-            "SELECT * FROM __agent_schedules WHERE name = 'Weekly pipeline review'; "
             "UPDATE __agent_schedules SET schedule = '15 10 * * 2' "
             "WHERE schedule_key = 'weekly-pipeline'"
         )
@@ -194,6 +207,19 @@ class AgentSchedulingEvalTests(TestCase):
             _schedule_sql_strategy_failures(case, [failed_read]),
         )
 
+    def test_schedule_strategy_accepts_a_successful_retry(self):
+        case = next(case for case in AGENT_SCHEDULING_CASES if case.expected_action == "monitor")
+        failed = _sqlite_call(
+            "INSERT INTO __agent_schedules (schedule_key, name) VALUES ('monitor', 'Monitor')",
+            status="error",
+            result_status="error",
+        )
+        recovered = _sqlite_call(
+            "INSERT INTO __agent_schedules (schedule_key, name) VALUES ('monitor', 'Monitor')"
+        )
+
+        self.assertEqual(_schedule_sql_strategy_failures(case, [failed, recovered]), [])
+
     def test_schedule_list_scorer_accepts_stable_hyphenated_keys(self):
         rows = [
             _schedule_row("morning-digest", name="Morning digest", instruction="Daily digest"),
@@ -216,6 +242,35 @@ class AgentSchedulingEvalTests(TestCase):
             messages=[
                 SimpleNamespace(
                     body="Active: morning-digest, friday-recap, and contract-reminder."
+                )
+            ],
+            exact_target=None,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_schedule_list_scorer_accepts_user_facing_schedule_names(self):
+        rows = [
+            _schedule_row("morning-digest", name="Morning digest", instruction="Daily digest"),
+            _schedule_row("friday-recap", name="Friday recap", instruction="Friday recap"),
+            _schedule_row(
+                "contract-reminder",
+                name="Contract reminder",
+                instruction="Review the contract",
+                kind=PersistentAgentSchedule.Kind.ONCE,
+                expression=None,
+                run_at=timezone.now() + timedelta(days=2),
+            ),
+        ]
+        scenario = ScenarioRegistry.get(LIST_WITHOUT_MUTATION)
+
+        failures = scenario._state_failures(
+            rows,
+            before=_schedule_snapshot(rows),
+            inbound=SimpleNamespace(timestamp=timezone.now()),
+            messages=[
+                SimpleNamespace(
+                    body="Active: daily operating digest, Friday support recap, and contract reminder."
                 )
             ],
             exact_target=None,
@@ -261,6 +316,11 @@ class AgentSchedulingEvalTests(TestCase):
         self.assertTrue(
             _offers_concrete_weekly_cadence(
                 "Want me to set up a weekly reminder that runs the numbers for you?"
+            )
+        )
+        self.assertTrue(
+            _offers_concrete_weekly_cadence(
+                "I can send this weekly report automatically."
             )
         )
         self.assertFalse(

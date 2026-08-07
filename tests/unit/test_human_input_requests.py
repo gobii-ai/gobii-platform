@@ -301,19 +301,16 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(function["name"], "request_human_input")
         self.assertIn("non-credential", function["description"])
         self.assertIn("secure_credentials_request", function["description"])
-        self.assertIn("Guided intake makes one tool call after orientation", function["description"])
-        self.assertIn("requests for several independent decisions", function["description"])
-        self.assertIn("not a quota", function["description"])
-        self.assertIn("2-8 options", function["description"])
-        self.assertIn("one-sentence description", function["description"])
-        self.assertIn("never bundle decisions", function["description"])
-        self.assertIn("category example choices are not blockers", function["description"])
+        self.assertIn("For guided intake, use one call after", function["description"])
+        self.assertIn("requests for several", function["description"])
+        self.assertIn("options are alternative answers", function["description"])
+        self.assertIn("2-3 clear choices", function["description"])
+        self.assertIn("do not bundle decisions", function["description"])
         self.assertIn("Web cards stay pending", function["description"])
-        self.assertIn("separate preferred email/SMS", function["description"])
-        self.assertIn("Ask later only when evidence reveals a consequential choice", function["description"])
+        self.assertIn("mirror them to email/SMS only when result guidance says", function["description"])
         self.assertIn("free-text blocker", function["description"])
         self.assertIn("Missing email/SMS recipient/detail", function["description"])
-        self.assertIn("generic roles do not count", function["description"])
+        self.assertIn("a generic role is not a recipient", function["description"])
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertEqual(function["parameters"]["properties"]["options"]["maxItems"], 8)
@@ -325,7 +322,7 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("recipient", function["parameters"]["properties"])
         self.assertIn("will_continue_work", function["parameters"]["properties"])
         self.assertEqual(function["parameters"]["properties"]["question"]["maxLength"], 500)
-        self.assertNotIn("minItems", function["parameters"]["properties"]["options"])
+        self.assertEqual(function["parameters"]["properties"]["options"]["minItems"], 2)
         self.assertEqual(function["parameters"]["required"], ["will_continue_work"])
         self.assertEqual(
             function["parameters"]["anyOf"],
@@ -334,11 +331,9 @@ class HumanInputRequestTests(TestCase):
                 {"required": ["requests"]},
             ],
         )
-        self.assertEqual(
-            function["parameters"]["properties"]["requests"]["items"]["required"],
-            ["question"],
-        )
-        self.assertNotIn("minItems", function["parameters"]["properties"]["requests"]["items"]["properties"]["options"])
+        batch_schema = function["parameters"]["properties"]["requests"]["items"]
+        self.assertEqual(batch_schema["required"], ["question", "options"])
+        self.assertEqual(batch_schema["properties"]["options"]["minItems"], 2)
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["properties"]["question"]["maxLength"],
             500,
@@ -419,6 +414,8 @@ class HumanInputRequestTests(TestCase):
         self.assertNotIn("auto_sleep_ok", result)
         self.assertEqual(result["next_message_suggestion"]["send_tool"], "send_email")
         self.assertEqual(result["next_message_suggestion"]["address"], preferred.address)
+        self.assertIn("Call send_email now", result["next_message_suggestion"]["instruction"])
+        self.assertIn("do not send a chat copy", result["next_message_suggestion"]["instruction"])
         self.assertEqual(result["next_message_suggestion"]["questions"][0]["options"][0]["title"], "Procurement")
 
     def test_execute_request_human_input_keeps_web_card_when_preferred_email_is_not_allowed(self):
@@ -621,7 +618,7 @@ class HumanInputRequestTests(TestCase):
                 )
                 self.assertEqual(result["status"], "ok")
 
-    def test_execute_request_human_input_accepts_batch_missing_options_as_free_text_only(self):
+    def test_execute_request_human_input_accepts_free_text_and_multi_choice_batch(self):
         result = execute_request_human_input(
             self.agent,
             {
@@ -632,7 +629,10 @@ class HumanInputRequestTests(TestCase):
                     },
                     {
                         "question": "What moves matter?",
-                        "options": [{"title": "All updates", "description": "Track anything notable."}],
+                        "options": [
+                            {"title": "All updates", "description": "Track anything notable."},
+                            {"title": "Major changes", "description": "Track only material changes."},
+                        ],
                     },
                 ],
                 "will_continue_work": False,
@@ -644,6 +644,20 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(len(request_objects), 2)
         self.assertEqual(request_objects[0].input_mode, PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY)
         self.assertEqual(request_objects[1].input_mode, PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT)
+
+    def test_execute_request_human_input_rejects_single_option(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Which path?",
+                "options": [{"title": "Only path", "description": "Use the only listed path."}],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIs(result["retryable"], True)
+        self.assertIn("at least 2 distinct choices", result["message"])
 
     def test_execute_request_human_input_does_not_special_case_legacy_planning_state(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -1124,9 +1138,8 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(suggestion["channel"], CommsChannel.EMAIL)
         self.assertEqual(suggestion["address"], "person@example.com")
         self.assertEqual(suggestion["send_tool"], "send_email")
-        self.assertIn("normal email message", suggestion["instruction"])
-        self.assertIn("same tool-call batch", suggestion["instruction"])
-        self.assertIn("cannot inject them into another tool call", suggestion["instruction"])
+        self.assertIn("Call send_email now", suggestion["instruction"])
+        self.assertIn("already has a message in this tool-call batch", suggestion["instruction"])
         self.assertIn("How should I send this?", suggestion["questions"][0]["question"])
         self.assertEqual(result["requests"][0]["options"][0]["title"], "Short summary")
         self.assertEqual(result["requests"][0]["options"][1]["title"], "Detailed memo")
@@ -1173,9 +1186,8 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(suggestion["channel"], CommsChannel.SMS)
         self.assertEqual(suggestion["address"], "+15555550199")
         self.assertEqual(suggestion["send_tool"], "send_sms")
-        self.assertIn("normal sms message", suggestion["instruction"])
-        self.assertIn("same tool-call batch", suggestion["instruction"])
-        self.assertIn("cannot inject them into another tool call", suggestion["instruction"])
+        self.assertIn("Call send_sms now", suggestion["instruction"])
+        self.assertIn("already has a message in this tool-call batch", suggestion["instruction"])
         self.assertIn("How should I send this?", suggestion["questions"][0]["question"])
         self.assertEqual(result["requests"][0]["options"][0]["title"], "Short summary")
 

@@ -136,7 +136,7 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertNotIn("## Planning Mode", prompt)
         self.assertNotIn("end_planning", prompt)
-        self.assertIn("Use `update_plan` only for substantial multi-step work", prompt)
+        self.assertIn("Use `update_plan` only before substantial multi-step work", prompt)
 
     def test_normal_prompt_distinguishes_first_assignment_discovery_from_clear_work(self):
         prompt = _get_system_instruction(
@@ -152,39 +152,44 @@ class PersistentAgentPlanningModeTests(TestCase):
             tool for tool in definitions if tool["function"]["name"] == "send_chat_message"
         )
 
-        self.assertIn("Outside that first-assignment rule", prompt)
-        self.assertIn("New substantial or explicit deep research", prompt)
+        self.assertIn("Outside first assignment", prompt)
+        self.assertIn("Research requested in Discord: first call send_discord_message", prompt)
         self.assertIn("With any tool call, leave response content empty", prompt)
         self.assertIn("Response content with tool calls is user-facing", prompt)
-        self.assertIn("diligence, multi-entity comparison", prompt)
-        self.assertIn("send one brief kickoff", prompt)
+        self.assertIn("One supplied source/content report is one-shot", prompt)
+        self.assertIn("send_discord_message with a brief kickoff", prompt)
         self.assertIn("continues after a meaningful evidence batch", prompt)
-        self.assertIn("strongest finding and what remains", prompt)
+        self.assertIn("strongest finding and remaining work", prompt)
         self.assertIn("decision-ready result", prompt)
         self.assertIn("Never announce phases", prompt)
         self.assertIn("explicit sends for Work Updates", prompt)
-        self.assertIn("Guided intake and executable work are mutually exclusive", prompt)
-        self.assertIn("question about prior action", prompt)
-        self.assertIn("do not create new state", prompt)
+        self.assertIn("Outside first assignment, choose sensible reversible defaults", prompt)
+        self.assertIn("prior-action status", prompt)
+        self.assertIn("report/summary/rewrite from supplied content", prompt)
+        self.assertIn("Schedules inside supplied content are report data", prompt)
+        self.assertIn("no kickoff, plan, config, fetch, or link verification", prompt)
+        self.assertIn("A current-only report omits resolved or superseded facts", prompt)
+        self.assertIn("Persist structured canonical changes once", prompt)
         self.assertIn("exact API endpoint + http_request", prompt)
         self.assertIn("execute it next without pre-reading or copying its source", prompt)
-        self.assertIn("Named enabled tool: call it directly", prompt)
-        self.assertIn("two or more tool results must be compared", prompt)
-        self.assertIn("meaningful shared win or repeated failure", prompt)
+        self.assertIn("call the listed tool that fits first", prompt)
+        self.assertIn("A scheduled wake first queries its owned queue", prompt)
+        self.assertIn("If tool results need calculation, filtering, joining, or a reusable model", prompt)
+        self.assertIn("Meaningful owner/user win or setback", prompt)
         self.assertIn("Campaign/bulk work", prompt)
         self.assertIn("qa_issues(issue, record, evidence)", prompt)
         self.assertIn("unsafe or unqualified recipient", prompt)
         self.assertIn("email=send_email in-thread", prompt)
         self.assertIn(
-            "Follow Work Updates for later milestone timing",
+            "one later update may report the strongest finding and remaining work",
             send_chat["function"]["description"],
         )
         self.assertIn(
-            "send one brief kickoff(true) first",
+            "send one brief kickoff(true), then start work next response",
             send_chat["function"]["description"],
         )
         self.assertIn(
-            "at most one concise orientation note",
+            "do not send a standalone orientation note",
             send_chat["function"]["description"],
         )
         self.assertNotIn(
@@ -223,21 +228,22 @@ class PersistentAgentPlanningModeTests(TestCase):
             )
         )
 
-        self.assertIn("Choose one route", prompt)
-        self.assertIn("Broad task missing a material scope", prompt)
-        self.assertIn("exactly one focused read-only lookup", prompt)
-        self.assertIn("A failed lookup still ends orientation", prompt)
-        self.assertIn("call request_human_input exactly once", prompt)
-        self.assertIn("every card in its `requests` array", prompt)
-        self.assertIn("one per unresolved material decision", prompt)
-        self.assertIn("2-3 distinct options", prompt)
-        self.assertIn("No padding or catch-all questions", prompt)
-        self.assertIn("cannot decide missing scope", prompt)
-        self.assertIn("named company or product is the seller", prompt)
+        self.assertIn("Choose the route before calling a tool", prompt)
+        self.assertIn("broad goal or named subject alone", prompt)
+        self.assertIn("call one enabled public search tool directly and alone", prompt)
+        self.assertIn("do not call search_tools", prompt)
+        self.assertIn("call request_human_input once", prompt)
+        self.assertIn("In `requests`", prompt)
+        self.assertIn("each independent material decision its own card", prompt)
+        self.assertIn("options must answer that card's question", prompt)
+        self.assertIn("2-3 clear choices", prompt)
+        self.assertIn("no umbrella, padding, or catch-all cards", prompt)
+        self.assertIn("Do not send a kickoff", prompt)
+        self.assertIn("Do not ask what the named subject is when the lookup identified it", prompt)
         self.assertIn("company, product, brand, or internal project", prompt)
         self.assertIn("mirrored to email or SMS", prompt)
         self.assertLess(len(prompt), 2200)
-        self.assertIn("Clear task: start it", prompt)
+        self.assertIn("Executable task: start only", prompt)
 
     @patch("api.agent.core.prompt_context.has_verified_email", return_value=True)
     def test_first_run_prompt_places_active_intake_after_stable_core(self, _has_verified_email):

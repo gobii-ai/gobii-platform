@@ -1456,13 +1456,10 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "function": {
             "name": "search_tools",
             "description": (
-                "Discover and enable tools and skills for the task; follow capability-discovery hints even when generic tools are enabled. "
-                "Use when no enabled tool clearly fits, including named integration requests. "
-                "Use for control-plane or agent/team-management requests that may require hidden system skills. "
-                "Use it when you need to choose between structured extractors, web search, scraping, browser automation, or a specialized integration. "
-                "Use already-enabled direct tools such as sqlite_batch, create_csv, or a named integration tool; do not rediscover a matching enabled app/tool. "
-                "An enabled/already_enabled match is ready: use it next without rediscovery or credential preflight. "
-                "Call search_tools again only when the task changes."
+                "Discover and enable a tool or skill only when no listed task-specific tool fits, or a capability-discovery "
+                "hint requires it. Use for agent/team-management through hidden system skills, or to choose among extractors, web search, "
+                "scraping, browser automation, and integrations. Do not rediscover a matching enabled tool or app. An "
+                "enabled/already_enabled match is ready: use it next without rediscovery or credential preflight. Search again only when it names another required skill, or the task changes."
             ),
             "parameters": {
                 "type": "object",
@@ -1495,7 +1492,7 @@ def execute_search_tools(agent: PersistentAgent, params: Dict[str, Any]) -> Tool
     if result.get("status") == "success":
         result.setdefault(
             "next_action",
-            "Use a returned enabled/already-enabled match now. If none fits, explain the setup or limitation; "
-            "do not call search_tools again unless the task changes.",
+            "Use a returned enabled/already-enabled match now. If it names another required skill, search once for that skill by name. "
+            "Otherwise do not call search_tools again unless the task changes.",
         )
     return result

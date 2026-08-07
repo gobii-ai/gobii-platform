@@ -18,6 +18,60 @@ def _response(*, arguments=None, content=None):
 class EvalJudgeFallbackTests(SimpleTestCase):
     @patch("api.evals.execution._JUDGE_RETRY_DELAYS_SECONDS", ())
     @patch("api.evals.execution.run_completion")
+    def test_contradictory_structured_choice_falls_back_to_json_text(self, run_completion):
+        run_completion.side_effect = [
+            _response(arguments=json.dumps({
+                "choice": "Misassociated",
+                "reasoning": "Every URL matches its entity. Therefore, the response is Grounded.",
+            })),
+            _response(content=json.dumps({
+                "choice": "Grounded",
+                "reasoning": "Every URL matches its entity.",
+            })),
+        ]
+
+        choice, reasoning = ScenarioExecutionTools()._run_judge_completion(
+            model="judge-model",
+            prompt=[{"role": "system", "content": "judge"}, {"role": "user", "content": "context"}],
+            tool_definition={"type": "function"},
+            tool_choice={"type": "function"},
+            params={"temperature": 0},
+            options=["Grounded", "Misassociated"],
+        )
+
+        self.assertEqual(choice, "Grounded")
+        self.assertIn("structured-output failure", reasoning)
+        self.assertEqual(run_completion.call_count, 2)
+
+    @patch("api.evals.execution._JUDGE_RETRY_DELAYS_SECONDS", ())
+    @patch("api.evals.execution.run_completion")
+    def test_contradictory_final_sentence_falls_back_to_json_text(self, run_completion):
+        run_completion.side_effect = [
+            _response(arguments=json.dumps({
+                "choice": "Misassociated",
+                "reasoning": "At first this looks wrong. The response is fully Grounded.",
+            })),
+            _response(content=json.dumps({
+                "choice": "Grounded",
+                "reasoning": "Every URL matches its entity.",
+            })),
+        ]
+
+        choice, reasoning = ScenarioExecutionTools()._run_judge_completion(
+            model="judge-model",
+            prompt=[{"role": "system", "content": "judge"}, {"role": "user", "content": "context"}],
+            tool_definition={"type": "function"},
+            tool_choice={"type": "function"},
+            params={"temperature": 0},
+            options=["Grounded", "Misassociated"],
+        )
+
+        self.assertEqual(choice, "Grounded")
+        self.assertIn("structured-output failure", reasoning)
+        self.assertEqual(run_completion.call_count, 2)
+
+    @patch("api.evals.execution._JUDGE_RETRY_DELAYS_SECONDS", ())
+    @patch("api.evals.execution.run_completion")
     def test_malformed_structured_arguments_fall_back_to_json_text(self, run_completion):
         run_completion.side_effect = [
             _response(arguments='{"choice":"Yes","reasoning":"unterminated'),

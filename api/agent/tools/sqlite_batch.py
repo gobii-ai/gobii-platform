@@ -22,7 +22,12 @@ from .sqlite_guardrails import (
     start_query_timer,
     stop_query_timer,
 )
-from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
+from .sqlite_autocorrect import (
+    build_cte_column_candidates,
+    build_derived_table_alias_candidates,
+    build_json_each_value_candidates,
+    build_sqlglot_candidates,
+)
 from .sqlite_query_quality import build_tool_result_query_advisories
 from .sqlite_recovery import (
     SQLITE_RECOVERY_NOTICE,
@@ -60,9 +65,15 @@ DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS = 1.0
 CONFIG_PATCH_NOT_PERSISTED_ERROR = "config_patch_not_persisted"
 CONFIG_PATCH_NOT_PERSISTED_MESSAGE = (
     "Query not executed: patch_text(...) was not assigned back to the same durable config field. "
-    "For appearance or schedule, assign patch_text(field, :old_text, :new_text) to that field. "
+    "For charter or appearance, assign patch_text(field, :old_text, :new_text) to that field. "
     "Use UPDATE __agent_config SET charter=patch_text(charter, :old_text, :new_text) WHERE id=1 "
     "with `bindings`; set old_text='' to append."
+)
+SOURCE_MODEL_WRITE_NOT_DERIVED_ERROR = "source_model_write_not_derived"
+SOURCE_MODEL_WRITE_NOT_DERIVED_MESSAGE = (
+    "Query not executed: a durable write sourced from __tool_results copied source facts into SQL literals. "
+    "Retry with one INSERT SELECT over all current sibling results. Derive every saved source field from "
+    "t.result_json or the json_each value; do not filter siblings by result ID, URL, or source name."
 )
 PATCH_TEXT_USAGE_HINT = (
     " FIX: patch_text takes exactly 3 arguments: patch_text(text, old, new). "
@@ -321,20 +332,27 @@ def _fix_python_operators(sql: str) -> tuple[str, str | None]:
     Examples: == -> =, && -> AND, != stays (valid in SQLite)
     """
     corrections = []
+    parsed = sqlparse.parse(sql)
+    if not parsed:
+        return sql, None
 
-    # == to = (but not inside strings)
-    # Use a simple heuristic: replace == that's not inside quotes
-    if '==' in sql:
-        new_sql = re.sub(r'(?<![\'"])\s*==\s*(?![\'"])', ' = ', sql)
-        if new_sql != sql:
-            sql = new_sql
-            corrections.append("'==' -> '='")
-
-    if '&&' in sql:
-        new_sql = re.sub(r'\s*&&\s*', ' AND ', sql)
-        if new_sql != sql:
-            sql = new_sql
-            corrections.append("'&&' -> 'AND'")
+    rewritten = []
+    for statement in parsed:
+        for token in statement.flatten():
+            value = token.value
+            if token.ttype in sql_tokens.Literal.String or token.ttype in sql_tokens.Comment:
+                rewritten.append(value)
+            elif value == "==":
+                rewritten.append("=")
+                if "'==' -> '='" not in corrections:
+                    corrections.append("'==' -> '='")
+            elif value == "&&":
+                rewritten.append("AND")
+                if "'&&' -> 'AND'" not in corrections:
+                    corrections.append("'&&' -> 'AND'")
+            else:
+                rewritten.append(value)
+    sql = "".join(rewritten)
 
     # || for logical OR is tricky - in SQLite || is string concat
     # Only fix if it looks like logical OR context (between conditions)
@@ -393,9 +411,97 @@ def _fix_dialect_functions(sql: str) -> tuple[str, str | None]:
         sql = re.sub(r'\bARRAY_AGG\s*\(', 'GROUP_CONCAT(', sql, flags=re.IGNORECASE)
         corrections.append("ARRAY_AGG() -> GROUP_CONCAT()")
 
+    sql, distinct_concat_count = _drop_distinct_group_concat_separators(sql)
+    if distinct_concat_count:
+        corrections.append("GROUP_CONCAT(DISTINCT x, separator) -> GROUP_CONCAT(DISTINCT x)")
+
     if corrections:
         return sql, ", ".join(corrections)
     return sql, None
+
+
+def _drop_distinct_group_concat_separators(sql: str) -> tuple[str, int]:
+    """Remove the unsupported separator argument from DISTINCT GROUP_CONCAT calls."""
+    pattern = re.compile(r"\bGROUP_CONCAT\s*\(\s*DISTINCT\b", re.IGNORECASE)
+    cursor = 0
+    parts: list[str] = []
+    fixes = 0
+
+    while match := pattern.search(sql, cursor):
+        open_paren = sql.find("(", match.start())
+        depth = 0
+        quote = None
+        comma = None
+        close_paren = None
+        index = open_paren
+        while index < len(sql):
+            char = sql[index]
+            if quote:
+                if char == quote:
+                    if index + 1 < len(sql) and sql[index + 1] == quote:
+                        index += 2
+                        continue
+                    quote = None
+            elif char in {"'", '"'}:
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    close_paren = index
+                    break
+            elif char == "," and depth == 1:
+                comma = index
+            index += 1
+
+        if close_paren is None:
+            break
+        if comma is None:
+            parts.append(sql[cursor:close_paren + 1])
+        else:
+            parts.append(sql[cursor:comma].rstrip() + ")")
+            fixes += 1
+        cursor = close_paren + 1
+
+    if not fixes:
+        return sql, 0
+    parts.append(sql[cursor:])
+    return "".join(parts), fixes
+
+
+def _fix_json_each_columns(sql: str) -> tuple[str, str | None]:
+    """Normalize common non-SQLite json_each column names."""
+    aliases = set(
+        re.findall(
+            r"\bjson_each\s*\([^;]*?\)\s+(?:AS\s+)?([A-Za-z_]\w*)",
+            sql,
+            re.IGNORECASE,
+        )
+    )
+    aliases.difference_update({"cross", "group", "join", "limit", "on", "order", "where"})
+    fixes = []
+    for alias in aliases:
+        sql, count = _replace_outside_literals(
+            sql,
+            rf"\b{re.escape(alias)}\.val\b",
+            f"{alias}.value",
+            flags=re.IGNORECASE,
+        )
+        if count:
+            fixes.append(f"{alias}.val -> {alias}.value")
+
+    simple_json_each = re.search(
+        r"\bFROM\s+json_each\s*\([^)]*\)\s*(?:WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT|$)",
+        sql,
+        re.IGNORECASE,
+    )
+    if simple_json_each and not re.search(r"\b(?:JOIN|CROSS\s+JOIN)\b", sql, re.IGNORECASE):
+        sql, count = _replace_outside_literals(sql, r"\bseq\b", "key", flags=re.IGNORECASE)
+        if count:
+            fixes.append("json_each seq -> key")
+
+    return sql, ", ".join(fixes) if fixes else None
 
 
 def _fix_dialect_syntax(sql: str) -> tuple[str, str | None]:
@@ -725,6 +831,19 @@ def _fix_insert_select_upsert_ambiguity(sql: str) -> tuple[str, str | None]:
     return fixed, "added WHERE 1=1 to disambiguate INSERT ... SELECT ... ON CONFLICT"
 
 
+def _fix_where_before_from(sql: str) -> tuple[str, str | None]:
+    """Remove a no-op WHERE accidentally placed in the SELECT list."""
+    fixed, count = _replace_outside_literals(
+        sql,
+        r"\bWHERE\s+1\s*=\s*1\s*(?=\bFROM\b)",
+        "",
+        flags=re.IGNORECASE,
+    )
+    if not count:
+        return sql, None
+    return fixed, "removed misplaced WHERE 1=1 before FROM"
+
+
 def _fix_agent_config_patch_where(sql: str) -> tuple[str, str | None]:
     statements = sqlparse.parse(sql)
     if len(statements) != 1:
@@ -782,7 +901,15 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
     if fix:
         corrections.append(fix)
 
+    sql, fix = _fix_json_each_columns(sql)
+    if fix:
+        corrections.append(fix)
+
     sql, fix = _fix_dialect_syntax(sql)
+    if fix:
+        corrections.append(fix)
+
+    sql, fix = _fix_where_before_from(sql)
     if fix:
         corrections.append(fix)
 
@@ -813,6 +940,17 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
             corrections.append(fix)
 
     return sql, corrections
+
+
+def _sql_fixes_change_semantics(fixes: list[str]) -> bool:
+    semantics_preserving = {
+        "added WHERE 1=1 to disambiguate INSERT ... SELECT ... ON CONFLICT",
+    }
+    return any(
+        fix not in semantics_preserving and not fix.startswith("json_each scalar column '")
+        and not fix.startswith("derived-table column '")
+        for fix in fixes
+    )
 
 
 def _extract_select_aliases(sql: str) -> list[str]:
@@ -1574,6 +1712,9 @@ def _build_autocorrection_candidates(
     if fix and corrected != sql:
         candidates.append((corrected, [fix]))
 
+    candidates.extend(build_json_each_value_candidates(sql, error_msg))
+    candidates.extend(build_derived_table_alias_candidates(sql, error_msg))
+
     corrected, fix = _autocorrect_missing_column_with_schema(sql, error_msg, conn)
     if fix and corrected != sql:
         candidates.append((corrected, [fix]))
@@ -1688,7 +1829,7 @@ def _has_postgres_escape_string(sql: str) -> bool:
     return False
 
 
-def _get_error_hint(error_msg: str, sql: str = "") -> str:
+def _get_error_hint(error_msg: str, sql: str = "", batch_sql: str = "") -> str:
     """Return a helpful hint for common SQLite errors."""
     error_lower = error_msg.lower()
     if _has_postgres_escape_string(sql):
@@ -1711,6 +1852,28 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
         if qualified_match and sql:
             missing_raw = qualified_match.group(1)
             qualifier, missing_field = _split_qualified_identifier(missing_raw)
+            created_tables = {
+                name.casefold()
+                for name in re.findall(
+                    r'\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`\[]?(\w+)',
+                    batch_sql,
+                    re.IGNORECASE,
+                )
+            }
+            referenced_table = next(
+                (
+                    table_name
+                    for table_name, alias in _extract_table_refs(sql)
+                    if qualifier and alias.casefold() == qualifier.casefold()
+                ),
+                "",
+            )
+            if referenced_table.casefold() in created_tables:
+                return (
+                    f" FIX: This batch declared {referenced_table} without {missing_field}, and the whole batch was "
+                    "rolled back. Make its CREATE, INSERT, and SELECT use the same columns, then retry the whole batch; "
+                    "do not inspect the rolled-back table."
+                )
             if qualifier and missing_field and re.search(
                 rf"\bjson_each\s*\([^;]*?\)\s+(?:AS\s+)?{re.escape(qualifier)}\b",
                 sql,
@@ -1755,6 +1918,8 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
                     return f" FIX: Typo? You defined CTE '{cte}' but referenced '{missing}'."
         return " FIX: Do not assume the table name or create a replacement yet. Query sqlite_master to find existing tables, inspect the intended table with PRAGMA table_info, then retry."
     if "syntax error" in error_lower:
+        if re.search(r"\bAS\s*\(\s*INSERT\b", sql, re.IGNORECASE | re.DOTALL):
+            return " FIX: SQLite CTEs cannot contain INSERT/UPDATE/DELETE. Run the write as a standalone statement, then SELECT."
         # Check if it might be a quote escaping issue
         if "'" in sql and ("regexp" in sql.lower() or "pattern" in sql.lower()):
             return " FIX: Quote escaping issue. Use extract_urls()/extract_emails() for URLs/emails, or escape ' as '' in regex patterns."
@@ -1769,7 +1934,10 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
             return " FIX: grep_context_all returns array of STRINGS, not objects. Use: SELECT ctx.value FROM json_each(grep_context_all(...)) ctx"
         if "split_sections" in sql.lower():
             return " FIX: split_sections returns array of STRINGS. Use: SELECT s.value FROM json_each(split_sections(...)) s"
-        return " FIX: json_extract requires valid JSON. Check that the column/expression contains JSON, not plain text."
+        return (
+            " FIX: json_extract requires valid JSON. For a json_each alias j, read child fields as "
+            "json_extract(j.value,'$.field'), not with -> or ->>. Otherwise check that the input is JSON, not plain text."
+        )
     return ""
 
 
@@ -2065,7 +2233,21 @@ def _normalize_named_bindings(params: Dict[str, Any]) -> tuple[dict[str, object]
         if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
             return None, "Provide `rows` as an array of objects."
         if "rows" in bindings:
-            return None, "Provide source rows with the top-level `rows` field, not both `rows` and `bindings.rows`."
+            raw_binding_rows = (raw or {}).get("rows")
+            if rows == [] and raw_binding_rows in ([], "[]"):
+                bindings.pop("rows")
+            else:
+                return None, "Provide source rows with the top-level `rows` field, not both `rows` and `bindings.rows`."
+        for index, row in enumerate(rows):
+            if set(row) != {"result_id", "fields"}:
+                return None, (
+                    f"Top-level rows item {index} must contain only `result_id` and `fields`. "
+                    "Use the exact short source result_id, never an item ID or $[link:...] handle."
+                )
+            if not isinstance(row["result_id"], str) or not row["result_id"].strip():
+                return None, f"Top-level rows item {index} needs a non-empty source `result_id`."
+            if not isinstance(row["fields"], dict) or not row["fields"]:
+                return None, f"Top-level rows item {index} needs a non-empty `fields` object."
         bindings["rows"] = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
 
     return bindings, None
@@ -2211,6 +2393,18 @@ def _execute_sqlite_batch_inner(
             tool_result_payloads=_recent_tool_result_payloads(conn),
             model_table_has_identity=lambda table: _table_has_stable_identity(conn, table),
         )
+        if any(
+            advisory.code == "source_facts_copied_into_model"
+            for advisory in advisories
+        ) and any("__tool_results" in str(query).casefold() for query in queries):
+            return {
+                "status": "error",
+                "error_code": SOURCE_MODEL_WRITE_NOT_DERIVED_ERROR,
+                "results": [],
+                "db_size_mb": round(_get_db_size_mb(db_path), 2),
+                "message": SOURCE_MODEL_WRITE_NOT_DERIVED_MESSAGE,
+                "retryable": True,
+            }
         preview = [q.strip()[:160] for q in queries[:5]]
         logger.info("Agent %s executing sqlite_batch: %s queries (preview=%s)", agent_id, len(queries), preview)
         conn.execute("BEGIN")
@@ -2253,7 +2447,7 @@ def _execute_sqlite_batch_inner(
                     if _has_postgres_escape_string(original_query)
                     else final_query
                 )
-                hint = _get_error_hint(failure_message, hint_sql)
+                hint = _get_error_hint(failure_message, hint_sql, "\n".join(queries[: idx + 1]))
                 error_message = f"Query {idx} failed: {failure_message}{hint}"
                 break
 
@@ -2270,6 +2464,7 @@ def _execute_sqlite_batch_inner(
                     "before": original_query,
                     "after": final_query,
                     "fixes": applied_corrections,
+                    "semantic_change": _sql_fixes_change_semantics(applied_corrections),
                 }
                 all_corrections.extend(applied_corrections)
             results.append(result_entry)
@@ -2312,15 +2507,42 @@ def _execute_sqlite_batch_inner(
 
         if had_error:
             response["retryable"] = True
-        has_result_rows = any(
-            isinstance(entry.get("result"), list) and bool(entry["result"])
+        has_url_columns = any(
+            any(
+                str(column).casefold() == "url"
+                or str(column).casefold().endswith(("_url", "_urls"))
+                for column in row
+            )
             for entry in results
+            for row in entry.get("result", ())
+            if isinstance(row, dict)
         )
+        has_result_rows = any(
+            entry.get("result")
+            for entry in results
+            if isinstance(entry, dict)
+        )
+        has_delivery_status = any(
+            "delivery_status" in row
+            for entry in results
+            for row in entry.get("result", ())
+            if isinstance(row, dict)
+        )
+        if not had_error and has_result_rows:
+            response["message"] += (
+                _nonterminal_result_guidance(results, queries)
+                if will_continue_work
+                else " Use the explicit send tool with these rows now; do not query again."
+            )
+        if not had_error and has_url_columns:
+            response["message"] += " Include every returned URL in the reply."
+        if not had_error and has_delivery_status:
+            response["message"] += " State delivery_status exactly; sent or provider-accepted is not delivered."
         if (
             not had_error
             and not had_warning
             and will_continue_work is False
-            and (params.get("_has_user_facing_message") is True or not has_result_rows)
+            and params.get("_has_user_facing_message") is True
         ):
             response["auto_sleep_ok"] = True
         if advisories:
@@ -2403,6 +2625,27 @@ def _sqlite_state_guard_result(
     return None
 
 
+def _nonterminal_result_guidance(results: List[Dict[str, Any]], queries: List[str]) -> str:
+    result_rows = [
+        row
+        for entry in results
+        for row in entry.get("result", ())
+        if isinstance(row, dict)
+    ]
+    inspected_prose_evidence = (
+        any("__tool_results" in query.casefold() for query in queries)
+        and bool(result_rows)
+        and all({"result_id", "source_url", "evidence"}.issubset(row) for row in result_rows)
+    )
+    if inspected_prose_evidence:
+        return (
+            " Next, pass top-level rows=[{result_id,fields:{...}},...] with these short IDs and join "
+            "__tool_results. In an INSERT SELECT upsert, add WHERE 1=1 only when the SELECT has no WHERE. Never copy "
+            "evidence into VALUES or SQL literals. Do not repeat this query."
+        )
+    return " Use these rows for the next required action; do not repeat this query."
+
+
 def get_sqlite_batch_tool() -> Dict[str, Any]:
     """Return the sqlite_batch tool definition for the LLM."""
     return {
@@ -2410,21 +2653,16 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
         "function": {
             "name": "sqlite_batch",
             "description": (
-                "Use SQLite for reusable data. Also use one batch whenever two or more tool results must be compared, "
-                "filtered, ranked, joined, aggregated, or reconciled. Do not call it to find a missing email/SMS "
-                "recipient; ask with request_human_input first. "
-                "For QA/audits, use one call: CREATE qa_issues(issue, record, evidence); INSERT SELECT derived issues "
-                "from __tool_results/json_each; SELECT the issue rows. Do not SELECT result_json first or store raw inputs. "
-                "In one batch, create keyed tables, upsert rows set-wise, and return the filtered answer rows with "
-                "their source URLs. Do not reread those rows before delivering them. "
-                "For structured tool results, use every current row for the exact tool name. Read HTTP payloads from "
-                "$.content and expand real arrays with json_each; keep result_id and source_url as provenance. Do not "
-                "filter by result_id or URL. For prose results, split repeated sections set-wise or inspect the full "
-                "current set once, keeping one row per result_id. "
-                "For inbound-message writes, derive every field and message_id from the latest non-outbound non-null "
-                "__messages payload inside the first write; do not pre-read it. Use bound parameters for authored or "
-                "messy text. Avoid per-item writes, historical rows, ATTACH, PostgreSQL -> syntax, and SELECT-all "
-                "readbacks. INSERT SELECT needs WHERE 1=1 before ON CONFLICT. Rank after unions in a separate SELECT."
+                "Use SQLite for filtering, ranking, joins, aggregates, or reusable rows. A comparison table is formatting, "
+                "not SQLite; do not recreate visible facts. Bind __agent_config patch text; never use SQL literals or read back. "
+                "Use one batch. Reusable tables need PRIMARY KEY or UNIQUE identity and set-wise upserts; never use CREATE TABLE AS. "
+                "Structured JSON: fill each table, including parent tables, with one INSERT SELECT over all current __tool_results "
+                "for the exact tool name. Never use VALUES or filter imports by source, result_id, URL, or content. Related entities "
+                "use separate tables joined by ID. Prose reuse: the first call uses one rows item per source, never rows=[]; join "
+                "json_each(:rows) to __tool_results, keep result_id/source_url, and never copy source facts or URLs into SQL literals. "
+                "Save cursor/remaining_work with bindings in the first batch, without pre-reading. End with answer rows containing "
+                "every needed field, URL, and count; use separate SELECTs for summary/detail, not UNION. Reply without another query. "
+                "Inbound-message writes derive fields and message_id from latest non-outbound __messages. Avoid per-item writes and historical rows."
             ),
             "parameters": {
                 "type": "object",
@@ -2436,7 +2674,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                             "properties": {
                                 "result_id": {
                                     "type": "string",
-                                    "description": "Exact result_id of the source row.",
+                                    "description": "Exact short __tool_results ID, never a $[link:...] handle.",
                                     "minLength": 1,
                                 },
                                 "fields": {
@@ -2444,42 +2682,51 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                                     "description": (
                                         "Facts explicitly supported by that source, keyed by semantic field name. "
                                         "Preserve the source's specificity. Omit unavailable fields; never enrich "
-                                        "or infer values to complete a schema."
+                "or infer values to complete a schema. Copy URL fields exactly; never construct "
+                                        "or normalize them from IDs. Do not repeat result_id or source_url; "
+                                        "SQL gets provenance by joining __tool_results."
                                     ),
                                     "minProperties": 1,
                                     "additionalProperties": {},
                                 },
                             },
                             "required": ["result_id", "fields"],
-                            "additionalProperties": True,
+                            "additionalProperties": False,
                         },
                         "description": (
-                            "Use [] for structured, inspection, model-only, and SQL-derived prose work. Transcribed "
-                            "prose writes need nonempty exact result_id/fields; never invent IDs. SQL receives :rows."
+                            "For prose/text sources, pass one item per source on the first call. Use [] only for "
+                            "structured JSON or SQL-only work. Each item has an exact result_id; put every fact inside "
+                            "fields. SQL receives this array as :rows and reads facts as "
+                            "json_extract(r.value,'$.fields.name'), never r.name or $.name."
                         ),
                     },
                     "sql": {
                         "type": "string",
                         "description": (
-                            "Semicolon-separated SQL. Prose joins json_each(:rows) to __tool_results by result_id and "
-                            "extracts $.fields.*. Message writes derive payload/message_id from __messages, or one bound "
-                            "payload when absent. Config uses patch_text(charter,:old,:new). INSERT SELECT requires "
-                            "WHERE 1=1 before ON CONFLICT. End writes with the requested decision/evidence SELECT."
+                            "Semicolon-separated SQLite. When rows is nonempty, use INSERT SELECT from "
+                            "json_each(:rows) joined to __tool_results; read facts from $.fields.* and source_url from "
+                            "the joined tool result. Never use VALUES or repeat those facts as SQL text. For an "
+                            "INSERT SELECT upsert puts ON CONFLICT after its single WHERE clause; add WHERE 1=1 only if none exists. "
+                            "Use separate SELECT statements for ranked results; never put ORDER BY or LIMIT inside UNION. "
+                            "End with every requested answer field and the source_url from each table used in the answer; use the explicit send tool next without rereading. After "
+                            "UPDATE with patch_text, SELECT the updated field, not patch_text again. Never DROP or use "
+                            "CREATE TABLE AS for a reusable model; create a keyed table and upsert it."
                         ),
                     },
                     "bindings": {
                         "type": "object",
                         "description": (
-                            "Named parameters without colons: config old/new, authored/messy values, or one complete "
-                            "payload unavailable in __messages. JSON object, never array/list."
+                            "Never include `rows` here; top-level `rows` supplies `:rows`. Use {} when SQL has no other "
+                            "parameters. Otherwise use plain names without colons, such as company_name, for authored or "
+                            "config values. Other lists are JSON strings for json_each(:name)."
                         ),
                         "additionalProperties": {},
                     },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. True for action-producing queue reads (all queue reads); false for answer SELECTs "
-                            "before replying. Never reread SQLite."
+                            "REQUIRED. True when any action or reply for this request remains; false only when a "
+                            "user-facing message in this response completes it. Never reread SQLite."
                         ),
                     },
                 },

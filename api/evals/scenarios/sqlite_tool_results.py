@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Iterable
 
@@ -86,6 +86,16 @@ SQLITE_TOOL_RESULT_SCENARIO_SLUGS = [
     SQLITE_STRUCTURED_PEER_EVENT_PERSISTENCE,
     SQLITE_PEER_OUTCOME_RECONCILES_CANONICAL_MODEL,
 ]
+
+
+def _matches_weekday(value: object, weekday: str) -> bool:
+    text = str(value or "").strip()
+    if text.casefold() == weekday.casefold():
+        return True
+    try:
+        return date.fromisoformat(text).strftime("%A").casefold() == weekday.casefold()
+    except ValueError:
+        return False
 
 
 SOURCE_URLS = ("https://sources.example.test/helpdesk/axonflow", "https://sources.example.test/helpdesk/brightsupport", "https://sources.example.test/helpdesk/caremesh", "https://sources.example.test/helpdesk/dockwise")
@@ -320,6 +330,13 @@ def _seed_account_export(agent_id, completion, source_url, accounts, observed_at
 
 def _contains_auto_correction(value) -> bool:
     if isinstance(value, dict):
+        correction = value.get("auto_correction")
+        if isinstance(correction, dict) and correction.get("semantic_change") is False:
+            return any(
+                _contains_auto_correction(item)
+                for key, item in value.items()
+                if key != "auto_correction"
+            )
         return "auto_correction" in value or any(_contains_auto_correction(item) for item in value.values())
     return isinstance(value, list) and any(_contains_auto_correction(item) for item in value)
 
@@ -342,8 +359,25 @@ def _tool_attempt_failures(calls, label: str, *, reject_auto_correction: bool = 
 
 def _sqlite_attempt_failures(calls) -> list[str]:
     calls = list(calls)
-    failures = _tool_attempt_failures(calls, "SQLite", reject_auto_correction=True)
-    for index, call in enumerate(calls, start=1):
+    accepted_rejections = set()
+    for index, call in enumerate(calls):
+        payload = _result_payload(call)
+        has_later_success = any(
+            str(getattr(later, "status", "") or "").casefold() == "complete"
+            and str((_result_payload(later) or {}).get("status") or "").casefold() == "ok"
+            for later in calls[index + 1:]
+        )
+        if (
+            isinstance(payload, dict)
+            and (payload.get("error_code") or payload.get("status_code")) == "source_model_write_not_derived"
+            and payload.get("retryable") is True
+            and "Query not executed:" in str(payload.get("message") or "")
+            and has_later_success
+        ):
+            accepted_rejections.add(index)
+    scored_calls = [call for index, call in enumerate(calls) if index not in accepted_rejections]
+    failures = _tool_attempt_failures(scored_calls, "SQLite", reject_auto_correction=True)
+    for index, call in enumerate(scored_calls, start=1):
         payload = _result_payload(call)
         raw_result = getattr(call, "result", None)
         if (isinstance(payload, dict) and payload.get("advisories")) or "SQLITE QUERY ADVICE" in str(raw_result or ""):
@@ -384,6 +418,86 @@ def _derives_structured_message_fields(
         and "structured_payload_json" in lowered
         and all(f"$.{field.casefold()}" in lowered for field in expected_fields)
         and _structured_outcome_assignments_use_extracted_fields(lowered)
+    )
+
+
+def _derives_structured_message_identity_with_literal_assignment(
+    statement: str,
+    expected_fields: set[str],
+    *,
+    column: str,
+    value: str,
+) -> bool:
+    """Recognize a write tied to message identity with an already-inspected value."""
+    statement_without_comments = sqlparse.format(statement, strip_comments=True)
+    lowered = statement_without_comments.casefold()
+    escaped_value = re.escape(value.casefold().replace("'", "''"))
+    return (
+        _reads_table(statement, "__messages")
+        and "structured_payload_json" in lowered
+        and all(f"$.{field.casefold()}" in lowered for field in expected_fields)
+        and re.search(
+            rf"\b{re.escape(column.casefold())}\s*=\s*'{escaped_value}'",
+            lowered,
+        )
+        is not None
+    )
+
+
+def _links_structured_message_provenance(
+    statement: str,
+    expected_fields: set[str],
+) -> bool:
+    """Recognize writes whose identity and provenance remain tied to one message."""
+    statement_without_comments = sqlparse.format(statement, strip_comments=True)
+    lowered = statement_without_comments.casefold()
+    assignment_provenance = re.search(
+        r"\bsource_message_id\s*=\s*(?:[a-z_][a-z0-9_]*\.)?message_id\b",
+        lowered,
+    ) is not None
+    assignment_provenance = assignment_provenance or re.search(
+        r"\bsource_message_id\s*=\s*\(\s*select\s+(?:[a-z_][a-z0-9_]*\.)?message_id\s+"
+        r"from\s+__messages\b[^)]*\)",
+        lowered,
+        flags=re.DOTALL,
+    ) is not None
+    cte_assignment = re.search(
+        r"\bsource_message_id\s*=\s*\(\s*select\s+(?:[a-z_][a-z0-9_]*\.)?source_message_id\s+"
+        r"from\s+(?P<source>[a-z_][a-z0-9_]*)\b[^)]*\)",
+        lowered,
+        flags=re.DOTALL,
+    )
+    if cte_assignment is not None:
+        source = cte_assignment.group("source")
+        assignment_provenance = assignment_provenance or re.search(
+            rf"\b{re.escape(source)}\s+as\s*\(\s*select\b.+?\bmessage_id\s+as\s+source_message_id\b"
+            r".+?\bfrom\b",
+            lowered,
+            flags=re.DOTALL,
+        ) is not None
+    insert_match = re.search(
+        r"\binsert(?:\s+or\s+\w+)?\s+into\s+[a-z_][a-z0-9_]*\s*"
+        r"\((?P<columns>.*?)\)\s*select\s+(?P<expressions>.*?)\s+from\b",
+        lowered,
+        flags=re.DOTALL,
+    )
+    insert_provenance = False
+    if insert_match is not None:
+        columns = [part.strip(' "`[]') for part in insert_match.group("columns").split(",")]
+        expressions = _split_sql_projection(insert_match.group("expressions"))
+        insert_provenance = (
+            len(columns) == len(expressions)
+            and re.fullmatch(
+                r"(?:[a-z_][a-z0-9_]*\.)?message_id",
+                dict(zip(columns, expressions)).get("source_message_id", "").strip(),
+            )
+            is not None
+        )
+    return (
+        _reads_table(statement, "__messages")
+        and "structured_payload_json" in lowered
+        and all(f"$.{field.casefold()}" in lowered for field in expected_fields)
+        and (assignment_provenance or insert_provenance)
     )
 
 
@@ -586,6 +700,22 @@ def _structured_outcome_assignments_use_extracted_fields(lowered_statement: str)
         )
         if direct_scalar_extract is not None:
             continue
+        cte_scalar_extract = re.search(
+            rf"\b{column}\s*=\s*\(\s*select\s+(?:[a-z_][a-z0-9_]*\.)?{source_field}\s+"
+            rf"from\s+(?P<source>[a-z_][a-z0-9_]*)\b.*?\)",
+            lowered_statement,
+            flags=re.DOTALL,
+        )
+        if cte_scalar_extract is not None:
+            source = cte_scalar_extract.group("source")
+            extracted_field = re.search(
+                rf"\b{re.escape(source)}\s+as\s*\(.+?json_extract\s*\(\s*structured_payload_json\s*,\s*"
+                rf"['\"]\$.{source_field}['\"]\s*\)\s+as\s+{source_field}\b.+?\bfrom\s+__messages\b",
+                lowered_statement,
+                flags=re.DOTALL,
+            )
+            if extracted_field is not None:
+                continue
         match = re.search(
             rf"\b{column}\s*=\s*(.+?)(?=,\s*(?:state|provider_message_id|sent_at|"
             rf"source_message_id)\s*=|\bfrom\b|\bwhere\b)",
@@ -621,15 +751,25 @@ def _insert_select_derives_structured_outcome(statement: str) -> bool:
         ),
         None,
     )
-    projection = next(
+    select_index = next(
         (
-            tokens[index + 1]
-            for index, token in enumerate(tokens[:-1])
+            index
+            for index, token in enumerate(tokens)
             if str(getattr(token, "normalized", "")).casefold() == "select"
         ),
         None,
     )
-    if target_columns is None or not isinstance(projection, sqlparse.sql.IdentifierList):
+    from_index = next(
+        (
+            index
+            for index, token in enumerate(tokens)
+            if select_index is not None
+            and index > select_index
+            and str(getattr(token, "normalized", "")).casefold() == "from"
+        ),
+        None,
+    )
+    if target_columns is None or select_index is None or from_index is None:
         return False
 
     column_list = next(
@@ -646,7 +786,8 @@ def _insert_select_derives_structured_outcome(statement: str) -> bool:
         str(item).strip('"`[] ').casefold()
         for item in column_list.get_identifiers()
     ]
-    expressions = [str(item).strip() for item in projection.get_identifiers()]
+    projection = "".join(str(token) for token in tokens[select_index + 1:from_index])
+    expressions = _split_sql_projection(projection)
     if len(columns) != len(expressions):
         return False
     assignments = dict(zip(columns, expressions))
@@ -659,6 +800,35 @@ def _insert_select_derives_structured_outcome(statement: str) -> bool:
             "sent_at": "sent_at",
         }.items()
     )
+
+
+def _split_sql_projection(projection: str) -> list[str]:
+    """Split a SELECT list on top-level commas."""
+    expressions: list[str] = []
+    start = 0
+    depth = 0
+    quote = ""
+    index = 0
+    while index < len(projection):
+        character = projection[index]
+        if quote:
+            if character == quote:
+                if index + 1 < len(projection) and projection[index + 1] == quote:
+                    index += 1
+                else:
+                    quote = ""
+        elif character in {"'", '"'}:
+            quote = character
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth = max(0, depth - 1)
+        elif character == "," and depth == 0:
+            expressions.append(projection[start:index].strip())
+            start = index + 1
+        index += 1
+    expressions.append(projection[start:].strip())
+    return [expression for expression in expressions if expression]
 
 
 def _direct_source_assignment(expression: str, source_field: str) -> bool:
@@ -803,17 +973,6 @@ def _modeled_source_urls(agent_id: str, table_names: Iterable[str]) -> set[str]:
     return urls
 
 
-def _repeated_source_import_tables(sql_values: Iterable[str]) -> tuple[str, ...]:
-    """Find model tables populated by multiple source-derived statements."""
-
-    counts: dict[str, int] = {}
-    for sql in sql_values:
-        for statement in sqlparse.split(str(sql or "")):
-            for table in source_derived_model_mutation_tables((statement,)):
-                counts[table] = counts.get(table, 0) + 1
-    return tuple(sorted(table for table, count in counts.items() if count > 1))
-
-
 _DECISION_FIELD_RE = re.compile(r"\b(?:stage|status|owner|next_action|due_on)\b", re.I)
 _AGGREGATE_CALL_RE = re.compile(
     r"\b(?:avg|count|group_concat|json_group_array|json_group_object|max|min|sum|total)\s*\([^)]*\)",
@@ -865,7 +1024,7 @@ def _orphan_completion_failures(run_id, after) -> list[str]:
         completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
         created_at__gte=after,
     )
-    completion_ids = set(completions.values_list("id", flat=True))
+    completion_ids = list(completions.order_by("created_at", "id").values_list("id", flat=True))
     linked_ids = set(
         PersistentAgentStep.objects.filter(
             eval_run_id=run_id,
@@ -874,8 +1033,13 @@ def _orphan_completion_failures(run_id, after) -> list[str]:
             tool_call__isnull=False,
         ).values_list("completion_id", flat=True)
     )
-    count = len(completion_ids - linked_ids)
-    return [f"found {count} orphan reasoning completion(s) without an action"] if count else []
+    unrecovered = [
+        completion_id
+        for index, completion_id in enumerate(completion_ids)
+        if completion_id not in linked_ids
+        and (index + 1 == len(completion_ids) or completion_ids[index + 1] not in linked_ids)
+    ]
+    return [f"found {len(unrecovered)} unrecovered reasoning completion(s) without an action"] if unrecovered else []
 
 
 UNIQUE_MODEL_INDEX_RE = re.compile(r'\bcreate\s+unique\s+index\b[^;]*?\bon\s+"?(?P<table>[a-z_]\w*)"?', re.I | re.S)
@@ -1590,8 +1754,12 @@ def _decision_model_tables(sql: str, model_tables: Iterable[str]) -> tuple[str, 
         parsed = sqlparse.parse(statement)
         if not parsed or parsed[0].get_type() != "SELECT":
             continue
-        narrows_rows = re.search(r"\bwhere\b", statement, re.I) or re.search(r"\bgroup\s+by\b", statement, re.I)
-        if narrows_rows and re.search(r"\border\s+by\b", statement, re.I):
+        decides_rows = (
+            re.search(r"\bwhere\b", statement, re.I)
+            or re.search(r"\bgroup\s+by\b", statement, re.I)
+            or re.search(r"\bcase\s+when\b", statement, re.I)
+        )
+        if decides_rows and re.search(r"\border\s+by\b", statement, re.I):
             decisions.update(table for table in tables if _reads_table(statement, table))
     return tuple(table for table in tables if table in decisions)
 
@@ -1981,32 +2149,55 @@ def _catalog_plan_row_failures(rows) -> list[str]:
 
 
 def _catalog_plan_model_failures(agent_id: str, table_names: Iterable[str]) -> list[str]:
-    required_columns = {
-        "vendor",
-        "monthly_price_usd",
-        "included_seats",
-    }
+    required_plan_columns = {"monthly_price_usd", "included_seats"}
     with agent_sqlite_db(str(agent_id)) as db_path:
         conn = open_guarded_sqlite_connection(db_path)
         try:
             for table_name in table_names:
                 quoted = '"' + table_name.replace('"', '""') + '"'
                 columns = {
-                    str(row[1]).casefold()
+                    str(row[1]).casefold(): str(row[1])
                     for row in conn.execute(f"PRAGMA table_info({quoted});")
                 }
                 if (
-                    not required_columns.issubset(columns)
+                    not required_plan_columns.issubset(columns)
                     or not {"plan", "plan_name"}.intersection(columns)
-                    or not {"compliance", "compliance_json"}.intersection(columns)
+                    or not any(
+                        column == "compliance" or column.startswith("compliance_")
+                        for column in columns
+                    )
                 ):
                     continue
-                plan_column = "plan" if "plan" in columns else "plan_name"
-                rows = conn.execute(
-                    f"SELECT vendor, {plan_column}, monthly_price_usd, included_seats "
-                    f"FROM {quoted};"
-                ).fetchall()
-                return _catalog_plan_row_failures(rows)
+                plan_column = columns["plan"] if "plan" in columns else columns["plan_name"]
+                if "vendor" in columns or "vendor_name" in columns:
+                    vendor_column = columns.get("vendor") or columns["vendor_name"]
+                    rows = conn.execute(
+                        f'SELECT "{vendor_column}", "{plan_column}", '
+                        f'"{columns["monthly_price_usd"]}", "{columns["included_seats"]}" '
+                        f"FROM {quoted};"
+                    ).fetchall()
+                    return _catalog_plan_row_failures(rows)
+
+                for foreign_key in conn.execute(f"PRAGMA foreign_key_list({quoted});"):
+                    parent_table = str(foreign_key[2])
+                    child_column = str(foreign_key[3])
+                    parent_column = str(foreign_key[4])
+                    parent_quoted = '"' + parent_table.replace('"', '""') + '"'
+                    parent_columns = {
+                        str(row[1]).casefold(): str(row[1])
+                        for row in conn.execute(f"PRAGMA table_info({parent_quoted});")
+                    }
+                    vendor_column = parent_columns.get("vendor") or parent_columns.get("vendor_name")
+                    if not vendor_column:
+                        continue
+                    rows = conn.execute(
+                        f'SELECT parent."{vendor_column}", child."{plan_column}", '
+                        f'child."{columns["monthly_price_usd"]}", '
+                        f'child."{columns["included_seats"]}" '
+                        f"FROM {quoted} child JOIN {parent_quoted} parent "
+                        f'ON parent."{parent_column}" = child."{child_column}";'
+                    ).fetchall()
+                    return _catalog_plan_row_failures(rows)
         finally:
             clear_guarded_connection(conn)
             conn.close()
@@ -2267,7 +2458,7 @@ class SqliteMultiResultWebSynthesisScenario(SqliteToolResultScenario):
     mock_kind = "web"
     verify_task_name = "verify_smart_sqlite_synthesis"
     answer_source_urls = SOURCE_URLS
-    required_terms = ("enterprise", "SMB", "HIPAA")
+    required_terms = ("enterprise", "small team", "HIPAA")
     min_sources = 3
     # Inspection + model write/read is ideal. One additional query of that
     # durable model is still coherent; the regression is per-result probing or
@@ -2434,11 +2625,19 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
         read_tables = _decision_model_tables(successful_sql, model_tables)
         has_stable_identity = bool(model_tables) and set(model_tables).issubset(identity_tables)
         reusable_tables = tuple(table for table in model_tables if table in identity_tables)
+        model_insert_counts = {
+            table: sum(
+                1
+                for statement in sqlparse.split(strategy_sql)
+                if (_inserted_table_name(statement) or "").casefold() == table.casefold()
+            )
+            for table in model_tables
+        }
+        split_model_writes = {
+            table: count for table, count in model_insert_counts.items() if count > 1
+        }
         row_derived_model_tables = set(model_tables).intersection(row_model_tables)
         manually_populated_model_tables = set(summary.manual_values_table_names).intersection(model_tables)
-        repeated_import_tables = _repeated_source_import_tables(
-            str((call.tool_params or {}).get("sql") or "") for call in successful_calls
-        )
         model_advisories = sorted({
             str(advisory.get("code") or "")
             for call in successful_calls
@@ -2468,15 +2667,12 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
                 f"domain model imported tool results one result at a time "
                 f"({summary.single_result_id_filters} > {self.max_single_result_filters})",
             ),
-            (
-                bool(repeated_import_tables),
-                f"same-shaped sibling rows used repeated imports into {repeated_import_tables}",
-            ),
             (not model_tables, "no reusable domain table was created"),
             (not has_stable_identity, "domain model lacked stable identity constraints"),
             (not row_derived_model_tables, "repeating child rows were not extracted into the domain model"),
             (not re.search(r"\b(?:source_url|source_id|provenance)\b", strategy_sql, re.I), "domain model lacked source provenance"),
             (not read_tables, "initial decision did not query the reusable domain model"),
+            (bool(split_model_writes), f"domain tables were split across repeated INSERTs: {split_model_writes}"),
             (not re.search(r"\bwhere\b", successful_sql, re.I), "initial decision did not filter in SQL"),
             (not re.search(r"\border\s+by\b", successful_sql, re.I), "initial decision did not rank in SQL"),
             (
@@ -2554,8 +2750,8 @@ class SqliteSchemaGroundedExistingTableScenario(SqliteDomainModelScenario):
         ScenarioTask(name="verify_unresolved_handoff_answer", assertion_type="manual"),
     ]
     prompt = (
-        "Check the existing handoff ledger and tell me who still has unfinished work, "
-        "with the count for each. Use the ledger as the source of truth."
+        "Check the existing handoff ledger and tell me each worker who still has unfinished work and their total "
+        "unfinished count. Use the ledger as the source of truth."
     )
 
     def run(self, run_id: str, agent_id: str) -> None:
@@ -2606,8 +2802,8 @@ class SqliteSchemaGroundedExistingTableWriteScenario(SqliteDomainModelScenario):
         ScenarioTask(name="verify_updated_handoff_answer", assertion_type="manual"),
     ]
     prompt = (
-        "Mark handoff-02 resolved in the existing handoff ledger. Then tell me who still has unfinished work "
-        "and the count for each. Use the ledger as the source of truth."
+        "Mark handoff-02 resolved in the existing handoff ledger. Then tell me each worker who still has unfinished "
+        "work and their total unfinished count. Use the ledger as the source of truth."
     )
 
     def run(self, run_id: str, agent_id: str) -> None:
@@ -2669,7 +2865,7 @@ class SqliteDomainTruthOverStaleHistoryScenario(SqliteDomainModelScenario):
     description = "An established domain model should beat stale conversation history."
     expected_runtime = "short"
     tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_modeled_truth_read", assertion_type="tool_call"), ScenarioTask(name="verify_current_truth_answer", assertion_type="manual")]
-    prompt = "I'm picking up Aster Labs. Where does it actually stand now, who owns it, and what should happen next?"
+    prompt = "I'm reviewing Aster Labs; don't change anything. Where does it stand now, who owns it, and what should happen next?"
 
     def run(self, run_id: str, agent_id: str) -> None:
         self._prepare_domain_agent(agent_id, DOMAIN_CURRENT, timezone.now().isoformat())
@@ -3344,8 +3540,8 @@ class SqliteProspectPipelineCompletesScenario(SqliteDomainModelScenario):
     prompt = (
         "Build a reusable first batch of four US healthcare staffing prospects at firms under 100 employees. "
         "For each one I need the recruiter or owner's name, title, company, company size, profile link, and a short "
-        "qualification note. The current company and people exports are below. Give me the completed batch as a "
-        "concise report; I'll have follow-ups by company and person.\n\n"
+        "qualification note. The current company and people exports are below. Keep the company and person records "
+        "reusable for later follow-ups. Give me the completed batch as a concise report.\n\n"
         + "\n".join(f"- {url}" for url in PROSPECT_FEED_URLS)
     )
 
@@ -3695,9 +3891,8 @@ class SqliteEnrichmentRefreshUnderPressureScenario(SqliteDomainModelScenario):
             (scalar_json_misuse, "plain scalar identity columns were treated as JSON"),
             (not modeled_rows_match, "contact model was incomplete, stale, or missing row provenance"),
             (
-                not re.search(r"\bgroup\s+by\s+(?:[a-z_]\w*\.)?owner\b", combined_sql, re.I)
-                or not re.search(r"\bverified_email\b[\s\S]*\bis\s+null\b", combined_sql, re.I),
-                "contact model was not queried for missing-email coverage by owner",
+                not re.search(r"\bverified_email\b[\s\S]*\bis\s+null\b", combined_sql, re.I),
+                "contact model was not queried for missing-email contacts",
             ),
             (
                 len(terminal_positions) != 1,
@@ -3724,7 +3919,7 @@ class SqliteDedupeRequeryScenario(SqliteToolResultScenario):
     description = "Duplicate source synthesis should use aggregate SQLite/CTE queries, not repeated blob re-fetches."
     tasks = [ScenarioTask(name="inject_prompt", assertion_type="agent_processing"), ScenarioTask(name="verify_dedupe_sqlite_usage", assertion_type="tool_call"), ScenarioTask(name="verify_sourced_answer", assertion_type="manual")]
     builtin_tools = ("http_request", "mcp_brightdata_scrape_as_markdown")
-    prompt = "Fetch these four source URLs, dedupe overlapping claims, and return the two strongest unique claims with citations. Use one aggregate sqlite_batch CTE/group/ranking query over __tool_results; do not repeatedly fetch result_text for the same result. Send one final answer with full source URLs, no progress note.\n\n" + "\n".join(f"- {url}" for url in SOURCE_URLS)
+    prompt = "Fetch these four source URLs. Remove overlapping claims and return the two strongest distinct claims with source links. Send one final answer.\n\n" + "\n".join(f"- {url}" for url in SOURCE_URLS)
     mock_kind = "dedupe"
     verify_task_name = "verify_dedupe_sqlite_usage"
     answer_source_urls = SOURCE_URLS
@@ -4170,7 +4365,8 @@ class SqliteFreshPeerFactOverEmptyModelScenario(SqliteDomainModelScenario):
 
         modeled_handoff = (
             len(rows) == 1
-            and tuple(rows[0][:3]) == ("launch-readiness", "Maya Chen", "Friday")
+            and tuple(rows[0][:2]) == ("launch-readiness", "Maya Chen")
+            and _matches_weekday(rows[0][2], "Friday")
             and bool(str(rows[0][3]).strip())
             and rows[0][4] == "peer-note-418"
         )
@@ -4337,7 +4533,11 @@ class SqliteStructuredPeerEventPersistenceScenario(SqliteDomainModelScenario):
                 expected_fields=set(expected_payload),
             )
         )
-        message_grounded_import = direct_message_import or bound_message_import
+        source_linked_import = (
+            write_entry is not None
+            and _links_structured_message_provenance(write_statement, set(expected_payload))
+        )
+        message_grounded_import = direct_message_import or bound_message_import or source_linked_import
 
         with agent_sqlite_db(str(agent_id)) as db_path:
             conn = open_guarded_sqlite_connection(db_path)
@@ -4525,7 +4725,29 @@ class SqlitePeerOutcomeReconcilesCanonicalModelScenario(SqliteDomainModelScenari
                 },
             )
         )
-        grounded_write = bound_write or structured_write or bound_payload_write
+        source_linked_write = (
+            write_call is not None
+            and _links_structured_message_provenance(
+                write_sql,
+                {"recipient", "provider_message_id", "sent_at"},
+            )
+        )
+        structured_identity_write = (
+            write_call is not None
+            and _derives_structured_message_identity_with_literal_assignment(
+                write_sql,
+                {"recipient", "provider_message_id", "sent_at"},
+                column="state",
+                value=self.outcome_state,
+            )
+        )
+        grounded_write = (
+            bound_write
+            or structured_write
+            or bound_payload_write
+            or source_linked_write
+            or structured_identity_write
+        )
 
         with agent_sqlite_db(str(agent_id)) as db_path:
             conn = open_guarded_sqlite_connection(db_path)

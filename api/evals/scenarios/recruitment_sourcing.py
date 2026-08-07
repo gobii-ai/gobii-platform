@@ -206,6 +206,7 @@ RECRUITMENT_SOURCING_CASES = (
                 "http_request",
             ),
         },
+        allowed_extra_tool_names=("mcp_brightdata_search_engine",),
         mock_config={
             "mcp_brightdata_web_data_linkedin_people_search": _linkedin_people_result(
                 [
@@ -319,6 +320,20 @@ RECRUITMENT_SOURCING_CASES = (
                     ],
                 },
             },
+            "mcp_brightdata_search_engine": _search_result(
+                [
+                    {
+                        "t": "Mina Patel, Assistant Project Manager at BuildRight GC",
+                        "u": "https://www.linkedin.com/in/mina-patel-eval",
+                        "p": 1,
+                    },
+                    {
+                        "t": "Priya Shah, Project Manager at Summit Retail Builders",
+                        "u": "https://www.linkedin.com/in/priya-shah-eval",
+                        "p": 2,
+                    },
+                ]
+            ),
         },
         response_term_groups=(
             ("Mina Patel",),
@@ -429,16 +444,37 @@ RECRUITMENT_SOURCING_CASES = (
                     "match_count": 2,
                 },
             },
-            "mcp_brightdata_web_data_linkedin_person_profile": _linkedin_profile_result(
-                {
-                    "name": "Carolina Vega",
-                    "title": "Legal Recruiter",
-                    "company": "NALSC-style boutique legal search firm",
-                    "location": "Charlotte, NC",
-                    "url": "https://www.linkedin.com/in/carolina-vega-eval",
-                    "evidence": "Attorney recruiting profile similar to boutique legal staffing archetypes.",
-                }
-            ),
+            "mcp_brightdata_web_data_linkedin_person_profile": {
+                "rules": [
+                    {
+                        "url_contains": "carolina-vega-eval",
+                        "result": _linkedin_profile_result(
+                            {
+                                "name": "Carolina Vega",
+                                "title": "Legal Recruiter",
+                                "company": "NALSC-style boutique legal search firm",
+                                "location": "Charlotte, NC",
+                                "url": "https://www.linkedin.com/in/carolina-vega-eval",
+                                "evidence": "Attorney recruiting profile similar to boutique legal staffing archetypes.",
+                            }
+                        ),
+                    },
+                    {
+                        "url_contains": "jordan-kim-eval",
+                        "result": _linkedin_profile_result(
+                            {
+                                "name": "Jordan Kim",
+                                "title": "Partner, Attorney Search",
+                                "company": "NorthStar Legal Search",
+                                "location": "Atlanta, GA",
+                                "url": "https://www.linkedin.com/in/jordan-kim-eval",
+                                "evidence": "Partner-level attorney search profile at a legal recruiting firm.",
+                            }
+                        ),
+                    },
+                ],
+                "default": {"status": "error", "message": "Unknown LinkedIn profile URL."},
+            },
             "mcp_brightdata_linkedin_person_profile": _linkedin_profile_result(
                 {
                     "name": "Carolina Vega",
@@ -634,8 +670,8 @@ RECRUITMENT_SOURCING_CASES = (
                 "remaining_work": 13,
                 "next_cursor": "candidate-offset-2",
                 "next_action": (
-                    "Report the verified partial set with the source limitation, then continue bounded verification "
-                    "or preserve the next cursor."
+                    "Preserve the next cursor once, then report the verified partial set and source limitation. "
+                    "Do not verify another batch in this turn."
                 ),
             }
         },
@@ -682,12 +718,15 @@ def _candidate_response_bodies(run_id: str, agent_id: str, inbound) -> list[tupl
         if body:
             bodies.append((body, call))
 
-    for request in (
+    requests = list(
         PersistentAgentHumanInputRequest.objects
         .filter(agent_id=agent_id, originating_step__eval_run_id=run_id, created_at__gt=inbound.timestamp)
         .order_by("created_at", "id")
-    ):
+    )
+    for request in requests:
         bodies.append((request.question or "", request))
+    if len(requests) > 1:
+        bodies.append(("\n".join(request.question or "" for request in requests), requests[0]))
 
     return bodies
 

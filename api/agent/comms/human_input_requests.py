@@ -414,11 +414,10 @@ def _build_next_message_suggestion(
         "address": target.address,
         "send_tool": send_tool,
         "instruction": (
-            f"Include these exact questions and numbered choices in your next normal {target.channel} message to {target.address}. "
-            f"If you already sent or are sending a {target.channel} message in the same tool-call batch, "
-            "that message must include the questions and choices because request_human_input cannot inject them into "
-            f"another tool call. The user may not be actively viewing the web chat. Do not call request_human_input again "
-            "for the same questions. The user's reply on that channel will be processed as answers."
+            f"Call {send_tool} now to {target.address}. Include these exact questions and numbered choices. "
+            "If that channel already has a message in this tool-call batch, put them there. "
+            "The user may not be viewing web chat, so do not send a chat copy or ask the same questions again. "
+            "Their reply on this channel will be processed as answers."
         ),
         "questions": [
             {"number": index, "question": request_obj.question, "options": request_obj.options_json}

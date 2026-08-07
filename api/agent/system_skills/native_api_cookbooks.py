@@ -55,7 +55,7 @@ GOOGLE_DRIVE_COOKBOOK = NativeApiCookbook(
                 "Canonical base query: `mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`; "
                 "add `and name contains 'text'` only when known. If you do not know a name term, still send the "
                 "complete base query rather than a partial predicate. Put query params in the URL, not headers; "
-                "encode quotes as `%27`."
+                "encode spaces as `%20` and quotes as `%27`."
             ),
             response_shape="Use `files[]` entries with `id`, `name`, `mimeType`, and `webViewLink`.",
             guardrails=(
@@ -72,8 +72,9 @@ GOOGLE_DRIVE_COOKBOOK = NativeApiCookbook(
             request_shape="No body. Use the concrete spreadsheet ID directly when supplied.",
             response_shape="Read `spreadsheetId`, `properties.title`, and `sheets[].properties` including `sheetId` and `title`.",
             guardrails=(
-                "For a concrete spreadsheet ID, this should be the first call for read, append, update, format, "
-                "or chart tasks. Do not search Drive for that ID unless Sheets says the file is missing or inaccessible."
+                "Use metadata first only when tabs, sheet IDs, or existing formatting are needed. When the user gives "
+                "an exact A1 range, call the values endpoint directly. Do not search Drive for a known ID unless "
+                "Sheets says the file is missing or inaccessible."
             ),
         ),
         _recipe(
@@ -138,8 +139,8 @@ GOOGLE_DRIVE_COOKBOOK = NativeApiCookbook(
             ),
             response_shape="Inspect `replies[]` and returned IDs such as `bandedRangeId` or chart IDs.",
             guardrails=(
-                "Inspect metadata before adding banding to avoid duplicates. If helper rows/columns are hidden for charts, "
-                "set `hiddenDimensionStrategy` to `SHOW_ALL`; for `updateChartSpec`, send the complete chart spec and "
+                "Inspect metadata before adding banding to avoid duplicates. For hidden chart helpers, set "
+                "`chart.spec.hiddenDimensionStrategy` to `SHOW_ALL` beside `basicChart`; for `updateChartSpec`, send the complete chart spec and "
                 "do not include a `fields` parameter. Never assume `sheetId` is `0`; if a `batchUpdate` returns 400 "
                 "after using a guessed sheet ID, GET spreadsheet metadata and retry with the returned `sheetId`, not "
                 "by web-searching Sheets docs. If a formatting request returns 400 after using top-level "
@@ -219,7 +220,10 @@ APOLLO_COOKBOOK = NativeApiCookbook(
             use_when="The user explicitly approves creating or updating Apollo contacts.",
             request_shape="Validate required fields such as email. Include `run_dedupe=true` when idempotency matters.",
             response_shape="Use `contact.id`, changed fields, and any duplicate/skipped indicators.",
-            guardrails="Summarize write scope and side effects before proceeding unless already clearly approved.",
+            guardrails=(
+                "When the request is to create a contact, call `/contacts` directly; do not call `/people/match` first. "
+                "Summarize write scope and side effects before proceeding unless already clearly approved."
+            ),
         ),
         _recipe(
             title="Search existing contacts/accounts",
@@ -305,8 +309,11 @@ HUBSPOT_COOKBOOK = NativeApiCookbook(
             title="Read/create/update CRM object",
             method="GET/POST/PATCH",
             url="https://api.hubapi.com/crm/v3/objects/{objectType} and /{objectType}/{objectId}",
-            use_when="The user asks to read, create, or update contacts, companies, or deals.",
-            request_shape="For writes, send `properties` with exact HubSpot property names; for reads, request explicit `properties`.",
+            use_when="The user supplies an object ID or asks to read, create, or update a CRM object.",
+            request_shape=(
+                "Put a supplied object ID verbatim in `/{objectType}/{objectId}`; do not search for it or remove a "
+                "prefix. PATCH with `properties` using exact HubSpot property names. Search only when the ID is unknown."
+            ),
             response_shape="Use returned `id`, `properties`, `createdAt`, `updatedAt`, and `archived`.",
             guardrails=(
                 "For creates, updates, deletes, merges, lifecycle-stage changes, and bulk changes, summarize "

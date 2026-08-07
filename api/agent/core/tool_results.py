@@ -282,7 +282,6 @@ def _build_optional_source_write_hint(
     tool_name: str,
     analysis: ResultAnalysis | None,
     model_tables: Sequence[str] = (),
-    payload: object | None = None,
     reusable_source_set: bool = False,
 ) -> str:
     """Give source-shape mechanics that fit both new and existing domain models."""
@@ -306,27 +305,10 @@ def _build_optional_source_write_hint(
     if not model_tables and not has_reusable_set and not reusable_source_set:
         return ""
 
-    first_path, _first_schema, first_key, first_fields = schemas[0]
+    first_path, _first_schema, first_key, _first_fields = schemas[0]
     first_path = first_path.replace("'", "''")
-    parent_path = first_path.rsplit(".", 1)[0]
-    parent_value = payload
-    if parent_path != "$":
-        for segment in parent_path.removeprefix("$.").split("."):
-            if not isinstance(parent_value, dict):
-                parent_value = None
-                break
-            parent_value = parent_value.get(segment)
-    parent_fields = (
-        tuple(
-            str(key)
-            for key, value in parent_value.items()
-            if not isinstance(value, (dict, list))
-            and len(str(key)) <= MAX_OPTIONAL_SOURCE_FIELD_CHARS
-        )[:MAX_OPTIONAL_SOURCE_FIELDS]
-        if isinstance(parent_value, dict)
-        else ()
-    )
     escaped_tool_name = tool_name.replace("'", "''")
+    wrapper_path = (json_analysis.wrapper_path or "$").replace("'", "''")
 
     def render_hint(schema_text: str) -> str:
         key_expr = (
@@ -334,43 +316,26 @@ def _build_optional_source_write_hint(
             if first_key
             else "a stable key derived only from shown item fields"
         )
-        safe_fields = [
-            field for field in first_fields
-            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field)
-        ]
-        select_shape = ", ".join(
-            f"json_extract(j.value,'$.{field}') AS {field}"
-            for field in safe_fields
-        )
         if model_tables:
             table_list = ",".join(sorted(model_tables)[:4])
             model_guidance = (
-                f"Existing tables: {table_list}. Upsert in place; never DELETE/rebuild or lose unrelated rows. "
-                f"Join its scalar key to {key_expr}. "
+                f"Existing tables: {table_list}; upsert without deleting unrelated rows. "
             )
         else:
-            model_guidance = f"No model: CREATE a user table; key {key_expr} PRIMARY KEY/UNIQUE. "
-        parent_guidance = (
-            f" Parent {parent_path}({','.join(parent_fields)}): "
-            f"json_extract(t.result_json,'{parent_path}.<field>')."
-            if parent_fields and not model_tables
-            else ""
-        )
-        select_guidance = (
-            f"INSERT ... SELECT {select_shape} "
-            if select_shape
-            else "INSERT ... SELECT item fields "
-        )
+            model_guidance = f"No model: create a user table keyed by {key_expr}. "
         return (
             f"[SOURCE SET: {schema_text}. "
             f"{model_guidance}"
-            "FIRST/NOW: one sqlite_batch rows=[]; __tool_results is read-only, never a write target. "
-            "No pre-read/bind/copy. "
-            f"INSERT INTO model {select_guidance.removeprefix('INSERT ... ')}FROM __tool_results AS t, "
+            "For filtering, ranking, comparison, joining, aggregation, or reusable rows, call one sqlite_batch "
+            "with rows=[]: INSERT ... SELECT item fields FROM __tool_results AS t, "
             f"json_each(t.result_json,'{first_path}') AS j "
             f"WHERE t.is_current_batch=1 AND t.tool_name='{escaped_tool_name}'. "
-            "Upsert mutable fields/provenance; then decision SELECT in the same batch."
-            f"{parent_guidance}]\n"
+            "Match every target to its same-named source field: wrapper fields use "
+            f"`json_extract(t.result_json,'{wrapper_path}.<field>')`; item fields use "
+            "`json_extract(j.value,'$.<field>')`. "
+            "Create/evolve a keyed model and finish that call with the filtered, ranked decision SELECT, not an all-row dump; "
+            "do not pre-read, copy, or delete "
+            "the source set. A small lookup or next API call may use the visible result directly.]\n"
         )
 
     hint = render_hint("; ".join(schema for _path, schema, _key, _fields in schemas))
@@ -468,6 +433,20 @@ def prepare_tool_results_for_prompt(
         else None
     )
     current_source_tool_name = current_source_record.tool_name if current_source_record else None
+    duplicate_source_step_ids: Set[str] = set()
+    seen_source_results: set[tuple[str, str, str]] = set()
+    for record in sorted(records, key=lambda item: item.created_at):
+        if not record.result_text or not _record_is_source_bearing(record):
+            continue
+        signature = (
+            record.source_batch_id or "",
+            record.tool_name,
+            record.result_text,
+        )
+        if signature in seen_source_results:
+            duplicate_source_step_ids.add(record.step_id)
+        else:
+            seen_source_results.add(signature)
     source_work_set_ids: Dict[str, List[str]] = {}
     for record in sorted(records, key=lambda item: item.created_at):
         if (
@@ -640,27 +619,13 @@ def prepare_tool_results_for_prompt(
                 record.tool_name,
                 analysis,
                 tuple(refresh_model_tables),
-                _load_json_payload(stored_json, analysis),
                 reusable_source_set=len(source_work_set_ids.get(record.tool_name, ())) >= 2,
             )
-        preserve_raw_model_source_values = bool(
-            source_write_hint_prefix and refresh_model_tables
-        )
+        preserve_raw_model_source_values = bool(source_write_hint_prefix and refresh_model_tables)
         if source_write_hint_prefix in emitted_source_write_hints:
             source_write_hint_prefix = ""
         elif source_write_hint_prefix:
             emitted_source_write_hints.add(source_write_hint_prefix)
-            if record.will_continue_work is True:
-                # The source set stays losslessly available in __tool_results. For
-                # continuing work, a second value-level copy invites transcription
-                # instead of the set-wise import needed for the durable model.
-                context_hint = None
-                preview_text = (
-                    "[NEXT: one sqlite_batch rows=[],bindings={}. CREATE/evolve the model, use result_meta's "
-                    "INSERT ... SELECT, then decision SELECT in that batch. Never SELECT/inspect/copy "
-                    "__tool_results first.]"
-                )
-                is_inline = False
         if requires_source_import:
             # A second visible copy invites literal transcription and wastes prompt space.
             context_hint = None
@@ -685,27 +650,24 @@ def prepare_tool_results_for_prompt(
             preview_text = _mark_missing_item_links(preview_text or "")
         link_guidance_key = (source_batch_id, record.tool_name)
         if (
-            preview_text
+            (preview_text or context_hint)
             and has_link_tokens
             and keep_source_import_hint
             and not source_import_prefix
             and link_guidance_key not in emitted_link_guidance
         ):
             emitted_link_guidance.add(link_guidance_key)
-            preview_text = (
-                "[VERIFIED LINK PRESENTATION: when presenting these sourced items, anchor each token on its exact "
-                "entity name using the active surface syntax ([entity]($[link:ID]) or "
-                "<a href='$[link:ID]'>entity</a>). Copy the complete `$[link:ID]` destination verbatim, including "
-                "`$[link:` and `]`; never use the bare ID, a host, URL, generic "
-                "'link/page', or related entity. No separate URL/link column unless requested. "
-                "For an owner report with 4+ items, say "
-                "Covered N/N and use one channel-appropriate table for every item/requested field. Say Not returned "
-                "where a requested URL is absent. Follow any preceding source-write directive for persistence; "
-                "otherwise use this visible source directly rather than creating or querying SQLite. This link "
-                "guidance does not change the "
-                "requested audience or action.]\n"
-                f"{preview_text}"
+            link_guidance = (
+                "[VERIFIED LINKS: show every requested item once. Use its displayed destination exactly: the full `$[link:ID]` "
+                "token when shown, otherwise the raw URL. Link the exact entity name in its row; no separate Links section, retyping, bare IDs, or generic labels. For 4+ "
+                "items, use one table and state Covered N/N. Say Not returned when an item has no link. Follow any "
+                "source-write directive above; otherwise answer from this visible source. Do not change the requested "
+                "audience or action.]\n"
             )
+            if preview_text:
+                preview_text = f"{link_guidance}{preview_text}"
+            else:
+                context_hint = f"{link_guidance}{context_hint or ''}"
         is_scrape_markdown = _is_scrape_as_markdown_tool(record.tool_name)
         explicit_section_shape = (
             _explicit_section_shape(stored_text)
@@ -749,6 +711,11 @@ def prepare_tool_results_for_prompt(
         terminal_directive = _terminal_result_directive(result_text)
         if terminal_directive:
             meta_text += f"\n{terminal_directive}"
+        if record.step_id in duplicate_source_step_ids:
+            meta_text += (
+                "\nREPEATED SOURCE RESULT: this exact evidence already appeared in this request. It adds no new "
+                "evidence. Do not try another query variant; answer from what is available or report the shortfall."
+            )
         if record.tool_name == "sqlite_batch" and sqlite_result_has_query_result(result_text):
             if record.will_continue_work is False and _tool_result_succeeded(result_text):
                 meta_text += (
@@ -792,6 +759,10 @@ def prepare_tool_results_for_prompt(
                 ]
                 previews_are_complete = bool(work_set_records) and all(
                     len(candidate.result_text.encode("utf-8")) <= SMALL_RESULT_ALWAYS_INLINE
+                    or (
+                        candidate.step_id in fresh_step_ids
+                        and len(candidate.result_text.encode("utf-8")) <= FRESH_RESULT_INLINE_THRESHOLD
+                    )
                     for candidate in work_set_records
                 )
                 section_shape = (
@@ -799,6 +770,7 @@ def prepare_tool_results_for_prompt(
                     if len(work_set) == 1 and not previews_are_complete
                     else None
                 )
+                direct_from_previews = previews_are_complete and not section_shape
                 evidence_chars = max(
                     PROSE_INSPECTION_MIN_CHARS,
                     min(
@@ -851,21 +823,23 @@ def prepare_tool_results_for_prompt(
                         "The split-section SELECT is the final import path; do not transcribe records into `rows`, "
                         "copy source facts into SQL literals, pre-read, refetch, or later reread. "
                     )
-                elif len(work_set) > 1:
+                elif len(work_set) > 1 and not direct_from_previews:
                     inspection_guidance = (
                         "Before any multi-source prose model write, make exactly one compact set-wide evidence "
                         "inspection; do not import from memory or previews alone. Use it even when previews look "
                         "complete. Do not inventory IDs, URLs, tool names, or shape. Return one output row and at most "
                         f"{evidence_chars} evidence characters per source: {inspection_query} {inspection_contract}"
                     )
-                elif previews_are_complete:
+                elif direct_from_previews:
+                    preview_subject = "This source preview is" if len(work_set) == 1 else "These source previews are"
+                    preview_object = "it" if len(work_set) == 1 else "them"
                     inspection_guidance = (
-                        "This single-source preview is complete. Do not query __tool_results to reread it or inventory "
-                        "IDs/URLs/shape; the next SQLite call is the final import/decision call. "
+                        f"{preview_subject} complete. Answer from {preview_object} directly unless the task explicitly "
+                        f"requires SQL or reusable storage; do not reread {preview_object} from __tool_results. "
                     )
                 else:
                     inspection_guidance = (
-                        "If this preview covers the decision, make the final import/decision SQLite call immediately. "
+                        "If this preview covers the decision, answer from it directly. "
                         "Otherwise make exactly one compact inspection with one output row and at most "
                         f"{evidence_chars} evidence characters: {inspection_query} {inspection_contract}"
                     )
@@ -877,13 +851,27 @@ def prepare_tool_results_for_prompt(
                     if not direct_import_guidance
                     else direct_import_guidance
                 )
+                if direct_from_previews and not direct_import_guidance:
+                    manual_import_guidance = (
+                        "If SQL or reusable storage is needed, the first sqlite_batch must use nonempty top-level "
+                        "`rows=[{\"result_id\":\"exact ID\",\"fields\":{...}}]` and SQL shaped as "
+                        "`INSERT INTO model(...) SELECT json_extract(r.value,'$.fields.name'),t.source_url FROM "
+                        "json_each(:rows) r JOIN __tool_results t ON t.result_id=json_extract(r.value,'$.result_id')`. "
+                        "Never use VALUES, rows=[], or source literals. Otherwise answer directly. "
+                    )
+                model_completion_guidance = (
+                    "End with decision-ready SELECTs. Upsert stable keys; no sourced SQL literals, ID-only rows, "
+                    "destructive rebuild, dump, or later reread. "
+                    if (len(work_set) > 1 and not direct_from_previews) or direct_import_guidance
+                    else ""
+                )
                 meta_text += (
                     f"\n{work_set_label} ({len(work_set)} {result_label}; exact source result IDs: "
                     f"`{source_ids}`): unstructured prose; this is the complete set. "
                     f"{inspection_guidance}"
                     f"{manual_import_guidance}"
-                    "End with decision-ready SELECTs. Upsert stable keys; no sourced SQL literals, ID-only "
-                    "rows, destructive rebuild, dump, or later reread. `fields` is evidence transcription, not "
+                    f"{model_completion_guidance}"
+                    "`fields` is evidence transcription, not "
                     "enrichment: preserve each source's specificity and omit unsupported fields. Never turn a "
                     "qualitative claim into a number, feature variant, certification level, integration, or "
                     "availability detail."
@@ -1375,15 +1363,22 @@ def _terminal_result_directive(result_text: str) -> str:
         payload = json.loads(result_text)
     except (json.JSONDecodeError, TypeError):
         return ""
-    if not isinstance(payload, dict) or payload.get("retryable") is not False:
+    if not isinstance(payload, dict):
         return ""
     status = str(payload.get("status") or "").casefold()
+    if status == "pending_approval" and str(payload.get("delivery_status") or "").casefold() == "not_sent":
+        return (
+            "PENDING APPROVAL: the item is in review and was not sent. Do not call this send tool again; tell the "
+            "requester it awaits approval."
+        )
+    if payload.get("retryable") is not False:
+        return ""
     if status not in {"error", "failed", "failure", "blocked"} and payload.get("terminal_error") is not True:
         return ""
     return (
         "TERMINAL RESULT (`retryable=false`): do not call this tool again or try a query/parameter variant for this "
-        "request. Use another path only when its exact tool, endpoint, or URL was known before this call; otherwise "
-        "report the constraint now."
+        "request. Use another path only when its exact tool, endpoint, or URL was already known and the result permits "
+        "it; otherwise stop."
     )
 
 
@@ -1503,7 +1498,10 @@ def _format_meta_text(
             )
 
     if context_hint:
-        meta_line += f"\nFor an unrelated one-off, use visible FOCUS directly when it covers the request; query only missing facts.\n{context_hint}"
+        meta_line += (
+            "\nFOCUS is ready to use. If it covers the request, answer from it; do not copy it to SQLite. "
+            f"Query only missing facts.\n{context_hint}"
+        )
 
     return meta_line
 

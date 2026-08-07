@@ -45,6 +45,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
                 latest_error_message=None,
                 is_hidden_in_chat=False,
                 structured_payload_json='{"record_id":"rec-17","status":"ready"}',
+                source_label="Customer in email",
             )
         ]
 
@@ -59,7 +60,8 @@ class SqliteMessagesTableTests(SimpleTestCase):
             cur.execute(
                 """
                 SELECT message_id, channel, is_outbound, direction, subject, attachment_paths_json,
-                       attachment_count, rejected_attachments_json, structured_payload_json
+                       attachment_count, rejected_attachments_json, structured_payload_json,
+                       source_label
                 FROM "__messages"
                 WHERE message_id='msg-1';
                 """
@@ -79,6 +81,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
                 json.loads(row[8]),
                 {"record_id": "rec-17", "status": "ready"},
             )
+            self.assertEqual(row[9], "Customer in email")
         finally:
             conn.close()
 

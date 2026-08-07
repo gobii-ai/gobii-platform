@@ -14,7 +14,6 @@ from api.evals.registry import register_scenario
 from api.evals.scenarios.agent_emotions import STRUGGLE_EMOTIONS
 from api.evals.scenarios.behavior_micro import get_tool_calls_for_run
 from api.models import (
-    AgentCollaborator,
     CommsChannel,
     EvalRunTask,
     PersistentAgent,
@@ -150,7 +149,6 @@ class CompetingChannelsPressureScenario(EvalScenario, ScenarioExecutionTools):
             username=f"pressure-collaborator-{agent.id}@eval.local",
             email=f"pressure-collaborator-{agent.id}@eval.local",
         )
-        AgentCollaborator.objects.create(agent=agent, user=collaborator)
         self._create_competing_message(
             agent,
             channel=CommsChannel.WEB,
@@ -260,7 +258,7 @@ class CompetingChannelsPressureScenario(EvalScenario, ScenarioExecutionTools):
         max_prompt_tokens = int(usage["max_prompt_tokens"] or 0)
         total_prompt_tokens = int(usage["total_prompt_tokens"] or 0)
         total_cached_tokens = int(usage["total_cached_tokens"] or 0)
-        context_is_pressured = max_prompt_tokens >= 35_000
+        context_is_pressured = max_prompt_tokens >= 10_000
         self.record_task_result(
             run_id,
             None,
@@ -284,10 +282,14 @@ class CompetingChannelsPressureScenario(EvalScenario, ScenarioExecutionTools):
         )
         attempted_calls, delivered_calls = self._chat_calls(run_id, after=active.timestamp)
         final_call = attempted_calls[0] if len(attempted_calls) == 1 else None
-        bound_delivery = (
+        explicit_delivery = (
             final_call is not None
             and (final_call.tool_params or {}).get("will_continue_work") is False
             and len(delivered_calls) == 1
+        )
+        implicit_delivery = len(outbound) == 1 and not delivered_calls
+        bound_delivery = (
+            (explicit_delivery or implicit_delivery)
             and len(outbound) == 1
             and outbound[0].conversation_id == active.conversation_id
         )
@@ -297,8 +299,8 @@ class CompetingChannelsPressureScenario(EvalScenario, ScenarioExecutionTools):
             EvalRunTask.Status.PASSED if bound_delivery else EvalRunTask.Status.FAILED,
             task_name="verify_bound_delivery",
             expected_summary=(
-                "The active owner request should produce one final chat call and one reply in its original web "
-                "conversation, without a duplicate progress delivery."
+                "The active owner request should produce one final reply in its original web conversation, without "
+                "a duplicate progress delivery."
             ),
             observed_summary=(
                 "The incident summary stayed bound to the originating web conversation."

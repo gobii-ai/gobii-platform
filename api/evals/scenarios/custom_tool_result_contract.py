@@ -460,23 +460,31 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _eval_stop_policy(case: CustomToolResultContractCase, custom_tool_name: str) -> dict[str, Any]:
-        return {
+        policy = {
             "max_relevant_tool_calls": 24,
             "ignored_tool_names": ["update_plan", "end_planning"],
-            "stop_on_tool_names_after_execution": [custom_tool_name],
         }
+        if case.requires_batching:
+            policy["stop_when_all_seen"] = [{
+                "tool_name": custom_tool_name,
+                "required_params_any": list(PARAM_NAME_ALIASES["batch_size"]),
+                "after_execution": True,
+            }]
+        else:
+            policy["stop_on_tool_names_after_execution"] = [custom_tool_name]
+        return policy
 
     @classmethod
     def _agent_prompt(cls, case: CustomToolResultContractCase) -> str:
         custom_tool_name = cls._custom_tool_name(case)
         return (
-            f"Build a reusable Python custom tool named `{custom_tool_name}`, then test it with a small synthetic "
-            "sample whose correct result is clear. If the result is wrong, fix the same source file and retest it. "
+            f"Build a reusable Python custom tool named `{custom_tool_name}`, then test its main work path with a "
+            "small synthetic sample whose result is clear. If the result is wrong, fix the same source file and retest it. "
             "Do not make live external writes.\n\n"
             f"Task: {case.user_task}\n\n"
             f"Tool job: {case.custom_tool_job}\n\n"
-            "Make real inputs parameters instead of hard-coding sample rows. For bounded work, return remaining_work "
-            "or next_cursor. Make completed simulated side effects clear."
+            "Make real inputs parameters instead of hard-coding sample rows. For bounded work, pass a limit and return "
+            "remaining_work or next_cursor. Make completed simulated side effects clear."
         )
 
     @staticmethod

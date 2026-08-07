@@ -2,7 +2,8 @@ import base64
 import json
 import sqlite3
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
@@ -165,6 +166,39 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIn("First", prompt_info.preview_text)
         self.assertNotIn("QUERY:", prompt_info.meta)
         self.assertNotIn("PATH:", prompt_info.meta)
+
+    def test_repeated_source_result_tells_agent_to_stop_query_variants(self):
+        created_at = datetime.now(timezone.utc)
+        result_text = json.dumps({
+            "status": "success",
+            "content": {"results": [{"title": "Same evidence", "url": "https://example.test/item"}]},
+        })
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id="search-1",
+                tool_name="mcp_brightdata_search_engine",
+                created_at=created_at,
+                result_text=result_text,
+                source_batch_id="request-1",
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="search-2",
+                tool_name="mcp_brightdata_search_engine",
+                created_at=created_at + timedelta(seconds=1),
+                result_text=result_text,
+                source_batch_id="request-1",
+            ),
+        ]
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            records,
+            recency_positions={"search-2": 0, "search-1": 1},
+            fresh_tool_call_step_id="search-2",
+        )
+
+        self.assertNotIn("REPEATED SOURCE RESULT", info["search-1"].meta)
+        self.assertIn("REPEATED SOURCE RESULT", info["search-2"].meta)
+        self.assertIn("Do not try another query variant", info["search-2"].meta)
 
     def test_prompt_info_for_text_result(self):
         csv_data = """id,name,email
@@ -544,17 +578,14 @@ class ToolResultSchemaTests(SimpleTestCase):
             prompt_info.meta,
         )
         self.assertIn("unstructured prose; this is the complete set", prompt_info.meta)
-        self.assertIn("This single-source preview is complete", prompt_info.meta)
-        self.assertIn("Do not query __tool_results to reread it", prompt_info.meta)
-        self.assertIn("next SQLite call is the final import/decision call", prompt_info.meta)
+        self.assertIn("This source preview is complete", prompt_info.meta)
+        self.assertIn("do not reread it from __tool_results", prompt_info.meta)
+        self.assertIn("Answer from it directly unless the task explicitly requires SQL or reusable storage", prompt_info.meta)
         self.assertIn("top-level `rows=[", prompt_info.meta)
         self.assertIn('`["step-scrape"]`', prompt_info.meta)
-        self.assertIn('`rows=[{"result_id":"exact ID","fields":{...}},...]`', prompt_info.meta)
-        self.assertIn("ID-only rows", prompt_info.meta)
-        self.assertIn("INSERT SELECT from `json_each(:rows)", prompt_info.meta)
-        self.assertIn("provenance from t", prompt_info.meta)
-        self.assertIn("End with decision-ready SELECTs", prompt_info.meta)
-        self.assertIn("no sourced SQL literals", prompt_info.meta)
+        self.assertIn('`rows=[{"result_id":"exact ID","fields":{...}}]`', prompt_info.meta)
+        self.assertIn("If SQL or reusable storage is needed", prompt_info.meta)
+        self.assertNotIn("End with decision-ready SELECTs", prompt_info.meta)
         self.assertNotIn("For an unrelated one-off", prompt_info.meta)
         self.assertNotIn("CSV DATA", prompt_info.meta)
         self.assertIn("# Gemma 4", prompt_info.preview_text)
@@ -584,13 +615,9 @@ class ToolResultSchemaTests(SimpleTestCase):
             '["step-scrape-0","step-scrape-1","step-scrape-2"]',
             combined_meta,
         )
-        self.assertIn("SELECT t.result_id,t.source_url", combined_meta)
-        self.assertIn("GROUP BY t.result_id,t.source_url", combined_meta)
-        self.assertIn(
-            "will_continue_work=false unless a specific non-SQLite action remains",
-            combined_meta,
-        )
-        self.assertEqual(combined_meta.count("no sourced SQL literals"), 1)
+        self.assertIn("json_each(:rows)", combined_meta)
+        self.assertIn("JOIN __tool_results", combined_meta)
+        self.assertEqual(combined_meta.count("Never use VALUES, rows=[], or source literals"), 1)
 
     def test_sqlite_result_tells_agent_to_use_decision_rows_without_reread(self):
         record = tool_results.ToolCallResultRecord(
@@ -638,11 +665,10 @@ class ToolResultSchemaTests(SimpleTestCase):
             '["legacy-scrape-0","legacy-scrape-1","legacy-scrape-2"]',
             combined_meta,
         )
-        self.assertEqual(
-            combined_meta.count("Before any multi-source prose model write"),
-            1,
-        )
-        self.assertIn("do not import from memory or previews alone", combined_meta)
+        self.assertIn("These source previews are complete", combined_meta)
+        self.assertIn("Answer from them directly", combined_meta)
+        self.assertNotIn("Before any multi-source prose model write", combined_meta)
+        self.assertNotIn("do not import from memory or previews alone", combined_meta)
 
     def test_http_prose_siblings_get_one_bound_row_work_set(self):
         records = [
@@ -670,7 +696,41 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertEqual(combined_meta.count("PROSE SOURCE WORK SET"), 1)
         self.assertIn('["profile-0","profile-1","profile-2"]', combined_meta)
         self.assertIn("top-level `rows=[", combined_meta)
-        self.assertIn("no sourced SQL literals", combined_meta)
+        self.assertIn("These source previews are complete", combined_meta)
+        self.assertIn("Answer from them directly", combined_meta)
+        self.assertIn("first sqlite_batch must use nonempty top-level", combined_meta)
+        self.assertIn("Never use VALUES, rows=[], or source literals", combined_meta)
+        self.assertNotIn("no sourced SQL literals", combined_meta)
+
+    def test_fully_inline_http_prose_is_answered_without_reparse(self):
+        content = "Harbor report source:\n" + ("document=report | link=https://example.test/report\n" * 80)
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id=f"inline-http-{index}",
+                tool_name="http_request",
+                created_at=datetime.now(timezone.utc) + timedelta(seconds=index),
+                result_text=json.dumps({
+                    "status": "ok",
+                    "url": f"https://api.example.test/reports/{index}",
+                    "content": content,
+                }),
+                source_batch_id="inline-http-batch",
+            )
+            for index in range(2)
+        ]
+
+        with patch("api.agent.core.tool_results.hint_from_unstructured_text", return_value=None):
+            info = tool_results.prepare_tool_results_for_prompt(
+                records,
+                recency_positions={record.step_id: index for index, record in enumerate(records)},
+                fresh_tool_call_step_ids={record.step_id for record in records},
+            )
+
+        combined_meta = "\n".join(item.meta for item in info.values())
+        self.assertTrue(all(item.is_inline for item in info.values()))
+        self.assertIn("These source previews are complete", combined_meta)
+        self.assertIn("Answer from them directly", combined_meta)
+        self.assertNotIn("Before any multi-source prose model write", combined_meta)
 
     def test_large_record_delimited_http_prose_gets_one_shot_modeling_path(self):
         records = [
@@ -771,9 +831,16 @@ class ToolResultSchemaTests(SimpleTestCase):
             [record],
             recency_positions={},
             fresh_tool_call_step_id="focused-owner-report",
+            paired_url_rewriter=lambda text, _record: text.replace(
+                "https://atlas.example.test/team",
+                "https://atlas.example.test/team [link_ref: $[link:LATLAS]]",
+            ),
+            paired_url_step_ids={"focused-owner-report"},
         )["focused-owner-report"]
 
         self.assertIn("FOCUS:", info.meta)
+        self.assertIn("VERIFIED LINKS", info.meta)
+        self.assertIn("token when shown, otherwise the raw URL", info.meta)
         self.assertIn("Atlas Forge", info.meta)
         self.assertNotIn("PROSE SOURCE WORK SET", info.meta)
 
@@ -1218,11 +1285,11 @@ class PreviewByteLimitTests(SimpleTestCase):
             paired_url_step_ids={"step-http"},
         )["step-http"]
         for expected in (
-            "VERIFIED LINK PRESENTATION", "anchor each token on its exact entity name",
-            "<a href='$[link:ID]'>entity</a>", "complete `$[link:ID]` destination verbatim",
-            "never use the bare ID", "No separate URL/link column unless requested", "owner report with 4+ items",
-            "Say Not returned where a requested URL is absent", "Follow any preceding source-write directive",
-            "does not change the requested audience or action",
+            "VERIFIED LINKS", "Use its displayed destination exactly",
+            "token when shown, otherwise the raw URL",
+            "Link the exact entity name in its row", "no separate Links section", "For 4+ items, use one table",
+            "Say Not returned when an item has no link", "Follow any source-write directive above",
+            "Do not change the requested audience or action",
         ):
             self.assertIn(expected, linked.preview_text)
         self.assertIn("SOURCE SET", linked.meta)
@@ -1359,25 +1426,22 @@ class PreviewByteLimitTests(SimpleTestCase):
         for expected in (
             "[SOURCE SET:",
             "$.content.prospects(name,title,profile_url)",
-            "No model: CREATE a user table",
+            "No model: create a user table keyed by",
             "`json_extract(j.value,'$.profile_url')`",
-            "FIRST/NOW: one sqlite_batch rows=[]",
-            "__tool_results is read-only, never a write target",
-            "No pre-read/bind/copy",
-            "INSERT INTO model SELECT",
-            "json_extract(j.value,'$.name') AS name",
-            "json_extract(j.value,'$.profile_url') AS profile_url",
+            "For filtering, ranking, comparison, joining, aggregation, or reusable rows",
+            "call one sqlite_batch with rows=[]",
+            "INSERT ... SELECT item fields",
             "FROM __tool_results AS t, json_each(t.result_json,'$.content.prospects') AS j",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
-            "Upsert mutable fields/provenance",
-            "decision SELECT in the same batch",
+            "filtered, ranked decision SELECT",
+            "A small lookup or next API call may use the visible result directly",
         ):
             self.assertIn(expected, info.meta)
         self.assertNotIn("[SOURCE ARRAYS", info.preview_text)
         self.assertNotIn(" VALUES ", info.preview_text)
-        self.assertIn("NEXT: one sqlite_batch rows=[],bindings={}", info.preview_text)
-        self.assertIn("INSERT ... SELECT, then decision SELECT in that batch", info.preview_text)
-        self.assertIn("Never SELECT/inspect/copy __tool_results first", info.preview_text)
+        self.assertIn("Ari Bell", info.preview_text)
+        self.assertIn("Dee Chen", info.preview_text)
+        self.assertTrue(info.is_inline)
         self.assertEqual(info.meta.count("[SOURCE SET"), 1)
         self.assertNotIn("result_id=", info.meta)
         self.assertNotIn("json_extract(j.value,'$.id')", info.meta)
@@ -1429,12 +1493,9 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         for expected in (
             "Existing tables: contacts",
-            "Upsert in place",
-            "never DELETE/rebuild",
-            "lose unrelated rows",
-            "Join its scalar key to `json_extract(j.value,'$.provider_id')`",
-            "json_extract(j.value,'$.provider_id') AS provider_id",
-            "json_extract(j.value,'$.verified_email') AS verified_email",
+            "upsert without deleting unrelated rows",
+            "INSERT ... SELECT item fields",
+            "json_each(t.result_json,'$.content.matches')",
             "WHERE t.is_current_batch=1 AND t.tool_name='http_request'",
         ):
             self.assertIn(expected, info.meta)
@@ -1531,12 +1592,12 @@ class PreviewByteLimitTests(SimpleTestCase):
             named_model_tables=set(),
         )
 
-        self.assertIn("Parent $.content(vendor,source_url)", info.meta)
-        self.assertIn(
-            "json_extract(t.result_json,'$.content.<field>')",
-            info.meta,
-        )
+        self.assertIn("$.content.plans(plan_id,price)", info.meta)
+        self.assertIn("Match every target to its same-named source field", info.meta)
+        self.assertIn("json_extract(t.result_json,'$.content.<field>')", info.meta)
+        self.assertIn("json_extract(j.value,'$.<field>')", info.meta)
         self.assertIn("AxonFlow", info.preview_text)
+        self.assertIn("source_url", info.preview_text)
         self.assertNotIn("AxonFlow", info.meta)
         self.assertNotIn("https://example.test/axonflow", info.meta)
 
@@ -1591,9 +1652,9 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertEqual(source_set_meta.count("[SOURCE SET"), 1)
         self.assertNotIn("source_batch_id=batch-current", source_set_meta)
         self.assertNotIn("source_batch_id=batch-historical", source_set_meta)
-        self.assertIn("No pre-read/bind/copy", source_set_meta)
+        self.assertIn("do not pre-read, copy, or delete", source_set_meta)
         self.assertIn("is_current_batch=1", source_set_meta)
-        self.assertIn("Upsert mutable fields/provenance", source_set_meta)
+        self.assertIn("Create/evolve a keyed model", source_set_meta)
 
         modeled = tool_results.prepare_tool_results_for_prompt(
             records,
@@ -1701,13 +1762,11 @@ class PreviewByteLimitTests(SimpleTestCase):
             "$.content.events(release_id,service,starts_at,owner,status,source_url,observed_at)",
             hint,
         )
-        self.assertIn("No model: CREATE a user table", hint)
-        self.assertIn("key `json_extract(j.value,'$.release_id')` PRIMARY KEY/UNIQUE", hint)
-        self.assertIn("FIRST/NOW: one sqlite_batch rows=[]", hint)
-        self.assertIn("__tool_results is read-only, never a write target", hint)
-        self.assertIn("No pre-read/bind/copy", hint)
-        self.assertIn("json_extract(j.value,'$.owner') AS owner", hint)
-        self.assertIn("decision SELECT in the same batch", hint)
+        self.assertIn("No model: create a user table keyed by", hint)
+        self.assertIn("`json_extract(j.value,'$.release_id')`", hint)
+        self.assertIn("call one sqlite_batch with rows=[]", hint)
+        self.assertIn("do not pre-read, copy, or delete", hint)
+        self.assertIn("decision SELECT in that call", hint)
         self.assertLessEqual(len(hint), tool_results.MAX_OPTIONAL_SOURCE_HINT_CHARS)
 
     def test_four_source_parallel_batch_keeps_each_brief_preview_visible(self):

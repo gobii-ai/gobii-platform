@@ -727,6 +727,68 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(tools, [])
         self.assertEqual(observed_agents, [agent])
 
+    def test_get_tools_for_eval_agent_skips_pipedream_before_registration(self):
+        pipedream_id = str(uuid.uuid4())
+        brightdata_id = str(uuid.uuid4())
+        pipedream_runtime = MCPServerRuntime(
+            config_id=pipedream_id,
+            name="pipedream",
+            display_name="Pipedream",
+            description="",
+            command=None,
+            args=[],
+            url="https://example.com/pipedream",
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=datetime.now(UTC),
+        )
+        brightdata_runtime = MCPServerRuntime(
+            config_id=brightdata_id,
+            name="brightdata",
+            display_name="BrightData",
+            description="",
+            command=None,
+            args=[],
+            url="https://example.com/brightdata",
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=datetime.now(UTC),
+        )
+        agent = SimpleNamespace(id=uuid.uuid4(), execution_environment="eval")
+        self.manager._initialized = True
+        self.manager._server_cache = {
+            pipedream_id: pipedream_runtime,
+            brightdata_id: brightdata_runtime,
+        }
+        configs = [
+            SimpleNamespace(id=pipedream_id, name="pipedream"),
+            SimpleNamespace(id=brightdata_id, name="brightdata"),
+        ]
+
+        with patch.object(self.manager, "_needs_refresh", return_value=False), patch(
+            "api.agent.tools.mcp_manager.agent_accessible_server_configs",
+            return_value=configs,
+        ), patch.object(
+            self.manager,
+            "_ensure_runtime_registered",
+            return_value=False,
+        ) as mock_register:
+            tools = self.manager.get_tools_for_agent(agent)
+
+        self.assertEqual(tools, [])
+        mock_register.assert_called_once()
+        self.assertEqual(mock_register.call_args.args[0].config_id, brightdata_id)
+
     def test_get_tools_for_agent_refreshes_config_ids_and_server_names_independently(self):
         config_id = str(uuid.uuid4())
         named_config_id = str(uuid.uuid4())
@@ -2700,7 +2762,7 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result["status"], "success")
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
         self.assertNotIn("customer-research", user_message)
-        self.assertNotIn("sqlite_batch", user_message)
+        self.assertNotIn("- sqlite_batch:", user_message)
         self.assertIn("web-review", user_message)
         mock_enable_tools.assert_not_called()
 
@@ -4556,8 +4618,8 @@ class MCPToolExecutorsTests(TestCase):
         self.assertNotIn("will_continue_work", tool_def["function"]["parameters"]["properties"])
         self.assertEqual(tool_def["function"]["parameters"]["required"], ["query"])
         description = tool_def["function"]["description"]
-        self.assertIn("no enabled tool clearly fits", description)
-        self.assertIn("do not rediscover", description)
+        self.assertIn("no listed task-specific tool fits", description)
+        self.assertIn("Do not rediscover", description)
         self.assertIn("enabled/already_enabled match is ready", description)
         self.assertIn("without rediscovery or credential preflight", description)
         self.assertNotIn("NOT for web search", description)
@@ -4578,7 +4640,8 @@ class MCPToolExecutorsTests(TestCase):
         result = execute_search_tools(self.agent, {"query": "test query"})
         self.assertEqual(result["status"], "success")
         self.assertIn("Enabled: mcp_tool_a", result["message"]) 
-        self.assertIn("do not call search_tools again", result["next_action"])
+        self.assertIn("If it names another required skill", result["next_action"])
+        self.assertIn("Otherwise do not call search_tools again", result["next_action"])
         mock_search.assert_called_once_with(self.agent, "test query")
 
     @patch('api.agent.tools.search_tools.search_tools')

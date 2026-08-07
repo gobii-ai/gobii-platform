@@ -31,9 +31,11 @@ from api.evals.scenarios.sqlite_tool_results import (
     _bound_json_payload_placeholder,
     _derives_bound_structured_message_fields,
     _derives_structured_message_fields,
+    _derives_structured_message_identity_with_literal_assignment,
+    _links_structured_message_provenance,
+    _contains_auto_correction,
     _insert_values_derive_bound_payload_fields,
     _mutation_target_table,
-    _repeated_source_import_tables,
     _release_source_url_column,
     _schema_grounded_read_failures,
     _sqlite_attempt_failures,
@@ -63,6 +65,21 @@ def _sqlite_call(sql, *, result=None, status="complete"):
 
 @tag("batch_eval_fingerprint")
 class SqliteSourceArrayEvalTests(SimpleTestCase):
+    def test_semantics_preserving_auto_correction_is_not_an_attempt_failure(self):
+        payload = {
+            "status": "ok",
+            "results": [{
+                "auto_correction": {
+                    "fixes": ["added WHERE 1=1"],
+                    "semantic_change": False,
+                },
+            }],
+        }
+
+        self.assertFalse(_contains_auto_correction(payload))
+        payload["results"][0]["auto_correction"]["semantic_change"] = True
+        self.assertTrue(_contains_auto_correction(payload))
+
     clean_sql = """
         CREATE TABLE release_events (
             release_id TEXT PRIMARY KEY,
@@ -246,6 +263,33 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             )
         )
 
+    def test_peer_outcome_provenance_allows_a_cte_source_message_alias(self):
+        sql = """
+            WITH peer_msg AS (
+                SELECT message_id, structured_payload_json
+                FROM __messages
+                WHERE is_peer_dm = 1
+            ),
+            payload AS (
+                SELECT
+                    json_extract(structured_payload_json, '$.recipient') AS recipient,
+                    json_extract(structured_payload_json, '$.provider_message_id') AS provider_message_id,
+                    json_extract(structured_payload_json, '$.sent_at') AS sent_at,
+                    message_id AS source_message_id
+                FROM peer_msg
+            )
+            UPDATE outreach_threads
+            SET source_message_id=(SELECT source_message_id FROM payload)
+            WHERE recipient=(SELECT recipient FROM payload)
+        """
+
+        self.assertTrue(
+            _links_structured_message_provenance(
+                sql,
+                {"recipient", "provider_message_id", "sent_at"},
+            )
+        )
+
     def test_source_read_does_not_bless_sibling_sql_literals_or_unused_bindings(self):
         sql = (
             "UPDATE outreach_threads SET state='sent', provider_message_id='provider-message-998', "
@@ -329,6 +373,95 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             )
         )
 
+    def test_structured_peer_update_can_link_identity_and_provenance(self):
+        sql = (
+            "UPDATE outreach_threads SET state='bounced', "
+            "provider_message_id=json_extract(m.structured_payload_json,'$.provider_message_id'), "
+            "sent_at=json_extract(m.structured_payload_json,'$.sent_at'), "
+            "source_message_id=m.message_id FROM __messages m "
+            "WHERE recipient=json_extract(m.structured_payload_json,'$.recipient')"
+        )
+
+        self.assertTrue(
+            _links_structured_message_provenance(
+                sql,
+                {"recipient", "provider_message_id", "sent_at"},
+            )
+        )
+        self.assertFalse(
+            _links_structured_message_provenance(
+                sql.replace("source_message_id=m.message_id", "source_message_id='copied-id'"),
+                {"recipient", "provider_message_id", "sent_at"},
+            )
+        )
+
+        insert_sql = (
+            "INSERT OR IGNORE INTO operational_events "
+            "(event_id,event_type,source_message_id) SELECT "
+            "json_extract(m.structured_payload_json,'$.event_id'), "
+            "json_extract(m.structured_payload_json,'$.event_type'), m.message_id "
+            "FROM __messages m WHERE m.message_id='inspected-message'"
+        )
+        self.assertTrue(
+            _links_structured_message_provenance(
+                insert_sql,
+                {"event_id", "event_type"},
+            )
+        )
+
+        scalar_subquery_sql = (
+            "UPDATE outreach_threads SET "
+            "provider_message_id=(SELECT json_extract(structured_payload_json,'$.provider_message_id') "
+            "FROM __messages ORDER BY seq DESC LIMIT 1), "
+            "sent_at=(SELECT json_extract(structured_payload_json,'$.sent_at') "
+            "FROM __messages ORDER BY seq DESC LIMIT 1), "
+            "source_message_id=(SELECT message_id FROM __messages ORDER BY seq DESC LIMIT 1) "
+            "WHERE recipient=(SELECT json_extract(structured_payload_json,'$.recipient') "
+            "FROM __messages ORDER BY seq DESC LIMIT 1)"
+        )
+        self.assertTrue(
+            _links_structured_message_provenance(
+                scalar_subquery_sql,
+                {"recipient", "provider_message_id", "sent_at"},
+            )
+        )
+
+    def test_structured_peer_update_can_reuse_an_inspected_outcome(self):
+        sql = (
+            "UPDATE outreach_threads SET state='bounced', "
+            "provider_message_id=json_extract((SELECT structured_payload_json FROM __messages "
+            "ORDER BY timestamp DESC LIMIT 1), '$.provider_message_id'), "
+            "sent_at=json_extract((SELECT structured_payload_json FROM __messages "
+            "ORDER BY timestamp DESC LIMIT 1), '$.sent_at') "
+            "WHERE recipient=json_extract((SELECT structured_payload_json FROM __messages "
+            "ORDER BY timestamp DESC LIMIT 1), '$.recipient')"
+        )
+
+        self.assertTrue(
+            _derives_structured_message_identity_with_literal_assignment(
+                sql,
+                {"recipient", "provider_message_id", "sent_at"},
+                column="state",
+                value="bounced",
+            )
+        )
+        self.assertFalse(
+            _derives_structured_message_identity_with_literal_assignment(
+                sql.replace("$.provider_message_id", "$.unrelated"),
+                {"recipient", "provider_message_id", "sent_at"},
+                column="state",
+                value="bounced",
+            )
+        )
+        self.assertFalse(
+            _derives_structured_message_identity_with_literal_assignment(
+                sql,
+                {"recipient", "provider_message_id", "sent_at"},
+                column="state",
+                value="delivered",
+            )
+        )
+
     def test_structured_peer_import_accepts_insert_select_upsert(self):
         fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
         sql = (
@@ -357,6 +490,26 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
                 fields,
             )
         )
+
+    def test_structured_peer_import_accepts_scalar_subquery_in_projection(self):
+        fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
+        sql = (
+            "INSERT INTO outreach_threads "
+            "(thread_id, recipient, owner_name, state, provider_message_id, sent_at, source_message_id) "
+            "SELECT 'manager:wave:prospect-77', "
+            "json_extract(m.structured_payload_json, '$.recipient'), "
+            "(SELECT owner_name FROM outreach_threads WHERE recipient="
+            "json_extract(m.structured_payload_json, '$.recipient')), "
+            "json_extract(m.structured_payload_json, '$.delivery_status'), "
+            "json_extract(m.structured_payload_json, '$.provider_message_id'), "
+            "json_extract(m.structured_payload_json, '$.sent_at'), m.message_id "
+            "FROM (SELECT message_id, structured_payload_json FROM __messages "
+            "WHERE is_outbound=0 AND structured_payload_json IS NOT NULL "
+            "ORDER BY seq DESC LIMIT 1) m WHERE 1=1 "
+            "ON CONFLICT(recipient) DO UPDATE SET state=excluded.state"
+        )
+
+        self.assertTrue(_derives_structured_message_fields(sql, fields))
 
     def test_structured_peer_import_accepts_direct_message_scalar_subqueries(self):
         fields = {"recipient", "delivery_status", "provider_message_id", "sent_at"}
@@ -397,6 +550,27 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
         self.assertFalse(
             _derives_structured_message_fields(
                 cte_sql.replace("FROM __messages", "FROM unrelated_payloads"),
+                fields,
+            )
+        )
+
+        extracted_cte_sql = (
+            "WITH outcome AS (SELECT "
+            "json_extract(structured_payload_json,'$.recipient') AS recipient, "
+            "json_extract(structured_payload_json,'$.delivery_status') AS delivery_status, "
+            "json_extract(structured_payload_json,'$.provider_message_id') AS provider_message_id, "
+            "json_extract(structured_payload_json,'$.sent_at') AS sent_at "
+            "FROM __messages WHERE is_outbound=0 ORDER BY seq DESC LIMIT 1) "
+            "UPDATE outreach_threads SET "
+            "state=(SELECT delivery_status FROM outcome), "
+            "provider_message_id=(SELECT provider_message_id FROM outcome), "
+            "sent_at=(SELECT sent_at FROM outcome) "
+            "WHERE recipient=(SELECT recipient FROM outcome)"
+        )
+        self.assertTrue(_derives_structured_message_fields(extracted_cte_sql, fields))
+        self.assertFalse(
+            _derives_structured_message_fields(
+                extracted_cte_sql.replace("state=(SELECT delivery_status FROM outcome)", "state='bounced'"),
                 fields,
             )
         )
@@ -597,22 +771,6 @@ class SqliteSourceArrayEvalTests(SimpleTestCase):
             _sqlite_attempt_failures([call]),
             ["SQLite attempt 1 returned a query advisory"],
         )
-
-    def test_catalog_case_rejects_repeated_same_table_imports_without_result_ids(self):
-        repeated = _repeated_source_import_tables([
-            """
-            INSERT INTO plans SELECT json_extract(item.value, '$.name')
-            FROM __tool_results, json_each(result_json, '$.content.plans') item
-            WHERE result_json LIKE '%AxonFlow%';
-            INSERT INTO plans SELECT json_extract(item.value, '$.name')
-            FROM __tool_results, json_each(result_json, '$.content.plans') item
-            WHERE result_json LIKE '%CareMesh%';
-            """
-        ])
-        aggregate = _repeated_source_import_tables([self.clean_sql])
-
-        self.assertEqual(repeated, ("plans",))
-        self.assertEqual(aggregate, ())
 
     def test_incremental_domain_model_case_is_registered_without_teaching_sql(self):
         suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)

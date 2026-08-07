@@ -439,7 +439,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         return (
             f"{delivery_instruction}\n\n"
             f"Report type: {case.brief}.\n"
-            "Use only these facts; do not browse, create files, or ask follow-up questions.\n\n"
+            "Use these only as report content. Do not browse, create files, change settings or schedules, "
+            "or ask questions.\n\n"
             f"{case.source_facts}\n\n"
             "Send the report now."
         )
@@ -457,9 +458,10 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
 
     def _record_expected_send_tool(self, run_id: str, case: MessageQualityCase, *, after) -> PersistentAgentToolCall | None:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_expected_send_tool")
+        calls = self._tool_calls_for_run(run_id, after=after)
         send_calls = [
             call
-            for call in self._tool_calls_for_run(run_id, after=after)
+            for call in calls
             if call.tool_name in MESSAGE_TOOL_NAMES
         ]
         expected_calls = [call for call in send_calls if call.tool_name == case.expected_tool]
@@ -470,8 +472,14 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             and str(self._tool_result(call).get("status") or "").lower() in {"ok", "queued", "sent", "success"}
         ]
         unexpected_calls = self._unexpected_message_calls(case, send_calls)
+        config_mutation_calls = [
+            call
+            for call in calls
+            if isinstance(self._tool_result(call).get("agent_config_update"), dict)
+            and bool(self._tool_result(call)["agent_config_update"].get("updated_fields"))
+        ]
 
-        if len(successful_calls) == 1 and not unexpected_calls:
+        if len(successful_calls) == 1 and not unexpected_calls and not config_mutation_calls:
             sent_message = self._sent_message_for_call(successful_calls[0])
             confirmation_count = len(self._allowed_confirmation_calls(case, send_calls))
             confirmation_note = (
@@ -494,7 +502,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
 
         summary = (
             f"Expected one successful {case.expected_tool} delivery; saw {len(successful_calls)} successful, "
-            f"{len(expected_calls)} total attempts, and {len(unexpected_calls)} unexpected message calls."
+            f"{len(expected_calls)} total attempts, {len(unexpected_calls)} unexpected message calls, and "
+            f"{len(config_mutation_calls)} unintended configuration changes."
         )
         self.record_task_result(
             run_id,
@@ -688,10 +697,10 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         if case.quality_target == "owner_update":
             return (
                 "Does this feel like a polished update from a thoughtful operator to the owner of the work? "
-                "Pass only if it stays human and direct while making the multi-part operational state easy to scan, "
-                "with clear visual grouping and proportionate use of sections, bullets, a compact table, metric blocks, "
-                "or status labels. Fail if it is a dense plain paragraph, a loose fact dump, needlessly over-formatted, "
-                "or templated/corporate. Do not require any one specific Markdown element."
+                "Pass only if it stays human and direct while making the multi-part operational state easy to scan "
+                "through short labeled blocks, bullets, a compact table, or metric blocks. Bold labels separated by "
+                "spacing count as visual grouping; do not require bullets or tables. Fail if it is a dense plain "
+                "paragraph, a loose fact dump, needlessly over-formatted, or templated/corporate."
             )
         if case.quality_target == "owner_research":
             return (
@@ -716,7 +725,9 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         return (
             "Does this web chat message meet a high bar for report formatting quality? Pass only if it uses "
             "clear, proportionate hierarchy to make the important findings and differences easy to scan. Short "
-            "sections, grouped bullets, compact tables, and status labels are options, not requirements. Fail if "
+            "sections, grouped bullets, compact tables, and status labels are options, not requirements. A short "
+            "report with a heading, bold status labels, and grouped exception bullets is scannable hierarchy, not a "
+            "flat catalog merely because several lines use labels. Fail if "
             "it is plain or cramped, a repetitive flat catalog wall where every item repeats the same labels and "
             "cadence, needlessly decorated, or hard to scan. Do not require emoji, a table, or any one Markdown element."
         )
@@ -1468,7 +1479,8 @@ class UnavailableWebChannelContinuityScenario(EvalScenario, ScenarioExecutionToo
         honored_failure = (
             len(chat_calls) == 1
             and chat_calls[0].status == "error"
-            and MessageQualityScenario._tool_params(chat_calls[0]).get("will_continue_work") is False
+            and MessageQualityScenario._tool_result(chat_calls[0]).get("retryable") is False
+            and MessageQualityScenario._tool_result(chat_calls[0]).get("terminal_error") is True
             and "Do not move this reply" in str(MessageQualityScenario._tool_result(chat_calls[0]).get("message") or "")
         )
         self.record_task_result(
@@ -1479,7 +1491,7 @@ class UnavailableWebChannelContinuityScenario(EvalScenario, ScenarioExecutionToo
             observed_summary=(
                 "Agent attempted the requested web reply once and received the unavailable-session contract."
                 if honored_failure
-                else f"Expected one failed web attempt; saw {len(chat_calls)}."
+                else f"Expected one non-retryable terminal web failure; saw {len(chat_calls)} web attempt(s)."
             ),
             artifacts={"step": chat_calls[0].step} if chat_calls else {},
         )
@@ -1557,9 +1569,9 @@ class RemoteMcpResultDeliveryScenario(EvalScenario, ScenarioExecutionTools):
             agent_id,
             (
                 "CREATE TABLE current_office_snapshot ("
-                "snapshot_key TEXT PRIMARY KEY, total_open_cases INTEGER NOT NULL, "
-                "busiest_region TEXT NOT NULL, busiest_region_open_cases INTEGER NOT NULL);",
-                "INSERT INTO current_office_snapshot VALUES ('latest', 16, 'South', 7);",
+                "region TEXT PRIMARY KEY, open_cases INTEGER NOT NULL);",
+                "INSERT INTO current_office_snapshot VALUES "
+                "('North', 4), ('South', 7), ('East', 3), ('West', 2);",
             ),
         )
 
@@ -2103,7 +2115,7 @@ class EmailApprovedActionTupleScenario(EvalScenario, ScenarioExecutionTools):
             inbound = self.inject_message(
                 agent_id,
                 (
-                    "Send approved action aurora-renewal-02 now. Use the approved tracker as the source of truth "
+                    "Send approved email action aurora-renewal-02 now. Use the approved tracker as the source of truth "
                     "for the recipient and content."
                 ),
                 trigger_processing=True,
@@ -2119,8 +2131,8 @@ class EmailApprovedActionTupleScenario(EvalScenario, ScenarioExecutionTools):
                 eval_stop_policy={
                     "stop_on_tool_names_after_execution": ["send_email"],
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["sqlite_batch", "send_email", "update_plan"],
-                    "ignored_tool_names": ["update_plan"],
+                    "allowed_tool_names": ["sqlite_batch", "send_chat_message", "send_email", "update_plan"],
+                    "ignored_tool_names": ["send_chat_message", "update_plan"],
                     "max_relevant_tool_calls": 4,
                 },
             )

@@ -373,10 +373,10 @@ def get_http_request_tool() -> Dict[str, Any]:
                 "Never use this when a response may contain credentials/passwords/tokens/OTPs; first search for `secure credential delegation` and use its secure request tool. "
                 "This is the PREFERRED tool for non-secret programmatic data retrieval from known endpoints. "
                 "With an exact endpoint, attempt once before API/auth/docs discovery. "
-                "If the user explicitly asks to scrape or read a known webpage, use the scraping/browser tool instead unless the URL clearly serves raw data. "
+                "Use this for raw data and API URLs, even when a browser could display them. "
+                "Use scraping or a browser for rendered webpages, not data endpoints. "
                 "When this tool returns a successful payload that answers the user's request, answer from that payload; do not open a browser task just to verify the same data. "
                 "For weather, a geocoding endpoint only resolves coordinates; call a forecast/current-conditions endpoint before replying with weather. "
-                "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
                 "URL, headers, and body accept `$[secret:my_api_key]` placeholders. Responses truncate at 5MB; "
                 "octet-stream text is returned, binary omitted. Look up docs only when request shape is unknown."
             ),
@@ -388,7 +388,8 @@ def get_http_request_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "Raw http(s) URL or exact `$[link:id]` token. Keep a URL supplied by the user literal; "
-                            "do not replace it with a link from another tool result."
+                            "do not replace it with a link from another tool result. Percent-encode spaces and quotes "
+                            "in query strings."
                         ),
                     },
                     "headers": {"type": "object", "description": "Optional HTTP headers to include in the request."},

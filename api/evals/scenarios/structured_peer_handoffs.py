@@ -202,6 +202,7 @@ class StructuredPeerHandoffScenario(EvalScenario, ScenarioExecutionTools):
                 name=f"Structured {role} Eval {str(run_id)[:8]}",
             ),
             planning_state=PersistentAgent.PlanningState.SKIPPED,
+            execution_environment=agent.execution_environment,
             is_active=False,
         )
         AgentPeerLink.objects.create(agent_a=agent, agent_b=peer, created_by=agent.user)
@@ -779,6 +780,7 @@ class StructuredDecisionRoutingScenario(EvalScenario, ScenarioExecutionTools):
                 name=f"{role.title()} Eval {str(run_id)[:8]}",
             ),
             planning_state=PersistentAgent.PlanningState.SKIPPED,
+            execution_environment=agent.execution_environment,
             is_active=False,
         )
         return peer, AgentPeerLink.objects.create(

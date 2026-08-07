@@ -72,6 +72,9 @@ def _is_retryable_llm_error(exc: OpenAIError) -> bool:
     return (
         "internal server error" in message
         or "upstream error" in message
+        or "temporarily rate-limited upstream" in message
+        or ("previous_errors" in message and "provider returned error" in message)
+        or "unable to get json response" in message
         or "structural_tag grammar" in message
         or "failed to compile structural" in message
     )
@@ -202,8 +205,8 @@ def _record_plan_tool() -> dict[str, Any]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "Only unrequested domains, schedules, contacts, files, extra agents, or extra actions. "
-                            "Do not list high-impact actions here when the user explicitly requested them."
+                            "Concrete changes the plan would execute beyond the user request. Leave empty for "
+                            "inspection, proposals, approval steps, rationale, exclusions, or requested actions."
                         ),
                         "maxItems": 8,
                     },
@@ -222,9 +225,9 @@ def _record_plan_tool() -> dict[str, Any]:
                                 "type": "string",
                                 "enum": ["none", "create", "update", "remove", "clarify"],
                                 "description": (
-                                    "The target Gobii lifecycle action for the schedule change, not whether a "
-                                    "schedule row itself is new. Use create only for a newly created Gobii/team, "
-                                    "update when modifying an existing named Gobii to add or change recurring work, "
+                                    "The target Gobii lifecycle action for the schedule change. If ordered_tools "
+                                    "contains meta_gobii_create_agent, use create even when meta_gobii_update_agent "
+                                    "later sets its schedule. Use update only for an existing named Gobii, "
                                     "and remove when the user asks to remove, disable, stop, or clear an existing "
                                     "schedule, even though the implementation tool may be meta_gobii_update_agent. "
                                     "Use none whenever schedule_in_scope=false and no clarifying schedule question "
@@ -246,7 +249,7 @@ def _record_plan_tool() -> dict[str, Any]:
                             "included_in_approval_scope": {
                                 "type": "boolean",
                                 "description": (
-                                    "True only when approval explicitly includes a schedule action and cadence/removal. "
+                                    "Set true when your proposed approval text includes the schedule action and cadence/removal. "
                                     "Leave false when the user says not to alter schedules or only says this week, "
                                     "project, when needed, batch, one-time, or one-off."
                                 ),
@@ -807,18 +810,16 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "success, CRM notes, recruiting, sales, operations, or reporting. "
                     "For broad operations involving multiple Gobiis, require a higher-level confirmation summary "
                     "before planning mutations as executable. "
-                    "Schedule policy: do not place schedules in scope for one-off, demo, setup-only, trial, "
-                    "prototype, exploratory, backfill, cleanup, research, candidate-screening, sales-list, "
-                    "project-team, reorganize, archive, link/unlink, resource, contact, file, or make-available "
-                    "requests unless the user explicitly asks for scheduled, recurring, ongoing, proactive, digest, "
-                    "watch, check-in, or cadence-based behavior. Ambiguous words such as monitor, watch, keep tabs, "
-                    "research, or follow up should not invent a cadence; either keep schedule_in_scope=false or ask "
-                    "a clarifying schedule question with schedule_action=clarify. If schedule_in_scope=false and "
-                    "the plan is not asking a clarifying schedule question, schedule_action must be none. "
-                    "When a schedule is in scope, "
-                    "schedule_policy must include the explicit cadence/removal and included_in_approval_scope=true. "
-                    "Do not add extra team members, domains, schedules, contacts, files, or scenarios the user did "
-                    "not ask for; record any accidental extras in extra_scope_items and in schedule_policy. "
+                    "Schedule policy: a stated cadence (daily, weekly, monthly, weekday, every...) or an explicit "
+                    "recurring, scheduled, or proactive request means schedule_in_scope=true. This includes a cadence "
+                    "attached to a report, digest, packet, summary, check, or check-in. One-time, setup-only, chat-availability, "
+                    "or 'not automatic' wording means no schedule. Monitor, watch, research, keep tabs, or follow up "
+                    "without a cadence is ambiguous: use no schedule or ask one schedule question; never invent a "
+                    "cadence. When schedule_in_scope=true, include the cadence/removal in schedule_policy and approval "
+                    "scope. Otherwise schedule_action is none, unless it is clarify. "
+                    "For teams, honor an exact count; otherwise use the smallest complementary team. Do not add "
+                    "domains, schedules, contacts, files, or scenarios the user did not ask for; record accidental "
+                    "extras in extra_scope_items and schedule_policy. "
                     "Do not put actions the user explicitly requested, such as archive redundant agents, relink "
                     "agents, or raise daily credit/resource limits, into extra_scope_items merely because they are "
                     "high-impact; require confirmation instead. "
@@ -833,16 +834,9 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "updates, or explain initial work, include a manager-to-target link and send_agent_message as the "
                     "briefing step; "
                     "creating or updating the charter is not a substitute for the initial briefing. "
-                    "Treat explicit cadence words such as daily, weekly, weekday, monthly, every morning, scheduled, "
-                    "recurring, proactively, digest, report, check, and check-in as schedule_in_scope=true. "
-                    "For a new Gobii that compiles a monthly/weekly/daily report, digest, packet, summary, or "
-                    "check-in, treat the cadence as recurring schedule intent unless the user explicitly says it is "
-                    "one-time, historical, setup-only, or not recurring. "
-                    "Cadence words override generic create/setup wording; do not dismiss monthly board reports or "
-                    "packets as content-only when the Gobii is being created to compile them. "
-                    "schedule_action describes the target Gobii lifecycle, not whether the schedule row itself is "
-                    "new. Use schedule_action=create only for a newly created Gobii/team, update for an existing "
-                    "named Gobii even when adding a new cadence to that Gobii, remove for removing an existing "
+                    "schedule_action follows the target Gobii. If ordered_tools contains meta_gobii_create_agent, "
+                    "use create even when meta_gobii_update_agent later sets its schedule. Use update only for an "
+                    "existing named Gobii, remove for removing an existing "
                     "schedule, clarify only when cadence is ambiguous and a clarification question is asked, and "
                     "none when no schedule change or clarification is in scope. "
                     "If the user says remove the schedule, stop running automatically, disable a cadence, or clear "
@@ -1170,6 +1164,21 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         if case.expected_any_tools and not any(tool_name in ordered_tools for tool_name in case.expected_any_tools):
             return True
         if case.expect_confirmation is not None and bool(plan_args.get("needs_human_confirmation")) != case.expect_confirmation:
+            return True
+        schedule_policy = plan_args.get("schedule_policy") or {}
+        if isinstance(schedule_policy, dict):
+            schedule_in_scope = bool(schedule_policy.get("schedule_in_scope"))
+            approval_includes_schedule = bool(schedule_policy.get("included_in_approval_scope"))
+            schedule_action = str(schedule_policy.get("schedule_action") or "none")
+            if not schedule_in_scope and (approval_includes_schedule or schedule_action not in ("none", "clarify")):
+                return True
+            if schedule_in_scope and (not approval_includes_schedule or schedule_action in ("none", "clarify")):
+                return True
+        if (
+            case.expected_schedule_change_kind
+            and isinstance(schedule_policy, dict)
+            and schedule_policy.get("schedule_action") != case.expected_schedule_change_kind
+        ):
             return True
         return False
 

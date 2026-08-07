@@ -54,10 +54,10 @@ class UpdatePlanValidationTests(SimpleTestCase):
         self.assertIn("new scheduled run", description)
         self.assertIn("do not create one step per day, hour, or recurrence slot", description)
         self.assertIn("represent the current run with compact reusable phases", description)
-        self.assertIn("one closeout immediately before final delivery", description)
-        self.assertIn("never update it between evidence batches", description)
-        self.assertIn("this active request", continue_description)
-        self.assertIn("Queued requests and plan items run separately", continue_description)
+        self.assertIn("set work steps once, then mark them all done", description)
+        self.assertIn("update between these calls", description)
+        self.assertIn("this request still needs action", continue_description)
+        self.assertIn("Queued requests run separately", continue_description)
 
     def test_invalid_message_deliverable_feedback_explains_user_facing_only(self):
         result = execute_update_plan(
@@ -109,9 +109,8 @@ class UpdatePlanResearchSuppressionTests(TestCase):
         prompt = format_current_plan_for_prompt(self.agent)
 
         self.assertIn("before final delivery", prompt)
-        self.assertIn("mark its delivery step done in update_plan", prompt)
-        self.assertIn("the following send completes it", prompt)
-        self.assertIn("send once with false", prompt)
+        self.assertIn("mark current-request work done once", prompt)
+        self.assertIn("Then send with false", prompt)
         self.assertIn("leave other requests in todo", prompt)
         self.assertIn("Do not update this plan between evidence batches", prompt)
 

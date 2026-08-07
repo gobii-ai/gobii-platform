@@ -47,7 +47,7 @@ def get_request_contact_permission_tool(agent: PersistentAgent | None = None) ->
             f"{sms_guidance}"
             "Use this instead of request_human_input for email/SMS contact approval. "
             "Returns a URL you MUST send so the user can approve. "
-            "Check allowed contacts first; if the user just gave a specific email/phone not already allowed, request before reading files, searching, drafting, or non-blocking follow-up. "
+            "If a user-given email/phone is not shown as allowed in the prompt, request directly; do not query contacts, read files, search, or draft first. "
             "For setup-only recurring work where the user explicitly says not to send the first email/SMS now, "
             "do not request contact permission during setup; record the recipient and request only when an actual outbound send is needed. "
             "Use only user-provided or public contact details; do not guess."

@@ -85,8 +85,8 @@ def get_update_plan_tool() -> dict[str, Any]:
                 "Use only for real multi-step work where a persistent user-visible plan is useful. Do not use for "
                 "quick lookups, simple research answers, simple latest/current company/news/batch reports, "
                 "scheduled briefings, or one-shot chart requests.\n"
-                "For deep work, use at most one initial update and one closeout immediately before final delivery; "
-                "never update it between evidence batches or create one at closeout.\n"
+                "For deep work, call exactly twice: set work steps once, then mark them all done immediately before "
+                "delivery. Never add a delivery/reply step or update between these calls.\n"
                 "Provide a list of plan items, each with a step and status.\n"
                 "At most one step can be doing at a time.\n"
                 "Every call replaces the full current active plan, including the deliverable references. "
@@ -100,7 +100,7 @@ def get_update_plan_tool() -> dict[str, Any]:
                 "properties": {
                     "plan": {
                         "type": "array",
-                        "description": "The list of steps",
+                        "description": "Work steps only; do not add a send, delivery, or reply step.",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -166,8 +166,8 @@ def get_update_plan_tool() -> dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. true only if this active request needs another action; false if done/deferred. "
-                            "Queued requests and plan items run separately."
+                            "REQUIRED. true while this request still needs action or final delivery; false after delivery "
+                            "or deferral. Queued requests run separately."
                         ),
                     },
                 },
@@ -340,7 +340,11 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
     _broadcast_plan_changes(agent, changes, snapshot)
     result = {
         "status": "ok",
-        "message": "Plan updated.",
+        "message": (
+            "Plan completed. Deliver the final result next."
+            if snapshot.todo_count == 0 and snapshot.doing_count == 0
+            else "Plan set. Continue the work without another plan update; update once when every step is done."
+        ),
         "step_count": len(plan_items),
         "todo_count": snapshot.todo_count,
         "doing_count": snapshot.doing_count,
@@ -348,7 +352,12 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
     }
     will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
     if will_continue_work is not None:
-        result["auto_sleep_ok"] = not will_continue_work
+        delivery_pending = (
+            snapshot.todo_count == 0
+            and snapshot.doing_count == 0
+            and not params.get("messages")
+        )
+        result["auto_sleep_ok"] = not will_continue_work and not delivery_pending
     return result
 
 
@@ -476,8 +485,8 @@ def format_current_plan_for_prompt(agent) -> str:
     heading = "Current plan:"
     if snapshot.todo_count or snapshot.doing_count:
         heading += (
-            " before final delivery: mark its delivery step done in update_plan (the following send completes it), "
-            "then send once with false; leave other requests in todo. Do not update this plan between evidence batches"
+            " before final delivery, mark current-request work done once. Then send with false; leave other requests "
+            "in todo. Do not update this plan between evidence batches"
         )
     lines = [
         heading,

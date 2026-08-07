@@ -280,6 +280,27 @@ class AgentAppearanceEvalTests(SimpleTestCase):
         )
         self.assertEqual(
             reply_failures(
+                [SimpleNamespace(body="Appearance changes need to be made by the agent owner or an organization admin.")],
+                unauthorized=True,
+            ),
+            [],
+        )
+        self.assertEqual(
+            reply_failures(
+                [
+                    SimpleNamespace(
+                        body=(
+                            "Only the agent owner or an authorized organization admin can update my appearance "
+                            "settings."
+                        )
+                    )
+                ],
+                unauthorized=True,
+            ),
+            [],
+        )
+        self.assertEqual(
+            reply_failures(
                 [
                     SimpleNamespace(
                         body=(

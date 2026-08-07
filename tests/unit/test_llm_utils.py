@@ -658,6 +658,53 @@ class RunCompletionReasoningTests(TestCase):
         self.assertEqual(mock_completion.call_count, 2)
 
     @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_retries_on_server_api_error(self, mock_completion):
+        response = make_completion_response()
+        mock_completion.side_effect = [
+            litellm.APIError(500, "internal server error", "mock", "mock-model"),
+            response,
+        ]
+
+        result = run_completion(model="mock-model", messages=[], params={})
+
+        self.assertIs(result, response)
+        self.assertEqual(mock_completion.call_count, 2)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_retries_when_provider_response_is_malformed_json(self, mock_completion):
+        response = make_completion_response()
+        mock_completion.side_effect = [
+            litellm.APIError(
+                400,
+                "Unable to get json response - Expecting value",
+                "mock",
+                "mock-model",
+            ),
+            response,
+        ]
+
+        result = run_completion(model="mock-model", messages=[], params={})
+
+        self.assertIs(result, response)
+        self.assertEqual(mock_completion.call_count, 2)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=3, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_does_not_retry_on_client_api_error(self, mock_completion):
+        error = litellm.APIError(400, "invalid request", "mock", "mock-model")
+        mock_completion.side_effect = error
+
+        with self.assertRaises(litellm.APIError):
+            run_completion(model="mock-model", messages=[], params={})
+
+        self.assertEqual(mock_completion.call_count, 1)
+
+    @tag("batch_event_llm")
     @override_settings(LITELLM_MAX_RETRIES=3, LITELLM_RETRY_BACKOFF_SECONDS=0)
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_does_not_retry_on_non_retryable_error(self, mock_completion):

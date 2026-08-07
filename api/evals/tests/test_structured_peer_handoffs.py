@@ -37,10 +37,11 @@ class StructuredPeerHandoffEvalTests(SimpleTestCase):
         instruction = _get_peer_communication_instruction()
         tool_description = get_send_agent_message_tool()["function"]["description"]
 
-        self.assertIn("Fielded records/lists use structured payloads", instruction)
-        self.assertIn("questions use prose", instruction)
-        self.assertIn("message may add prose context but must not be its only carrier", tool_description)
-        self.assertIn("never unrelated or owner-private source context", tool_description)
+        self.assertIn("Use structured payloads for records/lists and prose for questions", instruction)
+        self.assertIn("prose for questions", instruction)
+        self.assertIn("prose may add context but cannot be its sole carrier", tool_description)
+        self.assertIn("never unrelated or owner-private context", tool_description)
+        self.assertIn("Pass the object/array itself, not JSON text", str(get_send_agent_message_tool()))
 
     def test_suite_registers_real_harness_scenarios(self):
         suite = SuiteRegistry.get(STRUCTURED_PEER_HANDOFF_SUITE_SLUG)

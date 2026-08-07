@@ -16,8 +16,8 @@ def get_create_csv_tool() -> Dict[str, Any]:
         "function": {
             "name": "create_csv",
             "description": (
-                "Create a CSV file and store it in the agent filespace. "
-                "Provide exactly one content source: raw CSV text, or a SQLite SELECT query for data already in SQLite. "
+                "Create a CSV file. For a SQLite-to-CSV export, call create_csv directly with query; do not call "
+                "sqlite_batch first. Otherwise provide raw CSV text. Use exactly one of query or csv_text. "
                 "Recommended path: /exports/your-file.csv. Returns `file`, `inline`, `inline_html`, and `attach`."
             ),
             "parameters": {

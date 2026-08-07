@@ -910,11 +910,17 @@ def _eval_synthetic_results_for_custom_tool(agent: PersistentAgent) -> Dict[str,
         "tool_full_name",
         flat=True,
     )
-    return {
+    results = {
         tool_name: get_eval_synthetic_tool_fallback_result(tool_name)
         for tool_name in enabled_names
         if is_eval_synthetic_tool_name(tool_name)
     }
+    results["sqlite_batch"] = {
+        "status": "ok",
+        "message": "Synthetic eval SQLite call completed.",
+        "results": [],
+    }
+    return results
 
 
 def build_custom_tool_bridge_token(
@@ -999,8 +1005,9 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "Source must import `from _gobii_ctx import main`, define `run(params, ctx)`, and end with "
                 "`if __name__ == '__main__': main(run)`. The schema should require real runtime inputs such as URLs, "
                 "filters, limits, cursors, tables, or destinations. Use `ctx.call_tool(name, params)` for enabled tools. "
-                "Use `with ctx.sqlite() as db:` for durable data; set `db.row_factory = sqlite3.Row` before reads and "
-                "fetch from the cursor returned by db.execute. Add PEP 723 third-party dependencies; network clients "
+                "SQLite always uses `with ctx.sqlite() as db:`; never assign `ctx.sqlite()` directly. Set "
+                "`db.row_factory = sqlite3.Row` before reads, PRAGMA unknown tables, and query only returned columns. "
+                "Add PEP 723 third-party dependencies; network clients "
                 "must use the provided SOCKS proxy helpers.\n"
                 "Return a concise dict with status, summary, counts/outputs, next_action, and when applicable "
                 "remaining_work/next_cursor. Make slow work bounded with limit or batch_size. Secrets come from "
@@ -1063,23 +1070,24 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
 
     normalized_name = _normalize_custom_tool_name(params.get("name"))
     if normalized_name is None:
-        return {"status": "error", "message": "name must be a non-empty string."}
+        return {"status": "error", "message": "name must be a non-empty string.", "retryable": True}
     display_name, tool_name = normalized_name
 
     description = params.get("description")
     if not isinstance(description, str) or not description.strip():
-        return {"status": "error", "message": "description must be a non-empty string."}
+        return {"status": "error", "message": "description must be a non-empty string.", "retryable": True}
     description = description.strip()
 
     source_path = _normalize_custom_tool_source_path(params.get("source_path"))
     if not source_path:
-        return {"status": "error", "message": "source_path must be a valid workspace path like `/tools/my_tool.py`."}
+        return {"status": "error", "message": "source_path must be a valid workspace path like `/tools/my_tool.py`.", "retryable": True}
 
     entrypoint = _normalize_custom_tool_entrypoint(params.get("entrypoint"))
     if entrypoint is None:
         return {
             "status": "error",
             "message": "entrypoint is no longer configurable. Custom tools must use `def run(...):` and `main(run)`.",
+            "retryable": True,
         }
 
     parameters_schema = normalize_parameters_schema(params.get("parameters_schema"))
@@ -1087,6 +1095,7 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         return {
             "status": "error",
             "message": "parameters_schema must be a JSON object schema with `type: object`.",
+            "retryable": True,
         }
 
     timeout_seconds = _normalize_timeout_seconds(params.get("timeout_seconds"))
@@ -1094,6 +1103,7 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         return {
             "status": "error",
             "message": f"timeout_seconds must be between 1 and {MAX_CUSTOM_TOOL_TIMEOUT_SECONDS}.",
+            "retryable": True,
         }
 
     enable_value = params.get("enable", True)
@@ -1108,13 +1118,13 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         elif lowered in {"false", "0", "no"}:
             enable_tool = False
         else:
-            return {"status": "error", "message": "enable must be a boolean when provided."}
+            return {"status": "error", "message": "enable must be a boolean when provided.", "retryable": True}
     else:
-        return {"status": "error", "message": "enable must be a boolean when provided."}
+        return {"status": "error", "message": "enable must be a boolean when provided.", "retryable": True}
 
     source_code = params.get("source_code")
     if source_code is not None and not isinstance(source_code, str):
-        return {"status": "error", "message": "source_code must be a string when provided."}
+        return {"status": "error", "message": "source_code must be a string when provided.", "retryable": True}
 
     if isinstance(source_code, str):
         source_code = _normalize_pep723_fences(source_code)
@@ -1130,10 +1140,10 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
             return write_result
         validation_error = _validate_source_code(source_code, source_path)
         if validation_error:
-            return {"status": "error", "message": validation_error, "source_path": source_path}
+            return {"status": "error", "message": validation_error, "source_path": source_path, "retryable": True}
         validation_error = _validate_schema_runtime_params_for_source(source_code, description, parameters_schema)
         if validation_error:
-            return {"status": "error", "message": validation_error, "source_path": source_path}
+            return {"status": "error", "message": validation_error, "source_path": source_path, "retryable": True}
     else:
         sync_error = _sync_workspace_source(agent, source_path)
         if sync_error:
@@ -1144,10 +1154,10 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         assert source_text is not None
         validation_error = _validate_source_code(source_text, source_path)
         if validation_error:
-            return {"status": "error", "message": validation_error, "source_path": source_path}
+            return {"status": "error", "message": validation_error, "source_path": source_path, "retryable": True}
         validation_error = _validate_schema_runtime_params_for_source(source_text, description, parameters_schema)
         if validation_error:
-            return {"status": "error", "message": validation_error, "source_path": source_path}
+            return {"status": "error", "message": validation_error, "source_path": source_path, "retryable": True}
 
     tool, created = PersistentAgentCustomTool.objects.update_or_create(
         agent=agent,
@@ -1290,7 +1300,14 @@ def execute_custom_tool(
     if not isinstance(result, dict):
         return {"status": "error", "message": "Custom tool execution returned an invalid sandbox response."}
     if result.get("status") == "error":
-        return result
+        guided_result = dict(result)
+        guided_result["message"] = (
+            f"{str(result.get('message') or 'Custom tool execution failed.').rstrip()} "
+            f"Patch `{tool.source_path}` with apply_patch, then call `{tool.tool_name}` again. "
+            "Never call create_custom_tool again for this registered tool."
+        )
+        guided_result["retryable"] = True
+        return guided_result
 
     parsed_result, cleaned_stdout = _parse_custom_tool_result(result.get("stdout", ""))
     if parsed_result is None:

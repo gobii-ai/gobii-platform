@@ -96,7 +96,7 @@ def _patch_text(value: Optional[str], old: Optional[str], new: Optional[str]) ->
         message = "patch_text requires old='' for append or a non-null exact replacement target."
         if old is not None:
             message = (
-                "patch_text replacement target was not found. Use source text already in context, or read it once if absent, then retry with an exact target."
+                "patch_text replacement target was not found. Use exact source text already shown. If no related clause exists, use an empty old value. Retry the write."
                 if match_count == 0
                 else f"patch_text replacement target matched {match_count} times; retry with a longer target."
             )
@@ -1087,6 +1087,15 @@ _VACUUM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_READ_ONLY_SNAPSHOT_TABLES = ("__tool_results", "__messages", "__files", "__contacts")
+_SNAPSHOT_WRITE_PATTERN = re.compile(
+    r'\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE)\s+["`\[]?'
+    + r"(?P<table>"
+    + "|".join(map(re.escape, _READ_ONLY_SNAPSHOT_TABLES))
+    + r")\b",
+    re.IGNORECASE,
+)
+
 
 def _deny_action(action_code: int, param1: Optional[str], param2: Optional[str]) -> int:
     action_name = str(action_code)
@@ -1170,6 +1179,8 @@ def get_blocked_statement_reason(sql: str) -> Optional[str]:
     stripped = _strip_comments_and_literals(sql or "")
     if _VACUUM_PATTERN.match(stripped):
         return "VACUUM statements are disabled for safety."
+    if match := _SNAPSHOT_WRITE_PATTERN.search(stripped):
+        return f"{match.group('table')} is a read-only snapshot; save reusable data in a named table."
     return None
 
 

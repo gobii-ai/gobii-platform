@@ -33,6 +33,10 @@ _BARE_DOMAIN_PATH_RE = re.compile(
 )
 _TRAILING_PUNCTUATION = ".,;:!?"
 _LINK_TOKEN_RE = re.compile(r"\$\[link:[^\]]+\]", re.IGNORECASE)
+_MARKDOWN_LINK_RE = re.compile(
+    r"\[[^\]\n]*\]\((?:https?://[^\s)]+|\$\[link:[^\]]+\])\)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -769,7 +773,10 @@ def extract_http_urls(text: str) -> tuple[str, ...]:
 def extract_bare_link_like_destinations(text: str) -> tuple[str, ...]:
     seen = set()
     destinations = []
-    for match in _BARE_DOMAIN_PATH_RE.finditer(html.unescape(text or "")):
+    decoded = html.unescape(text or "")
+    # A domain-looking Markdown label is display text, not a link destination.
+    decoded = _MARKDOWN_LINK_RE.sub(" ", decoded)
+    for match in _BARE_DOMAIN_PATH_RE.finditer(decoded):
         destination = _trim_url(match.group(0))
         if destination and destination not in seen:
             seen.add(destination)
@@ -807,6 +814,7 @@ def owner_report_table_failures(
     row_requirements: Iterable[tuple[str, Iterable[str]]],
     entity_urls: Iterable[tuple[str, str]],
     unlinked_entities: Iterable[str],
+    source_urls: Iterable[str] = (),
 ) -> list[str]:
     body = body or ""
     row_requirements = tuple(row_requirements)
@@ -822,20 +830,46 @@ def owner_report_table_failures(
             current = []
     if current:
         tables.append(tuple(current))
-    if len(tables) != 1:
-        return ["Owner report must contain exactly one comparison table."]
+    if len(tables) > 1:
+        return ["Owner report split the comparison across multiple tables."]
 
-    table = tables[0]
-    if not any(
-        re.fullmatch(r"\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?){2,}\s*\|?\s*", line)
-        for line in table
-    ):
-        return ["Owner report comparison table lacked a Markdown separator row."]
+    if tables:
+        comparison_rows = tables[0]
+        if not any(
+            re.fullmatch(r"\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?){2,}\s*\|?\s*", line)
+            for line in comparison_rows
+        ):
+            return ["Owner report comparison table lacked a Markdown separator row."]
+    else:
+        entity_names = tuple(entity for entity, _required in row_requirements)
+        records = []
+        current_record = []
+        current_entity = None
+        for line in body.splitlines():
+            starts_entity = next((
+                entity
+                for entity in entity_names
+                if re.match(
+                    rf"^\s*(?:[-+*]\s+|\d+[.)]\s+)?(?:\*\*|__)?\[?{re.escape(entity)}\b",
+                    line,
+                    re.IGNORECASE,
+                )
+            ), None)
+            if starts_entity and current_record and starts_entity != current_entity:
+                records.append("\n".join(current_record))
+                current_record = []
+            if starts_entity:
+                current_entity = starts_entity
+            if starts_entity or current_record:
+                current_record.append(line)
+        if current_record:
+            records.append("\n".join(current_record))
+        comparison_rows = tuple(records or (line for line in body.splitlines() if line.strip()))
 
     failures = []
     entity_rows = {}
     for entity, required in row_requirements:
-        rows = tuple(line for line in table if entity.casefold() in line.casefold())
+        rows = tuple(line for line in comparison_rows if entity.casefold() in line.casefold())
         entity_rows[entity] = rows
         if len(rows) != 1:
             failures.append(f"{entity} did not have exactly one result row.")
@@ -844,14 +878,10 @@ def owner_report_table_failures(
 
     for entity, url in entity_urls:
         rows = entity_rows.get(entity, ())
-        entity_link = re.compile(
-            rf"\[\s*(?:\*\*)?{re.escape(entity)}(?:\*\*)?\s*\]\(\s*{re.escape(url)}\s*\)",
-            re.IGNORECASE,
-        )
-        if len(rows) == 1 and not entity_link.search(rows[0]):
+        if len(rows) == 1 and url not in rows[0]:
             failures.append(f"{entity} was not linked to its exact supplied destination in its row.")
-        if body.count(url) != 1:
-            failures.append(f"{entity}'s supplied destination did not appear exactly once.")
+        if len(rows) == 1 and url in body.replace(rows[0], "", 1):
+            failures.append(f"{entity}'s supplied destination also appeared outside its result row.")
 
     for entity in unlinked_entities:
         rows = entity_rows.get(entity, ())
@@ -859,6 +889,7 @@ def owner_report_table_failures(
             failures.append(f"{entity} was linked despite having no returned item URL.")
 
     expected = {url for _entity, url in entity_urls}
+    expected.update(source_urls)
     dangling = tuple(destination for destination in _link_destinations(body) if destination not in expected)
     if dangling:
         failures.append(f"Owner report contained generic or dangling destination(s): {list(dangling)}.")
@@ -875,8 +906,6 @@ def _link_destinations(text: str) -> tuple[str, ...]:
 
 def owner_report_has_resolved_summary(body: str, *, resolved: int, total: int) -> bool:
     lines = (body or "").splitlines()
-    if not any(line.count("|") >= 3 for line in lines):
-        return False
     summary = " ".join(line for line in lines if line.count("|") < 3)
     count = re.compile(rf"(?<!\d){resolved}\s*/\s*{total}(?!\d)")
     state = r"(?:resolved|covered|included|accounted\s+for|complete|coverage|found)"
@@ -887,6 +916,7 @@ def owner_report_has_resolved_summary(body: str, *, resolved: int, total: int) -
     all_count = resolved == total and (
         re.search(rf"\ball\s+{total_value}\s+{company}\b[^.\n]{{0,45}}\b{state}\b", summary, re.I)
         or re.search(rf"\b{state}\b[^.\n]{{0,45}}\ball\s+{total_value}\s+{company}\b", summary, re.I)
+        or re.search(rf"\b{total_value}\s+{company}\b[^.\n]{{0,45}}\b{state}\b", summary, re.I)
     )
     return bool(exact_count or all_count)
 
@@ -940,10 +970,23 @@ def tool_delivery_execution_failures(action_calls, orchestrator_completion_ids: 
         call for call in sends
         if (call.tool_params or {}).get("will_continue_work") is True
     ]
-    terminal_sends = [
+    requested_terminal_sends = [
         call for call in sends
         if (call.tool_params or {}).get("will_continue_work") is False
     ]
+    terminal_sends = [
+        call for call in requested_terminal_sends
+        if str(call.status or "").casefold() == "complete" and _tool_result_status(call) == "ok"
+    ]
+    corrected_sends = [call for call in requested_terminal_sends if call not in terminal_sends]
+    retryable_corrections = []
+    for call in corrected_sends:
+        try:
+            result = call.result if isinstance(call.result, dict) else json.loads(call.result or "{}")
+        except (TypeError, ValueError):
+            result = {}
+        if isinstance(result, dict) and result.get("retryable") is True:
+            retryable_corrections.append(call)
 
     if action_names.count("http_request") != 1:
         failures.append(f"Tool-backed delivery required one source fetch; actions were {action_names}.")
@@ -953,8 +996,10 @@ def tool_delivery_execution_failures(action_calls, orchestrator_completion_ids: 
         failures.append(f"Tool-backed delivery sent repeated progress updates: {action_names}.")
     if len(terminal_sends) != 1 or action_calls[-1:] != tuple(terminal_sends):
         failures.append(f"Tool-backed delivery required one terminal web-chat send; actions were {action_names}.")
-    if len(sends) != len(progress_sends) + len(terminal_sends):
+    if len(sends) != len(progress_sends) + len(requested_terminal_sends):
         failures.append("Tool-backed delivery used a chat send without an explicit continuation state.")
+    if corrected_sends != retryable_corrections or len(corrected_sends) > 1:
+        failures.append("Tool-backed delivery used an unsuccessful send that was not one retryable correction.")
 
     unexpected = [
         name for name in action_names
@@ -966,7 +1011,9 @@ def tool_delivery_execution_failures(action_calls, orchestrator_completion_ids: 
     bad_statuses = [
         (call.tool_name, str(call.status or "").casefold(), _tool_result_status(call))
         for call in action_calls
-        if str(call.status or "").casefold() != "complete" or _tool_result_status(call) != "ok"
+        if (
+            str(call.status or "").casefold() != "complete" or _tool_result_status(call) != "ok"
+        ) and call not in retryable_corrections
     ]
     if bad_statuses:
         failures.append(f"Tool-backed delivery actions were not all successful: {bad_statuses}.")
@@ -1019,7 +1066,16 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
         if case.context_messages():
             self._seed_history(agent_id, case)
 
-        owner_report = bool(case.pattern.table_row_requirements)
+        allowed_tool_names = [
+            "http_request",
+            "sqlite_batch",
+            "send_chat_message",
+        ]
+        if case.pattern.context_source == "history":
+            allowed_tool_names.extend([
+                "mcp_brightdata_scrape_as_markdown",
+                "mcp_brightdata_search_engine",
+            ])
         with self.wait_for_agent_idle(agent_id, timeout=180) as processing:
             inbound = self.inject_message(
                 agent_id,
@@ -1030,15 +1086,7 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                 eval_stop_policy={
                     "stop_on_tool_names_after_execution": ["send_chat_message"],
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ([
-                        "http_request",
-                        "sqlite_batch",
-                        "send_chat_message",
-                    ] if owner_report else [
-                        "http_request",
-                        "send_chat_message",
-                        "sqlite_batch",
-                    ]),
+                    "allowed_tool_names": allowed_tool_names,
                     "ignored_tool_names": ["sleep_until_next_trigger"],
                     # One concise progress send may accompany the fetch/import path.
                     "max_relevant_tool_calls": 5,
@@ -1321,7 +1369,7 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                 reference.url: f"$[link:{reference.public_id}]"
                 for reference in PersistentAgentLinkReference.objects.filter(
                     agent_id=message.owner_agent_id,
-                    url__in=case.required_urls,
+                    url__in=case.allowed_urls,
                 )
             }
             action_calls = list(PersistentAgentToolCall.objects.filter(
@@ -1343,12 +1391,12 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                 raw_body = str((send_attempts[0].tool_params or {}).get("body") or "")
                 missing_tokens = [
                     url for url in case.required_urls
-                    if not references.get(url) or references[url] not in raw_body
+                    if url not in raw_body and (not references.get(url) or references[url] not in raw_body)
                 ]
                 if missing_tokens:
                     failures.append(f"Final send omitted supplied link token(s) for: {missing_tokens}.")
             token_associations = tuple(
-                (entity, references[url])
+                (entity, references[url] if references[url] in raw_body else url)
                 for entity, url in case.pattern.entity_urls
                 if references.get(url)
             )
@@ -1357,6 +1405,11 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                 row_requirements=case.pattern.table_row_requirements,
                 entity_urls=token_associations,
                 unlinked_entities=case.pattern.unlinked_entities,
+                source_urls=(
+                    references[case.pattern.fixture_url]
+                    if references.get(case.pattern.fixture_url) in raw_body
+                    else case.pattern.fixture_url,
+                ) if references.get(case.pattern.fixture_url) else (),
             )
             failures.extend(token_association_failures)
         owner_report_failures = (
@@ -1365,6 +1418,7 @@ class HallucinatedLinkScenario(EvalScenario, ScenarioExecutionTools):
                 row_requirements=case.pattern.table_row_requirements,
                 entity_urls=case.pattern.entity_urls,
                 unlinked_entities=case.pattern.unlinked_entities,
+                source_urls=(case.pattern.fixture_url,) if case.pattern.fixture_url else (),
             )
             if case.pattern.table_row_requirements else []
         )

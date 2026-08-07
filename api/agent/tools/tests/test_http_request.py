@@ -11,6 +11,12 @@ class NativeHttpErrorMessageTests(SimpleTestCase):
         self.assertIn("$[secret:my_api_key]", description)
         self.assertNotIn("<<<my_api_key>>>", description)
 
+    def test_tool_description_distinguishes_api_data_from_webpages(self):
+        description = get_http_request_tool()["function"]["description"]
+
+        self.assertIn("raw data and API URLs", description)
+        self.assertIn("rendered webpages, not data endpoints", description)
+
     def test_extracts_google_error_message(self):
         message = _native_api_error_message(
             {

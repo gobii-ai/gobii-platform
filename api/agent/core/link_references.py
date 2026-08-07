@@ -40,10 +40,17 @@ class LinkReferenceResolutionError(ValueError):
 
 
 def _split_url_suffix(raw_url: str) -> tuple[str, str]:
-    url = raw_url.rstrip(_TRAILING_PUNCTUATION)
-    for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
-        while url.endswith(closing) and url.count(closing) > url.count(opening):
-            url = url[:-1]
+    url = raw_url
+    while True:
+        previous = url
+        url = url.rstrip(_TRAILING_PUNCTUATION)
+        if url.endswith(("**", "__")):
+            url = url[:-2]
+        for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
+            while url.endswith(closing) and url.count(closing) > url.count(opening):
+                url = url[:-1]
+        if url == previous:
+            break
     suffix = raw_url[len(url):]
     url = re.sub(r"&amp;", "&", url, flags=re.IGNORECASE)
     return url, suffix
@@ -145,15 +152,21 @@ def resolve_link_references(text: str, agent) -> str:
     )
     if naked := _NAKED_DESTINATION_RE.search(text):
         public_id = naked.group(1).upper()
-        raise LinkReferenceResolutionError(f"A link reference is malformed. Use $[link:{public_id}] as the complete destination.")
+        raise LinkReferenceResolutionError(
+            f"A link reference is malformed. Use $[link:{public_id}] as the complete destination, then retry the same send now."
+        )
     matches = list(_REFERENCE_RE.finditer(text))
     if len(matches) != len(_REFERENCE_PREFIX_RE.findall(text)):
-        raise LinkReferenceResolutionError("A link reference is malformed. Reuse a provided $[link:id] value or omit the link.")
+        raise LinkReferenceResolutionError(
+            "A link reference is malformed. Reuse a provided $[link:id] value or omit the link, then retry the same send now."
+        )
     if not matches:
         return text
     reference_ids = {match.group(1).upper() for match in matches}
     if any(not _PUBLIC_ID_RE.fullmatch(public_id) for public_id in reference_ids):
-        raise LinkReferenceResolutionError("A link reference is malformed. Reuse a provided $[link:id] value or omit the link.")
+        raise LinkReferenceResolutionError(
+            "A link reference is malformed. Reuse a provided $[link:id] value or omit the link, then retry the same send now."
+        )
     try:
         references = {ref.public_id: ref.url for ref in PersistentAgentLinkReference.objects.filter(agent=agent, public_id__in=reference_ids)}
     except DatabaseError as exc:

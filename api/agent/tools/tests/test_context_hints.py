@@ -709,6 +709,19 @@ class BarbellFocusTests(SimpleTestCase):
         self.assertIn("Alice Romero", hint)
         self.assertIn("https://www.linkedin.com/in/alice-romero-7f2c91?r=finance", hint)
 
+    def test_large_text_hint_keeps_every_url_line(self):
+        links = [f"record_id={index} | url=https://example.test/items/{index}" for index in range(12)]
+        content = "\n".join(["RECORDS", *links, *("Archive filler without links." for _ in range(500))])
+
+        hint = hint_from_unstructured_text(content, max_bytes=3000)
+
+        for index in range(12):
+            self.assertIn(f"https://example.test/items/{index}", hint)
+            self.assertEqual(
+                hint.count(f"record_id={index} | url=https://example.test/items/{index}"),
+                1,
+            )
+
     def test_scrape_as_markdown_barbell_fallback(self):
         payload = {
             "result": "Intro text " * 200 + "middle text " * 200 + "ending text " * 200,

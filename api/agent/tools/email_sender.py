@@ -175,6 +175,12 @@ def _resolve_reply_target(
             "status": "error",
             "message": "reply_to_message_id must reference an email message.",
         }
+    if target_message.is_outbound:
+        return None, {
+            "status": "error",
+            "message": "reply_to_message_id must reference the latest inbound email, not an outbound message.",
+            "retryable": True,
+        }
 
     target_address = get_message_contact_address(target_message)
     if not target_address or target_address != normalized_to_address:
@@ -221,7 +227,8 @@ def get_send_email_tool() -> Dict[str, Any]:
                     "reply_to_message_id": {
                         "type": "string",
                         "description": (
-                            "Optional internal Gobii message id for replying in-thread; omit to start a new thread."
+                            "For an in-thread reply, copy reply_to_message_id from the latest inbound email. "
+                            "Omit it only to start a new thread."
                         ),
                     },
                     "mobile_first_html": {

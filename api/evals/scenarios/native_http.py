@@ -205,7 +205,7 @@ class NativeHttpScenarioBase(EvalScenario, ScenarioExecutionTools):
             "ignored_tool_names": ["sleep_until_next_trigger", "update_plan"],
             "stop_on_unexpected_relevant_tool": True,
             "stop_on_tool_names": list(self.forbidden_tool_names),
-            "stop_on_tool_names_after_finish": ["send_chat_message"],
+            "stop_on_tool_names_after_execution": ["send_chat_message"],
             "max_relevant_tool_calls": self.max_relevant_tool_calls,
         }
 
