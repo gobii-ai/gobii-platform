@@ -89,6 +89,7 @@ from .message_quality import MESSAGE_QUALITY_SCENARIO_SLUGS, MESSAGE_QUALITY_SUI
 from .google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS, GOOGLE_SHEETS_NATIVE_SUITE_SLUG, GoogleSheetsNativeScenario
 from .apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG, ApolloNativeScenario
 from .recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG, RecruitmentSourcingScenario
+from .contactout_pilot import CONTACTOUT_PILOT_SCENARIO_SLUGS, CONTACTOUT_PILOT_SUITE_SLUG, ContactOutPilotScenario
 from .hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG, HubSpotNativeScenario
 from .discord_native import (
     DISCORD_NATIVE_SCENARIO_SLUGS,

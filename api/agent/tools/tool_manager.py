@@ -21,6 +21,7 @@ from util.text_sanitizer import decode_unicode_escapes
 
 from api.agent.eval_agents import is_eval_agent
 from api.services.agent_sqlite_coordination import AgentSQLiteBusy, agent_sqlite_busy_result
+from api.services.contactout_feature_flags import contactout_enabled_for_agent
 from api.services.deprecated_provider_guard import pipedream_google_sheets_blocked_error
 
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
@@ -56,6 +57,12 @@ from .brightdata import (
     get_brightdata_linkedin_person_profile_tool,
     get_brightdata_scrape_as_markdown_tool,
     get_brightdata_search_engine_tool,
+)
+from .contactout import (
+    CONTACTOUT_SYSTEM_SKILL_KEY,
+    CONTACTOUT_TOOL_NAME,
+    execute_contactout,
+    get_contactout_tool,
 )
 from .read_file import get_read_file_tool, execute_read_file
 from .create_file import get_create_file_tool, execute_create_file
@@ -249,6 +256,13 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_brightdata_scrape_as_markdown_tool,
         "executor": execute_brightdata_scrape_as_markdown,
         "parallel_safe": True,
+    },
+    CONTACTOUT_TOOL_NAME: {
+        "definition": get_contactout_tool,
+        "executor": execute_contactout,
+        "parallel_safe": True,
+        "is_available": contactout_enabled_for_agent,
+        "system_skill_key": CONTACTOUT_SYSTEM_SKILL_KEY,
     },
     BRIGHTDATA_LINKEDIN_PERSON_PROFILE_TOOL_NAME: {
         "definition": get_brightdata_linkedin_person_profile_tool,
@@ -1166,10 +1180,13 @@ def ensure_default_tools_enabled(
     agent: PersistentAgent,
 ) -> None:
     """Ensure the default tool set is enabled for new agents."""
+    default_tools = set(DEFAULT_BUILTIN_TOOLS)
+    if contactout_enabled_for_agent(agent):
+        default_tools.add(CONTACTOUT_TOOL_NAME)
     enabled_tools = set(
         PersistentAgentEnabledTool.objects.filter(agent=agent).values_list("tool_full_name", flat=True)
     )
-    missing_builtin = DEFAULT_BUILTIN_TOOLS - enabled_tools
+    missing_builtin = default_tools - enabled_tools
     if not missing_builtin:
         return
 
@@ -1179,6 +1196,9 @@ def ensure_default_tools_enabled(
             continue
         if tool_name not in BUILTIN_TOOL_REGISTRY:
             logger.warning("Default builtin tool '%s' not registered, skipping", tool_name)
+            continue
+        if not _is_builtin_tool_available(tool_name, agent, include_hidden=True):
+            logger.info("Default builtin tool '%s' is unavailable, skipping", tool_name)
             continue
         result = mark_tool_enabled_without_discovery(agent, tool_name)
         if result.get("status") == "success":

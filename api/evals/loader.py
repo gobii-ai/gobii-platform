@@ -15,6 +15,7 @@ from api.evals.scenarios.message_quality import MESSAGE_QUALITY_SCENARIO_SLUGS, 
 from api.evals.scenarios.google_sheets_native import GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS, GOOGLE_SHEETS_NATIVE_SUITE_SLUG
 from api.evals.scenarios.apollo_native import APOLLO_NATIVE_SCENARIO_SLUGS, APOLLO_NATIVE_SUITE_SLUG
 from api.evals.scenarios.recruitment_sourcing import RECRUITMENT_SOURCING_SCENARIO_SLUGS, RECRUITMENT_SOURCING_SUITE_SLUG
+from api.evals.scenarios.contactout_pilot import CONTACTOUT_PILOT_SCENARIO_SLUGS, CONTACTOUT_PILOT_SUITE_SLUG
 from api.evals.scenarios.hubspot_native import HUBSPOT_NATIVE_SCENARIO_SLUGS, HUBSPOT_NATIVE_SUITE_SLUG
 from api.evals.scenarios.discord_native import (
     DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
@@ -173,6 +174,11 @@ register_builtin_suites(
             slug=RECRUITMENT_SOURCING_SUITE_SLUG,
             description="Recruitment sourcing system-skill evals over mocked candidate, source, and ledger tools.",
             scenario_slugs=RECRUITMENT_SOURCING_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=CONTACTOUT_PILOT_SUITE_SLUG,
+            description="Native ContactOut routing, contact-reveal safety, and BrightData fallback over mocked API results.",
+            scenario_slugs=CONTACTOUT_PILOT_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=HUBSPOT_NATIVE_SUITE_SLUG,
