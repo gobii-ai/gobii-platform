@@ -21,7 +21,7 @@ from util.text_sanitizer import decode_unicode_escapes
 
 from api.agent.eval_agents import is_eval_agent
 from api.services.agent_sqlite_coordination import AgentSQLiteBusy, agent_sqlite_busy_result
-from api.services.contactout_feature_flags import contactout_enabled_for_agent
+from api.services.contactout_feature_flags import contactout_enabled_for_agent, contactout_mcp_blocked_error
 from api.services.deprecated_provider_guard import pipedream_google_sheets_blocked_error
 
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
@@ -1517,6 +1517,10 @@ def execute_enabled_tool(
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}
 
     resolved_name = entry.full_name
+
+    blocked_error = contactout_mcp_blocked_error(agent, entry, params)
+    if blocked_error is not None:
+        return blocked_error
 
     blocked_error = pipedream_google_sheets_blocked_error(
         agent,

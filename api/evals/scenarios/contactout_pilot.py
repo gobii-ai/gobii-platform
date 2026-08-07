@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from waffle import get_waffle_flag_model
-
 from api.agent.tools.brightdata import BRIGHTDATA_LINKEDIN_PERSON_PROFILE_TOOL_NAME
 from api.agent.tools.contactout import (
     CONTACTOUT_SYSTEM_SKILL_KEY,
@@ -24,7 +22,6 @@ from api.models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
-from constants.feature_flags import CONTACTOUT_PILOT
 
 
 CONTACTOUT_PILOT_SUITE_SLUG = "contactout_pilot"
@@ -63,7 +60,7 @@ class ContactOutPilotCase:
     mock_config: dict[str, Any]
     expected_operations: tuple[str, ...]
     required_response_terms: tuple[str, ...]
-    explicit_contact_reveal: bool = False
+    reveal_all_contact_info: bool = False
     expected_contact_types: tuple[str, ...] = ()
     expect_brightdata_fallback: bool = False
     tags: tuple[str, ...] = field(default_factory=tuple)
@@ -144,10 +141,11 @@ CONTACTOUT_PILOT_CASES = (
     ),
     ContactOutPilotCase(
         slug=CONTACTOUT_EXPLICIT_CONTACT_REVEAL,
-        description="Reveal only explicitly requested work-email and phone data in a people search.",
+        description="Reveal all contact data only after explicit authorization in a people search.",
         prompt=(
-            "Find a current CTO at Analytical Engines in New York and retrieve their work email and phone number. "
-            "I explicitly need both contact fields for this sourcing task."
+            "Find a current CTO at Analytical Engines in New York and retrieve all available contact information, "
+            "including personal email, work email, and phone number. I explicitly authorize all three contact "
+            "categories for this sourcing task."
         ),
         mock_config={
             CONTACTOUT_TOOL_NAME: _contactout_result(
@@ -159,6 +157,7 @@ CONTACTOUT_PILOT_CASES = (
                             "full_name": "Ada Lovelace",
                             "title": "CTO",
                             "contact_info": {
+                                "personal_email": ["ada@personal.example"],
                                 "work_email": ["ada@example.com"],
                                 "phone": ["+1-212-555-0100"],
                             },
@@ -168,9 +167,9 @@ CONTACTOUT_PILOT_CASES = (
             )
         },
         expected_operations=(SEARCH_PEOPLE,),
-        explicit_contact_reveal=True,
-        expected_contact_types=("work_email", "phone"),
-        required_response_terms=("ada@example.com", "212-555-0100"),
+        reveal_all_contact_info=True,
+        expected_contact_types=("personal_email", "work_email", "phone"),
+        required_response_terms=("ada@personal.example", "ada@example.com", "212-555-0100"),
         tags=("people_search", "contact_reveal"),
     ),
     ContactOutPilotCase(
@@ -304,11 +303,6 @@ class ContactOutPilotScenario(EvalScenario, ScenarioExecutionTools):
         PersistentAgent.objects.filter(id=agent_id).update(planning_state=PersistentAgent.PlanningState.SKIPPED)
         self._seed_prior_processing_run(agent_id)
         agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
-        flag, _ = get_waffle_flag_model().objects.get_or_create(
-            name=CONTACTOUT_PILOT,
-            defaults={"everyone": None},
-        )
-        flag.users.add(agent.user)
         result = mark_tool_enabled_without_discovery(agent, CONTACTOUT_TOOL_NAME)
         if result.get("status") != "success":
             raise ValueError(f"Could not enable eval ContactOut tool: {result}")
@@ -378,17 +372,18 @@ class ContactOutPilotScenario(EvalScenario, ScenarioExecutionTools):
         errors = []
         for call in contactout_calls:
             params = call.tool_params or {}
-            reveal = params.get("include_contact_info") is True
-            if reveal != case.explicit_contact_reveal:
+            reveal = params.get("reveal_all_contact_info") is True
+            if reveal != case.reveal_all_contact_info:
                 errors.append(
-                    f"expected include_contact_info={case.explicit_contact_reveal}, "
-                    f"saw {params.get('include_contact_info')!r}"
+                    f"expected reveal_all_contact_info={case.reveal_all_contact_info}, "
+                    f"saw {params.get('reveal_all_contact_info')!r}"
                 )
             if case.expected_contact_types:
-                actual_types = set(params.get("contact_data_types") or [])
+                actual_types = set(params.get("required_contact_data_types") or [])
                 if actual_types != set(case.expected_contact_types):
                     errors.append(
-                        f"expected contact_data_types {case.expected_contact_types}, saw {sorted(actual_types)}"
+                        "expected required_contact_data_types "
+                        f"{case.expected_contact_types}, saw {sorted(actual_types)}"
                     )
         if not contactout_calls:
             errors.append("no ContactOut call was recorded")

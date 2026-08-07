@@ -61,13 +61,16 @@ class ContactOutPilotScenarioTests(SimpleTestCase):
         )
 
     def test_only_explicit_contact_case_allows_reveal(self):
-        revealing = [case for case in CONTACTOUT_PILOT_CASES if case.explicit_contact_reveal]
+        revealing = [case for case in CONTACTOUT_PILOT_CASES if case.reveal_all_contact_info]
 
         self.assertEqual([case.slug for case in revealing], [CONTACTOUT_EXPLICIT_CONTACT_REVEAL])
-        self.assertEqual(set(revealing[0].expected_contact_types), {"work_email", "phone"})
+        self.assertEqual(
+            set(revealing[0].expected_contact_types),
+            {"personal_email", "work_email", "phone"},
+        )
         for case in CONTACTOUT_PILOT_CASES:
             if case.slug != CONTACTOUT_EXPLICIT_CONTACT_REVEAL:
-                self.assertFalse(case.explicit_contact_reveal)
+                self.assertFalse(case.reveal_all_contact_info)
 
     def test_brightdata_is_allowed_only_in_the_error_fallback_case(self):
         fallback = next(case for case in CONTACTOUT_PILOT_CASES if case.slug == CONTACTOUT_BRIGHTDATA_FALLBACK)
@@ -89,7 +92,9 @@ class ContactOutPilotScenarioTests(SimpleTestCase):
         recruitment_instructions = RECRUITMENT_SOURCING_SYSTEM_SKILL.prompt_instructions
 
         self.assertIn("never a ContactOut MCP tool", instructions)
-        self.assertIn("include_contact_info=false", instructions)
+        self.assertIn("reveal_all_contact_info=false", instructions)
+        self.assertIn("all-or-none reveal", instructions)
+        self.assertIn("only an availability filter", instructions)
         self.assertIn("does not itself authorize revealing contact data", instructions)
         self.assertIn("prefer ContactOut over BrightData", instructions)
         self.assertIn("Do not call both routinely", instructions)

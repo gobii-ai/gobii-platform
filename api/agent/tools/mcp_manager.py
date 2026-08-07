@@ -47,9 +47,14 @@ from django.contrib.sites.models import Site
 from django.db import DatabaseError, transaction
 from django.db.models import Max
 from django.urls import reverse
-
-from api.services.system_settings import get_mcp_http_timeout_seconds, get_mcp_stdio_timeout_seconds
 from django.utils import timezone
+
+from api.services.contactout_feature_flags import (
+    contactout_mcp_blocked_error,
+    contactout_mcp_blocked_for_agent,
+    filter_contactout_mcp_tools_for_agent,
+)
+from api.services.system_settings import get_mcp_http_timeout_seconds, get_mcp_stdio_timeout_seconds
 
 from .mcp_param_guards import MCPParamGuardRegistry
 from .mcp_error_normalizers import MCPErrorNormalizerRegistry
@@ -2207,7 +2212,7 @@ class MCPToolManager:
             server_tools = self._tools_cache.get(slot_key)
             if server_tools:
                 tools.extend(server_tools)
-        return tools
+        return filter_contactout_mcp_tools_for_agent(agent, tools)
 
     def find_tool_by_name(self, full_name: str) -> Optional[MCPToolInfo]:
         """Find a discovered MCP tool by its full name (exact match)."""
@@ -2303,9 +2308,13 @@ class MCPToolManager:
         )
         if cached and cached_matches_row:
             cached_runtime = self._server_cache.get(cached.config_id)
-            if cached_runtime and self._sandbox_required_runtime_available(
-                cached_runtime,
-                agent=agent,
+            if (
+                cached_runtime
+                and not contactout_mcp_blocked_for_agent(agent, cached)
+                and self._sandbox_required_runtime_available(
+                    cached_runtime,
+                    agent=agent,
+                )
             ):
                 return cached
 
@@ -2420,6 +2429,9 @@ class MCPToolManager:
                         app_slug=fallback_app_slug,
                     )
 
+        if info and contactout_mcp_blocked_for_agent(agent, info):
+            info = None
+
         if info and enabled_row:
             self._backfill_enabled_tool_metadata(enabled_row, info)
 
@@ -2513,7 +2525,8 @@ class MCPToolManager:
                 )
                 if tool.full_name not in seen_tool_names
             )
-        for tool_info in filter_guarded_pipedream_google_sheets_tools(agent, tools):
+        visible_tools = filter_contactout_mcp_tools_for_agent(agent, tools)
+        for tool_info in filter_guarded_pipedream_google_sheets_tools(agent, visible_tools):
             if tool_info.full_name in enabled_set:
                 self._backfill_enabled_tool_metadata(
                     enabled_rows_by_name[tool_info.full_name],
@@ -2941,6 +2954,12 @@ class MCPToolManager:
                 "status": "error",
                 "message": f"Tool '{tool_name}' is blacklisted and cannot be executed"
             }
+
+        info = tool_info or self._resolve_tool_info(tool_name)
+        if info is not None:
+            blocked_error = contactout_mcp_blocked_error(agent, info, params)
+            if blocked_error is not None:
+                return blocked_error
         
         # Check if tool is enabled
         if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
@@ -2960,7 +2979,6 @@ class MCPToolManager:
         except Exception:
             logger.exception("Failed to update usage for tool %s", tool_name)
         
-        info = tool_info or self._resolve_tool_info(tool_name)
         if not info:
             return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
 
