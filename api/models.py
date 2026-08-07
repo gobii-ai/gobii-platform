@@ -925,7 +925,7 @@ class UserPreference(models.Model):
             "type": "boolean",
         },
         KEY_DEFAULT_EMAIL_SENDING_MODE: {
-            "default": "review_all_external",
+            "default": "send_automatically",
             "type": "choice",
             "allowed_values": frozenset(
                 {"review_all_external", "review_new_contacts", "send_automatically"}

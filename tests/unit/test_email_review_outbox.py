@@ -22,10 +22,12 @@ from api.agent.comms.outbound_delivery import (
 from api.agent.comms.email_footer_service import append_footer_if_needed
 from api.agent.comms.email_threading import get_message_contact_address
 from api.agent.tools.email_sender import execute_send_email
+from api.agent.tools.request_contact_permission import execute_request_contact_permission
 from api.models import (
     AgentCollaborator,
     BrowserUseAgent,
     CommsAllowlistEntry,
+    CommsAllowlistRequest,
     CommsChannel,
     DeliveryStatus,
     OutboundEmailReview,
@@ -42,6 +44,7 @@ from api.models import (
 from api.services.outbound_email_policy import (
     classify_email_recipients,
     get_effective_email_sending_mode,
+    get_workspace_default_email_sending_mode,
     set_workspace_email_sending_policy,
 )
 from api.services.outbound_email_review import (
@@ -251,11 +254,12 @@ class EmailReviewOutboxTests(TestCase):
     def test_send_automatically_does_not_bypass_contact_approval(self, deliver_mock, close_mock):
         self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
         self.agent.save(update_fields=["email_sending_mode"])
+        recipient = "still-needs-contact-approval@example.com"
 
         result = execute_send_email(
             self.agent,
             {
-                "to_address": "still-needs-contact-approval@example.com",
+                "to_address": recipient,
                 "subject": "Permission still required",
                 "mobile_first_html": "<p>Hello</p>",
                 "will_continue_work": False,
@@ -266,6 +270,92 @@ class EmailReviewOutboxTests(TestCase):
         self.assertIn("request_contact_permission", result["message"])
         self.assertFalse(OutboundEmailReview.objects.exists())
         deliver_mock.assert_not_called()
+
+        permission_result = execute_request_contact_permission(
+            self.agent,
+            {
+                "contacts": [
+                    {
+                        "channel": "email",
+                        "address": recipient,
+                        "reason": "Send the requested email.",
+                        "purpose": "Regression test",
+                    }
+                ]
+            },
+        )
+        self.assertEqual(permission_result["status"], "ok")
+        contact_request = CommsAllowlistRequest.objects.get(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=recipient,
+        )
+        contact_request.approve(invited_by=self.owner, skip_invitation=True)
+
+        retry_result = execute_send_email(
+            self.agent,
+            {
+                "to_address": recipient,
+                "subject": "Permission now granted",
+                "mobile_first_html": "<p>Hello</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(retry_result["status"], "ok")
+        self.assertFalse(OutboundEmailReview.objects.exists())
+        deliver_mock.assert_called_once()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("django.db.close_old_connections")
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_approved_recipient_sends_automatically_without_outbox(self, deliver_mock, close_mock):
+        self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
+        self.agent.save(update_fields=["email_sending_mode"])
+        self._allow_contact("approved@example.com")
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": "approved@example.com",
+                "subject": "No message review required",
+                "mobile_first_html": "<p>Hello</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(OutboundEmailReview.objects.exists())
+        deliver_mock.assert_called_once()
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=False)
+    @patch("django.db.close_old_connections")
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_feature_flag_disabled_preserves_legacy_contact_authorization(self, deliver_mock, close_mock):
+        self.agent.contact_approval_mode = PersistentAgent.ContactApprovalMode.AUTO_APPROVE_EMAIL
+        self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.REVIEW_ALL_EXTERNAL
+        self.agent.save(update_fields=["contact_approval_mode", "email_sending_mode"])
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": "legacy-auto-approved@example.com",
+                "subject": "Legacy direct send",
+                "mobile_first_html": "<p>Hello</p>",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                address="legacy-auto-approved@example.com",
+                allow_outbound=True,
+            ).exists()
+        )
+        self.assertFalse(OutboundEmailReview.objects.exists())
+        deliver_mock.assert_called_once()
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     @patch("django.db.close_old_connections")
@@ -833,6 +923,201 @@ class EmailReviewOutboxTests(TestCase):
         self.assertEqual(
             preferences[UserPreference.KEY_DEFAULT_EMAIL_SENDING_MODE],
             PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+        )
+        self.assertEqual(
+            get_effective_email_sending_mode(self.agent),
+            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+        )
+
+    def test_new_workspace_policy_controls_report_send_automatically(self):
+        self.client.force_login(self.owner)
+
+        personal_response = self.client.get(reverse("console_email_sending_policy"))
+
+        self.assertEqual(personal_response.status_code, 200, personal_response.content.decode())
+        self.assertEqual(
+            personal_response.json()["defaultMode"],
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
+
+        organization = Organization.objects.create(
+            name="New automatic email org",
+            slug="new-automatic-email-org",
+            created_by=self.owner,
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session.save()
+
+        organization_response = self.client.get(reverse("console_email_sending_policy"))
+
+        self.assertEqual(
+            organization_response.status_code,
+            200,
+            organization_response.content.decode(),
+        )
+        self.assertEqual(
+            organization_response.json()["defaultMode"],
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
+
+    @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
+    @patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True)
+    def test_new_personal_and_organization_agents_use_independent_defaults(self, _has_capacity_mock):
+        personal_result = PersistentAgentProvisioningService.provision(
+            user=self.owner,
+            name="New personal automatic email agent",
+            charter="Use the new personal workspace default.",
+        )
+        organization = Organization.objects.create(
+            name="New agent default org",
+            slug="new-agent-default-org",
+            created_by=self.owner,
+        )
+        organization.billing.purchased_seats = 1
+        organization.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        organization_result = PersistentAgentProvisioningService.provision(
+            user=self.owner,
+            organization=organization,
+            name="New organization automatic email agent",
+            charter="Use the new organization workspace default.",
+        )
+
+        for result in (personal_result, organization_result):
+            self.assertEqual(
+                result.agent.contact_approval_mode,
+                PersistentAgent.ContactApprovalMode.REQUIRE_APPROVAL,
+            )
+            self.assertEqual(
+                result.agent.email_sending_mode,
+                PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+            )
+
+    def test_default_migration_pins_existing_workspaces_without_changing_agents(self):
+        explicit_owner = User.objects.create_user(
+            username="explicit-outbox-default@example.com",
+            email="explicit-outbox-default@example.com",
+            password="pw",
+        )
+        UserPreference.objects.create(
+            user=explicit_owner,
+            preferences={
+                UserPreference.KEY_DEFAULT_EMAIL_SENDING_MODE:
+                    PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+                "unrelated.preference": True,
+            },
+        )
+        staff_owner = User.objects.create_user(
+            username="staff-outbox-default@example.com",
+            email="staff-outbox-default@example.com",
+            password="pw",
+            is_staff=True,
+        )
+        existing_organization = Organization.objects.create(
+            name="Existing defaultless org",
+            slug="existing-defaultless-org",
+            created_by=self.owner,
+            org_settings={"unrelated_setting": True},
+        )
+        explicit_organization = Organization.objects.create(
+            name="Existing explicit default org",
+            slug="existing-explicit-default-org",
+            created_by=self.owner,
+            org_settings={
+                "default_email_sending_mode": PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+                "unrelated_setting": True,
+            },
+        )
+        staff_organization = Organization.objects.create(
+            name="Existing staff pilot org",
+            slug="existing-staff-pilot-org",
+            created_by=staff_owner,
+        )
+        self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS
+        self.agent.save(update_fields=["email_sending_mode"])
+
+        migration = import_module("api.migrations.0454_default_new_workspaces_to_automatic_email")
+        migration.pin_existing_workspace_email_sending_defaults(apps, None)
+
+        self.agent.refresh_from_db()
+        existing_organization.refresh_from_db()
+        explicit_organization.refresh_from_db()
+        staff_organization.refresh_from_db()
+        self.assertEqual(
+            self.agent.email_sending_mode,
+            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+        )
+        self.assertEqual(
+            get_workspace_default_email_sending_mode(user=self.owner),
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
+        self.assertEqual(
+            get_workspace_default_email_sending_mode(user=explicit_owner),
+            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+        )
+        self.assertTrue(
+            UserPreference.objects.get(user=explicit_owner).preferences["unrelated.preference"]
+        )
+        self.assertEqual(
+            get_workspace_default_email_sending_mode(user=staff_owner),
+            PersistentAgent.EmailSendingMode.REVIEW_ALL_EXTERNAL,
+        )
+        self.assertEqual(
+            get_workspace_default_email_sending_mode(
+                user=self.owner,
+                organization=existing_organization,
+            ),
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
+        self.assertEqual(
+            get_workspace_default_email_sending_mode(
+                user=self.owner,
+                organization=explicit_organization,
+            ),
+            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+        )
+        self.assertEqual(
+            get_workspace_default_email_sending_mode(
+                user=staff_owner,
+                organization=staff_organization,
+            ),
+            PersistentAgent.EmailSendingMode.REVIEW_ALL_EXTERNAL,
+        )
+        self.assertTrue(existing_organization.org_settings["unrelated_setting"])
+
+        future_owner = User.objects.create_user(
+            username="future-outbox-default@example.com",
+            email="future-outbox-default@example.com",
+            password="pw",
+        )
+        future_organization = Organization.objects.create(
+            name="Future automatic default org",
+            slug="future-automatic-default-org",
+            created_by=future_owner,
+        )
+        self.assertEqual(
+            get_workspace_default_email_sending_mode(user=future_owner),
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
+        self.assertEqual(
+            get_workspace_default_email_sending_mode(
+                user=future_owner,
+                organization=future_organization,
+            ),
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
         )
         self.assertEqual(
             get_effective_email_sending_mode(self.agent),
