@@ -18,18 +18,26 @@ from api.agent.tools.contactout import (
     execute_contactout,
     get_contactout_tool,
 )
+from api.agent.tools.mcp_manager import MCPToolInfo, MCPToolManager
 from api.agent.tools.tool_manager import (
+    ToolCatalogEntry,
     ensure_default_tools_enabled,
     execute_enabled_tool,
     get_available_builtin_tool_entries,
     get_enabled_tool_definitions,
     is_parallel_safe_tool_name,
+    mark_tool_enabled_without_discovery,
 )
 from api.models import (
     BrowserUseAgent,
+    MCPServerConfig,
     PersistentAgent,
     PersistentAgentEnabledTool,
     PersistentAgentSystemSkillState,
+)
+from api.services.contactout_feature_flags import (
+    CONTACTOUT_MCP_BLOCKED,
+    filter_contactout_mcp_tools_for_agent,
 )
 from constants.feature_flags import CONTACTOUT_PILOT
 
@@ -62,7 +70,9 @@ class ContactOutNativeToolTests(SimpleTestCase):
                 ENRICH_COMPANY_DOMAINS,
             ],
         )
-        self.assertFalse(properties["include_contact_info"]["default"])
+        self.assertFalse(properties["reveal_all_contact_info"]["default"])
+        self.assertIn("cannot reveal only a subset", properties["reveal_all_contact_info"]["description"])
+        self.assertIn("Availability filter only", properties["required_contact_data_types"]["description"])
         self.assertEqual(properties["people_filters"]["properties"]["page_size"]["maximum"], 25)
         self.assertEqual(properties["domains"]["maxItems"], 30)
 
@@ -102,7 +112,11 @@ class ContactOutNativeToolTests(SimpleTestCase):
         )
 
     @patch("api.agent.tools.contactout.requests.post")
-    def test_people_search_reveals_only_explicit_contact_types(self, mock_post, _mock_enabled):
+    def test_people_search_reveals_all_contacts_only_with_explicit_authorization(
+        self,
+        mock_post,
+        _mock_enabled,
+    ):
         mock_post.return_value = _response({"status_code": 200, "profiles": {}})
 
         result = execute_contactout(
@@ -110,8 +124,13 @@ class ContactOutNativeToolTests(SimpleTestCase):
             {
                 "operation": SEARCH_PEOPLE,
                 "people_filters": {"skills": ["Python AND Django"]},
-                "include_contact_info": True,
-                "contact_data_types": ["work_email", "phone", "work_email"],
+                "reveal_all_contact_info": True,
+                "required_contact_data_types": [
+                    "personal_email",
+                    "work_email",
+                    "phone",
+                    "work_email",
+                ],
             },
         )
 
@@ -121,7 +140,30 @@ class ContactOutNativeToolTests(SimpleTestCase):
             {
                 "skills": ["Python AND Django"],
                 "reveal_info": True,
-                "data_types": ["work_email", "phone"],
+                "data_types": ["personal_email", "work_email", "phone"],
+            },
+        )
+
+    @patch("api.agent.tools.contactout.requests.post")
+    def test_contact_type_filter_does_not_reveal_contact_data(self, mock_post, _mock_enabled):
+        mock_post.return_value = _response({"status_code": 200, "profiles": {}})
+
+        result = execute_contactout(
+            MagicMock(),
+            {
+                "operation": SEARCH_PEOPLE,
+                "people_filters": {"company": ["Gobii"]},
+                "required_contact_data_types": ["work_email"],
+            },
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"],
+            {
+                "company": ["Gobii"],
+                "reveal_info": False,
+                "data_types": ["work_email"],
             },
         )
 
@@ -172,7 +214,7 @@ class ContactOutNativeToolTests(SimpleTestCase):
             {
                 "operation": ENRICH_LINKEDIN_PROFILE,
                 "linkedin_url": url,
-                "include_contact_info": True,
+                "reveal_all_contact_info": True,
             },
         )
         self.assertFalse(mock_get.call_args.kwargs["params"]["profile_only"])
@@ -221,7 +263,7 @@ class ContactOutNativeToolTests(SimpleTestCase):
             {
                 "operation": SEARCH_PEOPLE,
                 "people_filters": {},
-                "contact_data_types": ["work_email"],
+                "required_contact_data_types": ["postal_address"],
             },
             {
                 "operation": SEARCH_COMPANIES,
@@ -388,6 +430,143 @@ class ContactOutPilotToolManagerTests(TestCase):
         ensure_default_tools_enabled(self.agent)
 
         mock_get_manager.assert_not_called()
+
+    def test_eval_override_is_scoped_to_one_agent_not_the_shared_user(self):
+        self.agent.execution_environment = "eval"
+        self.agent.save(update_fields=["execution_environment"])
+        other_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Other Eval Browser")
+        other_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Other Eval Agent",
+            charter="Test eval isolation.",
+            browser_use_agent=other_browser_agent,
+            execution_environment="eval",
+        )
+
+        result = mark_tool_enabled_without_discovery(self.agent, CONTACTOUT_TOOL_NAME)
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn(CONTACTOUT_TOOL_NAME, get_available_builtin_tool_entries(self.agent))
+        self.assertNotIn(CONTACTOUT_TOOL_NAME, get_available_builtin_tool_entries(other_agent))
+        self.assertFalse(self.flag.users.filter(pk=self.user.pk).exists())
+
+    def test_flagged_agent_cannot_discover_contactout_mcp_tools(self):
+        self.flag.users.add(self.user)
+        contactout_tool = MCPToolInfo(
+            "contactout-config",
+            "mcp_contactout_search_people",
+            "contactout",
+            "search_people",
+            "Search ContactOut through MCP",
+            {},
+        )
+        pipedream_contactout_tool = MCPToolInfo(
+            "pipedream-config",
+            "contactout-search-people",
+            "pipedream",
+            "contactout-search-people",
+            "Search ContactOut through Pipedream",
+            {},
+            app_slug="contactout",
+        )
+        unrelated_tool = MCPToolInfo(
+            "other-config",
+            "mcp_other_search_people",
+            "other",
+            "search_people",
+            "Search another provider",
+            {},
+        )
+
+        visible = filter_contactout_mcp_tools_for_agent(
+            self.agent,
+            [contactout_tool, pipedream_contactout_tool, unrelated_tool],
+        )
+
+        self.assertEqual(visible, [unrelated_tool])
+        self.flag.users.remove(self.user)
+        self.assertEqual(
+            filter_contactout_mcp_tools_for_agent(
+                self.agent,
+                [contactout_tool, pipedream_contactout_tool, unrelated_tool],
+            ),
+            [contactout_tool, pipedream_contactout_tool, unrelated_tool],
+        )
+
+    @patch("api.agent.tools.tool_manager.execute_mcp_tool")
+    def test_flagged_agent_cannot_execute_contactout_through_generic_pipedream_tool(self, mock_execute):
+        self.flag.users.add(self.user)
+        entry = ToolCatalogEntry(
+            provider="mcp",
+            full_name="configure_component",
+            description="Configure a Pipedream component",
+            parameters={},
+            tool_server="pipedream",
+            tool_name="configure_component",
+        )
+
+        result = execute_enabled_tool(
+            self.agent,
+            entry.full_name,
+            {"componentKey": "contactout-search-people"},
+            resolved_entry=entry,
+        )
+
+        self.assertEqual(result["error_code"], CONTACTOUT_MCP_BLOCKED)
+        self.assertEqual(result["replacement"], CONTACTOUT_TOOL_NAME)
+        self.assertFalse(result["retryable"])
+        mock_execute.assert_not_called()
+
+    def test_mcp_manager_blocks_pre_resolved_contactout_tool(self):
+        self.flag.users.add(self.user)
+        tool_info = MCPToolInfo(
+            "contactout-config",
+            "mcp_contactout_search_people",
+            "contactout",
+            "search_people",
+            "Search ContactOut through MCP",
+            {},
+        )
+
+        result = MCPToolManager().execute_mcp_tool(
+            self.agent,
+            tool_info.full_name,
+            {},
+            tool_info=tool_info,
+        )
+
+        self.assertEqual(result["error_code"], CONTACTOUT_MCP_BLOCKED)
+
+    def test_flagged_agent_enabled_roster_omits_stale_contactout_mcp_row(self):
+        self.flag.users.add(self.user)
+        server_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="contactout",
+            display_name="ContactOut MCP",
+            description="",
+            url="https://example.com/contactout-mcp",
+        )
+        tool_info = MCPToolInfo(
+            str(server_config.id),
+            "mcp_contactout_search_people",
+            "contactout",
+            "search_people",
+            "Search ContactOut through MCP",
+            {"type": "object", "properties": {}},
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name=tool_info.full_name,
+            tool_server=tool_info.server_name,
+            tool_name=tool_info.tool_name,
+            server_config=server_config,
+        )
+        manager = MCPToolManager()
+
+        with patch.object(manager, "get_tools_for_agent", return_value=[tool_info]):
+            definitions = manager.get_enabled_tools_definitions(self.agent)
+
+        self.assertEqual(definitions, [])
 
     @patch("api.agent.tools.contactout.requests.post")
     def test_removing_flag_hides_stale_enabled_row_and_blocks_direct_execution(self, mock_post):

@@ -250,7 +250,7 @@ def get_contactout_tool() -> dict[str, Any]:
             "description": (
                 "Search or count people, enrich a known LinkedIn person profile, search companies, or enrich "
                 "company domains through ContactOut. Read-only. Contact emails and phones are hidden unless "
-                "include_contact_info is explicitly true."
+                "reveal_all_contact_info is explicitly true, which reveals every available contact category."
             ),
             "parameters": {
                 "type": "object",
@@ -263,15 +263,22 @@ def get_contactout_tool() -> dict[str, Any]:
                         "format": "uri",
                         "description": "Regular LinkedIn /in/ or /pub/ person profile URL.",
                     },
-                    "include_contact_info": {
+                    "reveal_all_contact_info": {
                         "type": "boolean",
                         "default": False,
-                        "description": "Explicit opt-in to reveal paid email/phone contact data.",
+                        "description": (
+                            "Explicit authorization to reveal all available personal emails, work emails, and "
+                            "phone numbers. ContactOut cannot reveal only a subset."
+                        ),
                     },
-                    "contact_data_types": {
+                    "required_contact_data_types": {
                         "type": "array",
                         "items": {"type": "string", "enum": sorted(_CONTACT_DATA_TYPES)},
                         "uniqueItems": True,
+                        "description": (
+                            "Availability filter only: require profiles to have at least one selected contact type. "
+                            "This does not limit fields returned or billed when reveal_all_contact_info is true."
+                        ),
                     },
                     "domains": {
                         "type": "array",
@@ -483,10 +490,10 @@ def _validate_contact_types(raw_types: Any) -> tuple[Optional[list[str]], Option
     if raw_types is None:
         return [], None
     if not isinstance(raw_types, list):
-        return None, "contact_data_types must be an array."
+        return None, "required_contact_data_types must be an array."
     invalid = sorted({str(value) for value in raw_types} - _CONTACT_DATA_TYPES)
     if invalid:
-        return None, f"Unsupported contact_data_types: {', '.join(invalid)}."
+        return None, f"Unsupported required_contact_data_types: {', '.join(invalid)}."
     return list(dict.fromkeys(raw_types)), None
 
 
@@ -615,9 +622,14 @@ def execute_contactout(agent, params: dict[str, Any]) -> dict[str, Any]:
         )
 
     allowed_parameters = {
-        SEARCH_PEOPLE: {"operation", "people_filters", "include_contact_info", "contact_data_types"},
+        SEARCH_PEOPLE: {
+            "operation",
+            "people_filters",
+            "reveal_all_contact_info",
+            "required_contact_data_types",
+        },
         COUNT_PEOPLE: {"operation", "people_filters"},
-        ENRICH_LINKEDIN_PROFILE: {"operation", "linkedin_url", "include_contact_info"},
+        ENRICH_LINKEDIN_PROFILE: {"operation", "linkedin_url", "reveal_all_contact_info"},
         SEARCH_COMPANIES: {"operation", "company_filters"},
         ENRICH_COMPANY_DOMAINS: {"operation", "domains"},
     }[operation]
@@ -626,8 +638,8 @@ def execute_contactout(agent, params: dict[str, Any]) -> dict[str, Any]:
         "people_filters",
         "company_filters",
         "linkedin_url",
-        "include_contact_info",
-        "contact_data_types",
+        "reveal_all_contact_info",
+        "required_contact_data_types",
         "domains",
     }
     unknown = sorted(set(params) - known_parameters)
@@ -653,16 +665,11 @@ def execute_contactout(agent, params: dict[str, Any]) -> dict[str, Any]:
             payload = {key: value for key, value in filters.items() if key not in _COUNT_IGNORED_FILTERS}
             return _request_contactout(operation, payload=payload)
 
-        include_contact_info = params.get("include_contact_info") is True
-        contact_types, contact_error = _validate_contact_types(params.get("contact_data_types"))
+        reveal_all_contact_info = params.get("reveal_all_contact_info") is True
+        contact_types, contact_error = _validate_contact_types(params.get("required_contact_data_types"))
         if contact_error:
             return _error(contact_error, operation=operation)
-        if contact_types and not include_contact_info:
-            return _error(
-                "contact_data_types requires include_contact_info=true.",
-                operation=operation,
-            )
-        filters["reveal_info"] = include_contact_info
+        filters["reveal_info"] = reveal_all_contact_info
         if contact_types:
             filters["data_types"] = contact_types
         return _request_contactout(operation, payload=filters)
@@ -675,7 +682,7 @@ def execute_contactout(agent, params: dict[str, Any]) -> dict[str, Any]:
             operation,
             query={
                 "profile": linkedin_url,
-                "profile_only": params.get("include_contact_info") is not True,
+                "profile_only": params.get("reveal_all_contact_info") is not True,
             },
         )
 
