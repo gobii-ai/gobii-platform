@@ -4,6 +4,7 @@ from django.conf import settings
 
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
+from api.agent.tools.contactout import CONTACTOUT_SYSTEM_SKILL_KEY, CONTACTOUT_TOOL_NAME
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from api.agent.tools.secure_api_request import (
     SECURE_API_REQUEST_TOOL_NAME,
@@ -24,6 +25,12 @@ WEBHOOKS_SYSTEM_SKILL_KEY = "webhooks"
 CODE_WORK_SYSTEM_SKILL_KEY = "code_work"
 RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY = "recruitment_sourcing"
 COMPUTER_SYSTEM_SKILL_KEY = "computer"
+
+
+def _contactout_prompt_available(agent) -> bool:
+    from api.services.contactout_feature_flags import contactout_enabled_for_agent
+
+    return contactout_enabled_for_agent(agent)
 
 
 def _custom_tool_development_prompt_available(agent) -> bool:
@@ -598,6 +605,68 @@ APOLLO_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
 )
 
 
+CONTACTOUT_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=CONTACTOUT_SYSTEM_SKILL_KEY,
+    name="ContactOut",
+    search_summary=(
+        "Use the native ContactOut API for people and company search, counts, LinkedIn person enrichment, "
+        "and company-domain enrichment."
+    ),
+    tool_names=(CONTACTOUT_TOOL_NAME,),
+    enables=(
+        "search and count people by role, seniority, skills, company, industry, education, and location",
+        "enrich a known regular LinkedIn person profile URL",
+        "search companies by name, domain, size, location, industry, technology, revenue, or founding year",
+        "enrich up to 30 company domains in one request",
+    ),
+    use_when=(
+        "the user asks to source or research people, candidates, prospects, or companies",
+        "the user provides a LinkedIn person URL and wants structured profile information",
+        "the user wants company details from domains",
+        "ContactOut can cover a people or company lookup that might otherwise use BrightData",
+    ),
+    query_aliases=(
+        "contactout",
+        "contact out",
+        "people search",
+        "candidate search",
+        "prospect search",
+        "linkedin profile enrichment",
+        "company search",
+        "company domain enrichment",
+    ),
+    discovery_triggers=(
+        "use contactout",
+        "search contactout",
+        "find people",
+        "search companies",
+        "enrich linkedin profile",
+        "enrich company domains",
+    ),
+    prompt_instructions=(
+        "Use the native `contactout` tool, never a ContactOut MCP tool. It supports five operations: "
+        "`search_people`, `count_people`, `enrich_linkedin_profile`, `search_companies`, and "
+        "`enrich_company_domains`. Use `search_people` when the profiles are not yet known; use "
+        "`count_people` only when the user asks for an estimate or a count materially helps plan a broad search, "
+        "not as mandatory preflight. Use `enrich_linkedin_profile` for a known regular LinkedIn `/in/` or `/pub/` "
+        "URL; Sales Navigator and Recruiter URLs are unsupported. Use `search_companies` for filtered company "
+        "discovery and `enrich_company_domains` for known domains (up to 30 per request). People search pages are "
+        "limited to 25 results. Company `linkedin_url` filters cannot be combined with other company filters. "
+        "Capitalize boolean operators such as AND, OR, and NOT where the filter supports them.\n"
+        "Contact data is a paid, explicit reveal. Keep `include_contact_info=false` unless the user explicitly needs "
+        "emails or phones for the current task. Only then set it to true and narrow `contact_data_types` to what is "
+        "needed. A request to find, qualify, summarize, or shortlist people does not itself authorize revealing "
+        "contact data.\n"
+        "For covered people and company operations, prefer ContactOut over BrightData. Do not call both routinely or "
+        "shadow the same lookup. An empty/no-match response is a valid miss. Repair a malformed 400/422 request once "
+        "when the correction is clear. On a no-match, timeout, network error, 401, 403, 429, or 5xx response, use the "
+        "matching BrightData structured-data tool as fallback when it is available. Report the limitation if no "
+        "approved fallback can cover the request."
+    ),
+    prompt_available=_contactout_prompt_available,
+)
+
+
 RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
     name="Recruitment Sourcing",
@@ -678,10 +747,13 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
         "authorization, language, and remote/contract constraints without stereotyping individuals or implying "
         "quality from nationality.\n"
         "Choose sources based on the tools and permissions actually available. Prefer structured people/company "
-        "sources such as LinkedIn data tools, Apollo, ATS/CRM exports, Google Sheets, or existing SQLite ledgers "
+        "sources such as ContactOut, LinkedIn data tools, Apollo, ATS/CRM exports, Google Sheets, or existing SQLite "
+        "ledgers "
         "when they are connected and relevant. If a specific source is unavailable or blocked, use another approved "
         "source or explain the limitation; do not pretend the missing source was checked. Use `search_tools` only "
-        "when you need to discover available tools or sources, not before every obvious sourcing action.\n"
+        "when you need to discover available tools or sources, not before every obvious sourcing action. When the "
+        "ContactOut capability is enabled, use it first for covered people/company operations and use BrightData only "
+        "after an empty result, provider error, or unsupported operation; do not run routine duplicate lookups.\n"
         "Search in bounded, explainable batches. Convert requirements into concrete queries: role/title synonyms, "
         "must-have skills, target and adjacent companies, geography, remote/on-site rules, industry/domain signals, "
         "credentials, and exclusion terms. Expand from examples by archetype when the user says examples are not "
@@ -1314,6 +1386,7 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,
+    CONTACTOUT_SYSTEM_SKILL.skill_key: CONTACTOUT_SYSTEM_SKILL,
     RECRUITMENT_SOURCING_SYSTEM_SKILL.skill_key: RECRUITMENT_SOURCING_SYSTEM_SKILL,
     HUBSPOT_NATIVE_SYSTEM_SKILL.skill_key: HUBSPOT_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,

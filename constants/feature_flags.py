@@ -20,6 +20,9 @@ PIPEDREAM_GOOGLE_SHEETS_GUARD = "pipedream_google_sheets_guard"
 # Route /support form submissions to Intercom-style email intake.
 SUPPORT_INTERCOM = "support_intercom"
 
+# Enables the native ContactOut people/company sourcing pilot for selected users.
+CONTACTOUT_PILOT = "contactout_pilot"
+
 
 # Controls whether the pricing upgrade modal renders in an almost full-screen layout.
 PRICING_MODAL_ALMOST_FULL_SCREEN = "pricing_modal_almost_full_screen"
