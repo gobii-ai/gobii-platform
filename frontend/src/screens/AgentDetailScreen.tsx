@@ -2149,7 +2149,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               contactApprovalMode={formState.contactApprovalMode}
               emailReviewOutboxEnabled={initialData.features.emailReviewOutbox}
               emailSendingMode={formState.emailSendingMode}
-              effectiveEmailSendingMode={initialData.agent.effectiveEmailSendingMode}
               organizationMinimumEmailSendingMode={initialData.agent.organizationMinimumEmailSendingMode}
               saving={saving}
               onAddContact={openAddContactModal}
@@ -2426,7 +2425,6 @@ type AllowlistManagerProps = {
   contactApprovalMode: ContactApprovalMode
   emailReviewOutboxEnabled: boolean
   emailSendingMode: EmailSendingMode
-  effectiveEmailSendingMode: EmailSendingMode
   organizationMinimumEmailSendingMode: EmailSendingMode | null
   saving: boolean
   onAddContact: () => void
@@ -2446,7 +2444,6 @@ function AllowlistManager({
   contactApprovalMode,
   emailReviewOutboxEnabled,
   emailSendingMode,
-  effectiveEmailSendingMode,
   organizationMinimumEmailSendingMode,
   saving,
   onAddContact,
@@ -2462,13 +2459,11 @@ function AllowlistManager({
   const embeddedInfoCardClassName = 'rounded-xl border border-slate-200/20 bg-slate-950/35 px-4 py-4'
   const embeddedInfoIconClassName = 'flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300'
   const embeddedPrimaryActionClassName = getSettingsActionButtonClassName({ tone: 'primary' })
-  const automaticallyAllowsEmailContacts = emailReviewOutboxEnabled
-    ? effectiveEmailSendingMode === 'send_automatically'
-    : contactApprovalMode === 'auto_approve_email'
+  const automaticallyAllowsEmailContacts = contactApprovalMode === 'auto_approve_email'
 
   return (
     <div className="space-y-5">
-      {!emailReviewOutboxEnabled && contactAutoApproveEmailEnabled && (
+      {contactAutoApproveEmailEnabled && (
         <fieldset className="space-y-3">
           <legend className="text-sm font-semibold text-slate-700">New contact approval</legend>
           <p className="text-xs text-slate-500">Choose how this agent handles email addresses that are not already listed.</p>
@@ -2565,14 +2560,6 @@ function AllowlistManager({
               )
             })}
           </div>
-          {automaticallyAllowsEmailContacts && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3 text-xs leading-5 text-amber-100">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" aria-hidden="true" />
-              <p>
-                This agent can send external email without human review. New contacts remain visible and removable below. SMS contacts always require approval.
-              </p>
-            </div>
-          )}
         </fieldset>
       )}
 

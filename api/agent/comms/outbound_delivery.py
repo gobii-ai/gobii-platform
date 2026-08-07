@@ -859,17 +859,38 @@ def _claim_email_for_delivery(message: PersistentAgentMessage) -> bool:
                 track_outbox_bypass_denied(locked, reason="contact_access_changed")
                 return False
             message._verified_outbox_attachment_snapshots = verified_attachments
-        elif email_review_outbox_enabled(locked.owner_agent.user):
-            decision = classify_email_recipients(locked.owner_agent, get_message_email_recipients(locked))
-            if decision.blocked_recipients or decision.requires_review:
-                _deny_email_delivery(
-                    locked,
-                    error_code="outbox_review_required",
-                    error_message="Delivery blocked because this external email requires human review.",
+        else:
+            outbox_enabled = email_review_outbox_enabled(locked.owner_agent.user)
+            if outbox_enabled:
+                decision = classify_email_recipients(
+                    locked.owner_agent,
+                    get_message_email_recipients(locked),
                 )
-                logger.warning("Denied unreviewed external email delivery for message %s.", locked.id)
-                track_outbox_bypass_denied(locked, reason="missing_required_review")
-                return False
+                unavailable = decision.blocked_recipients or decision.unknown_external_recipients
+                if unavailable:
+                    _deny_email_delivery(
+                        locked,
+                        error_code="contact_authorization_required",
+                        error_message=(
+                            "Delivery blocked because outbound contact access is not enabled for "
+                            f"'{unavailable[0]}'."
+                        ),
+                    )
+                    logger.warning(
+                        "Denied email delivery for message %s because contact access is missing.",
+                        locked.id,
+                    )
+                    track_outbox_bypass_denied(locked, reason="contact_access_missing")
+                    return False
+                if decision.requires_review:
+                    _deny_email_delivery(
+                        locked,
+                        error_code="outbox_review_required",
+                        error_message="Delivery blocked because this external email requires human review.",
+                    )
+                    logger.warning("Denied unreviewed external email delivery for message %s.", locked.id)
+                    track_outbox_bypass_denied(locked, reason="missing_required_review")
+                    return False
 
         locked.latest_status = DeliveryStatus.SENDING
         locked.latest_error_code = ""

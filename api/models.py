@@ -6703,7 +6703,7 @@ class PersistentAgent(models.Model):
     email_sending_mode = models.CharField(
         max_length=32,
         choices=EmailSendingMode.choices,
-        default=EmailSendingMode.REVIEW_ALL_EXTERNAL,
+        default=EmailSendingMode.SEND_AUTOMATICALLY,
         help_text="Requested email sending mode. Organization policy may enforce a stricter effective mode.",
     )
     execution_environment = models.CharField(
