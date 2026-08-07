@@ -70,7 +70,10 @@ def _valid_mode(value: object) -> str | None:
 def get_workspace_default_email_sending_mode(*, user, organization=None) -> str:
     if organization is not None:
         settings_value = organization.org_settings if isinstance(organization.org_settings, dict) else {}
-        return _valid_mode(settings_value.get(ORGANIZATION_DEFAULT_KEY)) or PersistentAgent.EmailSendingMode.REVIEW_ALL_EXTERNAL
+        return (
+            _valid_mode(settings_value.get(ORGANIZATION_DEFAULT_KEY))
+            or PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY
+        )
 
     preferences = UserPreference.resolve_known_preferences(user)
     return preferences[UserPreference.KEY_DEFAULT_EMAIL_SENDING_MODE]

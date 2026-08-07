@@ -11,7 +11,7 @@ export const EMAIL_SENDING_MODE_OPTIONS = [
   },
   {
     value: 'send_automatically',
-    title: 'Send external emails automatically',
+    title: 'Send automatically',
     description: 'Permitted external email is sent without Outbox review. Contact approval still applies.',
   },
 ] as const
