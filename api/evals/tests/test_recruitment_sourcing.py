@@ -21,12 +21,12 @@ from api.evals.suites import SuiteRegistry
 
 @tag("batch_recruitment_sourcing", "eval_sim")
 class RecruitmentSourcingScenarioTests(SimpleTestCase):
-    def test_recruitment_sourcing_suite_contains_six_scenarios(self):
+    def test_recruitment_sourcing_suite_contains_all_scenarios(self):
         suite = SuiteRegistry.get(RECRUITMENT_SOURCING_SUITE_SLUG)
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), RECRUITMENT_SOURCING_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 6)
+        self.assertEqual(len(suite.scenario_slugs), 7)
 
     def test_generated_scenarios_have_expected_metadata(self):
         registered = ScenarioRegistry.list_all()
@@ -214,3 +214,24 @@ class RecruitmentSourcingScenarioTests(SimpleTestCase):
         self.assertEqual(result["remaining_work"], 13)
         self.assertIn("next_cursor", result)
         self.assertIn(("partial", "remaining", "source limitation", "could not verify"), case.response_term_groups)
+
+    def test_first_pass_momentum_scenario_registered_and_composed_from_intake(self):
+        from api.evals.scenarios.recruitment_sourcing import (
+            RECRUITMENT_SOURCING_FIRST_PASS_MOMENTUM,
+            RecruitmentSourcingFirstPassMomentumScenario,
+        )
+
+        registered = ScenarioRegistry.list_all()
+        scenario = registered[RECRUITMENT_SOURCING_FIRST_PASS_MOMENTUM]
+        self.assertIsInstance(scenario, RecruitmentSourcingFirstPassMomentumScenario)
+        self.assertIn("momentum", scenario.get_metadata().tags)
+
+        charter = scenario._compose_charter()
+        # The charter is composed by the real funnel builder, so the eval
+        # measures the shipped steering text (not a copy that can drift).
+        self.assertIn("structured human-input request tool", charter)
+        self.assertIn("(not provided — ask the user in chat)", charter)
+
+        brief = scenario._brief_message()
+        self.assertIn("Senior Backend Engineer", brief)
+

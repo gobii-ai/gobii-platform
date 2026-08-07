@@ -694,6 +694,79 @@ def _serialize_message(
     reply_to_payload: dict | None = None
     raw_message_payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
     structured_payload = get_structured_peer_payload(raw_message_payload)
+    briefing_payload = (
+        raw_message_payload.get("gobii_briefing")
+        if isinstance(raw_message_payload, dict)
+        and isinstance(raw_message_payload.get("gobii_briefing"), dict)
+        else None
+    )
+    # Structured result deliveries (deliver_results) render as result cards.
+    # While the agent is frozen at the signup wall, rows past the teaser count
+    # are REDACTED here, server-side — initials only, no detail/url — so the
+    # locked names never reach the browser. Payment unfreezes and the same
+    # serialization sends the full rows.
+    results_payload = None
+    raw_results = raw_message_payload.get("gobii_results")
+    if isinstance(raw_results, dict) and isinstance(raw_results.get("rows"), list):
+        result_rows = [
+            row
+            for row in raw_results["rows"]
+            if isinstance(row, Mapping) and str(row.get("primary") or "").strip()
+        ]
+        if result_rows:
+            from api.services.signup_preview import ACTIVE_SIGNUP_PREVIEW_STATES
+            from pages.template_intake import DEFAULT_RESULT_TEASER_COUNT
+
+            owner_agent = getattr(message, "owner_agent", None)
+            frozen = (
+                owner_agent is not None
+                and owner_agent.signup_preview_state in ACTIVE_SIGNUP_PREVIEW_STATES
+            )
+            serialized_rows = []
+            locked_count = 0
+            for index, row in enumerate(result_rows):
+                clean = {
+                    key: str(row.get(key) or "").strip()
+                    for key in ("primary", "secondary", "detail", "score", "url")
+                    if str(row.get(key) or "").strip()
+                }
+                if frozen and index >= DEFAULT_RESULT_TEASER_COUNT:
+                    initials = " ".join(
+                        part[0].upper() + "."
+                        for part in clean.get("primary", "").split()[:2]
+                        if part
+                    )
+                    locked_row = {"primary": initials or "·", "locked": True}
+                    if clean.get("secondary"):
+                        locked_row["secondary"] = clean["secondary"]
+                    serialized_rows.append(locked_row)
+                    locked_count += 1
+                else:
+                    serialized_rows.append(clean)
+            results_payload = {
+                "title": str(raw_results.get("title") or "").strip() or None,
+                "rows": serialized_rows,
+                "lockedCount": locked_count,
+            }
+
+    # Human-input answers render as a structured card, not a prose bubble; the
+    # question text travels in the payload so the card is self-contained.
+    answers_payload = None
+    raw_responses = raw_message_payload.get("human_input_responses")
+    if isinstance(raw_responses, list):
+        answer_rows = []
+        for response in raw_responses:
+            if not isinstance(response, Mapping):
+                continue
+            answer = str(response.get("selected_option_title") or response.get("free_text") or "").strip()
+            if not answer:
+                continue
+            answer_rows.append({
+                "question": str(response.get("question") or "").strip(),
+                "answer": answer,
+            })
+        if answer_rows:
+            answers_payload = {"rows": answer_rows}
     reply_raw = raw_message_payload.get("discord_reply_to")
     if isinstance(reply_raw, Mapping) and not reply_raw.get("unavailable"):
         reply_body = str(reply_raw.get("content") or "").strip()
@@ -746,6 +819,9 @@ def _serialize_message(
             "channelLabel": discord_channel_label or None,
             "webhookMeta": webhook_meta,
             "structuredPayload": structured_payload,
+            "briefing": briefing_payload,
+            "answers": answers_payload,
+            "results": results_payload,
             "viewerFeedback": feedback_lookup.get(message.id) if feedback_lookup else None,
             "deliveryStatus": message.latest_status,
             "outboxReview": outbox_review,

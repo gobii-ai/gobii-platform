@@ -307,10 +307,12 @@ def create_persistent_agent_from_charter(
             if user_has_existing_personal_agent_for_signup_preview(request.user):
                 raise ValidationError(SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE)
 
+        prospective_name = request.session.pop("prospective_agent_name", None)
         try:
             provisioning = PersistentAgentProvisioningService.provision(
                 user=request.user,
                 organization=organization,
+                name=prospective_name,
                 template_code=template_code,
                 allow_unlisted_template=(
                     template_source == AGENT_TEMPLATE_SOURCE_TRIAL_PROMO
@@ -320,8 +322,23 @@ def create_persistent_agent_from_charter(
                 signup_preview_state=get_signup_preview_creation_state(preview_creation_allowed),
             )
         except PersistentAgentProvisioningError as exc:
-            error_payload = exc.args[0] if exc.args else "Unable to create agent."
-            raise ValidationError(error_payload) from exc
+            if prospective_name:
+                # Gate-drawn name collided or failed validation — fall back to a
+                # fresh generated name rather than failing the spawn.
+                provisioning = PersistentAgentProvisioningService.provision(
+                    user=request.user,
+                    organization=organization,
+                    template_code=template_code,
+                    allow_unlisted_template=(
+                        template_source == AGENT_TEMPLATE_SOURCE_TRIAL_PROMO
+                    ),
+                    charter=charter_text,
+                    preferred_llm_tier=preferred_llm_tier,
+                    signup_preview_state=get_signup_preview_creation_state(preview_creation_allowed),
+                )
+            else:
+                error_payload = exc.args[0] if exc.args else "Unable to create agent."
+                raise ValidationError(error_payload) from exc
 
         persistent_agent = provisioning.agent
         applied_schedule = provisioning.applied_schedule
@@ -482,6 +499,9 @@ def create_persistent_agent_from_charter(
             PersistentAgentConversationParticipant.ParticipantRole.AGENT,
         )
 
+        # Staged by the template brief quiz: the timeline renders this as a
+        # structured briefing card instead of the model-facing message body.
+        briefing_payload = request.session.pop("agent_briefing_payload", None)
         initial_message_obj = PersistentAgentMessage.objects.create(
             is_outbound=False,
             from_endpoint=initial_user_endpoint,
@@ -489,9 +509,26 @@ def create_persistent_agent_from_charter(
             conversation=conversation,
             body=initial_message,
             owner_agent=persistent_agent,
+            raw_payload={"gobii_briefing": briefing_payload} if briefing_payload else {},
         )
         if initial_attachments_list:
             _save_attachments(initial_message_obj, initial_attachments_list)
+
+        if selected_template:
+            from pages.template_intake import get_template_system_skills
+
+            template_skills = get_template_system_skills(selected_template.code)
+            if template_skills:
+                try:
+                    from api.agent.system_skills.service import enable_system_skills
+
+                    enable_system_skills(persistent_agent, template_skills)
+                except Exception:
+                    logger.warning(
+                        "Failed to pre-enable template system skills for agent %s",
+                        persistent_agent.id,
+                        exc_info=True,
+                    )
 
         if selected_template and selected_template.default_tools:
             for tool_name in selected_template.default_tools:
@@ -514,6 +551,25 @@ def create_persistent_agent_from_charter(
                 selected_pipedream_app_slugs=selected_pipedream_app_slugs,
             )
 
+        # Demo flow (GOBII_DEMO_INTAKE=1 + session flag): seed canned agent replies
+        # instead of enqueueing the processing loop — no LLM, no tools, no inference.
+        from pages.demo_flow import (
+            DEMO_ANSWERS_KEY,
+            demo_real_llm,
+            demo_session_active,
+            grant_demo_entitlement,
+            seed_demo_agent_replies,
+        )
+
+        demo_session = demo_session_active(request)
+        demo_mode = demo_session and not demo_real_llm()  # canned replies, no processing
+        if demo_mode:
+            demo_answers = request.session.get(DEMO_ANSWERS_KEY) or {}
+            demo_args = (persistent_agent, conversation, initial_agent_endpoint, initial_user_endpoint)
+            transaction.on_commit(lambda: seed_demo_agent_replies(*demo_args, demo_answers))
+        elif demo_session:  # real-run validation: entitle the account, let processing run
+            transaction.on_commit(lambda: grant_demo_entitlement(persistent_agent))
+
         initial_message_id = str(initial_message_obj.id)
         has_initial_attachments = initial_message_obj.attachments.exists()
 
@@ -532,7 +588,9 @@ def create_persistent_agent_from_charter(
                     prefer_low_latency=True,
                 )
 
-        if has_initial_attachments:
+        if demo_mode:
+            pass  # canned replies seeded above; no processing loop in demo
+        elif has_initial_attachments:
             transaction.on_commit(_import_initial_attachments_then_process)
         else:
             transaction.on_commit(

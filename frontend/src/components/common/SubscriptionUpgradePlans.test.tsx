@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 
 import { SubscriptionUpgradePlans } from './SubscriptionUpgradePlans'
@@ -47,40 +47,37 @@ describe('SubscriptionUpgradePlans mobile layout', () => {
     )
   }
 
-  it('does not force full-height stacked plan cards in the expanded modal layout', () => {
+  it('renders the trial gate dial for the signup funnel with Scale selected by default', () => {
+    const onUpgrade = vi.fn()
     renderPlans(
       {
         currentPlan: 'free',
-        onUpgrade: vi.fn(),
+        onUpgrade,
         source: 'trial_onboarding',
       },
     )
 
-    const grid = screen.getByTestId('subscription-plans-grid')
-    const startupPlan = screen.getByTestId('subscription-plan-startup')
-    const scalePlan = screen.getByTestId('subscription-plan-scale')
+    expect(screen.getByTestId('subscription-plans-grid')).toBeInTheDocument()
+    expect(screen.getByTestId('subscription-plan-startup')).toBeInTheDocument()
+    expect(screen.getByText(/what happens next/i)).toBeInTheDocument()
+    expect(screen.getByText(/first charge/)).toBeInTheDocument()
 
-    expect(grid).toHaveClass('sm:min-h-full')
-    expect(grid).not.toHaveClass('h-full')
-    expect(grid).not.toHaveClass('min-h-full')
-    expect(startupPlan).toHaveClass('sm:h-full')
-    expect(startupPlan).not.toHaveClass('h-full')
-    expect(scalePlan).toHaveClass('sm:h-full')
-    expect(scalePlan).not.toHaveClass('h-full')
-    expect(screen.getAllByRole('button', { name: /start free trial/i })).toHaveLength(2)
+    fireEvent.click(screen.getByTestId('subscription-plan-scale'))
+    expect(onUpgrade).toHaveBeenCalledWith('scale')
   })
 
-  it('keeps the default trial copy when no unlock variant is requested', () => {
+  it('starts a Pro trial through the escape hatch', () => {
+    const onUpgrade = vi.fn()
     renderPlans(
       {
         currentPlan: 'free',
-        onUpgrade: vi.fn(),
+        onUpgrade,
         source: 'trial_onboarding',
       },
     )
 
-    expect(screen.getAllByRole('button', { name: /start free trial/i })).toHaveLength(2)
-    expect(screen.queryByText('No charge today. Cancel anytime.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('subscription-plan-startup'))
+    expect(onUpgrade).toHaveBeenCalledWith('startup')
   })
 
   it('uses the unlock copy only when the unlock variant is requested', () => {

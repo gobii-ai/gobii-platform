@@ -60,7 +60,7 @@ export function PendingRequestedSecretsPanel({
               value={secretValues[secret.id] ?? ''}
               onChange={(event) => onSecretValueChange(secret.id, event.currentTarget.value)}
               disabled={disabled || busyAction !== null}
-              className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200"
+              className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
               placeholder={`Enter value for ${secret.name}`}
               autoComplete="new-password"
             />
@@ -70,9 +70,9 @@ export function PendingRequestedSecretsPanel({
                 checked={makeGlobal}
                 onChange={(event) => onMakeGlobalChange(event.currentTarget.checked)}
                 disabled={disabled || busyAction !== null}
-                className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
               />
-              <Globe className="h-4 w-4 text-sky-600" aria-hidden="true" />
+              <Globe className="h-4 w-4 text-violet-600" aria-hidden="true" />
               <span>Make global</span>
               <HoverInfoButton
                 label="What Global does"

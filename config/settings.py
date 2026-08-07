@@ -111,7 +111,9 @@ EVAL_LOCAL_OPENROUTER_ENDPOINT_KEY = env(
 )
 EVAL_LOCAL_OPENROUTER_MODEL = env(
     "EVAL_LOCAL_OPENROUTER_MODEL",
-    default="deepseek/deepseek-v4-flash",
+    # Bare "deepseek-v4-flash" on OpenRouter is the old 0423 snapshot; 0731 is
+    # the GA revision (Andrew, 2026-08-03).
+    default="deepseek/deepseek-v4-flash-0731",
 )
 EVAL_LOCAL_OPENROUTER_QWEN_PROFILE_NAME = env(
     "EVAL_LOCAL_OPENROUTER_QWEN_PROFILE_NAME",

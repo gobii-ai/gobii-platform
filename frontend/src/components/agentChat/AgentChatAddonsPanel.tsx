@@ -348,8 +348,8 @@ export function AgentChatAddonsPanel({
         subtitle={subtitle}
         icon={PlusSquare}
         ariaLabel="Add-ons"
-        desktopIconBgClass="bg-blue-100"
-        desktopIconColorClass="text-blue-600"
+        desktopIconBgClass="bg-violet-100"
+        desktopIconColorClass="text-violet-600"
         desktopBodyClassName="agent-settings-modal-body"
       >
         {body}

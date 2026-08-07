@@ -1,0 +1,134 @@
+/* Template intake — "focus stage" living card (locked design, 2026-08-03).
+   Scoped under .tiq- to stay inert next to app styles. */
+
+.tiq-stage { position: relative; max-width: 620px; margin: 0 auto; padding: clamp(24px, 6vh, 52px) clamp(12px, 3vw, 24px) 70px; }
+.tiq-head { text-align: center; margin-bottom: 24px; }
+.tiq-head h1 { font-weight: 300; letter-spacing: -0.9px; color: #fff; font-size: 31px; }
+.tiq-accent { font-weight: 400; background: linear-gradient(90deg, #c4b5fd, #f0abfc); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.tiq-head p { margin-top: 8px; font-size: 13.5px; color: #9a8fc0; }
+
+.tiq-card { border-radius: 20px; padding: 8px 0 16px;
+  background: linear-gradient(rgba(24,15,45,.94), rgba(24,15,45,.94)) padding-box, linear-gradient(130deg, rgba(124,58,237,.6), rgba(240,171,252,.32)) border-box;
+  border: 1px solid transparent;
+  box-shadow: 0 44px 110px -44px rgba(124,58,237,.6), 0 12px 40px -18px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05); }
+
+.tiq-row { position: relative; padding: 0 22px; transition: opacity .35s ease, filter .35s ease; }
+.tiq-row::before { content: ""; position: absolute; top: 0; left: 22px; right: 22px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(196,181,253,.16) 18%, rgba(196,181,253,.16) 82%, transparent); }
+.tiq-card.tiq-staging .tiq-row:not(.tiq-active) { opacity: .38; filter: saturate(.6); }
+.tiq-card.tiq-staging .tiq-row:not(.tiq-active):hover { opacity: .75; filter: none; }
+.tiq-card.tiq-staging .tiq-foot-quiet { opacity: .5; }
+
+.tiq-rowhead { display: flex; align-items: center; gap: 12px; padding: 15px 0; cursor: pointer; user-select: none; }
+.tiq-stat { width: 23px; height: 23px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #8a80a8;
+  background: linear-gradient(rgba(24,15,45,1), rgba(24,15,45,1)) padding-box, linear-gradient(135deg, rgba(196,181,253,.4), rgba(240,171,252,.2)) border-box;
+  border: 1px solid transparent; }
+.tiq-row.tiq-done .tiq-stat { background: linear-gradient(135deg, #7c3aed, #c026d3); color: #fff; border: 0; animation: tiq-pop .25s cubic-bezier(.2,1.6,.4,1); }
+@keyframes tiq-pop { from { transform: scale(.3); opacity: 0; } }
+.tiq-lbl { font-size: 12px; letter-spacing: 0.2px; color: #8a80a8; font-weight: 600; width: 118px; flex: none; }
+.tiq-row:not(.tiq-active) .tiq-rowhead:hover .tiq-lbl { color: #c4b5fd; }
+.tiq-val { font-size: 13.5px; color: #e9dcff; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tiq-ph { color: #6f6590; font-style: italic; }
+.tiq-asm { font-size: 10.5px; letter-spacing: 0.2px; font-weight: 600; color: #9a8fc0; border: 1px dashed rgba(196,181,253,.4); border-radius: 99px; padding: 2px 7px; margin-left: 8px; vertical-align: 1px; }
+
+.tiq-row.tiq-active { background: linear-gradient(90deg, rgba(139,92,246,.11), rgba(139,92,246,.04)); border-radius: 14px; box-shadow: 0 14px 40px -20px rgba(124,58,237,.55); }
+.tiq-row.tiq-active::before { opacity: 0; }
+.tiq-row.tiq-active::after { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 2.5px; border-radius: 99px;
+  background: linear-gradient(180deg, #c4b5fd, #f0abfc); box-shadow: 0 0 12px rgba(196,181,253,.8); }
+.tiq-body { padding: 18px 0 20px; animation: tiq-slidein .25s ease; }
+@keyframes tiq-slidein { from { opacity: 0; transform: translateY(8px); } }
+.tiq-q { display: flex; align-items: baseline; gap: 12px; font-weight: 300; letter-spacing: -0.4px; color: #fff; font-size: 20px; line-height: 1.2; margin: 3px 0 5px; }
+.tiq-later { margin-left: auto; font: inherit; font-size: 11.5px; color: #6f6590; background: none; border: none; cursor: pointer; white-space: nowrap; }
+.tiq-later:hover { color: #c4b5fd; }
+.tiq-hint { font-size: 11.5px; color: #9a8fc0; margin-top: 9px; }
+.tiq-hint b { color: #c4b5fd; font-weight: 600; }
+.tiq-inline { font: inherit; font-size: inherit; color: #c4b5fd; background: none; border: none; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; padding: 0; }
+
+.tiq-input { width: 100%; font: inherit; font-size: 15px; padding: 11px 13px; border-radius: 12px; border: 1px solid rgba(255,255,255,.14);
+  background: rgba(10,6,22,.55); color: #fff; outline: none; }
+.tiq-input:focus { box-shadow: 0 0 0 3px rgba(168,85,247,.22); border-color: #a855f7; }
+.tiq-input::placeholder { color: #7f74a4; font-style: italic; }
+
+.tiq-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.tiq-tag { font: inherit; font-size: 13px; padding: 8px 11px 8px 15px; border-radius: 99px; cursor: pointer; color: #fff;
+  display: inline-flex; align-items: center; gap: 7px; animation: tiq-tagin .22s cubic-bezier(.2,1.4,.4,1);
+  background: linear-gradient(rgba(59,34,112,.85), rgba(42,24,84,.85)) padding-box, linear-gradient(120deg, rgba(196,181,253,.7), rgba(240,171,252,.45)) border-box;
+  border: 1px solid transparent; box-shadow: 0 4px 14px -6px rgba(124,58,237,.5); }
+@keyframes tiq-tagin { from { transform: scale(.6); opacity: 0; } }
+.tiq-tag .tiq-x { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%;
+  font-size: 11px; line-height: 1; color: #cfc2ee; background: rgba(255,255,255,.12); transition: all .15s; }
+.tiq-tag:hover .tiq-x { background: #f0abfc; color: #2a1854; transform: scale(1.15); }
+.tiq-taginput { font: inherit; font-size: 13px; padding: 8px 14px; border-radius: 99px; border: 1px solid rgba(196,181,253,.5);
+  background: rgba(10,6,22,.6); color: #fff; outline: none; flex: 1; min-width: 200px; }
+.tiq-taginput::placeholder { color: #7f74a4; }
+
+.tiq-opts { display: grid; gap: 8px; margin-top: 8px; }
+.tiq-opt { position: relative; display: flex; align-items: center; gap: 12px; text-align: left; font: inherit; font-size: 14px; color: #e9dcff;
+  padding: 11px 14px; border-radius: 13px; cursor: pointer;
+  background: linear-gradient(rgba(28,18,52,.85), rgba(28,18,52,.85)) padding-box, linear-gradient(120deg, rgba(124,58,237,.45), rgba(240,171,252,.22)) border-box;
+  border: 1px solid transparent; transition: transform .15s, box-shadow .2s; }
+.tiq-opt:hover { transform: translateY(-1px); }
+.tiq-key { width: 22px; height: 22px; border-radius: 6px; background: rgba(139,92,246,.18); color: #c4b5fd; font-size: 11.5px;
+  display: flex; align-items: center; justify-content: center; font-weight: 600; flex: none; }
+.tiq-optd { font-size: 12px; color: #9a8fc0; margin-top: 2px; }
+.tiq-opt.tiq-sel { background: linear-gradient(rgba(59,34,112,.9), rgba(42,24,84,.9)) padding-box, linear-gradient(120deg, #c4b5fd, #f0abfc) border-box;
+  box-shadow: 0 0 24px rgba(139,92,246,.4); }
+.tiq-opt.tiq-sel::after { content: "✓"; margin-left: auto; color: #f0abfc; font-weight: 700; animation: tiq-pop .2s cubic-bezier(.2,1.6,.4,1); }
+.tiq-opt.tiq-other { border-style: dashed; color: #9a8fc0; }
+.tiq-rec { position: absolute; top: -9px; right: 14px; font-size: 10px; letter-spacing: 0.3px; font-weight: 600; color: #fff;
+  background: linear-gradient(90deg, #7c3aed, #c026d3); border-radius: 99px; padding: 3px 9px; box-shadow: 0 0 0 3px #17102b; }
+
+.tiq-foot { position: relative; display: flex; align-items: center; gap: 16px; padding: 18px 22px 8px; flex-wrap: wrap; }
+.tiq-foot::before { content: ""; position: absolute; top: 0; left: 22px; right: 22px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(196,181,253,.16) 18%, rgba(196,181,253,.16) 82%, transparent); }
+.tiq-skipall { font: inherit; font-size: 12px; color: #6f6590; background: none; border: none; cursor: pointer; }
+.tiq-skipall:hover { color: #c4b5fd; }
+.tiq-dots { display: flex; gap: 7px; margin-left: auto; }
+.tiq-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.14); transition: all .3s; }
+.tiq-dots i.tiq-dot-done { background: linear-gradient(135deg, #a78bfa, #f0abfc); box-shadow: 0 0 8px rgba(196,181,253,.6); }
+.tiq-dots i.tiq-dot-cur { background: rgba(255,255,255,.35); transform: scale(1.35); }
+.tiq-next { --tiq-angle: 0deg; position: relative; font: inherit; font-size: 14px; font-weight: 600; color: #fff; padding: 11px 22px;
+  border-radius: 13px; border: 0; cursor: pointer; background: linear-gradient(180deg, #3b2270, #2a1854); white-space: nowrap; }
+.tiq-next::before { content: ""; position: absolute; inset: -2px; border-radius: 15px; padding: 2px;
+  background: conic-gradient(from var(--tiq-angle), #7c3aed, #f0abfc, #a855f7, #7c3aed);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: tiq-spin 3.2s linear infinite; }
+@property --tiq-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes tiq-spin { to { --tiq-angle: 360deg; } }
+.tiq-kbd { display: inline-block; margin-left: 7px; font-size: 11px; opacity: .55; font-weight: 500; }
+
+.tiq-under { text-align: center; font-size: 12px; color: #8a80a8; margin-top: 16px; padding: 0 12px; }
+
+.tiq-delegate { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; font: inherit; font-size: 12.5px;
+  color: #c4b5fd; padding: 8px 15px; border-radius: 99px; cursor: pointer;
+  background: rgba(139,92,246,.08); border: 1px dashed rgba(196,181,253,.45); transition: all .15s; }
+.tiq-delegate:hover { color: #fff; background: rgba(139,92,246,.16); border-color: rgba(196,181,253,.7); }
+.tiq-chatglyph { flex: none; opacity: .8; }
+.tiq-opt.tiq-deleg { border-style: dashed; color: #c4b5fd;
+  background: linear-gradient(rgba(28,18,52,.55), rgba(28,18,52,.55)) padding-box, linear-gradient(120deg, rgba(196,181,253,.4), rgba(240,171,252,.22)) border-box; }
+.tiq-opt.tiq-deleg:hover { color: #fff; }
+.tiq-opt.tiq-deleg .tiq-chatglyph { margin: 0 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tiq-next::before { animation: none; }
+  .tiq-body, .tiq-tag { animation: none; }
+  .tiq-row { transition: none; }
+}
+@media (max-width: 680px) {
+  .tiq-head h1 { font-size: 24px; }
+  .tiq-head p { font-size: 12.5px; padding: 0 8px; }
+  .tiq-row { padding: 0 14px; }
+  .tiq-row::before { left: 14px; right: 14px; }
+  .tiq-lbl { width: auto; min-width: 96px; font-size: 10px; letter-spacing: 1.4px; }
+  .tiq-val { font-size: 12.5px; }
+  .tiq-q { font-size: 17.5px; }
+  .tiq-opt { font-size: 13px; padding: 11px 12px; }
+  .tiq-foot { padding: 14px 14px 6px; gap: 10px; }
+  .tiq-foot::before { left: 14px; right: 14px; }
+  .tiq-next { flex: 1 1 100%; order: 3; }
+}
+@media (min-width: 1700px) {
+  .tiq-stage { max-width: 680px; }
+  .tiq-head h1 { font-size: 35px; }
+}

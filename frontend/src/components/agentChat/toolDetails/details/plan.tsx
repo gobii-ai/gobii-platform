@@ -11,7 +11,7 @@ type Deliverable = [key: string, label: string, detail: string | null, icon: Luc
 
 const STATUS_DISPLAY = {
   todo: [Circle, 'To do', 'text-slate-400', 'text-slate-700'],
-  doing: [CircleDot, 'In progress', 'text-blue-600', 'font-semibold text-slate-900'],
+  doing: [CircleDot, 'In progress', 'text-violet-600', 'font-semibold text-slate-900'],
   done: [Check, 'Done', 'rounded-full bg-emerald-100 p-0.5 text-emerald-700', 'text-slate-500'],
 } satisfies Record<PlanTaskStatus, [LucideIcon, string, string, string]>
 

@@ -3,10 +3,12 @@ import { Check, ChevronRight, Rocket, Sparkles } from 'lucide-react'
 
 import { isContinuationUpgradeModalSource, type PlanTaskCreditsByPlan, type PlanTier, selectSubscriptionState } from '../../store/subscriptionSlice'
 import { useAppSelector } from '../../store/hooks'
+import type { RootState } from '../../store/appStore'
 import type { SignupPreviewState } from '../../types/agentRoster'
 import { appendReturnTo } from '../../util/returnTo'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
+import { TrialGateDial } from './TrialGateDial'
 
 type PlanConfig = {
   id: PlanTier
@@ -125,6 +127,13 @@ export function SubscriptionUpgradePlans({
 
   const isSignupPreviewTracking = source === 'signup_preview_panel' && signupPreviewState && signupPreviewState !== 'none'
 
+  // The signup-funnel gate ("trial_onboarding") renders as the dial: one
+  // decision, Scale default, template-derived outcome estimate, name strip.
+  // Every other source keeps the classic plan grid. Checkout mechanics are
+  // identical — both paths end in onUpgrade(plan).
+  const spawnIntent = useAppSelector((state: RootState) => state.chat?.createAgent?.spawnIntent ?? null)
+  const isTrialGateDial = source === 'trial_onboarding' && !allowDowngrade
+
   const viewComparisonClick = useCallback(() => {
     if (isSignupPreviewTracking) {
       track(AnalyticsEvent.SIGNUP_PREVIEW_COMPARISON_CLICKED, {
@@ -195,6 +204,32 @@ export function SubscriptionUpgradePlans({
     setAllFeaturesExpanded(nextExpanded)
   }, [allFeaturesExpanded, isSignupPreviewTracking, signupPreviewAgentId, signupPreviewState, source, variant])
 
+  if (isTrialGateDial) {
+    return (
+      <div className={rootClass}>
+        <div className={wrapperClass}>
+          <TrialGateDial
+            onSelectPlan={handlePlanSelect}
+            trialDays={Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)}
+            planTaskCreditsByPlan={planTaskCreditsByPlan}
+            agentReadyName={spawnIntent?.prospective_agent_name ?? null}
+            briefTitle={spawnIntent?.brief_title ?? null}
+            outcomeEstimate={spawnIntent?.outcome_estimate ?? null}
+          />
+        </div>
+        <div className={footerClass}>
+          <a
+            href={pricingUrl}
+            className="text-sm font-medium text-slate-500 transition-colors hover:text-violet-600"
+            onClick={viewComparisonClick}
+          >
+            {pricingLinkLabel} &rarr;
+          </a>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={rootClass}>
       <div className={wrapperClass}>
@@ -245,16 +280,16 @@ export function SubscriptionUpgradePlans({
                 data-testid={`subscription-plan-${plan.id}`}
                 className={`group relative flex flex-col overflow-hidden rounded-2xl transition-all duration-200 ${
                   plan.highlight
-                    ? 'bg-gradient-to-b from-indigo-600 to-blue-700 p-[2px] shadow-lg shadow-blue-500/20'
+                    ? 'bg-gradient-to-b from-violet-700 to-purple-700 p-[2px] shadow-lg shadow-violet-500/20'
                     : 'border border-slate-200 bg-white hover:border-slate-300 hover:shadow-md'
-                } ${isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''} ${isExpandedModal ? 'sm:h-full' : ''} ${isCompactInline ? 'rounded-[1.15rem]' : ''}`}
+                } ${isCurrent ? 'ring-2 ring-violet-500 ring-offset-2' : ''} ${isExpandedModal ? 'sm:h-full' : ''} ${isCompactInline ? 'rounded-[1.15rem]' : ''}`}
               >
                 <div className={`relative flex flex-col ${isExpandedModal ? 'sm:h-full' : 'h-full'} ${plan.highlight ? 'rounded-[14px] bg-white' : ''} ${isCompactInline && plan.highlight ? 'rounded-[1rem]' : ''}`}>
                   {plan.badge && (
                     <div
                       className={`absolute rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-wide ${
                         plan.highlight
-                          ? 'bg-gradient-to-r from-indigo-500 to-blue-500 text-white'
+                          ? 'bg-gradient-to-r from-violet-600 to-fuchsia-500 text-white'
                           : 'bg-slate-100 text-slate-600'
                       } ${isCompactInline ? 'right-2.5 top-2.5' : 'right-3 top-3'}`}
                     >
@@ -301,10 +336,10 @@ export function SubscriptionUpgradePlans({
                             className="flex items-center gap-2.5 text-sm text-slate-600"
                           >
                             <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
-                              plan.highlight ? 'bg-blue-100' : 'bg-slate-100'
+                              plan.highlight ? 'bg-violet-100' : 'bg-slate-100'
                             }`}>
                               <Check
-                                className={`h-3 w-3 ${plan.highlight ? 'text-blue-600' : 'text-slate-600'}`}
+                                className={`h-3 w-3 ${plan.highlight ? 'text-violet-600' : 'text-slate-600'}`}
                                 strokeWidth={3}
                               />
                             </div>
@@ -326,7 +361,7 @@ export function SubscriptionUpgradePlans({
                         onClick={() => handlePlanSelect(plan.id)}
                         className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-all duration-200 ${
                           plan.highlight
-                            ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md shadow-blue-500/25 hover:from-indigo-700 hover:to-blue-700 hover:shadow-lg hover:shadow-blue-500/30'
+                            ? 'bg-gradient-to-r from-violet-700 to-purple-600 text-white shadow-md shadow-violet-500/25 hover:from-violet-800 hover:to-purple-700 hover:shadow-lg hover:shadow-violet-500/30'
                             : 'bg-slate-900 text-white hover:bg-slate-800'
                         } ${isCompactInline ? 'py-2.5' : 'py-3'}`}
                       >
@@ -358,7 +393,7 @@ export function SubscriptionUpgradePlans({
       <div className={footerClass}>
         <a
           href={pricingUrl}
-          className="text-sm font-medium text-slate-500 transition-colors hover:text-blue-600"
+          className="text-sm font-medium text-slate-500 transition-colors hover:text-violet-600"
           onClick={viewComparisonClick}
         >
           {pricingLinkLabel} &rarr;

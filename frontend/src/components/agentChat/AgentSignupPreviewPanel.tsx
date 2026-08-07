@@ -4,6 +4,7 @@ import { selectSubscriptionState } from '../../store/subscriptionSlice'
 import { selectActiveChatAgentId, selectActiveChatSession } from '../../store/chatSlice'
 import { useAppSelector } from '../../store/hooks'
 import { AgentUpgradePlansPanel } from './AgentUpgradePlansPanel'
+import { TrialFreezeWall } from './TrialFreezeWall'
 
 type AgentSignupPreviewPanelProps = {
   status?: SignupPreviewState
@@ -26,8 +27,21 @@ export function AgentSignupPreviewPanel({
   const agentId = agentIdOverride ?? storeAgentId
   const agentName = agentNameOverride ?? storeAgentName
   const ctaUnlockAgentCopy = useAppSelector((state) => selectSubscriptionState(state).ctaUnlockAgentCopy)
+  const trialEligible = useAppSelector((state) => selectSubscriptionState(state).trialEligible)
   const isPaused = status === 'awaiting_signup_completion'
   const resolvedAgentName = agentName?.trim() || 'Your agent'
+
+  // The freeze moment (agent worked once, now paused) gets the dark aurora
+  // wall: one Scale-trial CTA with a quiet Pro hatch. Non-trial cases (e.g.
+  // ineligible accounts) keep the classic plans panel.
+  if (isPaused && trialEligible && onUpgrade) {
+    return (
+      <TrialFreezeWall
+        agentName={resolvedAgentName}
+        onSelectPlan={(plan) => onUpgrade(plan, 'signup_preview_panel')}
+      />
+    )
+  }
   const title = ctaUnlockAgentCopy
     ? `${resolvedAgentName} is ready.`
     : (isPaused ? 'Keep your agent going' : 'Your agent is working')

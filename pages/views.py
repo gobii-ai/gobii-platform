@@ -19,7 +19,7 @@ from django.utils.decorators import method_decorator
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.vary import vary_on_cookie
-from django.shortcuts import redirect, resolve_url
+from django.shortcuts import redirect, render, resolve_url
 from django.http import HttpResponseRedirect
 from .models import LandingPage
 from django.conf import settings
@@ -538,10 +538,14 @@ def _auth_url_with_utms(base_url: str, request) -> str:
 
 
 def _cta_auth_url_with_utms(request) -> str:
-    """Resolve the auth destination for anonymous CTA flows."""
-    if is_waffle_flag_active(CTA_SIGNUP_FIRST, request, default=False):
-        return _auth_url_with_utms(reverse("account_signup"), request)
-    return _auth_url_with_utms(resolve_url(settings.LOGIN_URL), request)
+    """Resolve the auth destination for anonymous CTA flows.
+
+    New-customer CTAs land on account CREATION, unconditionally: a login page
+    shown to cold traffic is the canonical drop-off (NN/g login walls, Baymard
+    forced-account findings; every major funnel lands cold traffic on
+    registration). Returning users take the "Sign in" link on that page.
+    """
+    return _auth_url_with_utms(reverse("account_signup"), request)
 
 
 def _is_cta_signup_modal_enabled(request) -> bool:
@@ -1366,16 +1370,12 @@ class HomePage(TemplateView):
                 }
             )
 
-            # The template-first hero replaces the charter-box hero on the default
-            # render only. Explicit custom creation, landing renders (?g=/?dc=),
-            # and a session-saved charter keep the legacy hero so the relevant
-            # instructions remain above the fold.
-            home_use_k = not (
-                context["home_custom_agent_creation"]
-                or context.get("landing_hero_text")
-                or context.get("default_charter")
-                or context.get("agent_charter_saved")
-            )
+            # The old design must never render (Andrew, 2026-08-03). The legacy
+            # fallbacks that used to live here — custom creation, landing renders
+            # (?g=/?dc=), session-saved charters — get re-expressed inside the k
+            # layout in the template-intake PR; until then the k homepage is
+            # unconditional.
+            home_use_k = True
             context["home_use_k"] = home_use_k
             if home_use_k:
                 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
@@ -2386,6 +2386,23 @@ class PublicTemplateLaunchView(View):
         ):
             return _public_template_redirect_with_query(request, canonical_launch_path)
 
+        # Launch deep links get the same intake brief as the hire CTA when the
+        # template has a schema — the quiz is the public entry, whatever door.
+        # Temporary redirect: whether a template has a schema can change, and a
+        # cached 301 would keep old visitors on a dead brief URL.
+        from pages.template_intake import get_intake_schema
+
+        if get_intake_schema(template.code):
+            brief_path = reverse(
+                "pages:public_template_brief",
+                kwargs={
+                    "category_slug": public_template_category_slug(template),
+                    "template_slug": public_template_route_slug(template),
+                },
+            )
+            query_string = request.META.get("QUERY_STRING")
+            return redirect(f"{brief_path}?{query_string}" if query_string else brief_path)
+
         previous_referrer_code = _seed_public_template_session(request, template)
         _set_template_launch_trial_onboarding_if_needed(request)
         _track_anonymous_public_template_capture(request, template, previous_referrer_code)
@@ -2458,6 +2475,21 @@ class PublicTemplateHireView(View):
         )
         if not template:
             raise Http404("This template is no longer available.")
+
+        # Templates with an intake schema route their hire CTA through the
+        # brief quiz before auth — the answers become the agent's first input.
+        from pages.template_intake import get_intake_schema
+
+        if get_intake_schema(template.code):
+            return redirect(
+                reverse(
+                    "pages:public_template_brief",
+                    kwargs={
+                        "category_slug": public_template_category_slug(template),
+                        "template_slug": public_template_route_slug(template),
+                    },
+                )
+            )
 
         previous_referrer_code = _seed_public_template_session(request, template)
         _track_anonymous_public_template_capture(request, template, previous_referrer_code)
@@ -2549,6 +2581,177 @@ class PublicTemplateHireView(View):
         )
 
         return response
+
+
+class PublicTemplateBriefView(View):
+    """Intake brief page for templates with an intake schema: a schema-driven,
+    click-through quiz whose answers become the agent's first input. Stages the
+    same session mechanics the normal hire flow already uses, with the brief
+    table as the charter and the structured briefing payload alongside."""
+
+    def _resolve(self, request, kwargs):
+        from pages.template_intake import get_intake_schema
+
+        template = _resolve_public_template_for_route(
+            category_slug=kwargs.get("category_slug"),
+            template_slug=kwargs.get("template_slug"),
+        )
+        if not template:
+            raise Http404("This template is no longer available.")
+        schema = get_intake_schema(template.code)
+        if not schema:
+            raise Http404
+        return template, schema
+
+    def get(self, request, *args, **kwargs):
+        template, schema = self._resolve(request, kwargs)
+        return render(
+            request,
+            "public_templates/template_brief.html",
+            {
+                "template": template,
+                "intake_schema_json": json.dumps(schema),
+                "post_url": request.path,
+            },
+        )
+
+    def post(self, request, *args, **kwargs):
+        from pages.template_intake import (
+            BRIEFING_PAYLOAD_SESSION_KEY,
+            INTAKE_ANSWERS_SESSION_KEY,
+            build_brief_message,
+            build_briefing_payload,
+            build_charter_override,
+        )
+
+        template, schema = self._resolve(request, kwargs)
+        try:
+            answers = json.loads(request.POST.get("answers") or "{}")
+        except (TypeError, ValueError):
+            answers = {}
+        if not isinstance(answers, dict):
+            answers = {}
+
+        previous_referrer_code = _seed_public_template_session(request, template)
+        _track_anonymous_public_template_capture(request, template, previous_referrer_code)
+
+        brief_message = build_brief_message(schema, answers)
+        request.session["agent_charter"] = brief_message
+        request.session["agent_charter_source"] = "template"
+        request.session["agent_charter_override"] = build_charter_override(
+            template.charter, schema, answers
+        )
+        request.session[BRIEFING_PAYLOAD_SESSION_KEY] = build_briefing_payload(schema, answers)
+        request.session[INTAKE_ANSWERS_SESSION_KEY] = answers
+        request.session.modified = True
+
+        analytics_properties = {
+            "source_page": "template_brief",
+            "template_code": template.code,
+            "flow": "intake_brief",
+        }
+        if request.user.is_authenticated:
+            Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+                source=AnalyticsSource.WEB,
+                properties=analytics_properties,
+            )
+        else:
+            session_key = request.session.session_key
+            if not session_key:
+                request.session.save()
+                session_key = request.session.session_key
+            Analytics.track_event_anonymous(
+                anonymous_id=str(session_key),
+                event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+                source=AnalyticsSource.WEB,
+                properties=analytics_properties,
+            )
+
+        # Local demo (GOBII_DEMO_INTAKE=1): route through the simulated trial
+        # screen instead of the real in-app plan gate.
+        from pages.demo_flow import DEMO_ANSWERS_KEY, DEMO_SESSION_FLAG, demo_intake_enabled
+
+        if demo_intake_enabled():
+            request.session[DEMO_SESSION_FLAG] = True
+            request.session[DEMO_ANSWERS_KEY] = answers
+            request.session.modified = True
+            next_url = reverse("pages:demo_trial")
+        else:
+            # The brief is the trial funnel: after signup the SPA must show the
+            # plan gate before the spawn. (The hire view's redirect to the brief
+            # drops its POST flags, so the intent is staged here.)
+            if not request.user.is_authenticated:
+                set_trial_onboarding_intent(
+                    request,
+                    target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                )
+            next_url = append_query_params(
+                f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                {"spawn": "1"},
+            )
+
+        if request.user.is_authenticated:
+            return redirect(next_url)
+        # New customers land on account CREATION, never a login page — cold
+        # traffic on a login wall is the canonical drop-off (NN/g, Baymard);
+        # returning users take the "Sign in" link on that page.
+        response = redirect_to_login(
+            next=next_url,
+            login_url=_auth_url_with_utms(reverse("account_signup"), request),
+        )
+        charter_data = _build_oauth_charter_cookie_payload(
+            request,
+            charter=brief_message,
+            charter_source="template",
+            template_code=template.code,
+        )
+        attribution_data = _build_oauth_attribution_cookie_payload(request)
+        _set_oauth_stash_cookies(
+            response,
+            request,
+            charter_data=charter_data,
+            attribution_data=attribution_data,
+        )
+        return response
+
+
+class DemoTrialView(View):
+    """Demo-only simulated opt-out trial screen — no Stripe, nothing charged."""
+
+    def get(self, request, *args, **kwargs):
+        from pages.demo_flow import DEMO_ANSWERS_KEY, demo_intake_enabled
+
+        if not demo_intake_enabled():
+            raise Http404
+
+        # Draw the agent's real name now so the gate can say "<Name> is ready".
+        # Same generator + uniqueness check as provisioning; the spawn honors it
+        # via provision(name=...), so the gate never lies. Idempotent per session.
+        prospective_name = request.session.get("prospective_agent_name")
+        if not prospective_name and request.user.is_authenticated:
+            from api.services.persistent_agents import PersistentAgentProvisioningService
+
+            prospective_name = PersistentAgentProvisioningService.generate_unique_name(request.user)
+            request.session["prospective_agent_name"] = prospective_name
+            request.session.modified = True
+
+        answers = request.session.get(DEMO_ANSWERS_KEY) or {}
+        return render(
+            request,
+            "public_templates/demo_trial.html",
+            {
+                "prospective_name": prospective_name,
+                "brief_role": answers.get("role") or "",
+                # Explicit return_to so closing the chat lands on the agents
+                # list, not back on this simulated trial screen.
+                "continue_url": (
+                    f"{IMMERSIVE_APP_BASE_PATH}/agents/new?spawn=1"
+                    f"&return_to={IMMERSIVE_APP_BASE_PATH}/agents"
+                ),
+            },
+        )
 
 
 class EngineeringProSignupView(View):

@@ -38,6 +38,11 @@ from ...utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolInfo, MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
+from .deliver_results import (
+    DELIVER_RESULTS_TOOL_NAME,
+    execute_deliver_results,
+    get_deliver_results_tool,
+)
 from .sqlite_state import agent_sqlite_db
 from .http_request import get_http_request_tool, execute_http_request
 from .secure_api_request import (
@@ -80,7 +85,11 @@ from .add_discord_reaction import get_add_discord_reaction_tool, execute_add_dis
 from .discord_channel_subscriptions import get_discord_channel_subscriptions_tool, execute_discord_channel_subscriptions
 from .send_discord_message import get_send_discord_message_tool, execute_send_discord_message
 from . import webhook_management, webhook_sender
-from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY, WEBHOOKS_SYSTEM_SKILL_KEY
+from api.agent.system_skills.defaults import (
+    DISCORD_NATIVE_SYSTEM_SKILL_KEY,
+    RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
+    WEBHOOKS_SYSTEM_SKILL_KEY,
+)
 from api.agent.system_skills.image_generation import IMAGE_GENERATION_SYSTEM_SKILL_KEY
 from .meta_gobii import execute_meta_gobii_tool, get_meta_gobii_tool_definition, is_meta_gobii_available_for_agent
 from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
@@ -222,6 +231,12 @@ def should_skip_auto_substitution(tool_name: str) -> bool:
 
 
 BUILTIN_TOOL_REGISTRY = {
+    DELIVER_RESULTS_TOOL_NAME: {
+        "definition": get_deliver_results_tool,
+        "executor": execute_deliver_results,
+        "search_hidden": True,
+        "system_skill_key": RECRUITMENT_SOURCING_SYSTEM_SKILL_KEY,
+    },
     SQLITE_TOOL_NAME: {
         "definition": get_sqlite_batch_tool,
         "executor": execute_sqlite_batch,

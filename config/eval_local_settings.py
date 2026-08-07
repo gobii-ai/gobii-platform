@@ -36,7 +36,16 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": str(_eval_local_dir / "eval-local.sqlite3"),
-        "OPTIONS": {"timeout": 30},
+        # WAL lets web requests read while a long-running loop process writes;
+        # the busy timeout stops "database is locked" 500s under contention.
+        "OPTIONS": {
+            "timeout": 30,
+            "init_command": (
+                "PRAGMA journal_mode=WAL;"
+                "PRAGMA synchronous=NORMAL;"
+                "PRAGMA busy_timeout=30000;"
+            ),
+        },
     }
 }
 

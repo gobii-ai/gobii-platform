@@ -103,7 +103,9 @@
       {% include "library/_fallback.html" with payload=library_initial_payload selected_category=library_initial_category official_only=library_initial_official_only %}
     </div>
     <div class="relative z-10 mt-8 text-center">
-      <a class="gk-btn-quiet" href="{% url 'pages:home' %}?spawn=1" rel="nofollow"
+      {# The legacy homepage charter box is gone for good — the full custom input
+         lives in the app's new-agent surface (auth-gated, current design). #}
+      <a class="gk-btn-quiet" href="/app/agents/new" rel="nofollow"
          data-analytics-cta-id="library_custom_agent" data-analytics-placement="library_footer"
          data-analytics-intent="create_custom_agent">
         Build a custom agent from your own prompt

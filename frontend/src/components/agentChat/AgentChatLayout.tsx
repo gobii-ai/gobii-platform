@@ -1632,7 +1632,7 @@ export function AgentChatLayout({
               aria-busy="true"
             >
               <div className="flex flex-col items-center gap-3 text-center">
-                <Loader2 size={28} className="animate-spin text-blue-600" aria-hidden="true" />
+                <Loader2 size={28} className="animate-spin text-violet-600" aria-hidden="true" />
                 <div>
                   <p className="text-sm font-semibold text-slate-700">Preparing your agent…</p>
                 </div>

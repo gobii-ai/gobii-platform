@@ -1,0 +1,184 @@
+/* The freeze wall — e2 "aurora" treatment: night-violet panel on the light
+   chat canvas, one living animated seam along the top edge. */
+
+@property --freeze-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
+
+.freeze-wall {
+    position: relative;
+    border-radius: 20px;
+    overflow: hidden;
+    text-align: center;
+    color: #b7aed4;
+    padding: 27px 26px 20px;
+    border: 1px solid transparent;
+    background: linear-gradient(rgba(20, 13, 38, 0.97), rgba(24, 15, 44, 0.97)) padding-box,
+    linear-gradient(120deg, rgba(124, 58, 237, 0.45), rgba(240, 171, 252, 0.28)) border-box;
+    box-shadow: 0 30px 74px -28px rgba(15, 10, 30, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.freeze-wall::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+}
+.freeze-wall__aurora {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    z-index: 1;
+    border-radius: 20px 20px 0 0;
+    background: linear-gradient(90deg, #7c3aed, #f0abfc, transparent, #a855f7, #7c3aed);
+    background-size: 220% 100%;
+    animation: freeze-aurora 6s linear infinite;
+}
+@keyframes freeze-aurora {
+    to { background-position: 220% 0; }
+}
+.freeze-wall__aurora-glow {
+    position: absolute;
+    top: -70px;
+    left: 15%;
+    right: 15%;
+    height: 130px;
+    z-index: 0;
+    background: radial-gradient(50% 90% at 50% 100%, rgba(168, 85, 247, 0.4), transparent 75%);
+    filter: blur(24px);
+}
+.freeze-wall__who {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    max-width: 360px;
+    margin: 0 auto 14px;
+    padding: 9px 14px;
+    border-radius: 13px;
+    text-align: left;
+    background: rgba(139, 92, 246, 0.13);
+    border: 1px solid rgba(196, 181, 253, 0.32);
+}
+.freeze-wall__avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #8b5cf6, #c026d3);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12.5px;
+    font-weight: 700;
+    flex: none;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.16), 0 5px 14px -5px rgba(124, 58, 237, 0.8);
+}
+.freeze-wall__who-text { display: flex; flex-direction: column; min-width: 0; }
+.freeze-wall__who-text b { font-size: 13px; color: #fff; font-weight: 650; letter-spacing: -0.1px; }
+.freeze-wall__who-text small {
+    font-size: 11px;
+    color: #9a8fc0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.freeze-wall__pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #f59e0b;
+    margin-left: auto;
+    flex: none;
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+    animation: freeze-pulse 2s ease-in-out infinite;
+}
+@keyframes freeze-pulse { 50% { opacity: 0.35; } }
+.freeze-wall__title {
+    position: relative;
+    z-index: 1;
+    font-size: 22px;
+    font-weight: 300;
+    letter-spacing: -0.028em;
+    color: #fff;
+    margin: 0 0 4px;
+}
+.freeze-wall__title em {
+    font-style: normal;
+    font-weight: 400;
+    background: linear-gradient(90deg, #c4b5fd, #f0abfc);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+.freeze-wall__zero { position: relative; z-index: 1; font-size: 13px; color: #b7aed4; margin: 9px 0 16px; }
+.freeze-wall__zero b { color: #7ee2b8; font-weight: 650; }
+.freeze-wall__go {
+    position: relative;
+    z-index: 1;
+    display: inline-block;
+    padding: 2px;
+    border: 0;
+    border-radius: 14px;
+    background: conic-gradient(from var(--freeze-angle), #7c3aed, #f0abfc, #a855f7, #7c3aed);
+    cursor: pointer;
+    animation: freeze-spin 3.2s linear infinite;
+    box-shadow: 0 18px 40px -14px rgba(124, 58, 237, 0.75);
+    font: inherit;
+}
+@keyframes freeze-spin { to { --freeze-angle: 360deg; } }
+.freeze-wall__go span {
+    display: block;
+    padding: 13px 34px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, #3b2270, #2a1854);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: 0.1px;
+}
+.freeze-wall__hatch { position: relative; z-index: 1; font-size: 11.5px; color: #8a80a8; margin-top: 11px; }
+.freeze-wall__hatch button {
+    font: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: #c4b5fd;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.freeze-wall__hatch button:hover { color: #f0abfc; }
+.freeze-wall__wallets {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    gap: 7px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 13px;
+    flex-wrap: wrap;
+}
+.freeze-wall__wchip {
+    font-size: 11px;
+    font-weight: 600;
+    color: #e9dcff;
+    padding: 4.5px 12px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.freeze-wall__wsec { font-size: 10.5px; color: #8a80a8; }
+.freeze-wall__under { position: relative; z-index: 1; font-size: 11px; color: #8a80a8; margin-top: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+    .freeze-wall__go,
+    .freeze-wall__aurora,
+    .freeze-wall__pulse { animation: none; }
+}

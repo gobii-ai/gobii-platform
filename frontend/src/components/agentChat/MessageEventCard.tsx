@@ -3,6 +3,9 @@ import { Fragment, memo, useCallback, useMemo, useState } from 'react'
 import { Check, Copy, Flag, RotateCcw } from 'lucide-react'
 import type { AgentMessage } from './types'
 import { trackAgentMessageCopy } from '../../api/agentChat'
+import { BriefingEventCard } from './BriefingEventCard'
+import { AnswersEventCard } from './AnswersEventCard'
+import { ResultsEventCard } from './ResultsEventCard'
 import { MessageContent } from './MessageContent'
 import { MessageFeedbackActions } from './MessageFeedbackActions'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -112,6 +115,39 @@ export const MessageEventCard = memo(function MessageEventCard({
 }: MessageEventCardProps) {
   const [copied, setCopied] = useState(false)
   const [retrying, setRetrying] = useState(false)
+
+  // Briefings are input artifacts, not chat messages — render the structured
+  // card instead of a bubble (the message body is model-facing input only).
+  if (message.briefing && !message.isOutbound) {
+    return (
+      <BriefingEventCard
+        briefing={message.briefing}
+        relativeTimestamp={message.relativeTimestamp}
+      />
+    )
+  }
+
+  // Same treatment for the user's structured question answers.
+  if (message.answers && !message.isOutbound) {
+    return (
+      <AnswersEventCard
+        answers={message.answers}
+        relativeTimestamp={message.relativeTimestamp}
+      />
+    )
+  }
+
+  // Structured result deliveries render as result cards, not bubbles.
+  if (message.results && message.isOutbound) {
+    return (
+      <ResultsEventCard
+        results={message.results}
+        bodyText={message.bodyText}
+        relativeTimestamp={message.relativeTimestamp}
+      />
+    )
+  }
+
   const isAgent = Boolean(message.isOutbound)
   const shouldAnimate = isAgent && !disableFastReveal && isRecentMessage(message.timestamp)
   const channel = (message.channel || 'web').toLowerCase()

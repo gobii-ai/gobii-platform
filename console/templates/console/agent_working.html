@@ -1,0 +1,62 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ agent_name }} is working · Gobii</title>
+<link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Inter Variable','InterVariable',ui-sans-serif,system-ui,sans-serif; min-height:100vh;
+    background:linear-gradient(170deg,#0f0a1e 0%,#16102b 40%,#241a4a 100%); color:#b7aed4; }
+  .glow { position:fixed; inset:0; pointer-events:none; }
+  .glow::before { content:""; position:absolute; width:560px; height:560px; border-radius:50%;
+    background:rgba(168,85,247,.28); filter:blur(110px); top:-160px; right:-120px; }
+  .nav { display:flex; align-items:center; max-width:1080px; margin:18px auto 0; padding:10px 18px; }
+  .nav img { width:30px; height:30px; }
+  .nav span { color:#fff; font-weight:300; font-size:21px; margin-left:8px; transform:translateY(-2px); display:inline-block; }
+  .wrap { max-width:480px; margin:0 auto; padding:clamp(30px,10vh,84px) 16px; position:relative; text-align:center; }
+  .card { border-radius:18px; padding:32px 30px 26px;
+    background:linear-gradient(rgba(22,14,40,.85),rgba(22,14,40,.85)) padding-box,
+               linear-gradient(120deg,rgba(124,58,237,.5),rgba(240,171,252,.28)) border-box;
+    border:1px solid transparent; box-shadow:0 44px 110px -44px rgba(124,58,237,.6); }
+  .avatar { width:52px; height:52px; border-radius:50%; margin:0 auto 14px;
+    background:linear-gradient(135deg,#8b5cf6,#c026d3); color:#fff; display:flex; align-items:center; justify-content:center;
+    font-size:20px; font-weight:700; box-shadow:0 0 0 3px rgba(255,255,255,.14), 0 8px 24px -8px rgba(124,58,237,.7); }
+  h1 { font-weight:300; letter-spacing:-.5px; font-size:24px; color:#fff; line-height:1.25; }
+  h1 em { font-style:normal; font-weight:400; background:linear-gradient(90deg,#c4b5fd,#f0abfc);
+    -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .mission { margin:10px 0 0; font-size:14px; color:#b7aed4; line-height:1.55; }
+  .status { display:inline-flex; align-items:center; gap:8px; margin:16px auto 0; padding:7px 14px; border-radius:999px;
+    background:rgba(139,92,246,.13); border:1px solid rgba(196,181,253,.3); font-size:12px; color:#e9dcff; }
+  .dot { width:7px; height:7px; border-radius:50%; background:#7ee2b8; animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.35; } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation:none; } }
+  .close-note { margin:20px 0 4px; font-size:14.5px; color:#fff; font-weight:450; }
+  .email-note { font-size:12.5px; color:#9a8fc0; line-height:1.6; }
+  .email-note b { color:#e9dcff; font-weight:550; }
+  .chatlink { display:inline-block; margin-top:20px; font-size:12px; color:#c4b5fd; text-decoration:none;
+    border-bottom:1px solid rgba(196,181,253,.4); padding-bottom:1px; }
+  .chatlink:hover { color:#f0abfc; border-color:rgba(240,171,252,.5); }
+  .under { margin-top:16px; font-size:11px; color:#6f6590; }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<nav class="nav"><a href="/" style="display:flex;align-items:center;text-decoration:none"><img src="{% static 'images/gobii_fish.png' %}" alt=""><span>gobii</span></a></nav>
+<div class="wrap">
+  <div class="card">
+    <div class="avatar">{{ agent_name|slice:":1" }}</div>
+    <h1>{{ agent_name }} is <em>on the job</em></h1>
+    {% if mission %}<p class="mission">Working on: {{ mission }}</p>{% endif %}
+    <div class="status"><span class="dot"></span>Started {{ started_at }} · sourcing</div>
+    <p class="close-note">You can close this window.</p>
+    <p class="email-note">Your first results will arrive by email at <b>{{ user_email }}</b> —
+      usually within a few hours. {{ agent_first_name }} keeps working around the clock either way.</p>
+    <a class="chatlink" href="{{ chat_url }}">Open the live workspace to steer or watch {{ agent_first_name }} work</a>
+  </div>
+  <p class="under">Reply to any email from {{ agent_first_name }} to refine the search.</p>
+</div>
+</body>
+</html>

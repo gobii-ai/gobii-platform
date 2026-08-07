@@ -1,0 +1,201 @@
+/* Trial gate — the "what happens next" receipt in the locked night-luxe
+   language: dark card on the light modal, gradient hairline, grain, conic
+   CTA. No gauge; the ledger carries the pitch. */
+
+@property --trial-gate-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
+
+.trial-gate {
+    position: relative;
+    max-width: 27rem;
+    margin: 0 auto;
+    padding: 26px 30px 22px;
+    text-align: center;
+    color: #b7aed4;
+    border-radius: 20px;
+    border: 1px solid transparent;
+    background: linear-gradient(rgba(23, 14, 42, 0.95), rgba(19, 12, 36, 0.96)) padding-box,
+    linear-gradient(130deg, rgba(124, 58, 237, 0.65), rgba(240, 171, 252, 0.35), rgba(124, 58, 237, 0.5)) border-box;
+    box-shadow: 0 40px 110px -40px rgba(124, 58, 237, 0.55),
+    0 10px 40px -18px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.trial-gate::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 20px;
+    pointer-events: none;
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.trial-gate__who {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 330px;
+    margin: 0 auto 16px;
+    padding: 9px 14px;
+    border-radius: 12px;
+    text-align: left;
+    background: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(196, 181, 253, 0.3);
+}
+.trial-gate__avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #8b5cf6, #c026d3);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex: none;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15), 0 4px 12px -4px rgba(124, 58, 237, 0.6);
+}
+.trial-gate__who-text { display: flex; flex-direction: column; min-width: 0; }
+.trial-gate__who-text b { font-size: 13px; color: #fff; font-weight: 650; }
+.trial-gate__who-text small {
+    font-size: 11px;
+    color: #9a8fc0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.trial-gate__pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #7ee2b8;
+    margin-left: auto;
+    flex: none;
+    animation: trial-gate-pulse 2s ease-in-out infinite;
+}
+@keyframes trial-gate-pulse { 50% { opacity: 0.35; } }
+
+.trial-gate__title {
+    position: relative;
+    font-size: 23px;
+    font-weight: 300;
+    letter-spacing: -0.5px;
+    color: #fff;
+    margin: 0;
+}
+.trial-gate__accent {
+    font-weight: 400;
+    background: linear-gradient(90deg, #c4b5fd, #f0abfc);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.trial-gate__ledger {
+    position: relative;
+    margin: 16px 0 6px;
+    border-radius: 14px;
+    text-align: left;
+    background: rgba(9, 5, 20, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    padding: 4px 16px;
+}
+.trial-gate__lrow {
+    display: flex;
+    gap: 13px;
+    padding: 10px 0;
+    align-items: baseline;
+}
+.trial-gate__lrow + .trial-gate__lrow { border-top: 1px solid rgba(196, 181, 253, 0.12); }
+.trial-gate__lrow b {
+    flex: none;
+    width: 88px;
+    font-size: 11.5px;
+    letter-spacing: 0.2px;
+    color: #c4b5fd;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+.trial-gate__lrow span { font-size: 12.5px; color: #cfc2ee; line-height: 1.45; }
+.trial-gate__lrow span i { font-style: normal; color: #7ee2b8; font-weight: 650; }
+.trial-gate__lrow--rec span em { font-style: normal; color: #fff; font-weight: 550; }
+
+.trial-gate__estnote { position: relative; font-size: 10.5px; color: #8a80a8; margin: 8px 0 14px; }
+.trial-gate__estnote a {
+    color: #9a8fc0;
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(196, 181, 253, 0.4);
+}
+.trial-gate__estnote a:hover { color: #c4b5fd; }
+
+.trial-gate__go {
+    --trial-gate-angle: 0deg;
+    position: relative;
+    display: block;
+    width: 100%;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 650;
+    color: #fff;
+    background: linear-gradient(180deg, #3b2270, #2a1854);
+    border: 0;
+    border-radius: 13px;
+    padding: 14px;
+    cursor: pointer;
+}
+.trial-gate__go::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 15px;
+    padding: 2px;
+    background: conic-gradient(from var(--trial-gate-angle), #7c3aed, #f0abfc, #a855f7, #7c3aed);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: trial-gate-spin 3.2s linear infinite;
+}
+@keyframes trial-gate-spin { to { --trial-gate-angle: 360deg; } }
+
+.trial-gate__prohatch { position: relative; font-size: 11.5px; color: #8a80a8; margin-top: 12px; }
+.trial-gate__prohatch button {
+    font: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: #c4b5fd;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(196, 181, 253, 0.4);
+}
+.trial-gate__prohatch button:hover { color: #f0abfc; }
+
+.trial-gate__wallets {
+    position: relative;
+    display: flex;
+    gap: 7px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+.trial-gate__wchip {
+    font-size: 11px;
+    font-weight: 600;
+    color: #e9dcff;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    padding: 5px 12px;
+}
+.trial-gate__wsec { font-size: 10.5px; color: #8a80a8; }
+
+@media (prefers-reduced-motion: reduce) {
+    .trial-gate__go::before,
+    .trial-gate__pulse { animation: none; }
+}

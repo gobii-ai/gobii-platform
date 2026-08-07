@@ -178,6 +178,7 @@ from console.views import (
     AgentAvatarThumbnailProxyView,
     PublicAgentAvatarThumbnailView,
     AgentQuickSpawnView,
+    AgentWorkingView,
     AgentDailyLimitEmailActionView,
     AgentDeleteView,
     ConsoleEvalsView,
@@ -572,6 +573,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/secrets/<uuid:secret_id>/promote/", AgentSecretPromoteAPIView.as_view(), name="console-agent-secret-promote"),
     path("console/api/usage/agents/", UsageAgentsAPIView.as_view(), name="console_usage_agents"),
     path("console/agents/create/quick/", AgentQuickSpawnView.as_view(), name="agent_quick_spawn"),
+    path("console/agents/<uuid:agent_id>/working/", AgentWorkingView.as_view(), name="agent_working"),
     path("console/agents/<uuid:pk>/", LegacyConsoleRedirectView.as_view(), name="agent_detail"),
     path(
         "console/agents/<uuid:pk>/daily-limit/<str:action>/",

@@ -246,7 +246,7 @@ export function EmbeddedAgentContactRequestsPanel({
                         onChange={(event) => toggleSelected(request.id, event.currentTarget.checked)}
                         disabled={busy}
                         aria-label={`Select ${heading}`}
-                        className="mt-1 h-4 w-4 rounded border-slate-400 bg-slate-950 text-sky-500 focus:ring-sky-400"
+                        className="mt-1 h-4 w-4 rounded border-slate-400 bg-slate-950 text-violet-500 focus:ring-violet-400"
                       />
                       <div className="min-w-0 flex-1 space-y-4">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -325,7 +325,7 @@ export function EmbeddedAgentContactRequestsPanel({
                               checked={draft.allowOutbound}
                               onChange={(event) => updateDraft(request.id, { ...draft, allowOutbound: event.currentTarget.checked })}
                               disabled={busy}
-                              className="mt-0.5 h-4 w-4 rounded border-slate-400 bg-slate-950 text-sky-500 focus:ring-sky-400"
+                              className="mt-0.5 h-4 w-4 rounded border-slate-400 bg-slate-950 text-violet-500 focus:ring-violet-400"
                             />
                             <span>Allow sending messages to this contact</span>
                           </label>

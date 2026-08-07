@@ -4160,6 +4160,16 @@ export function AgentChatPage({
       return
     }
 
+    // Funnel spawns (a briefing is staged) always go through the server
+    // quick-spawn path: it creates the agent, sends the bridge email, and
+    // lands on the "agent is working" page — never straight into the chat.
+    // This covers entitled users who rightly skip the plan gate.
+    if (spawnIntent.brief_title) {
+      spawnIntentAutoSubmittedRef.current = true
+      window.location.assign('/console/agents/create/quick/')
+      return
+    }
+
     const preferredTierRaw = spawnIntent.preferred_llm_tier?.trim() || null
     const desiredTierRaw = preferredTierRaw || llmIntelligence?.systemDefaultTier || null
     if (desiredTierRaw) {

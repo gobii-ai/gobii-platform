@@ -124,8 +124,8 @@ export function buildAgentConfigEntry(
     caption = scheduleCaption
     summary = confirmedScheduleSummary
     icon = CalendarClock
-    iconBgClass = 'bg-sky-100'
-    iconColorClass = 'text-sky-600'
+    iconBgClass = 'bg-violet-100'
+    iconColorClass = 'text-violet-600'
   }
 
   return {

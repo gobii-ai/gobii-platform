@@ -227,7 +227,7 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
               {initialLoading ? (
                 <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
                   <div className="flex flex-col items-center gap-3 text-center">
-                    <Loader2 size={28} className="animate-spin text-blue-600" aria-hidden="true" />
+                    <Loader2 size={28} className="animate-spin text-violet-600" aria-hidden="true" />
                     <div>
                       <p className="text-sm font-semibold text-slate-700">Loading conversation…</p>
                     </div>

@@ -360,7 +360,7 @@ export function PendingActionComposerPanel({
       <div className={useApprovalInfoCard ? 'rounded-xl border border-slate-200/70 bg-white px-3 py-3' : undefined}>
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2.5">
-            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
               <ActiveIcon className="h-4 w-4" aria-hidden="true" />
             </span>
             <div className={`min-w-0 ${activeActionMeta ? '' : 'flex min-h-8 items-center'}`}>
@@ -388,14 +388,14 @@ export function PendingActionComposerPanel({
               <button
                 type="button"
                 onClick={onOpenOutbox}
-                className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 hover:text-blue-800"
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-900"
               >
                 Review in Outbox
               </button>
             ) : (
               <a
                 href={activeAction.outboxUrl}
-                className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 hover:text-blue-800"
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-900"
               >
                 Review in Outbox
               </a>

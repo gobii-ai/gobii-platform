@@ -127,7 +127,7 @@ export function HumanInputComposerPanel({
                   key={option.key}
                   className={`relative flex items-center gap-1.5 border-b border-slate-200 px-1.5 py-1.5 transition ${
                     isSelected
-                      ? 'bg-sky-50'
+                      ? 'bg-violet-50'
                       : 'bg-white hover:bg-slate-50'
                   }`}
                 >
@@ -136,13 +136,13 @@ export function HumanInputComposerPanel({
                     onClick={() => onSelectOption(activeRequest.id, option.key)}
                     disabled={disabled || isBusy}
                     className={`group flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-0.5 py-0.5 text-left disabled:cursor-wait disabled:opacity-60 ${
-                      isSelected ? 'text-sky-950' : ''
+                      isSelected ? 'text-violet-950' : ''
                     }`}
                   >
-                    <span className={`w-4 shrink-0 text-xs font-semibold ${isSelected ? 'text-sky-600' : 'text-slate-400'}`}>
+                    <span className={`w-4 shrink-0 text-xs font-semibold ${isSelected ? 'text-violet-600' : 'text-slate-400'}`}>
                       {index + 1}.
                     </span>
-                    <div className={`min-w-0 flex-1 text-[13px] font-semibold leading-5 ${isSelected ? 'text-sky-950' : 'text-slate-900'}`}>
+                    <div className={`min-w-0 flex-1 text-[13px] font-semibold leading-5 ${isSelected ? 'text-violet-950' : 'text-slate-900'}`}>
                       {option.title}
                     </div>
                   </button>
@@ -158,13 +158,13 @@ export function HumanInputComposerPanel({
             <div
               className={`relative flex items-center gap-2.5 px-1.5 py-1.5 transition ${
                 isOtherSelected
-                  ? 'bg-sky-50'
+                  ? 'bg-violet-50'
                   : 'bg-white hover:bg-slate-50'
               }`}
             >
               <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-0.5 py-0.5">
                 <span className={`w-4 shrink-0 text-xs font-semibold ${
-                  isOtherSelected ? 'text-sky-600' : 'text-slate-400'
+                  isOtherSelected ? 'text-violet-600' : 'text-slate-400'
                 }`}>
                   {activeRequest.options.length + 1}.
                 </span>

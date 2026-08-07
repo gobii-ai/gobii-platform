@@ -61,7 +61,7 @@
     padding: 0.75rem;
 }
 :is(.agent-chat-surface, .agent-chat-section-card)[data-tone='info'] {
-    border-color: rgba(14, 165, 233, 0.24);
+    border-color: rgba(139, 92, 246, 0.24);
     background: rgba(224, 242, 254, 0.64);
 }
 :is(.agent-chat-surface, .agent-chat-section-card)[data-tone='success'] {
@@ -261,8 +261,8 @@
     gap: 0.25rem;
 }
 :is(.agent-chat-status-badge, .agent-chat-pill, .agent-chat-icon-button, .agent-chat-button)[data-tone='info'] {
-    background: rgba(14, 165, 233, 0.12);
-    color: #0369a1;
+    background: rgba(139, 92, 246, 0.12);
+    color: #6d28d9;
 }
 :is(.agent-chat-status-badge, .agent-chat-pill, .agent-chat-icon-button, .agent-chat-button)[data-tone='success'] {
     background: rgba(34, 197, 94, 0.12);
@@ -2128,7 +2128,7 @@
     display: none;
 }
 .composer-working-panel[data-has-pending-actions="true"] .composer-working-indicator {
-    color: #0284c7;
+    color: #7c3aed;
     opacity: 1;
 }
 .composer-working-panel[data-has-pending-actions="true"] .composer-working-status strong {
@@ -2136,7 +2136,7 @@
 }
 .composer-working-panel[data-has-pending-actions="true"] .composer-working-tasks-badge {
     color: #075985;
-    background: rgba(14, 165, 233, 0.13);
+    background: rgba(139, 92, 246, 0.13);
 }
 .composer-working-header-row {
     position: relative;
@@ -2163,7 +2163,7 @@
     align-items: center;
     justify-content: center;
     gap: 0.125rem;
-    color: #0284c7;
+    color: #7c3aed;
 }
 .composer-working-indicator--dots .composer-working-dot {
     background: currentColor;
@@ -2171,14 +2171,14 @@
 .composer-working-status {
     flex-shrink: 0;
     font-size: 0.8125rem;
-    color: #64748b;
+    color: #6d28d9;
     display: flex;
     align-items: center;
     gap: 0.25rem;
     white-space: nowrap;
 }
 .composer-working-status strong {
-    color: #334155;
+    color: #4c1d95;
     font-weight: 600;
 }
 .composer-ready-status {
@@ -2268,16 +2268,16 @@
     height: 1.625rem;
     flex-shrink: 0;
     border-radius: 9999px;
-    border: 1px solid rgba(14, 165, 233, 0.24);
+    border: 1px solid rgba(139, 92, 246, 0.24);
     background: rgba(255, 255, 255, 0.58);
     padding: 0 0.625rem;
-    color: #0369a1;
+    color: #6d28d9;
     font-size: 0.6875rem;
     font-weight: 650;
     transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 .composer-skip-planning-button:hover {
-    border-color: rgba(14, 165, 233, 0.42);
+    border-color: rgba(139, 92, 246, 0.42);
     background: rgba(255, 255, 255, 0.78);
     color: #075985;
 }
@@ -2299,15 +2299,15 @@
     width: 1.75rem;
     height: 1.75rem;
     border-radius: 0.625rem;
-    border: 1px solid rgba(14, 165, 233, 0.22);
+    border: 1px solid rgba(139, 92, 246, 0.22);
     background: rgba(255, 255, 255, 0.58);
     color: #075985;
     transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 .composer-pending-action-nav__button:hover {
-    border-color: rgba(14, 165, 233, 0.42);
+    border-color: rgba(139, 92, 246, 0.42);
     background: rgba(255, 255, 255, 0.78);
-    color: #0c4a6e;
+    color: #4c1d95;
 }
 .composer-pending-action-nav__button:disabled {
     cursor: not-allowed;
@@ -2547,22 +2547,22 @@
     background: var(--tab-color, #6b7280);
 }
 .composer-insight-tab[data-priority="true"] {
-    border: 1px solid color-mix(in srgb, var(--tab-color, #0284c7) 36%, transparent);
-    background: color-mix(in srgb, var(--tab-color, #0284c7) 13%, white);
+    border: 1px solid color-mix(in srgb, var(--tab-color, #7c3aed) 36%, transparent);
+    background: color-mix(in srgb, var(--tab-color, #7c3aed) 13%, white);
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.52) inset;
 }
 .composer-insight-tab[data-priority="true"]:hover {
-    background: color-mix(in srgb, var(--tab-color, #0284c7) 18%, white);
+    background: color-mix(in srgb, var(--tab-color, #7c3aed) 18%, white);
 }
 .composer-insight-tab[data-priority="true"][data-active="true"] {
-    border-color: color-mix(in srgb, var(--tab-color, #0284c7) 58%, white);
-    background: color-mix(in srgb, var(--tab-color, #0284c7) 22%, white);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--tab-color, #0284c7) 22%, white) inset,
-    0 0 0 2px color-mix(in srgb, var(--tab-color, #0284c7) 8%, transparent);
+    border-color: color-mix(in srgb, var(--tab-color, #7c3aed) 58%, white);
+    background: color-mix(in srgb, var(--tab-color, #7c3aed) 22%, white);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--tab-color, #7c3aed) 22%, white) inset,
+    0 0 0 2px color-mix(in srgb, var(--tab-color, #7c3aed) 8%, transparent);
 }
 .composer-working-panel[data-expanded="false"] .composer-insight-tab[data-priority="true"] {
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--tab-color, #0284c7) 30%, white) inset,
-    0 0 0 3px color-mix(in srgb, var(--tab-color, #0284c7) 10%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--tab-color, #7c3aed) 30%, white) inset,
+    0 0 0 3px color-mix(in srgb, var(--tab-color, #7c3aed) 10%, transparent);
 }
 .composer-insight-tab-inner {
     display: none;
@@ -2617,11 +2617,11 @@
 .composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-label,
 .composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-icon,
 .composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-count {
-    color: var(--tab-color, #0284c7);
+    color: var(--tab-color, #7c3aed);
     font-weight: 700;
 }
 .composer-insight-tab[data-priority="true"][data-active="true"] .composer-insight-tab-count {
-    background: color-mix(in srgb, var(--tab-color, #0284c7) 16%, white);
+    background: color-mix(in srgb, var(--tab-color, #7c3aed) 16%, white);
 }
 .composer-insight-tab[data-active="true"] .composer-insight-tab-count {
     background: rgba(255, 255, 255, 0.22);
@@ -3145,7 +3145,7 @@
     background: rgba(255, 255, 255, 0.96);
 }
 .hard-limit-callout-button:focus-visible {
-    outline: 2px solid rgba(14, 165, 233, 0.4);
+    outline: 2px solid rgba(139, 92, 246, 0.4);
     outline-offset: 2px;
 }
 .hard-limit-callout-button:active {
@@ -4331,7 +4331,7 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: linear-gradient(102deg, rgba(14, 165, 233, 0), rgba(14, 165, 233, 0.16), rgba(14, 165, 233, 0));
+    background: linear-gradient(102deg, rgba(139, 92, 246, 0), rgba(139, 92, 246, 0.16), rgba(139, 92, 246, 0));
     z-index: 0;
 }
 .tool-cluster-live-preview__entry-icon {
@@ -5071,7 +5071,7 @@
     top: calc(0.48rem + var(--timeline-icon-size));
     bottom: calc(0.48rem + var(--timeline-icon-size));
     width: 2px;
-    background: linear-gradient(180deg, rgba(99, 102, 241, 0.28), rgba(14, 165, 233, 0.18));
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.28), rgba(139, 92, 246, 0.18));
     opacity: 0.7;
 }
 .tool-cluster-timeline-item {
@@ -5411,7 +5411,7 @@
     gap: 0.35rem;
     border-radius: 999px;
     background: rgba(2, 132, 199, 0.1);
-    color: #0c4a6e;
+    color: #4c1d95;
     padding: 0.35rem 0.75rem;
     font-weight: 600;
 }
@@ -6319,11 +6319,12 @@
     align-items: center;
     gap: 0.45rem;
     max-width: 11rem;
+    min-width: 0;
     padding: 0.35rem 0.55rem;
     border-radius: 0.65rem;
-    border: 1px solid rgba(37, 99, 235, 0.25);
-    background: rgba(37, 99, 235, 0.12);
-    color: #1d4ed8;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    background: rgba(139, 92, 246, 0.14);
+    color: #6d28d9;
     font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: -0.01em;
@@ -8743,7 +8744,7 @@
     --embedded-text: rgba(248, 245, 255, 0.96);
     --embedded-muted: rgba(196, 181, 253, 0.74);
     --embedded-field: rgba(14, 11, 33, 0.74);
-    --embedded-accent: rgba(14, 165, 233, 0.9);
+    --embedded-accent: rgba(139, 92, 246, 0.9);
     color-scheme: dark;
     color: var(--embedded-text);
     --console-card-surface: var(--embedded-surface);
@@ -8834,7 +8835,7 @@
     align-items: center;
     justify-content: center;
     border: 1px solid rgba(125, 211, 252, 0.24);
-    background: rgba(14, 165, 233, 0.13);
+    background: rgba(139, 92, 246, 0.13);
     color: rgba(186, 230, 253, 0.96);
 }
 .profile-screen__title-icon {
@@ -8927,7 +8928,7 @@
     transform: translateY(-1px);
 }
 .profile-screen__button--primary {
-    --embedded-button-bg: linear-gradient(135deg, rgba(14, 165, 233, 0.92), rgba(99, 102, 241, 0.92));
+    --embedded-button-bg: linear-gradient(135deg, rgba(139, 92, 246, 0.92), rgba(99, 102, 241, 0.92));
     --embedded-button-color: #ffffff;
 }
 .profile-screen__button--secondary {
@@ -9041,7 +9042,7 @@
 }
 .profile-screen .organization-screen__setting-toggle input:checked + .organization-screen__setting-switch {
     border-color: rgba(125, 211, 252, 0.42);
-    background: rgba(14, 165, 233, 0.62);
+    background: rgba(139, 92, 246, 0.62);
 }
 .profile-screen .organization-screen__setting-toggle input:checked + .organization-screen__setting-switch::after {
     transform: translateX(1.25rem);
@@ -9185,4 +9186,368 @@
     .mood-shift__glyph {
         font-size: 1.375rem;
     }
+}
+
+/* ============================================================================
+   Timeline "elevated light" materials + question spotlight (design locked
+   2026-08-03, round w2; regression-hardened 2026-08-05). App frame untouched.
+   Rules here are additive: no radius, padding, background, or state overrides —
+   bubble variants (user/agent/peer), sending/failed tints, and mobile radii all
+   come from the original rules above.
+   ========================================================================== */
+/* The framed chat wrapper is classless and doesn't clip children; without
+   this, any child background paints square over its rounded corners. */
+.agent-chat-page--framed :where(div:has(> .agent-chat-workspace-main)) {
+    overflow: hidden;
+}
+/* The canvas paints the WHOLE workspace — timeline, composer, and the docked
+   plan column — one continuous surface. Painting only the timeline region
+   left a flat white band behind the expanded plan panel. */
+#agent-workspace-root {
+    background:
+        radial-gradient(1100px 460px at 82% -8%, rgba(196, 181, 253, 0.16), transparent 60%),
+        radial-gradient(900px 420px at -10% 110%, rgba(196, 181, 253, 0.10), transparent 55%),
+        linear-gradient(180deg, #f8f5fe 0%, #ffffff 34%);
+}
+.chat-bubble {
+    position: relative;
+    box-shadow: 0 12px 34px -18px rgba(80, 40, 160, 0.22), 0 2px 8px -4px rgba(80, 40, 160, 0.08);
+}
+/* Gradient hairline as an overlay that inherits each bubble's own radius.
+   Peer bubbles keep their dashed identity; sending/failed keep their tints. */
+.chat-event:not([data-status='sending']):not([data-status='failed'])
+    .chat-bubble:not(.chat-bubble--peer-out):not(.chat-bubble--peer-in)::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(130deg, rgba(124, 58, 237, 0.28), rgba(240, 171, 252, 0.16));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+}
+.chat-event:not([data-status='sending']):not([data-status='failed'])
+    .chat-bubble--user::before {
+    background: linear-gradient(130deg, rgba(124, 58, 237, 0.42), rgba(240, 171, 252, 0.26));
+}
+.chat-author-name { color: #6d28d9; font-weight: 600; }
+.chat-author-avatar {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px rgba(168, 85, 247, 0.5), 0 6px 14px -6px rgba(124, 58, 237, 0.45);
+}
+.chat-timestamp { color: #a79fc4; font-size: 10.5px; letter-spacing: 0.3px; }
+.chat-content table { border-radius: 10px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.13); }
+.chat-content th, .chat-content td { border-color: rgba(124, 58, 237, 0.09); }
+
+/* Pending-question option list: violet hairlines instead of slate */
+.composer-surface .rounded-xl.border-slate-200 {
+    border-color: rgba(124, 58, 237, 0.2);
+    box-shadow: 0 6px 18px -10px rgba(80, 40, 160, 0.25);
+}
+.composer-surface .border-b.border-slate-200 { border-color: rgba(124, 58, 237, 0.1); }
+
+/* Question spotlight: when the agent needs input, the timeline steps back and
+   the question card lifts. Pure CSS via :has(); reduced-motion safe. */
+.agent-chat-workspace-main:has(.composer-working-panel[data-has-pending-actions="true"]) .agent-chat-timeline-region {
+    opacity: 0.5;
+    filter: saturate(0.75);
+    transition: opacity 0.4s ease, filter 0.4s ease;
+}
+.agent-chat-workspace-main:has(.composer-working-panel[data-has-pending-actions="true"]) .composer-shell {
+    transform: translateY(-2px);
+}
+.agent-chat-workspace-main:has(.composer-working-panel[data-has-pending-actions="true"]) .composer-working-panel {
+    /* Soft lift only — the original 70px halo read as an unwanted dark band. */
+    box-shadow: 0 -6px 24px -12px rgba(124, 58, 237, 0.28);
+}
+@media (prefers-reduced-motion: reduce) {
+    .agent-chat-workspace-main:has(.composer-working-panel[data-has-pending-actions="true"]) .agent-chat-timeline-region {
+        transition: none;
+    }
+}
+
+/* Briefing card — structured input artifact on the timeline (not a message) */
+.briefing-card {
+    max-width: 560px;
+    margin: 4px auto 10px;
+    border: 1px solid transparent;
+    border-radius: 16px;
+    padding: 16px 20px 14px;
+    background:
+        linear-gradient(#ffffff, #fdfbff) padding-box,
+        linear-gradient(130deg, rgba(124, 58, 237, 0.45), rgba(240, 171, 252, 0.3)) border-box;
+    box-shadow: 0 14px 38px -18px rgba(80, 40, 160, 0.32);
+}
+.briefing-card__head { display: flex; align-items: baseline; gap: 12px; }
+.briefing-card__eyebrow {
+    font-size: 11.5px;
+    letter-spacing: 0.3px;
+    font-weight: 600;
+    color: #7c3aed;
+}
+.briefing-card__time {
+    margin-left: auto;
+    font-size: 10.5px;
+    letter-spacing: 0.3px;
+    color: #a79fc4;
+}
+.briefing-card__title {
+    margin-top: 6px;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: #241a4a;
+}
+.briefing-card__rows { margin-top: 10px; }
+.briefing-card__row {
+    display: flex;
+    gap: 12px;
+    padding: 7px 0;
+    border-top: 1px solid rgba(124, 58, 237, 0.09);
+    font-size: 13.5px;
+}
+.briefing-card__label {
+    flex: none;
+    width: 96px;
+    font-size: 12px;
+    letter-spacing: 0.2px;
+    font-weight: 600;
+    color: #8b5cf6;
+    padding-top: 1px;
+}
+.briefing-card__value { color: #33304a; min-width: 0; }
+.briefing-card__value--open { color: #8a86a0; font-style: italic; }
+
+/* Answers card — the user's replies to a question round; sibling of the
+   briefing card, sitting on the user's side of the timeline. */
+.answers-card {
+    max-width: 480px;
+    margin: 4px 0 10px auto;
+    border: 1px solid transparent;
+    border-radius: 16px;
+    padding: 14px 18px 12px;
+    background:
+        linear-gradient(#faf7ff, #f3edfd) padding-box,
+        linear-gradient(130deg, rgba(124, 58, 237, 0.35), rgba(240, 171, 252, 0.24)) border-box;
+    box-shadow: 0 12px 32px -18px rgba(80, 40, 160, 0.28);
+}
+.answers-card__head { display: flex; align-items: baseline; gap: 12px; }
+.answers-card__eyebrow {
+    font-size: 11.5px;
+    letter-spacing: 0.3px;
+    font-weight: 600;
+    color: #7c3aed;
+}
+.answers-card__time {
+    margin-left: auto;
+    font-size: 10.5px;
+    letter-spacing: 0.3px;
+    color: #a79fc4;
+}
+.answers-card__rows { margin-top: 8px; }
+.answers-card__row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 0;
+    border-top: 1px solid rgba(124, 58, 237, 0.09);
+}
+.answers-card__row:first-child { border-top: 0; padding-top: 2px; }
+.answers-card__question {
+    font-size: 12px;
+    letter-spacing: 0.2px;
+    font-weight: 600;
+    color: #8b5cf6;
+}
+.answers-card__answer {
+    font-size: 13.5px;
+    color: #33304a;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* Results card — structured deliver_results batches: clear rows with score
+   pills, then locked rows (server-redacted while frozen; blur is styling on
+   already-redacted initials, never the security boundary). */
+.results-card {
+    max-width: 620px;
+    margin: 4px auto 10px 0;
+    border: 1px solid transparent;
+    border-radius: 16px;
+    padding: 16px 20px 12px;
+    background:
+        linear-gradient(#ffffff, #fdfbff) padding-box,
+        linear-gradient(130deg, rgba(124, 58, 237, 0.45), rgba(240, 171, 252, 0.3)) border-box;
+    box-shadow: 0 14px 38px -18px rgba(80, 40, 160, 0.32);
+}
+.results-card__head { display: flex; align-items: baseline; gap: 12px; }
+.results-card__eyebrow {
+    font-size: 11.5px;
+    letter-spacing: 0.3px;
+    font-weight: 600;
+    color: #7c3aed;
+}
+.results-card__time { margin-left: auto; font-size: 10.5px; color: #a79fc4; }
+.results-card__title {
+    margin-top: 4px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: #241a4a;
+}
+.results-card__summary { margin-top: 5px; font-size: 12.5px; line-height: 1.55; color: #4c4368; }
+.results-card__rows { margin-top: 8px; }
+.results-card__row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 0;
+    border-top: 1px solid rgba(124, 58, 237, 0.09);
+}
+.results-card__info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.results-card__info b { font-size: 13.5px; color: #241a4a; font-weight: 650; }
+.results-card__info b a { color: inherit; text-decoration: none; }
+.results-card__info b a:hover { color: #7c3aed; }
+.results-card__info span { font-size: 11.5px; color: #6f6590; }
+.results-card__info small { font-size: 10.5px; color: #8a80a8; }
+.results-card__score {
+    font-style: normal;
+    font-size: 11px;
+    font-weight: 650;
+    color: #047857;
+    background: rgba(16, 185, 129, 0.09);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    border-radius: 999px;
+    padding: 3px 8px;
+    flex: none;
+    white-space: nowrap;
+}
+.results-card__locked { border-top: 1px solid rgba(124, 58, 237, 0.12); margin-top: 4px; padding-top: 4px; }
+.results-card__lockrow { display: flex; align-items: center; gap: 9px; padding: 6.5px 0; color: rgba(139, 92, 246, 0.55); }
+.results-card__lockdot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    flex: none;
+    background: linear-gradient(135deg, #ddd6fe, #f5d0fe);
+    filter: blur(1.5px);
+}
+.results-card__lockname {
+    filter: blur(5px);
+    user-select: none;
+    font-size: 12.5px;
+    color: #4c4368;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.results-card__unlock {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 6px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(124, 58, 237, 0.12);
+    font-size: 12px;
+    color: #6f6590;
+    padding-bottom: 4px;
+}
+.results-card__unlock b { color: #7c3aed; }
+
+/* The sidebar account switcher was overlapping the collapse toggle at every
+   width: the trigger's 11rem cap ignored available space. Let it flex and
+   truncate instead. */
+.chat-context-switcher--sidebar {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-right: 0.4rem;
+}
+.chat-context-switcher--sidebar .chat-context-switcher__trigger {
+    max-width: 100%;
+}
+.chat-context-switcher__trigger > * {
+    min-width: 0;
+}
+.chat-context-switcher__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The header's center grid track was `auto`, which never shrinks below the
+   switcher's max-content — colliding with the toggle at every width. Allow it
+   to compress; the trigger then truncates via the rules above. */
+.chat-sidebar-header[data-has-center='true'] {
+    /* Left (logo) and right (action buttons) size to their content; only the
+       center (account switcher) flexes and truncates. The previous 1fr side
+       columns collapsed under a wide center, pushing the action buttons left
+       into the pill. */
+    grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+/* The plan/progress panel: violet night glass — deep brand violet (never the
+   old grey), floating on the continuous light canvas. */
+.plan-panel {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015)),
+    linear-gradient(165deg, #241a4a, #1a1236);
+    border: 1px solid rgba(196, 181, 253, 0.3);
+    color: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 18px 44px -16px rgba(36, 26, 74, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.plan-panel-header h2 {
+    color: #c4b5fd;
+    opacity: 0.8;
+}
+.plan-panel-task {
+    color: rgba(255, 255, 255, 0.78);
+}
+.plan-panel-task-icon,
+.plan-panel-task[data-status='todo'] .plan-panel-task-icon {
+    color: rgba(196, 181, 253, 0.6);
+}
+.plan-panel-task[data-status='done'] .plan-panel-task-icon {
+    color: #c4b5fd;
+}
+.plan-panel-task[data-status='doing'] .plan-panel-task-icon {
+    color: #f0abfc;
+}
+.plan-panel-task[data-status='doing'][data-work-state='paused'] .plan-panel-task-icon {
+    color: rgba(196, 181, 253, 0.5);
+}
+.plan-panel-task[data-status='done'] .plan-panel-task-title {
+    color: rgba(255, 255, 255, 0.55);
+}
+.plan-panel-task[data-status='doing'] .plan-panel-task-title {
+    color: #fff;
+    font-weight: 550;
+}
+.plan-panel-task[data-status='todo'] .plan-panel-task-title {
+    color: rgba(255, 255, 255, 0.72);
+}
+.plan-panel-empty {
+    color: rgba(255, 255, 255, 0.55);
+}
+.plan-panel-deliverables {
+    border-top: 1px solid rgba(196, 181, 253, 0.2);
+}
+.plan-panel-deliverables-title {
+    color: #c4b5fd;
+    opacity: 0.8;
+}
+.plan-panel-deliverable {
+    color: rgba(255, 255, 255, 0.78);
+}
+.plan-panel-deliverable:hover,
+.plan-panel-deliverable-download:hover {
+    color: #fff;
+}
+.plan-panel-deliverable-download {
+    color: rgba(255, 255, 255, 0.62);
+}
+.plan-panel-deliverable-download:hover,
+.plan-panel-deliverable-download:focus-visible {
+    background: rgba(255, 255, 255, 0.1);
 }
