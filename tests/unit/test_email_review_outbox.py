@@ -857,17 +857,61 @@ class EmailReviewOutboxTests(TestCase):
             PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
         )
 
-    def test_migration_disables_outbox_for_grandfathered_review_new_agents(self):
+    def test_migration_only_disables_outbox_for_identifiable_grandfathered_agents(self):
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            grandfathered_browser = BrowserUseAgent.objects.create(
+                user=self.owner,
+                name="Grandfathered browser",
+            )
+        grandfathered_agent = PersistentAgent.objects.create(
+            user=self.owner,
+            name="Grandfathered agent",
+            charter="Preserve legacy behavior.",
+            browser_use_agent=grandfathered_browser,
+            email_sending_mode=PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+        )
+
         self.agent.email_sending_mode = PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS
         self.agent.save(update_fields=["email_sending_mode"])
+        queue_message_for_review(self._message("pilot-history@example.com"))
+
+        staff_owner = User.objects.create_user(
+            username="outbox-staff@example.com",
+            email="outbox-staff@example.com",
+            password="pw",
+            is_staff=True,
+        )
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            staff_browser = BrowserUseAgent.objects.create(
+                user=staff_owner,
+                name="Staff Outbox browser",
+            )
+        staff_agent = PersistentAgent.objects.create(
+            user=staff_owner,
+            name="Staff Outbox agent",
+            charter="Explicit pilot configuration.",
+            browser_use_agent=staff_browser,
+            email_sending_mode=PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+        )
+
         migration = import_module("api.migrations.0450_decouple_contact_approval_from_outbox")
 
         migration.disable_outbox_for_grandfathered_agents(apps, None)
 
+        grandfathered_agent.refresh_from_db()
         self.agent.refresh_from_db()
+        staff_agent.refresh_from_db()
+        self.assertEqual(
+            grandfathered_agent.email_sending_mode,
+            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+        )
         self.assertEqual(
             self.agent.email_sending_mode,
-            PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
+            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
+        )
+        self.assertEqual(
+            staff_agent.email_sending_mode,
+            PersistentAgent.EmailSendingMode.REVIEW_NEW_CONTACTS,
         )
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)

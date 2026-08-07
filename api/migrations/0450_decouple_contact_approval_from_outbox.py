@@ -6,8 +6,13 @@ def disable_outbox_for_grandfathered_agents(apps, schema_editor):
     # Migration 0430 used review_new_contacts as a compatibility mirror for
     # legacy require_approval agents. Now that the controls are independent,
     # those mirrored values should preserve the pre-Outbox delivery behavior.
+    # Staff users were the feature-flagged pilot cohort, while review history
+    # is durable evidence that an agent already used the explicit policy.
     PersistentAgent.objects.filter(
         email_sending_mode="review_new_contacts",
+        user__is_staff=False,
+        user__is_superuser=False,
+        outbound_email_reviews__isnull=True,
     ).update(email_sending_mode="send_automatically")
 
 
