@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Supervised agentic API runtime loop</title>
+  <desc id="desc">An API request enters an agent runtime that plans, uses approved tools, observes results, and either returns a result or escalates to a person.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="1" stop-color="#312e81"/>
+    </linearGradient>
+    <linearGradient id="node" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef2ff"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#818cf8"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="675" rx="32" fill="url(#background)"/>
+  <circle cx="600" cy="338" r="222" fill="none" stroke="#6366f1" stroke-width="2" stroke-dasharray="8 14" opacity="0.65"/>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <rect x="44" y="281" width="176" height="112" rx="18" fill="url(#node)"/>
+    <text x="132" y="326" text-anchor="middle" fill="#312e81" font-size="18" font-weight="700">API request</text>
+    <text x="132" y="356" text-anchor="middle" fill="#475569" font-size="15">Goal + boundaries</text>
+
+    <rect x="478" y="267" width="244" height="142" rx="71" fill="#4338ca" stroke="#a5b4fc" stroke-width="3"/>
+    <text x="600" y="326" text-anchor="middle" fill="#ffffff" font-size="22" font-weight="700">Agent runtime</text>
+    <text x="600" y="358" text-anchor="middle" fill="#e0e7ff" font-size="15">State + instructions</text>
+
+    <rect x="506" y="62" width="188" height="94" rx="18" fill="url(#node)"/>
+    <text x="600" y="103" text-anchor="middle" fill="#312e81" font-size="18" font-weight="700">Plan</text>
+    <text x="600" y="130" text-anchor="middle" fill="#475569" font-size="14">Choose next step</text>
+
+    <rect x="862" y="291" width="246" height="94" rx="18" fill="url(#node)"/>
+    <text x="985" y="332" text-anchor="middle" fill="#312e81" font-size="18" font-weight="700">Approved tools</text>
+    <text x="985" y="359" text-anchor="middle" fill="#475569" font-size="14">Browser, data, files, apps</text>
+
+    <rect x="485" y="519" width="230" height="94" rx="18" fill="url(#node)"/>
+    <text x="600" y="560" text-anchor="middle" fill="#312e81" font-size="18" font-weight="700">Observe</text>
+    <text x="600" y="587" text-anchor="middle" fill="#475569" font-size="14">Update state and adapt</text>
+
+    <rect x="952" y="492" width="192" height="112" rx="18" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="2"/>
+    <text x="1048" y="537" text-anchor="middle" fill="#065f46" font-size="18" font-weight="700">Result</text>
+    <text x="1048" y="566" text-anchor="middle" fill="#047857" font-size="14">Artifact + trace</text>
+
+    <rect x="56" y="502" width="210" height="112" rx="18" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
+    <text x="161" y="547" text-anchor="middle" fill="#9a3412" font-size="18" font-weight="700">Human input</text>
+    <text x="161" y="576" text-anchor="middle" fill="#c2410c" font-size="14">Approve or redirect</text>
+  </g>
+
+  <g fill="none" stroke="#818cf8" stroke-width="5" stroke-linecap="round" marker-end="url(#arrow)">
+    <path d="M220 337 H456"/>
+    <path d="M600 267 V176"/>
+    <path d="M694 109 C835 109 846 214 846 296"/>
+    <path d="M862 338 H744"/>
+    <path d="M687 409 C687 452 656 475 622 500"/>
+    <path d="M578 519 C512 493 484 457 503 416"/>
+    <path d="M722 373 C831 408 901 454 970 510"/>
+    <path d="M478 371 C374 407 294 464 233 520"/>
+  </g>
+</svg>

@@ -22,6 +22,8 @@
   .eng-stat b { display: block; font-size: 24px; font-weight: 300; color: #fff; }
   .eng-stat span { font-size: 11px; color: #8b7fb8; }
   .eng-lede { color: #b7aed4; font-size: 15px; line-height: 1.65; margin-top: 12px; }
+  .eng-lede a { color: #c4b5fd; font-weight: 600; text-decoration: none; }
+  .eng-lede a:hover { color: #fff; text-decoration: underline; }
   /* code window — the page's product proof, dark by design */
   .eng-codewrap { max-width: 860px; margin: 30px auto 0; }
   .code-block { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 0.75rem;
@@ -116,6 +118,9 @@
 
     <p class="gk-sub">
       Gobii's Agent API gives each employee a charter, schedule, timeline, tools, channels, and persistent workspace. Create them once, keep them working, and manage their full lifecycle from your product.
+    </p>
+    <p class="eng-lede" style="max-width:58ch">
+      Evaluating the category first? Read how Gobii's <a href="{% url 'pages:agent_api' %}">agentic API delegates multi-step work</a> while keeping supervision visible.
     </p>
 
     <div class="eng-ctas">
