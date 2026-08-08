@@ -2,6 +2,7 @@
 
 import logging
 import re
+from datetime import date
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -42,6 +43,17 @@ _OPERATION_REQUESTS = {
 }
 
 _CONTACT_DATA_TYPES = {"personal_email", "work_email", "phone"}
+_COMPANY_SIZE_RANGES = (
+    "1_10",
+    "11_50",
+    "51_200",
+    "201_500",
+    "501_1000",
+    "1001_5000",
+    "5001_10000",
+    "10001",
+)
+_YEAR_RANGE_PATTERN = re.compile(r"^(\d+)(?:_(\d+))?$")
 _PEOPLE_FILTER_KEYS = {
     "page",
     "page_size",
@@ -158,6 +170,20 @@ def _array_schema(*, max_items: int = 50, item_schema: Optional[dict[str, Any]] 
     }
 
 
+def _year_range_schema(*, subject: str) -> dict[str, Any]:
+    return _array_schema(
+        max_items=20,
+        item_schema={
+            "type": "string",
+            "pattern": r"^\d+(?:_\d+)?$",
+            "description": (
+                f"An inclusive {subject} range in X_Y form, such as 5_30. "
+                "ContactOut also accepts a single threshold such as 10."
+            ),
+        },
+    )
+
+
 def _people_filter_schema() -> dict[str, Any]:
     properties = {
         "page": {"type": "integer", "minimum": 1, "default": 1},
@@ -167,7 +193,14 @@ def _people_filter_schema() -> dict[str, Any]:
         "exclude_job_titles": _array_schema(),
         "current_titles_only": {"type": "boolean", "default": True},
         "include_related_job_titles": {"type": "boolean", "default": False},
-        "match_experience": {"type": "string", "enum": ["current", "past", "both"]},
+        "match_experience": {
+            "type": "string",
+            "enum": ["current", "past", "both"],
+            "description": (
+                "Require job_title and company to match the same experience entry. "
+                "Do not combine with current_titles_only or company_filter."
+            ),
+        },
         "job_function": _array_schema(),
         "seniority": _array_schema(),
         "skills": _array_schema(),
@@ -191,11 +224,17 @@ def _people_filter_schema() -> dict[str, Any]:
                     "field_of_study": {"type": "string"},
                     "location": {"type": "string"},
                 },
+                "minProperties": 1,
                 "additionalProperties": False,
             }
         ),
         "location": _array_schema(),
-        "location_radius": {"type": "integer", "minimum": 1, "maximum": 500},
+        "location_radius": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Radius in miles. Requires a city or area in location.",
+        },
         "current_work_location": _array_schema(),
         "past_work_location": _array_schema(),
         "company": _array_schema(),
@@ -206,9 +245,15 @@ def _people_filter_schema() -> dict[str, Any]:
         "domain": _array_schema(),
         "industry": _array_schema(),
         "keyword": {"type": "string"},
-        "company_size": _array_schema(max_items=8),
-        "years_of_experience": _array_schema(max_items=20),
-        "years_in_current_role": _array_schema(max_items=20),
+        "company_size": _array_schema(
+            max_items=8,
+            item_schema={"type": "string", "enum": list(_COMPANY_SIZE_RANGES)},
+        ),
+        "years_of_experience": _year_range_schema(subject="years-of-experience"),
+        "years_in_current_role": {
+            **_year_range_schema(subject="years-in-current-role"),
+            "description": "Cannot be combined with recently_changed_jobs=true.",
+        },
         "recently_changed_jobs": {"type": "boolean", "default": False},
         "detailed_experience": {"type": "boolean", "default": False},
         "detailed_education": {"type": "boolean", "default": False},
@@ -225,10 +270,18 @@ def _company_filter_schema() -> dict[str, Any]:
         "type": "object",
         "properties": {
             "page": {"type": "integer", "minimum": 1, "default": 1},
-            "linkedin_url": _array_schema(max_items=25),
+            "linkedin_url": {
+                **_array_schema(max_items=25),
+                "description": (
+                    "Company LinkedIn URLs, bare company slugs, or numeric company IDs. "
+                    "Cannot be combined with other company search filters."
+                ),
+            },
             "name": _array_schema(),
             "domain": _array_schema(),
-            "size": _array_schema(),
+            "size": _array_schema(
+                item_schema={"type": "string", "enum": list(_COMPANY_SIZE_RANGES)},
+            ),
             "hq_only": {"type": "boolean"},
             "location": _array_schema(),
             "industry": _array_schema(),
@@ -236,7 +289,11 @@ def _company_filter_schema() -> dict[str, Any]:
             "min_revenue": {"type": "integer"},
             "max_revenue": {"type": "integer"},
             "year_founded_from": {"type": "integer", "minimum": 1985},
-            "year_founded_to": {"type": "integer"},
+            "year_founded_to": {
+                "type": "integer",
+                "maximum": date.today().year,
+                "description": "Maximum founding year. Requires year_founded_from.",
+            },
         },
         "additionalProperties": False,
     }
@@ -333,6 +390,44 @@ def _validate_list_limits(values: dict[str, Any], limits: dict[str, int]) -> Opt
     return None
 
 
+def _validate_year_ranges(filters: dict[str, Any]) -> Optional[str]:
+    for field in ("years_of_experience", "years_in_current_role"):
+        for value in filters.get(field, []):
+            if not isinstance(value, str):
+                return f"{field} values must be strings in X_Y form, such as 5_30."
+            match = _YEAR_RANGE_PATTERN.fullmatch(value)
+            if not match:
+                return f"{field} values must use X_Y form, such as 5_30, or a single threshold."
+            lower = int(match.group(1))
+            upper = int(match.group(2)) if match.group(2) is not None else None
+            if upper is not None and lower > upper:
+                return f"{field} range minimum cannot exceed its maximum: {value}."
+    return None
+
+
+def _validate_educations(filters: dict[str, Any]) -> Optional[str]:
+    allowed_fields = {"school_name", "field_of_study", "location"}
+    for index, education in enumerate(filters.get("educations", [])):
+        if not isinstance(education, dict):
+            return f"educations[{index}] must be an object."
+        unknown = sorted(set(education) - allowed_fields)
+        if unknown:
+            return f"Unsupported educations[{index}] fields: {', '.join(unknown)}."
+        invalid_types = [field for field, value in education.items() if not isinstance(value, str)]
+        if invalid_types:
+            return f"educations[{index}] fields must be strings: {', '.join(invalid_types)}."
+        if not any(value.strip() for value in education.values()):
+            return f"educations[{index}] must include school_name, field_of_study, or location."
+    return None
+
+
+def _validate_company_sizes(values: dict[str, Any], field: str) -> Optional[str]:
+    invalid = [value for value in values.get(field, []) if value not in _COMPANY_SIZE_RANGES]
+    if invalid:
+        return f"{field} contains unsupported company size ranges: {', '.join(map(str, invalid))}."
+    return None
+
+
 def _validate_bounded_integer(
     values: dict[str, Any],
     field: str,
@@ -363,6 +458,15 @@ def _validate_people_filters(raw_filters: Any) -> tuple[Optional[dict[str, Any]]
     list_error = _validate_list_limits(filters, _PEOPLE_LIST_LIMITS)
     if list_error:
         return None, list_error
+    range_error = _validate_year_ranges(filters)
+    if range_error:
+        return None, range_error
+    education_error = _validate_educations(filters)
+    if education_error:
+        return None, education_error
+    company_size_error = _validate_company_sizes(filters, "company_size")
+    if company_size_error:
+        return None, company_size_error
     for field, minimum, maximum in (("page", 1, None), ("page_size", 1, 25), ("location_radius", 1, 500)):
         integer_error = _validate_bounded_integer(filters, field, minimum, maximum)
         if integer_error:
@@ -378,13 +482,19 @@ def _validate_people_filters(raw_filters: Any) -> tuple[Optional[dict[str, Any]]
         if value is not None and value not in choices:
             return None, f"{field} must be one of: {', '.join(sorted(choices))}."
 
+    if "match_experience" in filters:
+        conflicting = [field for field in ("current_titles_only", "company_filter") if field in filters]
+        if conflicting:
+            return None, f"match_experience cannot be combined with {', '.join(conflicting)}."
+    if "location_radius" in filters and not filters.get("location"):
+        return None, "location_radius requires location."
     if filters.get("years_in_current_role") and filters.get("recently_changed_jobs") is True:
         return None, "years_in_current_role cannot be combined with recently_changed_jobs=true."
     return filters, None
 
 
-def _validate_linkedin_url(value: Any, *, company: bool = False) -> tuple[Optional[str], Optional[str]]:
-    label = "company LinkedIn URL" if company else "LinkedIn profile URL"
+def _validate_linkedin_url(value: Any) -> tuple[Optional[str], Optional[str]]:
+    label = "LinkedIn profile URL"
     if not isinstance(value, str) or not value.strip():
         return None, f"A {label} is required."
     raw = value.strip()
@@ -400,12 +510,35 @@ def _validate_linkedin_url(value: Any, *, company: bool = False) -> tuple[Option
     lowered = raw.lower()
     if "sales.linkedin.com" in lowered or "/sales/" in lowered or "/recruiter/" in lowered:
         return None, "Sales Navigator and Recruiter URLs are not supported."
-    prefixes = ("/company/",) if company else ("/in/", "/pub/")
+    prefixes = ("/in/", "/pub/")
     if not any(parsed.path.lower().startswith(prefix) for prefix in prefixes):
-        expected = "/company/" if company else "/in/ or /pub/"
-        return None, f"{label.capitalize()} must use a regular {expected} path."
+        return None, f"{label.capitalize()} must use a regular /in/ or /pub/ path."
     if parsed.path.rstrip("/").lower() in {prefix.rstrip("/") for prefix in prefixes}:
         return None, f"{label.capitalize()} must identify a profile."
+    return raw, None
+
+
+_COMPANY_LINKEDIN_IDENTIFIER = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def _validate_company_linkedin_identifier(value: Any) -> tuple[Optional[str], Optional[str]]:
+    if not isinstance(value, str) or not value.strip():
+        return None, "Company LinkedIn identifiers must be non-empty strings."
+    raw = value.strip()
+    if _COMPANY_LINKEDIN_IDENTIFIER.fullmatch(raw):
+        return raw, None
+
+    try:
+        parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+        hostname = (parsed.hostname or "").lower()
+    except ValueError:
+        return None, f"Invalid company LinkedIn identifier: {raw}."
+    if parsed.scheme.lower() not in {"http", "https"} or not (
+        hostname == "linkedin.com" or hostname.endswith(".linkedin.com")
+    ):
+        return None, f"Invalid company LinkedIn identifier: {raw}."
+    if not parsed.path.lower().startswith("/company/") or parsed.path.rstrip("/").lower() == "/company":
+        return None, "Company LinkedIn URLs must identify a /company/ profile."
     return raw, None
 
 
@@ -421,6 +554,9 @@ def _validate_company_filters(raw_filters: Any) -> tuple[Optional[dict[str, Any]
     list_error = _validate_list_limits(filters, _COMPANY_LIST_LIMITS)
     if list_error:
         return None, list_error
+    company_size_error = _validate_company_sizes(filters, "size")
+    if company_size_error:
+        return None, company_size_error
     page_error = _validate_bounded_integer(filters, "page", 1)
     if page_error:
         return None, page_error
@@ -439,7 +575,7 @@ def _validate_company_filters(raw_filters: Any) -> tuple[Optional[dict[str, Any]
             return None, "company_filters.linkedin_url cannot be combined with other company filters."
         normalized_urls = []
         for url in linkedin_urls:
-            normalized_url, url_error = _validate_linkedin_url(url, company=True)
+            normalized_url, url_error = _validate_company_linkedin_identifier(url)
             if url_error:
                 return None, url_error
             normalized_urls.append(normalized_url)
@@ -449,6 +585,12 @@ def _validate_company_filters(raw_filters: Any) -> tuple[Optional[dict[str, Any]
         value = filters.get(integer_field)
         if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
             return None, f"{integer_field} must be an integer."
+    year_founded_to = filters.get("year_founded_to")
+    if year_founded_to is not None:
+        if "year_founded_from" not in filters:
+            return None, "year_founded_to requires year_founded_from."
+        if year_founded_to > date.today().year:
+            return None, f"year_founded_to cannot exceed {date.today().year}."
     for lower_field, upper_field in (
         ("min_revenue", "max_revenue"),
         ("year_founded_from", "year_founded_to"),

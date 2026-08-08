@@ -1,3 +1,4 @@
+from datetime import date
 from unittest.mock import ANY, MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -73,9 +74,18 @@ class ContactOutNativeToolTests(SimpleTestCase):
         self.assertFalse(properties["reveal_all_contact_info"]["default"])
         self.assertIn("cannot reveal only a subset", properties["reveal_all_contact_info"]["description"])
         self.assertIn("Availability filter only", properties["required_contact_data_types"]["description"])
-        self.assertEqual(properties["people_filters"]["properties"]["years_of_experience"]["minItems"], 1)
+        people_filters = properties["people_filters"]["properties"]
+        company_filters = properties["company_filters"]["properties"]
+        self.assertEqual(people_filters["years_of_experience"]["minItems"], 1)
+        self.assertEqual(people_filters["years_of_experience"]["items"]["pattern"], r"^\d+(?:_\d+)?$")
+        self.assertEqual(people_filters["educations"]["items"]["minProperties"], 1)
+        self.assertEqual(people_filters["company_size"]["items"]["enum"][0], "1_10")
+        self.assertEqual(people_filters["company_size"]["items"]["enum"][-1], "10001")
+        self.assertEqual(company_filters["year_founded_to"]["maximum"], date.today().year)
+        self.assertIn("bare company slugs", company_filters["linkedin_url"]["description"])
+        self.assertIn("Use `X_Y` strings for experience ranges", CONTACTOUT_SYSTEM_SKILL.prompt_instructions)
         self.assertEqual(properties["required_contact_data_types"]["minItems"], 1)
-        self.assertEqual(properties["people_filters"]["properties"]["page_size"]["maximum"], 25)
+        self.assertEqual(people_filters["page_size"]["maximum"], 25)
         self.assertEqual(properties["domains"]["maxItems"], 30)
 
     @patch("api.agent.tools.contactout.requests.post")
@@ -144,6 +154,37 @@ class ContactOutNativeToolTests(SimpleTestCase):
                 "page": 1,
                 "page_size": 25,
                 "recently_changed_jobs": False,
+                "reveal_info": False,
+            },
+        )
+
+    @patch("api.agent.tools.contactout.requests.post")
+    def test_people_search_accepts_documented_experience_ranges(self, mock_post, _mock_enabled):
+        mock_post.return_value = _response({"status_code": 200, "profiles": {}})
+
+        result = execute_contactout(
+            MagicMock(),
+            {
+                "operation": SEARCH_PEOPLE,
+                "people_filters": {
+                    "job_title": ["CTO"],
+                    "company": ["Gobii"],
+                    "match_experience": "current",
+                    "company_size": ["11_50"],
+                    "years_of_experience": ["5_30", "10"],
+                },
+            },
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"],
+            {
+                "job_title": ["CTO"],
+                "company": ["Gobii"],
+                "match_experience": "current",
+                "company_size": ["11_50"],
+                "years_of_experience": ["5_30", "10"],
                 "reveal_info": False,
             },
         )
@@ -273,6 +314,8 @@ class ContactOutNativeToolTests(SimpleTestCase):
                     "hq_only": False,
                     "min_revenue": 10,
                     "max_revenue": 100,
+                    "year_founded_from": 2000,
+                    "year_founded_to": 2024,
                 },
             },
         )
@@ -294,6 +337,8 @@ class ContactOutNativeToolTests(SimpleTestCase):
                 "hq_only": False,
                 "min_revenue": 10,
                 "max_revenue": 100,
+                "year_founded_from": 2000,
+                "year_founded_to": 2024,
             },
         )
         self.assertEqual(
@@ -314,6 +359,34 @@ class ContactOutNativeToolTests(SimpleTestCase):
             },
             {
                 "operation": SEARCH_PEOPLE,
+                "people_filters": {"years_of_experience": ["five_30"]},
+            },
+            {
+                "operation": SEARCH_PEOPLE,
+                "people_filters": {"years_of_experience": ["30_5"]},
+            },
+            {
+                "operation": SEARCH_PEOPLE,
+                "people_filters": {"company_size": ["10_50"]},
+            },
+            {
+                "operation": SEARCH_PEOPLE,
+                "people_filters": {"educations": [{}]},
+            },
+            {
+                "operation": SEARCH_PEOPLE,
+                "people_filters": {"match_experience": "current", "current_titles_only": False},
+            },
+            {
+                "operation": SEARCH_PEOPLE,
+                "people_filters": {"match_experience": "past", "company_filter": "both"},
+            },
+            {
+                "operation": SEARCH_PEOPLE,
+                "people_filters": {"location_radius": 25},
+            },
+            {
+                "operation": SEARCH_PEOPLE,
                 "people_filters": {},
                 "required_contact_data_types": ["postal_address"],
             },
@@ -329,6 +402,25 @@ class ContactOutNativeToolTests(SimpleTestCase):
                 "company_filters": {"unknown": ["value"]},
             },
             {
+                "operation": SEARCH_COMPANIES,
+                "company_filters": {"size": ["10_50"]},
+            },
+            {
+                "operation": SEARCH_COMPANIES,
+                "company_filters": {"year_founded_to": 2020},
+            },
+            {
+                "operation": SEARCH_COMPANIES,
+                "company_filters": {
+                    "year_founded_from": 2000,
+                    "year_founded_to": date.today().year + 1,
+                },
+            },
+            {
+                "operation": SEARCH_COMPANIES,
+                "company_filters": {"linkedin_url": ["https://example.com/company/gobii"]},
+            },
+            {
                 "operation": ENRICH_COMPANY_DOMAINS,
                 "domains": ["not-a-domain"],
             },
@@ -340,6 +432,27 @@ class ContactOutNativeToolTests(SimpleTestCase):
                 self.assertEqual(result["status"], "error")
                 self.assertFalse(result["retryable"])
         mock_post.assert_not_called()
+
+    @patch("api.agent.tools.contactout.requests.post")
+    def test_company_search_accepts_documented_linkedin_identifiers(self, mock_post, _mock_enabled):
+        mock_post.return_value = _response({"status_code": 200, "companies": []})
+        identifiers = [
+            "contactout",
+            "27927",
+            "www.linkedin.com/company/contactout",
+            "https://www.linkedin.com/company/27927",
+        ]
+
+        result = execute_contactout(
+            MagicMock(),
+            {
+                "operation": SEARCH_COMPANIES,
+                "company_filters": {"linkedin_url": identifiers},
+            },
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(mock_post.call_args.kwargs["json"], {"linkedin_url": identifiers})
 
     @patch("api.agent.tools.contactout.requests.get")
     def test_rejects_sales_navigator_and_recruiter_urls(self, mock_get, _mock_enabled):
