@@ -5,6 +5,7 @@ from typing import Any
 
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
+from django.utils.html import escape
 from django.views import View
 
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
@@ -14,8 +15,11 @@ from api.models import (
     PersistentAgentDiscordGuild,
     PersistentAgentDiscordOAuthSession,
     PersistentAgentSystemSkillState,
+    UserDiscordIdentity,
+    UserDiscordIdentityOAuthSession,
 )
 from api.services.discord_bot import (
+    DISCORD_IDENTITY_OAUTH_STATE_PREFIX,
     DiscordBotIntegrationError,
     build_discord_oauth_start_url,
     disconnect_discord_guild_for_owner,
@@ -23,11 +27,13 @@ from api.services.discord_bot import (
     disable_subscription,
     discover_channels,
     ensure_subscription,
+    handle_discord_identity_oauth_callback,
     handle_discord_oauth_callback,
     list_claimed_guilds,
     list_claimed_guilds_for_owner,
     list_subscriptions,
     start_discord_oauth,
+    start_discord_identity_oauth,
 )
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
@@ -99,7 +105,7 @@ def _discord_oauth_complete_response(*, agent_id: str) -> HttpResponse:
             "agent_id": agent_id,
             "guild_count": 1,
         }
-    )
+    ).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -131,6 +137,64 @@ def _discord_oauth_complete_response(*, agent_id: str) -> HttpResponse:
     return HttpResponse(html, content_type="text/html")
 
 
+def _discord_identity_oauth_complete_response(*, status: str, message: str = "") -> HttpResponse:
+    payload = json.dumps(
+        {
+            "type": "gobii:discord_identity_oauth_complete",
+            "status": status,
+            "message": message,
+        }
+    ).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    heading = "Discord account linked" if status == "success" else "Discord account link failed"
+    detail = message or (
+        "Your Discord account is now linked to your Gobii profile."
+        if status == "success"
+        else "Unable to link your Discord account."
+    )
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{heading}</title>
+</head>
+<body>
+  <p id="status">{escape(detail)}</p>
+  <button type="button" id="close-button">Close tab</button>
+  <script>
+    (function() {{
+      var payload = {payload};
+      function closeTab() {{ window.close(); }}
+      if (window.opener && !window.opener.closed) {{
+        window.opener.postMessage(payload, window.location.origin);
+      }}
+      document.getElementById("close-button").addEventListener("click", closeTab);
+      if (payload.status === "success") {{ window.setTimeout(closeTab, 250); }}
+    }}());
+  </script>
+</body>
+</html>"""
+    return HttpResponse(html, content_type="text/html")
+
+
+class DiscordIdentityOAuthStartView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            return HttpResponseRedirect(start_discord_identity_oauth(request.user))
+        except DiscordBotIntegrationError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+
+
+class DiscordIdentityView(ApiLoginRequiredMixin, View):
+    http_method_names = ["delete"]
+
+    def delete(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        deleted, _details = UserDiscordIdentity.objects.filter(user=request.user).delete()
+        return JsonResponse({"disconnected": bool(deleted)})
+
+
 class DiscordOAuthStartView(ApiLoginRequiredMixin, View):
     def get(self, request):
         agent_id = str(request.GET.get("agent_id") or "").strip()
@@ -158,12 +222,31 @@ class DiscordOAuthStartView(ApiLoginRequiredMixin, View):
 class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
     def get(self, request):
         error = str(request.GET.get("error") or "").strip()
-        if error:
-            return JsonResponse({"error": error}, status=400)
         state = str(request.GET.get("state") or "").strip()
+        identity_flow = state.startswith(DISCORD_IDENTITY_OAUTH_STATE_PREFIX)
+        if error:
+            if identity_flow:
+                return _discord_identity_oauth_complete_response(status="error", message=error)
+            return JsonResponse({"error": error}, status=400)
         code = str(request.GET.get("code") or "").strip()
         if not state or not code:
             return HttpResponseBadRequest("state and code are required.")
+        if identity_flow:
+            try:
+                UserDiscordIdentityOAuthSession.objects.get(state=state, user=request.user)
+                handle_discord_identity_oauth_callback(
+                    state=state,
+                    code=code,
+                    user=request.user,
+                )
+            except UserDiscordIdentityOAuthSession.DoesNotExist:
+                return _discord_identity_oauth_complete_response(
+                    status="error",
+                    message="Discord identity authorization was not found for this user.",
+                )
+            except DiscordBotIntegrationError as exc:
+                return _discord_identity_oauth_complete_response(status="error", message=str(exc))
+            return _discord_identity_oauth_complete_response(status="success")
         try:
             session = PersistentAgentDiscordOAuthSession.objects.select_related("agent").get(state=state)
             agent_id = str(session.agent_id)

@@ -161,6 +161,30 @@ def _webhooks_prompt_context(agent) -> str:
     ])
 
 
+def _discord_native_prompt_context(agent) -> str:
+    from api.models import PersistentAgentDiscordChannelSubscription
+
+    subscriptions = (
+        PersistentAgentDiscordChannelSubscription.objects.select_related("guild")
+        .filter(
+            agent=agent,
+            status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+        )
+        .order_by("guild__name", "guild__guild_id", "channel_name", "channel_id")
+    )
+    lines = ["Currently subscribed Discord servers and channels:"]
+    for subscription in subscriptions:
+        guild_name = subscription.guild.name or "Unnamed server"
+        channel_name = subscription.channel_name.lstrip("#") or "unnamed-channel"
+        lines.append(
+            f"- Server: {guild_name} (guild_id={subscription.guild.guild_id}); "
+            f"channel: #{channel_name} (channel_id={subscription.channel_id})"
+        )
+    if len(lines) == 1:
+        lines.append("- No active Discord channel subscriptions.")
+    return "\n".join(lines)
+
+
 def _google_sheets_native_prompt_instructions(agent) -> str:
     connection_gate = _native_connection_gate(
         agent,
@@ -997,6 +1021,7 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "If channel discovery says the Gobii bot cannot list channels, send the returned `connect_url` as the repair link. "
         "The repair flow is locked to that connected server."
     ),
+    prompt_context_renderer=_discord_native_prompt_context,
 )
 
 

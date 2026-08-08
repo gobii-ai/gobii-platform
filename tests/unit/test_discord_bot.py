@@ -41,6 +41,8 @@ from api.models import (
     PersistentAgentMessageAttachment,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
+    UserDiscordIdentity,
+    UserDiscordIdentityOAuthSession,
 )
 from api.services.discord_bot import (
     add_discord_reaction,
@@ -49,11 +51,13 @@ from api.services.discord_bot import (
     DiscordGatewayMessage,
     discover_channels,
     ensure_subscription,
+    handle_discord_identity_oauth_callback,
     handle_discord_oauth_callback,
     ingest_gateway_message,
     send_inactive_discord_auto_reply,
     send_channel_message,
     start_discord_oauth,
+    start_discord_identity_oauth,
     _agent_webhook_username,
     _raise_for_discord_status,
     _webhook_echo_signature,
@@ -108,6 +112,144 @@ class NativeDiscordBotTests(TestCase):
         self.user.is_staff = True
         self.user.save(update_fields=["is_staff"])
         self.client.force_login(self.user)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.get")
+    @patch("api.services.discord_bot.requests.post")
+    def test_identity_oauth_links_verified_discord_user_without_storing_token(self, post_mock, get_mock):
+        auth_url = start_discord_identity_oauth(self.user)
+        auth_query = parse_qs(urlsplit(auth_url).query)
+        self.assertEqual(auth_query["scope"], ["identify"])
+        self.assertNotIn("permissions", auth_query)
+        self.assertNotIn("integration_type", auth_query)
+
+        session = UserDiscordIdentityOAuthSession.objects.get(user=self.user)
+        self.assertTrue(session.state.startswith("identity_"))
+        post_mock.return_value = _response({
+            "access_token": "short-lived-token",
+            "scope": "identify",
+        })
+        get_mock.return_value = _response({
+            "id": "177593384389705729",
+            "username": "verified_user",
+            "global_name": "Verified User",
+        })
+
+        identity = handle_discord_identity_oauth_callback(
+            state=session.state,
+            code="identity-code",
+            user=self.user,
+        )
+
+        self.assertEqual(identity.discord_user_id, "177593384389705729")
+        self.assertEqual(identity.username, "verified_user")
+        self.assertEqual(identity.global_name, "Verified User")
+        self.assertFalse(hasattr(identity, "access_token"))
+        session.refresh_from_db()
+        self.assertIsNotNone(session.completed_at)
+        self.assertEqual(get_mock.call_args.kwargs["headers"], {"Authorization": "Bearer short-lived-token"})
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot._fetch_discord_current_user")
+    @patch("api.services.discord_bot._exchange_identity_oauth_code")
+    def test_identity_oauth_rejects_discord_account_linked_to_another_user(self, exchange_mock, user_mock):
+        other_user = get_user_model().objects.create_user(
+            username="other-discord-user",
+            email="other-discord-user@example.test",
+            password="pw",
+        )
+        UserDiscordIdentity.objects.create(
+            user=other_user,
+            discord_user_id="177593384389705729",
+            username="already_linked",
+            verified_at=timezone.now(),
+        )
+        start_discord_identity_oauth(self.user)
+        session = UserDiscordIdentityOAuthSession.objects.get(user=self.user)
+        exchange_mock.return_value = {"access_token": "token", "scope": "identify"}
+        user_mock.return_value = {
+            "id": "177593384389705729",
+            "username": "already_linked",
+            "global_name": "",
+        }
+
+        with self.assertRaisesMessage(DiscordBotIntegrationError, "already linked to another Gobii user"):
+            handle_discord_identity_oauth_callback(
+                state=session.state,
+                code="identity-code",
+                user=self.user,
+            )
+
+        self.assertFalse(UserDiscordIdentity.objects.filter(user=self.user).exists())
+        session.refresh_from_db()
+        self.assertIsNone(session.completed_at)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot._fetch_discord_current_user")
+    @patch("api.services.discord_bot._exchange_identity_oauth_code")
+    def test_identity_oauth_routes_complete_profile_link(self, exchange_mock, user_mock):
+        self.client.force_login(self.user)
+        start_response = self.client.get(reverse("discord_identity_oauth_start"))
+        self.assertEqual(start_response.status_code, 302)
+        self.assertEqual(parse_qs(urlsplit(start_response.url).query)["scope"], ["identify"])
+        session = UserDiscordIdentityOAuthSession.objects.get(user=self.user)
+        exchange_mock.return_value = {"access_token": "token", "scope": "identify"}
+        user_mock.return_value = {
+            "id": "177593384389705729",
+            "username": "route_verified",
+            "global_name": "Route Verified",
+        }
+
+        callback_response = self.client.get(
+            reverse("discord_oauth_callback"),
+            {"state": session.state, "code": "identity-code"},
+        )
+
+        self.assertEqual(callback_response.status_code, 200)
+        self.assertContains(callback_response, "gobii:discord_identity_oauth_complete")
+        self.assertContains(callback_response, '"status": "success"')
+        identity = UserDiscordIdentity.objects.get(user=self.user)
+        self.assertEqual(identity.discord_user_id, "177593384389705729")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot._exchange_identity_oauth_code")
+    def test_expired_identity_oauth_session_is_rejected_before_token_exchange(self, exchange_mock):
+        start_discord_identity_oauth(self.user)
+        session = UserDiscordIdentityOAuthSession.objects.get(user=self.user)
+        session.expires_at = timezone.now() - timedelta(seconds=1)
+        session.save(update_fields=["expires_at"])
+
+        with self.assertRaisesMessage(DiscordBotIntegrationError, "has expired"):
+            handle_discord_identity_oauth_callback(
+                state=session.state,
+                code="identity-code",
+                user=self.user,
+            )
+
+        exchange_mock.assert_not_called()
+
+    @tag("batch_agent_webhooks")
+    def test_discord_skill_prompt_lists_active_server_and_channel_names_and_ids(self):
+        guild = self._guild(guild_id="100", name="Product Team")
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="200",
+            channel_name="agent-ops",
+        )
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="201",
+            channel_name="disabled-channel",
+            status=PersistentAgentDiscordChannelSubscription.Status.DISABLED,
+        )
+
+        context = get_system_skill_definition("discord_native").render_prompt_context(self.agent)
+
+        self.assertIn("Product Team (guild_id=100)", context)
+        self.assertIn("#agent-ops (channel_id=200)", context)
+        self.assertNotIn("disabled-channel", context)
 
     @tag("batch_agent_webhooks")
     def test_discord_http_error_preserves_escaped_response_body(self):

@@ -3242,7 +3242,7 @@ def _direct_correction_context(agent: PersistentAgent, latest_inbound=None):
         or _matches_behavior_feedback(normalized)
     ):
         return None
-    if not _ConfigAuthorityResolver(agent).endpoint_can_configure(latest_inbound.from_endpoint):
+    if not _ConfigAuthorityResolver(agent).message_can_configure(latest_inbound):
         return None
     # A shared Discord reply carries deterministic ownership. Do not let the correction fast path
     # override that routing context and mutate a bystander's charter.
@@ -3255,7 +3255,7 @@ def _direct_correction_context(agent: PersistentAgent, latest_inbound=None):
     if prior_outbound is None:
         return None
     # Bound a rapid same-sender burst so the focused correction call keeps its cache-efficient shape.
-    feedback_messages = list(
+    feedback_queryset = (
         PersistentAgentMessage.objects.filter(
             owner_agent=agent,
             is_outbound=False,
@@ -3267,8 +3267,15 @@ def _direct_correction_context(agent: PersistentAgent, latest_inbound=None):
         ).filter(
             Q(timestamp__lt=latest_inbound.timestamp)
             | Q(timestamp=latest_inbound.timestamp, seq__lte=latest_inbound.seq),
-        ).order_by("-timestamp", "-seq")[:6]
+        ).order_by("-timestamp", "-seq")
     )
+    if latest_inbound.from_endpoint.channel == CommsChannel.DISCORD:
+        discord_author_id = str((latest_inbound.raw_payload or {}).get("discord_author_id") or "").strip()
+        feedback_queryset = feedback_queryset.filter(
+            raw_payload__source="discord_bot",
+            raw_payload__discord_author_id=discord_author_id,
+        )
+    feedback_messages = list(feedback_queryset[:6])
     feedback_text = "\n".join(message.body for message in reversed(feedback_messages))
     analysis = _analyze_feedback_turn(feedback_text, prior_outbound.body)
     if not (analysis.lasting and analysis.behavior and not analysis.transient_only):

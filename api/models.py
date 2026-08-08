@@ -9806,6 +9806,48 @@ class PersistentAgentPipedreamTriggerSubscription(EncryptedTextModelMixin, model
         return f"PipedreamTrigger<{self.app_slug}:{self.event_type}:{self.platform_channel}>"
 
 
+class UserDiscordIdentity(models.Model):
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="discord_identity",
+    )
+    discord_user_id = models.CharField(max_length=32, unique=True)
+    username = models.CharField(max_length=255)
+    global_name = models.CharField(max_length=255, blank=True)
+    verified_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"UserDiscordIdentity<{self.user_id}:{self.discord_user_id}>"
+
+
+class UserDiscordIdentityOAuthSession(models.Model):
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    state = models.CharField(max_length=128, unique=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="discord_identity_oauth_sessions",
+    )
+    expires_at = models.DateTimeField()
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["state"], name="user_discord_oauth_state_idx"),
+            models.Index(fields=["user", "expires_at"], name="user_discord_oauth_user_idx"),
+        ]
+
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+
 class PersistentAgentDiscordOAuthSession(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

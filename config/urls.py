@@ -149,6 +149,8 @@ from console.discord_api import (
     DiscordContextAppView,
     DiscordDisconnectView,
     DiscordGuildDisconnectView,
+    DiscordIdentityOAuthStartView,
+    DiscordIdentityView,
     DiscordOAuthCallbackView,
     DiscordOAuthStartView,
 )
@@ -273,6 +275,16 @@ urlpatterns = [
     path("connect/pipedream/<uuid:agent_id>/<slug:app_slug>/", PipedreamConnectRedirectView.as_view(), name="pipedream_jit_connect"),
     path("console/api/discord/oauth/start/", DiscordOAuthStartView.as_view(), name="discord_oauth_start"),
     path("console/api/discord/oauth/callback/", DiscordOAuthCallbackView.as_view(), name="discord_oauth_callback"),
+    path(
+        "console/api/user/discord-identity/oauth/start/",
+        DiscordIdentityOAuthStartView.as_view(),
+        name="discord_identity_oauth_start",
+    ),
+    path(
+        "console/api/user/discord-identity/",
+        DiscordIdentityView.as_view(),
+        name="discord_identity",
+    ),
     path("console/api/discord/app/", DiscordContextAppView.as_view(), name="console-discord-context-app"),
 
     # Plan landing pages (must be before console to avoid conflict)

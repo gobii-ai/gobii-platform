@@ -19,6 +19,17 @@ export type EmailVerificationState = {
   pendingEmail: string | null
 }
 
+export type DiscordIdentityState = {
+  contextConnected: boolean
+  linked: boolean
+  username: string | null
+  displayName: string | null
+  verifiedAt: string | null
+  canConfigureInCurrentContext: boolean
+  connectUrl: string
+  disconnectUrl: string
+}
+
 export type UserProfilePayload = {
   profile: UserProfileFormState
   timezoneOptions: TimezoneOption[]
@@ -29,6 +40,7 @@ export type UserProfilePayload = {
   phone: PhoneState | null
   pendingPhone?: PhoneState | null
   supportedPhoneRegions: SupportedPhoneRegion[]
+  discordIdentity: DiscordIdentityState | null
 }
 
 export type UserProfileErrorPayload = {
@@ -59,6 +71,13 @@ export function updateUserEmail(action: 'change' | 'resend' | 'cancel', email?: 
   return jsonRequest<{ emailVerification: EmailVerificationState }>('/console/api/user/email/', {
     method: action === 'change' ? 'POST' : action === 'resend' ? 'PUT' : 'DELETE',
     json: action === 'change' ? { email } : undefined,
+    includeCsrf: true,
+  })
+}
+
+export function disconnectUserDiscordIdentity(disconnectUrl: string) {
+  return jsonRequest<{ disconnected: boolean }>(disconnectUrl, {
+    method: 'DELETE',
     includeCsrf: true,
   })
 }

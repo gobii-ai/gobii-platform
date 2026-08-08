@@ -10,6 +10,7 @@ import { PhoneNumberInput, type SupportedPhoneRegion } from '../../components/co
 import { PetProfileSection } from '../../components/pets/PetProfileSection'
 import { CustomInstructionsSection } from '../../components/settings/CustomInstructionsSection'
 import { useUserPhoneVerification } from '../../hooks/useUserPhoneVerification'
+import { DiscordIdentitySection } from './DiscordIdentitySection'
 
 type ProfileScreenProps = {
   initialData: UserProfilePayload
@@ -469,6 +470,13 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
           {saveError ? <p className="profile-screen__feedback profile-screen__feedback--error">{saveError}</p> : null}
         </div>
       </section>
+
+      {data.discordIdentity ? (
+        <DiscordIdentitySection
+          identity={data.discordIdentity}
+          onChange={(discordIdentity) => setData((current) => ({ ...current, discordIdentity }))}
+        />
+      ) : null}
 
       <PetProfileSection />
 
