@@ -169,6 +169,10 @@
     <!-- TikTok Pixel Code End -->
   {% endif %}
 
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.BULLSEYE_PIXEL_ID %}
+  <!-- Bullseye Pixel -->
+  <script async defer src="https://script.bullseye.so/script/{{ settings.BULLSEYE_PIXEL_ID }}" referrerpolicy="strict-origin-when-cross-origin" data-bullseye-pixel="{{ settings.BULLSEYE_PIXEL_ID }}"></script>
+  {% endif %}
 
   {% block segment_bootstrap_js %}
   <script src="{% static 'js/segment_bootstrap.js' %}"></script>

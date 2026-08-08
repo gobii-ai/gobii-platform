@@ -31,7 +31,7 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
         "INTERCOM_SUPPORT_EMAIL": "help@gobii.ai",
     },
     "analytics": {
-        # Real keys are injected via environment in production deployments.
+        # Secrets and deployment-specific IDs are injected via environment.
         "SEGMENT_WRITE_KEY": "",
         "SEGMENT_WEB_WRITE_KEY": "",
         "REDDIT_PIXEL_ID": "",
@@ -39,6 +39,7 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
         "MIXPANEL_PROJECT_TOKEN": "",
         "LINKEDIN_PARTNER_ID": "",
         "LINKEDIN_SIGNUP_CONVERSION_ID": "",
+        "BULLSEYE_PIXEL_ID": "",
     },
 }
 

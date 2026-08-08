@@ -1307,6 +1307,10 @@ LINKEDIN_PARTNER_ID = env(
     "LINKEDIN_PARTNER_ID",
     default=_proprietary_default("analytics", "LINKEDIN_PARTNER_ID"),
 )
+BULLSEYE_PIXEL_ID = env(
+    "BULLSEYE_PIXEL_ID",
+    default=_proprietary_default("analytics", "BULLSEYE_PIXEL_ID"),
+)
 
 TIKTOK_PIXEL_ID = env(
     "TIKTOK_PIXEL_ID",
