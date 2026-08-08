@@ -499,6 +499,7 @@ TEMPLATES = [
                 "config.context_processors.account_auth_flags",
                 "pages.context_processors.account_info",
                 "pages.context_processors.environment_info",
+                "pages.context_processors.public_facing_page",
                 "pages.context_processors.show_signup_tracking",
                 "pages.context_processors.mini_mode",
                 "pages.context_processors.analytics",
@@ -1306,6 +1307,10 @@ META_PIXEL_ID = env(
 LINKEDIN_PARTNER_ID = env(
     "LINKEDIN_PARTNER_ID",
     default=_proprietary_default("analytics", "LINKEDIN_PARTNER_ID"),
+)
+BULLSEYE_PIXEL_ID = env(
+    "BULLSEYE_PIXEL_ID",
+    default=_proprietary_default("analytics", "BULLSEYE_PIXEL_ID"),
 )
 
 TIKTOK_PIXEL_ID = env(
