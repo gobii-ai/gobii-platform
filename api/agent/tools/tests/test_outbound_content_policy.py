@@ -213,6 +213,7 @@ class NativeMarkdownSenderTests(TestCase):
             channel_id="123",
             body="**MINOR**",
             attachments=[],
+            embeds=[],
         )
 
     def test_peer_message_rejects_html_before_delivery(self):

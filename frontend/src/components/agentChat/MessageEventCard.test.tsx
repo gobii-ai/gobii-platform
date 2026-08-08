@@ -92,10 +92,80 @@ describe('MessageEventCard reply context', () => {
     expect(screen.getByText('honestly maybe like a 30.')).toBeInTheDocument()
   })
 
+  it('shows embed, attachment, and unavailable reply fallbacks supplied by the timeline', () => {
+    const { rerender } = renderCard(emailMessage({
+      channel: 'discord',
+      isOutbound: false,
+      bodyText: 'what do you think?',
+      subject: null,
+      recipientAddress: null,
+      replyTo: {
+        authorName: 'Release Bot',
+        bodyText: '',
+        embeds: [{
+          title: 'Deployment',
+          description: 'Production is healthy.',
+          color: '#22C55E',
+          fields: [{ name: 'Version', value: 'v42', inline: true }],
+        }],
+        attachmentFilenames: ['report.pdf'],
+      },
+    }))
+
+    expect(screen.getByText('Release Bot')).toBeInTheDocument()
+    expect(screen.getByTestId('discord-embed')).toBeInTheDocument()
+    expect(screen.getByText('Deployment')).toBeInTheDocument()
+    expect(screen.getByText('Production is healthy.')).toBeInTheDocument()
+    expect(screen.getByText('Version')).toBeInTheDocument()
+    expect(screen.getByText('v42')).toBeInTheDocument()
+    expect(screen.getByText(/Attachments: report.pdf/)).toBeInTheDocument()
+
+    rerender(
+      <MessageEventCard
+        eventCursor="cursor-1"
+        message={emailMessage({
+          channel: 'discord',
+          isOutbound: false,
+          bodyText: 'following up',
+          subject: null,
+          recipientAddress: null,
+          replyTo: { authorName: null, bodyText: 'Original Discord message is unavailable.' },
+        })}
+        agentFirstName="Alpha"
+      />,
+    )
+
+    expect(screen.getByText('Original Discord message is unavailable.')).toBeInTheDocument()
+  })
+
   it('renders no quote block for a plain message', () => {
     renderCard(emailMessage({ channel: 'discord', isOutbound: false, subject: null, recipientAddress: null }))
 
     expect(screen.queryByTestId('reply-context')).not.toBeInTheDocument()
+  })
+
+  it('renders top-level embeds even when a Discord message has no text', () => {
+    renderCard(emailMessage({
+      channel: 'discord',
+      isOutbound: true,
+      bodyText: '',
+      subject: null,
+      recipientAddress: null,
+      discordEmbeds: [{
+        author: { name: 'Release Bot', iconUrl: 'https://example.test/bot.png' },
+        title: 'Embed Demo',
+        url: 'https://example.test/demo',
+        description: 'A clean status card.',
+        thumbnailUrl: 'https://example.test/thumb.png',
+        footer: { text: 'Updated now' },
+      }],
+    }))
+
+    expect(screen.queryByText('No content provided.')).not.toBeInTheDocument()
+    expect(screen.getByText('Release Bot')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Embed Demo' })).toHaveAttribute('href', 'https://example.test/demo')
+    expect(screen.getByText('A clean status card.')).toBeInTheDocument()
+    expect(screen.getByText('Updated now')).toBeInTheDocument()
   })
 })
 

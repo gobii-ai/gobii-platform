@@ -787,6 +787,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertNotIn("channel_id", subscription_parameters["required"])
         self.assertIn("channel_name", send_parameters["properties"])
         self.assertNotIn("channel_id", send_parameters["required"])
+        self.assertEqual(send_parameters["properties"]["embeds"]["maxItems"], 10)
 
     @tag("batch_agent_webhooks")
     def test_claimed_guild_queryset_is_lockable_without_distinct(self):
@@ -857,6 +858,7 @@ class NativeDiscordBotTests(TestCase):
             clean_content="original @Ada",
             author=SimpleNamespace(id=301, display_name="Ada", name="ada"),
             attachments=[SimpleNamespace(filename="brief.pdf")],
+            embeds=[SimpleNamespace(to_dict=lambda: {"title": "Release", "description": "Ready"})],
         )
         message = SimpleNamespace(
             id=500,
@@ -890,6 +892,7 @@ class NativeDiscordBotTests(TestCase):
                 "author_name": "Ada",
                 "content": "original @Ada",
                 "attachment_filenames": ["brief.pdf"],
+                "embeds": [{"title": "Release", "description": "Ready"}],
                 "unavailable": False,
             },
         )
@@ -1122,6 +1125,10 @@ class NativeDiscordBotTests(TestCase):
                 "author_name": "Ada",
                 "content": "Ship the updated report",
                 "attachment_filenames": ["report.pdf"],
+                "embeds": [{
+                    "title": "Release status",
+                    "fields": [{"name": "Version", "value": "v42"}],
+                }],
                 "unavailable": False,
             },
         )
@@ -1147,6 +1154,62 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("Author: Ada", user_prompt)
         self.assertIn("Ship the updated report", user_prompt)
         self.assertIn("Attachments: report.pdf", user_prompt)
+        self.assertIn("Embeds:", user_prompt)
+        self.assertIn("Title: Release status", user_prompt)
+        self.assertIn("- Version: v42", user_prompt)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_embed_only_message_is_readable_in_agent_prompt(
+        self,
+        schedule_mock,
+        _comms_compacted_mock,
+        _steps_compacted_mock,
+    ):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        result = ingest_gateway_message(DiscordGatewayMessage(
+            message_id="embed-500",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="300",
+            author_name="Human",
+            content="",
+            attachments=[],
+            embeds=[{
+                "title": "Deployment",
+                "description": "Production is healthy.",
+                "url": "https://status.example.test/deployments/42",
+                "color": 0x22C55E,
+                "author": {"name": "Release Bot"},
+                "provider": {"name": "Status Service", "url": "https://status.example.test"},
+                "fields": [{"name": "Version", "value": "v42", "inline": True}],
+                "footer": {"text": "Updated now"},
+                "thumbnail": {"url": "https://status.example.test/icon.png"},
+            }],
+        ))
+
+        context, _, _ = build_prompt_context(self.agent)
+        user_prompt = next(item["content"] for item in context if item["role"] == "user")
+        self.assertFalse(result["ignored"])
+        self.assertIn("<discord_embeds>", user_prompt)
+        self.assertIn("Title: Deployment", user_prompt)
+        self.assertIn("Production is healthy.", user_prompt)
+        self.assertIn("Color: #22C55E", user_prompt)
+        self.assertIn("Author: Release Bot", user_prompt)
+        self.assertIn("Provider: Status Service", user_prompt)
+        self.assertIn("- Version (inline): v42", user_prompt)
+        self.assertIn("Thumbnail: https://status.example.test/icon.png", user_prompt)
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.requests.head")
@@ -1483,6 +1546,68 @@ class NativeDiscordBotTests(TestCase):
             inbound_message_id=result["message_id"],
             typing_channel_id="10",
         )
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_filters_embed_only_webhook_echo(self, schedule_mock):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        webhook = PersistentAgentDiscordWebhook.objects.create(
+            guild=guild,
+            channel_id="10",
+            webhook_id="wh",
+            name="Gobii",
+        )
+        embeds = [{
+            "title": "Deployment",
+            "description": "Healthy",
+            "color": 0x22C55E,
+            "fields": [{"name": "Version", "value": "v42"}],
+        }]
+        PersistentAgentDiscordWebhookEcho.objects.create(
+            agent=self.agent,
+            webhook=webhook,
+            channel_id="10",
+            discord_webhook_id="wh",
+            signature_hash=_webhook_echo_signature(
+                webhook_id="wh",
+                channel_id="10",
+                username="Discord Agent",
+                body="",
+                attachment_filenames=[],
+                embeds=embeds,
+            ),
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
+
+        result = ingest_gateway_message(DiscordGatewayMessage(
+            message_id="embed-echo-1",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="webhook",
+            author_name="Discord Agent",
+            content="",
+            attachments=[],
+            embeds=[{
+                **embeds[0],
+                "type": "rich",
+                "fields": [{"name": "Version", "value": "v42", "inline": False}],
+            }],
+            author_is_bot=True,
+            webhook_id="wh",
+        ))
+
+        self.assertTrue(result["ignored"])
+        self.assertEqual(result["reason"], "own_webhook_echo")
+        self.assertFalse(PersistentAgentMessage.objects.exists())
+        schedule_mock.assert_not_called()
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
@@ -1958,12 +2083,14 @@ class NativeDiscordBotTests(TestCase):
             {
                 "channel_id": "10",
                 "attachments": ["$[/exports/report.txt]"],
+                "embeds": [{"title": "Report", "color": "#5865F2"}],
                 "will_continue_work": False,
             },
         )
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["attachment_count"], 1)
+        self.assertEqual(result["embed_count"], 1)
         message = PersistentAgentMessage.objects.get(id=result["message_id"])
         self.assertEqual(message.body, "")
         self.assertEqual(message.raw_payload["discord_sent_attachments"][0]["path"], "/exports/report.txt")
@@ -1975,11 +2102,80 @@ class NativeDiscordBotTests(TestCase):
         payload = json.loads(send_call.kwargs["data"]["payload_json"])
         self.assertEqual(payload["username"], "Discord Agent 📎")
         self.assertEqual(payload["content"], "")
+        self.assertEqual(payload["embeds"], [{"title": "Report", "color": 0x5865F2}])
         self.assertEqual(send_call.kwargs["files"][0][0], "files[0]")
         self.assertEqual(send_call.kwargs["files"][0][1][0], "report.txt")
         self.assertEqual(send_call.kwargs["files"][0][1][2], "text/plain")
         self.assertNotIn("json", send_call.kwargs)
         broadcast_mock.assert_called_once_with(str(message.id))
+
+    @tag("batch_agent_webhooks")
+    @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
+    @patch("api.services.discord_bot.requests.get")
+    @patch("api.services.discord_bot.requests.post")
+    def test_send_message_tool_sends_and_persists_embed_only_message(self, post_mock, get_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        post_mock.side_effect = [
+            _response({"id": "wh1", "token": "token1", "name": "Gobii"}),
+            _response({"id": "discord-message-1", "channel_id": "10"}),
+        ]
+
+        result = execute_send_discord_message(self.agent, {
+            "channel_id": "10",
+            "embeds": [{
+                "title": "Deployment",
+                "description": "Production is healthy.",
+                "url": "https://status.example.test/deployments/42",
+                "color": "#22C55E",
+                "fields": [{"name": "Version", "value": "v42", "inline": True}],
+            }],
+            "will_continue_work": False,
+        })
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["attachment_count"], 0)
+        self.assertEqual(result["embed_count"], 1)
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        expected_embed = {
+            "title": "Deployment",
+            "description": "Production is healthy.",
+            "url": "https://status.example.test/deployments/42",
+            "color": 0x22C55E,
+            "fields": [{"name": "Version", "value": "v42", "inline": True}],
+        }
+        self.assertEqual(message.body, "")
+        self.assertEqual(message.raw_payload["discord_sent_embeds"], [expected_embed])
+        send_payload = post_mock.call_args_list[1].kwargs["json"]
+        self.assertEqual(send_payload["content"], "")
+        self.assertEqual(send_payload["embeds"], [expected_embed])
+        self.assertTrue(result["auto_sleep_ok"])
+
+        context, _, _ = build_prompt_context(self.agent)
+        rendered_context = json.dumps(context)
+        self.assertIn("discord_embeds", rendered_context)
+        self.assertIn("Title: Deployment", rendered_context)
+        self.assertIn("- Version (inline): v42", rendered_context)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tools.send_discord_message.resolve_filespace_attachments", return_value=[])
+    @patch("api.agent.tools.send_discord_message.send_channel_message")
+    def test_send_message_tool_rejects_empty_content_attachments_and_embeds(self, send_mock, _resolve_mock):
+        result = execute_send_discord_message(self.agent, {
+            "channel_id": "10",
+            "embeds": [],
+            "will_continue_work": False,
+        })
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("At least one of message, attachments, or embeds", result["message"])
+        send_mock.assert_not_called()
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.tools.send_discord_message.resolve_filespace_attachments", return_value=[])
@@ -2014,6 +2210,7 @@ class NativeDiscordBotTests(TestCase):
             channel_id="10",
             body="Shipped.",
             attachments=[],
+            embeds=[],
         )
 
     @tag("batch_agent_webhooks")
@@ -2132,6 +2329,9 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("A direct reply to someone else is not your social moment", skill.prompt_instructions)
         self.assertIn("Discord cannot render tables", skill.prompt_instructions)
         self.assertIn("never send pipe-separated columns with a hyphen-divider row", skill.prompt_instructions)
+        self.assertIn("at least one of `message`, `attachments`, or `embeds`", skill.prompt_instructions)
+        self.assertIn("Simple cards support", skill.prompt_instructions)
+        self.assertIn("`color` as `#RRGGBB`", skill.prompt_instructions)
 
     @tag("batch_agent_webhooks")
     def test_global_report_contract_allows_a_supported_discord_equivalent(self):

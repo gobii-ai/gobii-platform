@@ -35,6 +35,29 @@ export type StructuredPeerPayload = Record<string, unknown> | unknown[]
 
 export type AgentMessageFeedback = 'up' | 'down'
 
+export type DiscordEmbed = {
+  title?: string
+  description?: string
+  url?: string
+  color?: string
+  author?: { name?: string; url?: string; iconUrl?: string }
+  fields?: Array<{ name: string; value: string; inline?: boolean }>
+  footer?: { text?: string; iconUrl?: string }
+  provider?: { name?: string; url?: string }
+  imageUrl?: string
+  thumbnailUrl?: string
+  videoUrl?: string
+}
+
+export type DiscordReplyContext = {
+  authorName?: string | null
+  bodyText: string
+  embeds?: DiscordEmbed[]
+  attachmentFilenames?: string[]
+  messageId?: string | null
+  unavailable?: boolean
+}
+
 export type AgentMessage = {
   id: string
   cursor?: string
@@ -59,7 +82,8 @@ export type AgentMessage = {
   senderAddress?: string | null
   recipientName?: string | null
   recipientAddress?: string | null
-  replyTo?: { authorName?: string | null; bodyText: string } | null
+  replyTo?: DiscordReplyContext | null
+  discordEmbeds?: DiscordEmbed[]
   ccAddresses?: string[] | null
   bccAddresses?: string[] | null
   sourceKind?: string | null

@@ -33,6 +33,7 @@ from util.urls import append_context_query, build_immersive_contact_requests_pat
 from api.services import mcp_servers as mcp_server_service
 from api.services.dedicated_proxy_service import DedicatedProxyService
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.discord_embeds import format_discord_embeds
 from api.services.prompt_settings import get_prompt_settings
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time, resolve_user_timezone
@@ -4694,6 +4695,9 @@ def _format_discord_reply_context(raw_payload: Mapping[str, Any]) -> str:
         ]
         if filenames:
             lines.append(f"Attachments: {', '.join(filenames)}")
+    embed_context = format_discord_embeds(reply_to.get("embeds"))
+    if embed_context:
+        lines.extend(["Embeds:", embed_context])
     return "\n".join(lines)
 
 
@@ -5615,6 +5619,11 @@ def _get_unified_history_prompt(
                 discord_message_id = str(raw_payload.get("discord_message_id") or "").strip()
                 if discord_message_id:
                     components["discord_message_id"] = discord_message_id
+                embed_context = format_discord_embeds(
+                    raw_payload.get("discord_sent_embeds") if m.is_outbound else raw_payload.get("discord_embeds")
+                )
+                if embed_context:
+                    components["discord_embeds"] = embed_context
                 discord_reply_context = _format_discord_reply_context(raw_payload)
                 if discord_reply_context:
                     components["discord_reply_context"] = discord_reply_context

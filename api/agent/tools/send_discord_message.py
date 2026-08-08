@@ -10,15 +10,45 @@ from api.agent.files.attachment_helpers import AttachmentResolutionError, resolv
 from api.agent.comms.outbound_content_policy import markdown_only_error
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.agent_variables import substitute_variables_with_filespace
-from api.agent.core.link_references import handle_link_reference_errors
+from api.agent.core.link_references import handle_link_reference_errors, resolve_link_references
 from api.models import PersistentAgent
 from api.services.discord_bot import (
     DiscordBotIntegrationError,
     resolve_active_subscription,
     send_channel_message,
 )
+from api.services.discord_embeds import discord_embed_tool_schema, normalize_discord_embeds
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_embed_link_references(raw_embeds: object, agent: PersistentAgent) -> object:
+    if not isinstance(raw_embeds, list):
+        return raw_embeds
+    resolved_embeds = []
+    for raw_embed in raw_embeds:
+        if not isinstance(raw_embed, dict):
+            resolved_embeds.append(raw_embed)
+            continue
+        embed = dict(raw_embed)
+        for key in ("title", "description", "url"):
+            if isinstance(embed.get(key), str):
+                embed[key] = resolve_link_references(embed[key], agent)
+        raw_fields = embed.get("fields")
+        if isinstance(raw_fields, list):
+            fields = []
+            for raw_field in raw_fields:
+                if not isinstance(raw_field, dict):
+                    fields.append(raw_field)
+                    continue
+                field = dict(raw_field)
+                for key in ("name", "value"):
+                    if isinstance(field.get(key), str):
+                        field[key] = resolve_link_references(field[key], agent)
+                fields.append(field)
+            embed["fields"] = fields
+        resolved_embeds.append(embed)
+    return resolved_embeds
 
 
 def get_send_discord_message_tool() -> Dict[str, Any]:
@@ -52,7 +82,7 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "Message body to send. Optional when attachments are provided. "
+                        "description": "Message body to send. Optional when attachments or embeds are provided. "
                                        "For reports, use compact Markdown sections, bullets, bold labels, status labels, and tasteful emoji. "
                                        "Discord cannot render tables: never send pipe-separated columns with a "
                                        "hyphen-divider row, even as a summary. "
@@ -68,6 +98,7 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                         "items": {"type": "string"},
                         "description": SEND_TOOL_ATTACHMENTS_DESCRIPTION,
                     },
+                    "embeds": discord_embed_tool_schema(),
                     "will_continue_work": {
                         "type": "boolean",
                         "description": "REQUIRED. true = you'll take another action, false = you're done.",
@@ -86,6 +117,10 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
     guild_id = str(params.get("guild_id") or "").strip()
     body = str(params.get("message") or "").strip()
     attachment_paths = params.get("attachments")
+    try:
+        embeds = normalize_discord_embeds(_resolve_embed_link_references(params.get("embeds"), agent))
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
     body = substitute_variables_with_filespace(body, agent)
     if content_error := markdown_only_error(body, surface="Discord"):
         return content_error
@@ -93,8 +128,8 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
     except AttachmentResolutionError as exc:
         return {"status": "error", "message": str(exc)}
-    if not body and not resolved_attachments:
-        return {"status": "error", "message": "message is required when attachments is empty."}
+    if not body and not resolved_attachments and not embeds:
+        return {"status": "error", "message": "At least one of message, attachments, or embeds is required."}
     subscription = None
     if channel_name:
         try:
@@ -115,6 +150,7 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
             channel_id=channel_id,
             body=body,
             attachments=resolved_attachments,
+            embeds=embeds,
         )
         result: dict[str, Any] = {
             "status": "success",
@@ -122,6 +158,7 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
             "discord_message_id": str((message.raw_payload or {}).get("discord_message_id") or ""),
             "channel_id": channel_id,
             "attachment_count": len(resolved_attachments),
+            "embed_count": len(embeds),
         }
         if subscription:
             result["channel_name"] = subscription.channel_name

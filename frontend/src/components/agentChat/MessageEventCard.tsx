@@ -5,6 +5,7 @@ import type { AgentMessage } from './types'
 import { trackAgentMessageCopy } from '../../api/agentChat'
 import { MessageContent } from './MessageContent'
 import { MessageFeedbackActions } from './MessageFeedbackActions'
+import { DiscordEmbedCard } from './DiscordEmbedCard'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { useRelativeTimestamp } from '../../hooks/useRelativeTimestamp'
 import { sanitizeHtml } from '../../util/sanitize'
@@ -280,8 +281,9 @@ export const MessageEventCard = memo(function MessageEventCard({
     message.bodyText?.trim() || (clipboardHtml ? plainTextFromHtml(clipboardHtml) : '')
   ), [clipboardHtml, message.bodyText])
   const copyDisabled = !clipboardPlainText && !clipboardHtml
+  const discordEmbeds = message.discordEmbeds || []
   const shouldRenderMessageContent = Boolean(
-    message.bodyText?.trim() || message.bodyHtml?.trim() || message.replyTo || !structuredPayload,
+    message.bodyText?.trim() || message.bodyHtml?.trim() || message.replyTo || discordEmbeds.length || !structuredPayload,
   )
 
   const handleCopyMessage = useCallback(async () => {
@@ -406,16 +408,43 @@ export const MessageEventCard = memo(function MessageEventCard({
                 {message.replyTo.authorName ? (
                   <span className="chat-reply-context__author">{message.replyTo.authorName}</span>
                 ) : null}
-                <span className="chat-reply-context__body">{message.replyTo.bodyText}</span>
+                {message.replyTo.bodyText ? (
+                  <span className="chat-reply-context__body">{message.replyTo.bodyText}</span>
+                ) : null}
+                {message.replyTo.embeds?.slice(0, 2).map((embed, index) => (
+                  <DiscordEmbedCard
+                    embed={embed}
+                    compact
+                    key={`reply-embed:${index}`}
+                    onLinkClick={onMessageLinkClick}
+                  />
+                ))}
+                {(message.replyTo.embeds?.length || 0) > 2 ? (
+                  <span className="chat-reply-context__more">
+                    +{(message.replyTo.embeds?.length || 0) - 2} more embeds
+                  </span>
+                ) : null}
+                {message.replyTo.attachmentFilenames?.length ? (
+                  <span className="chat-reply-context__attachments">
+                    Attachments: {message.replyTo.attachmentFilenames.join(', ')}
+                  </span>
+                ) : null}
               </blockquote>
             ) : null}
             <MessageContent
               bodyHtml={message.bodyHtml}
               bodyText={message.bodyText}
-              showEmptyState={!message.attachments || message.attachments.length === 0}
+              showEmptyState={(!message.attachments || message.attachments.length === 0) && discordEmbeds.length === 0}
               animateIn={shouldAnimate}
               onLinkClick={onMessageLinkClick}
             />
+            {discordEmbeds.map((embed, index) => (
+              <DiscordEmbedCard
+                embed={embed}
+                key={`message-embed:${index}`}
+                onLinkClick={onMessageLinkClick}
+              />
+            ))}
           </div>
         ) : null}
         {structuredPayload ? (

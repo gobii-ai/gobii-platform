@@ -66,10 +66,13 @@ class TimelineDiscordReplyTests(TestCase):
         self.assertEqual(payload["replyTo"], {
             "authorName": "Alyssa Perkins",
             "bodyText": "honestly maybe like a 30. it's strip-mall Frederick right off 26.",
+            "embeds": [],
+            "attachmentFilenames": [],
+            "messageId": None,
+            "unavailable": False,
         })
 
-    def test_an_unavailable_reply_carries_no_context(self):
-        """Discord marks fetch failures; a banner with an empty quote asserts nothing useful."""
+    def test_an_unavailable_reply_keeps_the_reply_relationship_visible(self):
         message = self._discord_message({
             "source_kind": "discord",
             "discord_reply_to": {
@@ -81,7 +84,78 @@ class TimelineDiscordReplyTests(TestCase):
 
         payload = serialize_message_event(message)["message"]
 
-        self.assertIsNone(payload["replyTo"])
+        self.assertEqual(payload["replyTo"], {
+            "authorName": "Alyssa Perkins",
+            "bodyText": "Original Discord message is unavailable.",
+            "embeds": [],
+            "attachmentFilenames": [],
+            "messageId": None,
+            "unavailable": True,
+        })
+
+    def test_embed_and_attachment_only_reply_context_reaches_the_card(self):
+        message = self._discord_message({
+            "source_kind": "discord",
+            "discord_reply_to": {
+                "author_name": "Release Bot",
+                "message_id": "123456789",
+                "content": "",
+                "embeds": [{
+                    "title": "Deployment",
+                    "description": "Production is healthy.",
+                    "fields": [{"name": "Version", "value": "v42"}],
+                }],
+                "attachment_filenames": ["report.pdf"],
+                "unavailable": False,
+            },
+        })
+
+        payload = serialize_message_event(message)["message"]
+
+        self.assertEqual(payload["replyTo"]["authorName"], "Release Bot")
+        self.assertEqual(payload["replyTo"]["messageId"], "123456789")
+        self.assertEqual(payload["replyTo"]["bodyText"], "")
+        self.assertEqual(payload["replyTo"]["attachmentFilenames"], ["report.pdf"])
+        self.assertEqual(payload["replyTo"]["embeds"], [{
+            "title": "Deployment",
+            "description": "Production is healthy.",
+            "fields": [{"name": "Version", "value": "v42", "inline": False}],
+        }])
+
+    def test_top_level_inbound_and_outbound_embeds_reach_the_card(self):
+        inbound = self._discord_message({
+            "source_kind": "discord",
+            "discord_embeds": [{
+                "type": "rich",
+                "title": "Inbound card",
+                "color": 0x5865F2,
+                "image": {"url": "https://example.test/inbound.png"},
+            }],
+        })
+        outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.endpoint,
+            conversation=self.conversation,
+            is_outbound=True,
+            body="",
+            raw_payload={
+                "source_kind": "discord",
+                "discord_sent_embeds": [{
+                    "title": "Outbound card",
+                    "description": "Sent by the agent.",
+                }],
+            },
+        )
+
+        self.assertEqual(serialize_message_event(inbound)["message"]["discordEmbeds"], [{
+            "title": "Inbound card",
+            "color": "#5865F2",
+            "imageUrl": "https://example.test/inbound.png",
+        }])
+        self.assertEqual(serialize_message_event(outbound)["message"]["discordEmbeds"], [{
+            "title": "Outbound card",
+            "description": "Sent by the agent.",
+        }])
 
     def test_a_plain_message_has_no_reply_context(self):
         message = self._discord_message({"source_kind": "discord"})
@@ -89,3 +163,4 @@ class TimelineDiscordReplyTests(TestCase):
         payload = serialize_message_event(message)["message"]
 
         self.assertIsNone(payload["replyTo"])
+        self.assertEqual(payload["discordEmbeds"], [])

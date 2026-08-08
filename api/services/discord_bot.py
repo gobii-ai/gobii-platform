@@ -48,6 +48,7 @@ from api.agent.files.attachment_helpers import ResolvedAttachment, create_messag
 from api.agent.files.filespace_service import broadcast_message_attachment_update
 from api.services.agent_avatar_public import build_public_agent_avatar_thumbnail_url
 from api.services.discord_markdown import normalize_discord_markdown
+from api.services.discord_embeds import discord_embed_signature_projection
 from api.services.discord_messages import (
     create_discord_outbound_message,
     discord_agent_address,
@@ -1161,6 +1162,7 @@ def _webhook_echo_signature(
     username: str,
     body: str,
     attachment_filenames: Iterable[str],
+    embeds: object = None,
 ) -> str:
     payload = {
         "webhook_id": webhook_id,
@@ -1169,6 +1171,9 @@ def _webhook_echo_signature(
         "body": body,
         "attachment_filenames": sorted(filename.strip() for filename in attachment_filenames if filename.strip()),
     }
+    embed_projection = discord_embed_signature_projection(embeds)
+    if embed_projection:
+        payload["embeds"] = embed_projection
     encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -1180,6 +1185,7 @@ def _gateway_webhook_echo_signature(message: DiscordGatewayMessage) -> str:
         username=message.author_name,
         body=message.raw_content or message.content,
         attachment_filenames=_webhook_attachment_filenames(message.attachments),
+        embeds=message.embeds,
     )
 
 
@@ -1190,6 +1196,7 @@ def _outbound_webhook_echo_signature(
     username: str,
     body: str,
     attachments: Iterable[ResolvedAttachment],
+    embeds: object = None,
 ) -> str:
     return _webhook_echo_signature(
         webhook_id=webhook.webhook_id,
@@ -1197,6 +1204,7 @@ def _outbound_webhook_echo_signature(
         username=username,
         body=body,
         attachment_filenames=[attachment.filename for attachment in attachments],
+        embeds=embeds,
     )
 
 
@@ -1377,13 +1385,15 @@ def send_channel_message(
     channel_id: str,
     body: str,
     attachments: Iterable[ResolvedAttachment] | None = None,
+    embeds: Iterable[Mapping[str, Any]] | None = None,
     metadata: Mapping[str, object] | None = None,
     persisted_message: PersistentAgentMessage | None = None,
 ) -> PersistentAgentMessage:
     resolved_attachments = list(attachments or [])
+    normalized_embeds = [dict(embed) for embed in (embeds or [])]
     body = normalize_discord_markdown(decode_unicode_character_escapes(body))
-    if not body and not resolved_attachments:
-        raise ValueError("message is required when attachments is empty.")
+    if not body and not resolved_attachments and not normalized_embeds:
+        raise ValueError("At least one of message, attachments, or embeds is required.")
     if len(resolved_attachments) > DISCORD_WEBHOOK_MAX_FILES:
         raise ValueError(f"Discord supports at most {DISCORD_WEBHOOK_MAX_FILES} attachments per message.")
     total_attachment_bytes = sum(max(0, int(attachment.size_bytes or 0)) for attachment in resolved_attachments)
@@ -1406,6 +1416,8 @@ def send_channel_message(
         "content": body,
         "username": username,
     }
+    if normalized_embeds:
+        payload["embeds"] = normalized_embeds
     avatar_url = _agent_avatar_url(agent)
     if avatar_url:
         payload["avatar_url"] = avatar_url
@@ -1425,6 +1437,7 @@ def send_channel_message(
         username=username,
         body=body,
         attachments=resolved_attachments,
+        embeds=normalized_embeds,
     )
     echo_marker = _create_webhook_echo_marker(
         agent=agent,
@@ -1472,6 +1485,7 @@ def send_channel_message(
         "webhook_echo_signature": echo_signature,
         "source_label": discord_channel_source_label(subscription.channel_id, subscription.channel_name),
         "discord_sent_attachments": sent_attachments,
+        "discord_sent_embeds": normalized_embeds,
         "discord_response": response_payload if isinstance(response_payload, Mapping) else {},
         **dict(metadata or {}),
     }

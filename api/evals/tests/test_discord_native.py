@@ -7,6 +7,7 @@ import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.tools.add_discord_reaction import get_add_discord_reaction_tool
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.discord_native import (
+    DISCORD_NATIVE_EMBED_ROUND_TRIP,
     DISCORD_NATIVE_GATEWAY_WAKE,
     DISCORD_NATIVE_READABLE_COMPARISON,
     DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT,
@@ -17,6 +18,7 @@ from api.evals.scenarios.discord_native import (
     DISCORD_NATIVE_SUITE_SLUG,
     DISCORD_READABLE_COMPARISON_PROMPT,
     DiscordNativeGatewayWakeScenario,
+    DiscordNativeEmbedRoundTripScenario,
     DiscordNativeReactionReplyContextScenario,
     DiscordNativeResearchKickoffScenario,
     contains_markdown_pipe_table,
@@ -36,6 +38,33 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         self.assertIn("real_harness", scenario.get_metadata().tags)
         for slug in DISCORD_NATIVE_SCENARIO_SLUGS:
             self.assertIsNotNone(ScenarioRegistry.get(slug))
+
+        embed_scenario = ScenarioRegistry.get(DISCORD_NATIVE_EMBED_ROUND_TRIP)
+        self.assertIsNotNone(embed_scenario)
+        self.assertIn("real_harness", embed_scenario.get_metadata().tags)
+
+    def test_embed_round_trip_verifier_requires_card_details(self):
+        call = SimpleNamespace(
+            tool_name="send_discord_message",
+            tool_params={
+                "channel_id": "channel-1",
+                "embeds": [{
+                    "title": "Deployment 42",
+                    "description": "Production is healthy.",
+                    "fields": [{"name": "Version", "value": "v42"}],
+                }],
+                "will_continue_work": False,
+            },
+            result=json.dumps({"status": "success"}),
+        )
+
+        self.assertTrue(
+            DiscordNativeEmbedRoundTripScenario._embed_call_matches(call, channel_id="channel-1")
+        )
+        call.tool_params["embeds"] = []
+        self.assertFalse(
+            DiscordNativeEmbedRoundTripScenario._embed_call_matches(call, channel_id="channel-1")
+        )
 
     def test_readable_comparison_prompt_does_not_prescribe_formatting_contract(self):
         prompt = DISCORD_READABLE_COMPARISON_PROMPT.casefold()

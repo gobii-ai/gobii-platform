@@ -181,7 +181,7 @@ register_builtin_suites(
         ),
         EvalSuite(
             slug=DISCORD_NATIVE_SUITE_SLUG,
-            description="Native Discord reply-context and reaction behavior over the real agent harness.",
+            description="Native Discord embeds, reply-context, and reaction behavior over the real agent harness.",
             scenario_slugs=DISCORD_NATIVE_SCENARIO_SLUGS,
         ),
         EvalSuite(
