@@ -476,7 +476,7 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
 
     @staticmethod
     def _discord_channel(agent: PersistentAgent, run_id: str):
-        guild_id = "eval-guild"
+        guild_id = f"eval-guild-{str(run_id)[:8]}"
         channel_id = f"eval-customer-signals-{str(run_id)[:8]}"
         channel_name = "customer-signals"
         conversation = get_or_create_discord_conversation(
@@ -510,6 +510,8 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             "source_label": f"{author_name} in #{channel_name}",
             "discord_channel_id": channel_id,
             "discord_channel_name": channel_name,
+            "discord_guild_id": f"eval-guild-{str(run_id)[:8]}",
+            "discord_guild_name": "Eval Guild",
             "discord_author_name": author_name,
         }
         if discord_message_id:
@@ -549,11 +551,13 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
                 "source_kind": "discord",
                 "discord_channel_id": channel_id,
                 "discord_channel_name": channel_name,
+                "discord_guild_id": f"eval-guild-{str(run_id)[:8]}",
+                "discord_guild_name": "Eval Guild",
                 "discord_message_id": discord_message_id,
             },
         )
 
-    def _mock_config(self) -> dict[str, Any]:
+    def _mock_config(self, run_id: str) -> dict[str, Any]:
         summary = {
             "status": "success",
             "content": {
@@ -577,7 +581,9 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             "send_discord_message": {
                 "status": "success",
                 "message_id": "eval-discord-message",
-                "channel_id": "eval-customer-signals",
+                "guild_id": f"eval-guild-{str(run_id)[:8]}",
+                "guild_name": "Eval Guild",
+                "channel_name": "customer-signals",
                 "auto_sleep_ok": True,
             },
         }
@@ -689,7 +695,7 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             reply_to = {
                 "message_id": referenced_message.raw_payload["discord_message_id"],
                 "channel_id": referenced_message.raw_payload["discord_channel_id"],
-                "guild_id": "eval-guild",
+                "guild_id": referenced_message.raw_payload["discord_guild_id"],
                 "author_id": "engineering-agent",
                 "author_name": peer_name,
                 "content": referenced_message.body,
@@ -722,7 +728,7 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
             self.trigger_processing(
                 agent_id,
                 eval_run_id=run_id,
-                mock_config=self._mock_config(),
+                mock_config=self._mock_config(run_id),
                 eval_stop_policy=self._stop_policy(
                     terminal_tool,
                     allow_http=self.case.event_kind
@@ -811,7 +817,8 @@ class ResponsibilityBoundaryScenario(EvalScenario, ScenarioExecutionTools):
         delivered_once = (
             len(channel_calls) == 1
             and self._call_succeeded(channel_calls[0])
-            and params.get("channel_id") == inbound.raw_payload["discord_channel_id"]
+            and params.get("guild_id") == inbound.raw_payload["discord_guild_id"]
+            and params.get("channel_name") == inbound.raw_payload["discord_channel_name"]
             and params.get("will_continue_work") is False
             and material_reply
             and not any(claim in reply_lower for claim in adjacent_takeover)

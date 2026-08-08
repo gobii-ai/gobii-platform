@@ -383,7 +383,10 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         scenario = ResponsibilityBoundaryScenario(case)
         recorded = []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
-        inbound = SimpleNamespace(raw_payload={"discord_channel_id": "channel-1"})
+        inbound = SimpleNamespace(raw_payload={
+            "discord_guild_id": "guild-1",
+            "discord_channel_name": "team-chat",
+        })
         http_call = SimpleNamespace(
             tool_name="http_request",
             tool_params={"url": "https://api.example.test/customer-signals-summary.json"},
@@ -394,7 +397,8 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         discord_call = SimpleNamespace(
             tool_name="send_discord_message",
             tool_params={
-                "channel_id": "channel-1",
+                "guild_id": "guild-1",
+                "channel_name": "team-chat",
                 "message": "Top confirmed theme: Export reliability, with three confirmed reports.",
                 "will_continue_work": False,
             },
@@ -420,7 +424,10 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         scenario = ResponsibilityBoundaryScenario(case)
         recorded = []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
-        inbound = SimpleNamespace(raw_payload={"discord_channel_id": "channel-1"})
+        inbound = SimpleNamespace(raw_payload={
+            "discord_guild_id": "guild-1",
+            "discord_channel_name": "team-chat",
+        })
         scrape_call = SimpleNamespace(
             tool_name="mcp_brightdata_scrape_as_markdown",
             tool_params={"url": "https://api.example.test/customer-signals-summary.json"},
@@ -431,7 +438,8 @@ class ResponsibilityBoundaryScenarioTests(SimpleTestCase):
         discord_call = SimpleNamespace(
             tool_name="send_discord_message",
             tool_params={
-                "channel_id": "channel-1",
+                "guild_id": "guild-1",
+                "channel_name": "team-chat",
                 "message": "Top confirmed theme: Export reliability, with three confirmed reports.",
                 "will_continue_work": False,
             },

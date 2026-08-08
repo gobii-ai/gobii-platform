@@ -138,6 +138,37 @@ def _hubspot_native_prompt_context(agent) -> str:
     return _native_integration_prompt_context(agent, "hubspot")
 
 
+def _discord_native_prompt_context(agent) -> str:
+    from api.models import PersistentAgentDiscordChannelSubscription
+    from api.services.discord_bot import list_claimed_guilds
+
+    guilds = list_claimed_guilds(agent)
+    subscriptions = (
+        PersistentAgentDiscordChannelSubscription.objects.select_related("guild")
+        .filter(
+            agent=agent,
+            status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+        )
+        .order_by("guild__name", "channel_name")
+    )
+    lines = ["Current native Gobii Discord connection:", "Connected servers:"]
+    lines.extend(
+        f"- {guild['name']} (guild_id={guild['guild_id']})"
+        for guild in guilds
+    )
+    if not guilds:
+        lines.append("- None connected")
+    lines.append("Active subscribed channels:")
+    lines.extend(
+        f"- {subscription.guild.name} / #{subscription.channel_name} "
+        f"(guild_id={subscription.guild.guild_id})"
+        for subscription in subscriptions
+    )
+    if not subscriptions:
+        lines.append("- None subscribed")
+    return "\n".join(lines)
+
+
 def _webhooks_prompt_context(agent) -> str:
     def triggered(hook):
         return hook.last_triggered_at.isoformat() if hook.last_triggered_at else "never"
@@ -971,18 +1002,17 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "Use `discord_channel_subscriptions` to manage inbound Discord server-channel subscriptions that wake this agent. "
         "V1 supports server channels only. Multiple agents may subscribe to the same guild/channel; each subscribed agent receives inbound channel messages. "
         "Do not set up DMs, all-channel subscriptions, or mention-only routing.\n"
-        "Before asking the user for Discord IDs, call `discord_channel_subscriptions` with `action=\"list_guilds\"` or `action=\"discover_channels\"`. "
+        "Get server IDs and human-readable channel names by calling `discord_channel_subscriptions` with `action=\"list_guilds\"` or `action=\"discover_channels\"`; do not ask the user for them first. "
         "If the tool returns `action_required`, send the returned Gobii Discord `connect_url` as the single setup link. "
         "That link installs the Gobii bot only in the server selected during that authorization. "
         "Each additional server requires its own connect flow.\n"
         "After the user says Discord setup is complete, call `list_guilds` or `discover_channels` again. "
         "If the tool returns `selected_guild`, use that server and continue to channel discovery; do not ask the user to choose the server again.\n"
-        "After guilds are connected, use `discover_channels` to list channels visible to the Gobii bot. If several channels are returned, ask the user to choose by channel name, "
-        "then call `ensure` with the selected `guild_id`, `channel_id`, and `channel_name` so future channel messages wake this agent.\n"
-        "Only ask the user for raw server or channel IDs if discovery fails or returns no useful choices. "
-        "Do not request Discord server IDs or channel IDs as secrets.\n"
-        "Use `send_discord_message` for outbound Discord replies to subscribed channels. Pass the channel ID when known; "
-        "otherwise pass the exact channel name, adding the guild ID if the same name is subscribed in multiple servers. "
+        "After servers are connected, use `discover_channels` to list channels visible to the Gobii bot. If several channels are returned, ask the user to choose by channel name, "
+        "then call `ensure` with the selected `guild_id` and `channel_name` so future channel messages wake this agent. "
+        "Never ask for or pass a Discord channel ID. Do not request Discord server IDs as secrets.\n"
+        "Use `send_discord_message` for outbound Discord replies to subscribed channels. Always pass both the exact "
+        "human-readable `channel_name` and its `guild_id`. "
         "Pass `message` and the correct `will_continue_work` value. "
         "Write the message in Discord-compatible Markdown; raw HTML is rejected. "
         "Discord cannot render tables: never send pipe-separated columns with a hyphen-divider row, even as a summary. "
@@ -991,12 +1021,13 @@ DISCORD_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `add_discord_reaction` for lightweight social moments such as acknowledgement, thanks, agreement, humor, congratulations, or a shared win, even when no reaction was explicitly requested. "
         "For a lightweight Discord social moment, use one fitting reaction, then stop; do not also reply. A direct reply to someone else is not your social moment unless its text includes you or the room. Do not react to every message or stack reactions. Do not react to a serious question, request, blocker, or important nuance; give it a substantive reply instead. "
-        "Pass the subscribed `channel_id`, the message's `discord_message_id` as `message_id`, one Unicode or Discord custom emoji, and the correct `will_continue_work` value. "
+        "Pass the subscribed channel's `guild_id` and human-readable `channel_name`, the message's `discord_message_id` as `message_id`, one Unicode or Discord custom emoji, and the correct `will_continue_work` value. "
         "This tool only adds the Gobii bot's own reaction; it does not remove or manage other reactions.\n"
-        "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"
+        "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` with the channel's `guild_id` and `channel_name` only when the user asks to stop receiving messages from it.\n"
         "If channel discovery says the Gobii bot cannot list channels, send the returned `connect_url` as the repair link. "
         "The repair flow is locked to that connected server."
     ),
+    prompt_context_renderer=_discord_native_prompt_context,
 )
 
 

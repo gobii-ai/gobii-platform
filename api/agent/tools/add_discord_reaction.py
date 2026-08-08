@@ -7,7 +7,11 @@ import requests
 from django.core.exceptions import ObjectDoesNotExist
 
 from api.models import PersistentAgent
-from api.services.discord_bot import DiscordBotIntegrationError, add_discord_reaction
+from api.services.discord_bot import (
+    DiscordBotIntegrationError,
+    add_discord_reaction,
+    resolve_active_subscription,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +23,20 @@ def get_add_discord_reaction_tool() -> Dict[str, Any]:
             "name": "add_discord_reaction",
             "description": (
                 "Add one emoji reaction to a message in a Discord channel subscribed by this agent. "
-                "Use the discord_message_id and channel ID from Discord message context."
+                "Use the discord_message_id, server ID, and human-readable channel name from Discord message context."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "channel_id": {
+                    "guild_id": {
                         "type": "string",
-                        "description": "Subscribed Discord channel ID.",
+                        "description": "Connected Discord server ID containing channel_name.",
+                    },
+                    "channel_name": {
+                        "type": "string",
+                        "description": (
+                            "Exact human-readable subscribed channel name; a leading # and letter case are ignored."
+                        ),
                     },
                     "message_id": {
                         "type": "string",
@@ -43,26 +53,36 @@ def get_add_discord_reaction_tool() -> Dict[str, Any]:
                         "description": "REQUIRED. true = you'll take another action, false = you're done.",
                     },
                 },
-                "required": ["channel_id", "message_id", "emoji", "will_continue_work"],
+                "required": ["guild_id", "channel_name", "message_id", "emoji", "will_continue_work"],
             },
         },
     }
 
 
 def execute_add_discord_reaction(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
-    channel_id = str(params.get("channel_id") or "").strip()
+    guild_id = str(params.get("guild_id") or "").strip()
+    channel_name = str(params.get("channel_name") or "").strip()
     message_id = str(params.get("message_id") or "").strip()
     emoji = str(params.get("emoji") or "").strip()
+    if not guild_id or not channel_name:
+        return {"status": "error", "message": "guild_id and channel_name are required."}
     try:
+        subscription = resolve_active_subscription(
+            agent,
+            guild_id=guild_id,
+            channel_name=channel_name,
+        )
         normalized_emoji = add_discord_reaction(
             agent,
-            channel_id=channel_id,
+            channel_id=subscription.channel_id,
             message_id=message_id,
             emoji=emoji,
         )
         result: dict[str, Any] = {
             "status": "success",
-            "channel_id": channel_id,
+            "guild_id": subscription.guild.guild_id,
+            "guild_name": subscription.guild.name,
+            "channel_name": subscription.channel_name,
             "message_id": message_id,
             "discord_message_id": message_id,
             "emoji": normalized_emoji,

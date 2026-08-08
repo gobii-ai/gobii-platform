@@ -175,7 +175,8 @@ class NativeMarkdownSenderTests(TestCase):
         result = execute_send_discord_message(
             self.agent,
             {
-                "channel_id": "123",
+                "guild_id": "guild-1",
+                "channel_name": "general",
                 "message": "<span style='color:red'>MINOR</span>",
                 "attachments": ["/exports/report.pdf"],
                 "will_continue_work": False,
@@ -187,12 +188,19 @@ class NativeMarkdownSenderTests(TestCase):
         send_channel_message_mock.assert_not_called()
 
     @patch("api.agent.tools.send_discord_message.send_channel_message")
+    @patch("api.agent.tools.send_discord_message.resolve_active_subscription")
     @patch("api.agent.tools.send_discord_message.resolve_filespace_attachments", return_value=[])
     def test_discord_delivers_valid_markdown(
         self,
         _resolve_filespace_attachments_mock,
+        resolve_active_subscription_mock,
         send_channel_message_mock,
     ):
+        resolve_active_subscription_mock.return_value = SimpleNamespace(
+            channel_id="123",
+            channel_name="general",
+            guild=SimpleNamespace(guild_id="guild-1", name="Guild"),
+        )
         send_channel_message_mock.return_value = SimpleNamespace(
             id="message-id",
             raw_payload={"discord_message_id": "discord-id"},
@@ -201,7 +209,8 @@ class NativeMarkdownSenderTests(TestCase):
         result = execute_send_discord_message(
             self.agent,
             {
-                "channel_id": "123",
+                "guild_id": "guild-1",
+                "channel_name": "general",
                 "message": "**MINOR**",
                 "will_continue_work": False,
             },

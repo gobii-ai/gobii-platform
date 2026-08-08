@@ -70,7 +70,7 @@ def ensure_conversation_participant(
 
 
 def display_name_for_channel(channel_id: str, channel_name: str = "") -> str:
-    return f"#{channel_name.lstrip('#')}" if channel_name else f"Discord {channel_id}"
+    return f"#{channel_name.lstrip('#')}" if channel_name else "Discord channel"
 
 
 def discord_channel_source_label(channel_id: str, channel_name: str = "") -> str:

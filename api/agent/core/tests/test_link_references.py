@@ -654,7 +654,8 @@ class LinkReferenceTests(TestCase):
             execute_send_discord_message(
                 self.agent,
                 {
-                    "channel_id": "123456789",
+                    "guild_id": "guild-1",
+                    "channel_name": "general",
                     "message": malformed,
                     "will_continue_work": False,
                 },

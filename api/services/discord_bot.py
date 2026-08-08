@@ -208,7 +208,7 @@ def add_discord_reaction(
         )
     if response.status_code == 404:
         raise DiscordBotIntegrationError(
-            "Discord could not find that message in the subscribed channel. Check the channel_id and message_id."
+            "Discord could not find that message in the subscribed channel. Check the server, channel name, and message ID."
         )
     _raise_for_discord_status(response, action="reaction creation")
     return normalized_emoji
@@ -677,7 +677,7 @@ def _normalized_channel_name(value: str) -> str:
 def _resolve_text_channel_in_guild(*, guild_id: str, channel_name: str) -> Mapping[str, Any]:
     normalized_name = _normalized_channel_name(channel_name)
     if not normalized_name:
-        raise DiscordBotIntegrationError("channel_id or channel_name is required.")
+        raise DiscordBotIntegrationError("channel_name is required.")
     matches = [
         channel
         for channel in _fetch_bot_channels(guild_id)
@@ -688,7 +688,8 @@ def _resolve_text_channel_in_guild(*, guild_id: str, channel_name: str) -> Mappi
         raise DiscordBotIntegrationError("Discord channel name was not found in the selected server.")
     if len(matches) > 1:
         raise DiscordBotIntegrationError(
-            "Discord channel name matches more than one text channel in the selected server; use channel_id."
+            "Discord channel name matches more than one text channel in the selected server. "
+            "Rename the duplicate channels or choose a channel with a unique name."
         )
     return matches[0]
 
@@ -810,12 +811,13 @@ def resolve_active_subscription(
             if _normalized_channel_name(subscription.channel_name) == requested_name
         ]
     if not requested_id and not requested_name:
-        raise DiscordBotIntegrationError("channel_id or channel_name is required.")
+        raise DiscordBotIntegrationError("channel_name is required.")
     if not subscriptions:
         raise DiscordBotIntegrationError("No active native Discord subscription matched that channel.")
     if len(subscriptions) > 1:
         raise DiscordBotIntegrationError(
-            "That channel name matches more than one subscribed channel; provide guild_id or channel_id."
+            "That channel name matches more than one active subscription in the selected server. "
+            "Rename or remove the duplicate channels before trying again."
         )
     return subscriptions[0]
 
@@ -920,7 +922,7 @@ def _finalize_gateway_subscription_delivery(
     message: DiscordGatewayMessage,
     stored_message: PersistentAgentMessage,
 ) -> dict[str, Any]:
-    display_name = f"#{message.channel_name.lstrip('#')}" if message.channel_name else f"Discord {message.channel_id}"
+    display_name = f"#{message.channel_name.lstrip('#')}" if message.channel_name else "Discord channel"
     if stored_message.conversation_id and display_name:
         PersistentAgentConversation.objects.filter(id=stored_message.conversation_id).update(display_name=display_name)
     inactive_blocked = (

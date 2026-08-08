@@ -35,20 +35,16 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "channel_id": {
-                        "type": "string",
-                        "description": "Optional subscribed Discord channel ID.",
-                    },
                     "channel_name": {
                         "type": "string",
                         "description": (
-                            "Exact subscribed channel name when channel_id is unavailable. "
-                            "A leading # and letter case are ignored; ambiguous names are rejected."
+                            "Exact human-readable subscribed channel name. A leading # and letter case are ignored; "
+                            "ambiguous names are rejected."
                         ),
                     },
                     "guild_id": {
                         "type": "string",
-                        "description": "Optional connected Discord guild ID to disambiguate channel_name.",
+                        "description": "Connected Discord server ID containing channel_name.",
                     },
                     "message": {
                         "type": "string",
@@ -73,7 +69,7 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
                         "description": "REQUIRED. true = you'll take another action, false = you're done.",
                     },
                 },
-                "required": ["will_continue_work"],
+                "required": ["guild_id", "channel_name", "will_continue_work"],
             },
         },
     }
@@ -81,9 +77,10 @@ def get_send_discord_message_tool() -> Dict[str, Any]:
 
 @handle_link_reference_errors
 def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
-    channel_id = str(params.get("channel_id") or "").strip()
     channel_name = str(params.get("channel_name") or "").strip()
     guild_id = str(params.get("guild_id") or "").strip()
+    if not guild_id or not channel_name:
+        return {"status": "error", "message": "guild_id and channel_name are required."}
     body = str(params.get("message") or "").strip()
     attachment_paths = params.get("attachments")
     body = substitute_variables_with_filespace(body, agent)
@@ -95,24 +92,18 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
         return {"status": "error", "message": str(exc)}
     if not body and not resolved_attachments:
         return {"status": "error", "message": "message is required when attachments is empty."}
-    subscription = None
-    if channel_name:
-        try:
-            subscription = resolve_active_subscription(
-                agent,
-                channel_id=channel_id,
-                channel_name=channel_name,
-                guild_id=guild_id,
-            )
-        except DiscordBotIntegrationError as exc:
-            return {"status": "error", "message": str(exc)}
-        channel_id = subscription.channel_id
-    elif not channel_id:
-        return {"status": "error", "message": "channel_id or channel_name is required."}
+    try:
+        subscription = resolve_active_subscription(
+            agent,
+            channel_name=channel_name,
+            guild_id=guild_id,
+        )
+    except DiscordBotIntegrationError as exc:
+        return {"status": "error", "message": str(exc)}
     try:
         message = send_channel_message(
             agent,
-            channel_id=channel_id,
+            channel_id=subscription.channel_id,
             body=body,
             attachments=resolved_attachments,
         )
@@ -120,12 +111,11 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
             "status": "success",
             "message_id": str(message.id),
             "discord_message_id": str((message.raw_payload or {}).get("discord_message_id") or ""),
-            "channel_id": channel_id,
+            "guild_id": subscription.guild.guild_id,
+            "guild_name": subscription.guild.name,
+            "channel_name": subscription.channel_name,
             "attachment_count": len(resolved_attachments),
         }
-        if subscription:
-            result["channel_name"] = subscription.channel_name
-            result["guild_id"] = subscription.guild.guild_id
         if params.get("will_continue_work") is False:
             result["auto_sleep_ok"] = True
         return result

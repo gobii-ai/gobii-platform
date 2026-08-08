@@ -166,7 +166,8 @@ class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
         cls,
         call,
         *,
-        channel_id: str,
+        guild_id: str,
+        channel_name: str,
         message_id: str,
         allowed_emojis: tuple[str, ...] = ("👍",),
     ) -> bool:
@@ -175,7 +176,8 @@ class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
         params = call.tool_params or {}
         parsed_result = cls._parsed_result(call)
         return (
-            params.get("channel_id") == channel_id
+            params.get("guild_id") == guild_id
+            and params.get("channel_name") == channel_name
             and params.get("message_id") == message_id
             and params.get("emoji") in allowed_emojis
             and isinstance(parsed_result, dict)
@@ -183,14 +185,15 @@ class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
         )
 
     @classmethod
-    def _reply_matches(cls, call, *, channel_id: str) -> bool:
+    def _reply_matches(cls, call, *, guild_id: str, channel_name: str) -> bool:
         if call.tool_name != "send_discord_message":
             return False
         params = call.tool_params or {}
         message = str(params.get("message") or "").strip()
         parsed_result = cls._parsed_result(call)
         return (
-            params.get("channel_id") == channel_id
+            params.get("guild_id") == guild_id
+            and params.get("channel_name") == channel_name
             and len(message.split()) >= 6
             and params.get("will_continue_work") is False
             and isinstance(parsed_result, dict)
@@ -235,6 +238,8 @@ class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
                 "discord_message_id": message_id,
                 "discord_channel_id": channel_id,
                 "discord_channel_name": "team-updates",
+                "discord_guild_id": guild_id,
+                "discord_guild_name": "Eval Team",
                 "discord_author_name": "Maya",
                 "discord_reply_to": _agent_addressed_reply_context(
                     agent,
@@ -256,14 +261,18 @@ class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
                 mock_config={
                     "add_discord_reaction": {
                         "status": "success",
-                        "channel_id": channel_id,
+                        "guild_id": guild_id,
+                        "guild_name": "Eval Team",
+                        "channel_name": "team-updates",
                         "message_id": message_id,
                         "auto_sleep_ok": True,
                     },
                     "send_discord_message": {
                         "status": "success",
                         "message_id": "eval-discord-reply",
-                        "channel_id": channel_id,
+                        "guild_id": guild_id,
+                        "guild_name": "Eval Team",
+                        "channel_name": "team-updates",
                         "auto_sleep_ok": True,
                     },
                 },
@@ -304,7 +313,8 @@ class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
                 and len(reaction_calls) == 1
                 and self._reaction_matches(
                     reaction_calls[0],
-                    channel_id=channel_id,
+                    guild_id=guild_id,
+                    channel_name="team-updates",
                     message_id=message_id,
                     allowed_emojis=self.case.allowed_emojis,
                 )
@@ -322,7 +332,8 @@ class DiscordNativeReactionScenario(EvalScenario, ScenarioExecutionTools):
         else:
             passed = not reaction_calls and len(reply_calls) == 1 and self._reply_matches(
                 reply_calls[0],
-                channel_id=channel_id,
+                guild_id=guild_id,
+                channel_name="team-updates",
             )
             if passed and self.case.expected_action == "supported_reply":
                 delivered_reply = normalize_discord_markdown(
@@ -456,6 +467,8 @@ class DiscordNativeResearchKickoffScenario(EvalScenario, ScenarioExecutionTools)
                 "discord_message_id": "eval-discord-research-message",
                 "discord_channel_id": channel_id,
                 "discord_channel_name": "research",
+                "discord_guild_id": guild_id,
+                "discord_guild_name": "Eval Team",
                 "discord_author_name": "Maya",
             },
         )
@@ -467,7 +480,9 @@ class DiscordNativeResearchKickoffScenario(EvalScenario, ScenarioExecutionTools)
                         "result": {
                             "status": "success",
                             "message_id": "eval-discord-research-kickoff",
-                            "channel_id": channel_id,
+                            "guild_id": guild_id,
+                            "guild_name": "Eval Team",
+                            "channel_name": "research",
                             "auto_sleep_ok": False,
                         },
                     },
@@ -476,7 +491,9 @@ class DiscordNativeResearchKickoffScenario(EvalScenario, ScenarioExecutionTools)
                         "result": {
                             "status": "success",
                             "message_id": "eval-discord-research-result",
-                            "channel_id": channel_id,
+                            "guild_id": guild_id,
+                            "guild_name": "Eval Team",
+                            "channel_name": "research",
                             "auto_sleep_ok": True,
                         },
                     },
@@ -542,7 +559,8 @@ class DiscordNativeResearchKickoffScenario(EvalScenario, ScenarioExecutionTools)
             index
             for index, call in enumerate(calls)
             if call.tool_name == "send_discord_message"
-            and (call.tool_params or {}).get("channel_id") == channel_id
+            and (call.tool_params or {}).get("guild_id") == guild_id
+            and (call.tool_params or {}).get("channel_name") == "research"
             and (call.tool_params or {}).get("will_continue_work") is True
             and len(self._message_body(call).split()) >= 4
             and self._call_succeeded(call)
@@ -579,7 +597,8 @@ class DiscordNativeResearchKickoffScenario(EvalScenario, ScenarioExecutionTools)
             if first_research_index is not None
             and index > first_research_index
             and call.tool_name == "send_discord_message"
-            and (call.tool_params or {}).get("channel_id") == channel_id
+            and (call.tool_params or {}).get("guild_id") == guild_id
+            and (call.tool_params or {}).get("channel_name") == "research"
             and (call.tool_params or {}).get("will_continue_work") is False
             and len(self._message_body(call).split()) >= 12
             and self._call_succeeded(call)
@@ -713,7 +732,9 @@ class DiscordNativeGatewayWakeScenario(EvalScenario, ScenarioExecutionTools):
                     "send_discord_message": {
                         "status": "success",
                         "message_id": "eval-discord-priorities-reply",
-                        "channel_id": channel_id,
+                        "guild_id": guild_id,
+                        "guild_name": "Eval Team",
+                        "channel_name": "team-chat",
                         "auto_sleep_ok": True,
                     },
                 },
@@ -733,7 +754,8 @@ class DiscordNativeGatewayWakeScenario(EvalScenario, ScenarioExecutionTools):
         )
         passed = len(reply_calls) == 1 and DiscordNativeReactionScenario._reply_matches(
             reply_calls[0],
-            channel_id=channel_id,
+            guild_id=guild_id,
+            channel_name="team-chat",
         )
         self.record_task_result(
             run_id,

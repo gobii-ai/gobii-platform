@@ -16,10 +16,36 @@ from api.services.discord_bot import (
     latest_selected_guild,
     list_claimed_guilds,
     list_subscriptions,
-    serialize_guild,
+    resolve_active_subscription,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _agent_guild(guild: dict[str, Any]) -> dict[str, str]:
+    return {
+        "guild_id": str(guild.get("guild_id") or ""),
+        "guild_name": str(guild.get("name") or guild.get("guild_name") or ""),
+    }
+
+
+def _agent_channel(channel: dict[str, Any]) -> dict[str, str]:
+    return {
+        "guild_id": str(channel.get("guild_id") or ""),
+        "guild_name": str(channel.get("guild_name") or ""),
+        "channel_name": str(channel.get("channel_name") or ""),
+        "label": str(channel.get("label") or ""),
+    }
+
+
+def _agent_subscription(subscription: dict[str, Any]) -> dict[str, str]:
+    return {
+        "guild_id": str(subscription.get("guild_id") or ""),
+        "guild_name": str(subscription.get("guild_name") or ""),
+        "channel_name": str(subscription.get("channel_name") or ""),
+        "status": str(subscription.get("status") or ""),
+        "last_message_at": str(subscription.get("last_message_at") or ""),
+    }
 
 
 def get_discord_channel_subscriptions_tool() -> Dict[str, Any]:
@@ -31,7 +57,7 @@ def get_discord_channel_subscriptions_tool() -> Dict[str, Any]:
                 "Manage native Gobii Discord bot channel subscriptions for this agent. "
                 "For Discord setup requests, call list_guilds or discover_channels immediately; "
                 "if setup is required, this tool returns the single connect_url to send to the user. "
-                "Use this before asking for raw Discord IDs: list claimed guilds, discover visible channels, "
+                "Use this to list connected servers, discover visible channels by name, "
                 "subscribe the selected channel, inspect subscriptions, or disable one."
             ),
             "parameters": {
@@ -44,17 +70,13 @@ def get_discord_channel_subscriptions_tool() -> Dict[str, Any]:
                     },
                     "guild_id": {
                         "type": "string",
-                        "description": "Discord guild ID from list_guilds/discover_channels.",
-                    },
-                    "channel_id": {
-                        "type": "string",
-                        "description": "Optional Discord channel ID from discover_channels.",
+                        "description": "Discord server ID from list_guilds/discover_channels.",
                     },
                     "channel_name": {
                         "type": "string",
                         "description": (
-                            "Exact human-readable channel name for ensure when channel_id is unavailable. "
-                            "guild_id is still required; a leading # and letter case are ignored."
+                            "Exact human-readable channel name for ensure or disable. guild_id is also required; "
+                            "a leading # and letter case are ignored."
                         ),
                     },
                     "query": {
@@ -66,10 +88,6 @@ def get_discord_channel_subscriptions_tool() -> Dict[str, Any]:
                         "minimum": 1,
                         "maximum": 200,
                         "description": "Maximum channels to return during discovery.",
-                    },
-                    "subscription_id": {
-                        "type": "string",
-                        "description": "Subscription ID to disable.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
@@ -98,10 +116,13 @@ def execute_discord_channel_subscriptions(agent: PersistentAgent, params: Dict[s
                 setup_required.pop("channels", None)
                 setup_required["guilds"] = []
                 return _result_with_sleep(setup_required, params)
-            result = {"status": "success", "guilds": guilds}
+            result = {"status": "success", "guilds": [_agent_guild(guild) for guild in guilds]}
             selected_guild = latest_selected_guild(agent)
             if selected_guild:
-                result["selected_guild"] = serialize_guild(selected_guild)
+                result["selected_guild"] = {
+                    "guild_id": selected_guild.guild_id,
+                    "guild_name": selected_guild.name,
+                }
                 result["message"] = (
                     "Use selected_guild from the most recent Discord setup. "
                     "Do not ask the user to choose a server again; discover channels for this guild next."
@@ -115,33 +136,49 @@ def execute_discord_channel_subscriptions(agent: PersistentAgent, params: Dict[s
                 query=str(params.get("query") or "").strip(),
                 limit=int(params.get("limit") or 100),
             )
+            if isinstance(result.get("channels"), list):
+                result["channels"] = [_agent_channel(channel) for channel in result["channels"]]
+            if isinstance(result.get("selected_guild"), dict):
+                result["selected_guild"] = _agent_guild(result["selected_guild"])
             return _result_with_sleep(result, params)
 
         if action == "ensure":
             guild_id = str(params.get("guild_id") or "").strip()
-            channel_id = str(params.get("channel_id") or "").strip()
             channel_name = str(params.get("channel_name") or "").strip()
-            if not guild_id:
-                return {"status": "error", "message": "guild_id is required for ensure."}
-            if not channel_id and not channel_name:
-                return {"status": "error", "message": "channel_id or channel_name is required for ensure."}
+            if not guild_id or not channel_name:
+                return {"status": "error", "message": "guild_id and channel_name are required for ensure."}
             result = ensure_subscription(
                 agent,
                 guild_id=guild_id,
-                channel_id=channel_id,
                 channel_name=channel_name,
             )
+            result["subscription"] = _agent_subscription(result["subscription"])
             return _result_with_sleep({"status": "success", **result}, params)
 
         if action == "list":
-            return _result_with_sleep({"status": "success", "subscriptions": list_subscriptions(agent)}, params)
+            return _result_with_sleep(
+                {
+                    "status": "success",
+                    "subscriptions": [_agent_subscription(subscription) for subscription in list_subscriptions(agent)],
+                },
+                params,
+            )
 
         if action == "disable":
-            subscription_id = str(params.get("subscription_id") or "").strip()
-            if not subscription_id:
-                return {"status": "error", "message": "subscription_id is required for disable."}
+            guild_id = str(params.get("guild_id") or "").strip()
+            channel_name = str(params.get("channel_name") or "").strip()
+            if not guild_id or not channel_name:
+                return {"status": "error", "message": "guild_id and channel_name are required for disable."}
+            subscription = resolve_active_subscription(
+                agent,
+                guild_id=guild_id,
+                channel_name=channel_name,
+            )
             return _result_with_sleep(
-                {"status": "success", "subscription": disable_subscription(agent, subscription_id)},
+                {
+                    "status": "success",
+                    "subscription": _agent_subscription(disable_subscription(agent, str(subscription.id))),
+                },
                 params,
             )
 

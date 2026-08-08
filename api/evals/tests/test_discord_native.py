@@ -107,14 +107,16 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         self.assertEqual(tool["name"], "add_discord_reaction")
         self.assertEqual(
             set(tool["parameters"]["required"]),
-            {"channel_id", "message_id", "emoji", "will_continue_work"},
+            {"guild_id", "channel_name", "message_id", "emoji", "will_continue_work"},
         )
+        self.assertNotIn("channel_id", tool["parameters"]["properties"])
 
     def test_reaction_verifier_requires_exact_message_channel_and_emoji(self):
         call = SimpleNamespace(
             tool_name="add_discord_reaction",
             tool_params={
-                "channel_id": "channel-1",
+                "guild_id": "guild-1",
+                "channel_name": "team-updates",
                 "message_id": "message-1",
                 "emoji": "👍",
                 "will_continue_work": False,
@@ -125,7 +127,8 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         self.assertTrue(
             DiscordNativeReactionReplyContextScenario._reaction_matches(
                 call,
-                channel_id="channel-1",
+                guild_id="guild-1",
+                channel_name="team-updates",
                 message_id="message-1",
             )
         )
@@ -133,7 +136,8 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         self.assertFalse(
             DiscordNativeReactionReplyContextScenario._reaction_matches(
                 call,
-                channel_id="channel-1",
+                guild_id="guild-1",
+                channel_name="team-updates",
                 message_id="message-1",
             )
         )
@@ -142,7 +146,8 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         call = SimpleNamespace(
             tool_name="send_discord_message",
             tool_params={
-                "channel_id": "channel-1",
+                "guild_id": "guild-1",
+                "channel_name": "team-updates",
                 "message": "I see it.",
                 "will_continue_work": False,
             },
@@ -152,13 +157,15 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         self.assertFalse(
             DiscordNativeReactionReplyContextScenario._reply_matches(
                 call,
-                channel_id="channel-1",
+                guild_id="guild-1",
+                channel_name="team-updates",
             )
         )
         call.tool_params["message"] = "Check the auth service health and recent error logs first."
         self.assertTrue(
             DiscordNativeReactionReplyContextScenario._reply_matches(
                 call,
-                channel_id="channel-1",
+                guild_id="guild-1",
+                channel_name="team-updates",
             )
         )

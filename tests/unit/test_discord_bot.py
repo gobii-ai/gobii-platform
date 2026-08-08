@@ -18,7 +18,7 @@ from django.utils import timezone
 from api.agent.system_skills.registry import get_system_skill_definition
 from api.agent.core.prompt_context import _format_discord_reply_context, _get_system_instruction, build_prompt_context
 from api.agent.files.attachment_helpers import ResolvedAttachment
-from api.agent.tools.add_discord_reaction import execute_add_discord_reaction
+from api.agent.tools.add_discord_reaction import execute_add_discord_reaction, get_add_discord_reaction_tool
 from api.agent.tools.discord_channel_subscriptions import (
     execute_discord_channel_subscriptions,
     get_discord_channel_subscriptions_tool,
@@ -41,6 +41,8 @@ from api.models import (
     PersistentAgentMessageAttachment,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
+    PersistentAgentStep,
+    PersistentAgentToolCall,
 )
 from api.services.discord_bot import (
     add_discord_reaction,
@@ -559,19 +561,158 @@ class NativeDiscordBotTests(TestCase):
         )
 
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["subscription"]["channel_id"], "11")
+        self.assertEqual(result["subscription"]["guild_id"], "100")
         self.assertEqual(result["subscription"]["channel_name"], "releases")
+        self.assertNotIn("channel_id", result["subscription"])
+        self.assertNotIn("id", result["subscription"])
         self.assertTrue(result["auto_sleep_ok"])
 
     @tag("batch_agent_webhooks")
-    def test_discord_tool_contracts_accept_human_channel_names(self):
+    def test_discord_tool_contracts_require_human_channel_names(self):
         subscription_parameters = get_discord_channel_subscriptions_tool()["function"]["parameters"]
         send_parameters = get_send_discord_message_tool()["function"]["parameters"]
+        reaction_parameters = get_add_discord_reaction_tool()["function"]["parameters"]
 
         self.assertIn("channel_name", subscription_parameters["properties"])
-        self.assertNotIn("channel_id", subscription_parameters["required"])
+        self.assertNotIn("channel_id", subscription_parameters["properties"])
+        self.assertNotIn("subscription_id", subscription_parameters["properties"])
         self.assertIn("channel_name", send_parameters["properties"])
-        self.assertNotIn("channel_id", send_parameters["required"])
+        self.assertNotIn("channel_id", send_parameters["properties"])
+        self.assertEqual(
+            set(send_parameters["required"]),
+            {"guild_id", "channel_name", "will_continue_work"},
+        )
+        self.assertNotIn("channel_id", reaction_parameters["properties"])
+        self.assertEqual(
+            set(reaction_parameters["required"]),
+            {"guild_id", "channel_name", "message_id", "emoji", "will_continue_work"},
+        )
+
+    @tag("batch_agent_webhooks")
+    def test_discord_tools_reject_missing_human_readable_channel_target(self):
+        send_result = execute_send_discord_message(
+            self.agent,
+            {"guild_id": "100", "message": "Hello", "will_continue_work": False},
+        )
+        reaction_result = execute_add_discord_reaction(
+            self.agent,
+            {
+                "guild_id": "100",
+                "message_id": "message-1",
+                "emoji": "👍",
+                "will_continue_work": False,
+            },
+        )
+        ensure_result = execute_discord_channel_subscriptions(
+            self.agent,
+            {"action": "ensure", "guild_id": "100", "will_continue_work": False},
+        )
+        disable_result = execute_discord_channel_subscriptions(
+            self.agent,
+            {"action": "disable", "guild_id": "100", "will_continue_work": False},
+        )
+
+        for result in (send_result, reaction_result, ensure_result, disable_result):
+            with self.subTest(result=result):
+                self.assertEqual(result["status"], "error")
+                self.assertIn("guild_id and channel_name are required", result["message"])
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.get")
+    def test_subscription_tool_discovery_and_list_hide_internal_ids(self, get_mock):
+        guild = self._guild(name="Support")
+        get_mock.return_value = _response([{"id": "hidden-channel-id", "name": "general", "type": 0}])
+
+        discovered = execute_discord_channel_subscriptions(
+            self.agent,
+            {
+                "action": "discover_channels",
+                "guild_id": guild.guild_id,
+                "will_continue_work": True,
+            },
+        )
+        self.assertEqual(
+            discovered["channels"],
+            [{
+                "guild_id": "100",
+                "guild_name": "Support",
+                "channel_name": "general",
+                "label": "Support / #general",
+            }],
+        )
+
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="hidden-channel-id",
+            channel_name="general",
+        )
+        listed = execute_discord_channel_subscriptions(
+            self.agent,
+            {"action": "list", "will_continue_work": True},
+        )
+
+        self.assertEqual(listed["subscriptions"][0]["channel_name"], "general")
+        self.assertNotIn("channel_id", listed["subscriptions"][0])
+        self.assertNotIn("id", listed["subscriptions"][0])
+        self.assertNotIn("agent_id", listed["subscriptions"][0])
+
+    @tag("batch_agent_webhooks")
+    def test_subscription_tool_disables_by_guild_and_channel_name(self):
+        guild = self._guild(name="Support")
+        subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="hidden-channel-id",
+            channel_name="general",
+        )
+
+        result = execute_discord_channel_subscriptions(
+            self.agent,
+            {
+                "action": "disable",
+                "guild_id": guild.guild_id,
+                "channel_name": "#General",
+                "will_continue_work": False,
+            },
+        )
+
+        subscription.refresh_from_db()
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["subscription"]["guild_name"], "Support")
+        self.assertEqual(result["subscription"]["channel_name"], "general")
+        self.assertNotIn("channel_id", result["subscription"])
+        self.assertEqual(subscription.status, PersistentAgentDiscordChannelSubscription.Status.DISABLED)
+
+    @tag("batch_agent_webhooks")
+    def test_discord_skill_context_lists_only_active_named_subscriptions(self):
+        skill = get_system_skill_definition("discord_native")
+        empty_context = skill.render_prompt_context(self.agent)
+        self.assertIn("- None connected", empty_context)
+        self.assertIn("- None subscribed", empty_context)
+
+        guild = self._guild(name="Support")
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="active-channel-id",
+            channel_name="general",
+        )
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="disabled-channel-id",
+            channel_name="archive",
+            status=PersistentAgentDiscordChannelSubscription.Status.DISABLED,
+        )
+
+        context = skill.render_prompt_context(self.agent)
+
+        self.assertIn("- Support (guild_id=100)", context)
+        self.assertIn("- Support / #general (guild_id=100)", context)
+        self.assertNotIn("archive", context)
+        self.assertNotIn("active-channel-id", context)
+        self.assertNotIn("disabled-channel-id", context)
 
     @tag("batch_agent_webhooks")
     def test_claimed_guild_queryset_is_lockable_without_distinct(self):
@@ -918,7 +1059,11 @@ class NativeDiscordBotTests(TestCase):
         context, _, _ = build_prompt_context(self.agent)
         user_prompt = next(item["content"] for item in context if item["role"] == "user")
         self.assertIn("<discord_message_id>500</discord_message_id>", user_prompt)
-        self.assertIn("<discord_channel_id>10</discord_channel_id>", user_prompt)
+        self.assertIn("<discord_guild_id>100</discord_guild_id>", user_prompt)
+        self.assertIn("<discord_guild_name>Guild</discord_guild_name>", user_prompt)
+        self.assertIn("<discord_channel_name>general</discord_channel_name>", user_prompt)
+        self.assertNotIn("discord_channel_id", user_prompt)
+        self.assertNotIn("discord://guild/100/channel/10", user_prompt)
         self.assertIn("<discord_shared_channel_context>", user_prompt)
         self.assertIn("The message may or may not be for you", user_prompt)
         self.assertIn("<discord_reply_context>", user_prompt)
@@ -932,6 +1077,43 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("Author: Ada", user_prompt)
         self.assertIn("Ship the updated report", user_prompt)
         self.assertIn("Attachments: report.pdf", user_prompt)
+
+    @tag("batch_agent_webhooks")
+    def test_historical_discord_tool_calls_render_names_without_channel_ids(self):
+        guild = self._guild(name="Support")
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="hidden-channel-id",
+            channel_name="general",
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Send a Discord update",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="send_discord_message",
+            tool_params={
+                "channel_id": "hidden-channel-id",
+                "message": "Done.",
+                "will_continue_work": False,
+            },
+            result=json.dumps({
+                "status": "success",
+                "channel_id": "hidden-channel-id",
+                "message_id": "message-1",
+            }),
+        )
+
+        context, _, _ = build_prompt_context(self.agent)
+        user_prompt = next(item["content"] for item in context if item["role"] == "user")
+
+        self.assertIn("Support", user_prompt)
+        self.assertIn("general", user_prompt)
+        self.assertIn("guild_id", user_prompt)
+        self.assertNotIn("channel_id", user_prompt)
+        self.assertNotIn("hidden-channel-id", user_prompt)
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.requests.head")
@@ -1339,7 +1521,8 @@ class NativeDiscordBotTests(TestCase):
         unicode_result = execute_add_discord_reaction(
             self.agent,
             {
-                "channel_id": "10",
+                "guild_id": "100",
+                "channel_name": "general",
                 "message_id": "500",
                 "emoji": "👍",
                 "will_continue_work": False,
@@ -1348,7 +1531,8 @@ class NativeDiscordBotTests(TestCase):
         custom_result = execute_add_discord_reaction(
             self.agent,
             {
-                "channel_id": "10",
+                "guild_id": "100",
+                "channel_name": "general",
                 "message_id": "501",
                 "emoji": "<a:party:123>",
                 "will_continue_work": True,
@@ -1358,6 +1542,9 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(unicode_result["status"], "success")
         self.assertEqual(unicode_result["emoji"], "👍")
         self.assertEqual(unicode_result["discord_message_id"], "500")
+        self.assertEqual(unicode_result["guild_name"], "Guild")
+        self.assertEqual(unicode_result["channel_name"], "general")
+        self.assertNotIn("channel_id", unicode_result)
         self.assertTrue(unicode_result["auto_sleep_ok"])
         self.assertEqual(custom_result["status"], "success")
         self.assertEqual(custom_result["emoji"], "party:123")
@@ -1381,7 +1568,8 @@ class NativeDiscordBotTests(TestCase):
         result = execute_add_discord_reaction(
             self.agent,
             {
-                "channel_id": "10",
+                "guild_id": "100",
+                "channel_name": "general",
                 "message_id": "500",
                 "emoji": "👍",
                 "will_continue_work": False,
@@ -1407,7 +1595,8 @@ class NativeDiscordBotTests(TestCase):
         result = execute_add_discord_reaction(
             self.agent,
             {
-                "channel_id": "10",
+                "guild_id": "100",
+                "channel_name": "general",
                 "message_id": "500",
                 "emoji": "👍",
                 "will_continue_work": False,
@@ -1436,7 +1625,8 @@ class NativeDiscordBotTests(TestCase):
         missing_result = execute_add_discord_reaction(
             self.agent,
             {
-                "channel_id": "10",
+                "guild_id": "100",
+                "channel_name": "general",
                 "message_id": "missing",
                 "emoji": "👍",
                 "will_continue_work": False,
@@ -1445,7 +1635,8 @@ class NativeDiscordBotTests(TestCase):
         invalid_result = execute_add_discord_reaction(
             self.agent,
             {
-                "channel_id": "10",
+                "guild_id": "100",
+                "channel_name": "general",
                 "message_id": "500",
                 "emoji": "not-an-emoji",
                 "will_continue_work": False,
@@ -1741,7 +1932,8 @@ class NativeDiscordBotTests(TestCase):
         result = execute_send_discord_message(
             self.agent,
             {
-                "channel_id": "10",
+                "guild_id": "100",
+                "channel_name": "general",
                 "attachments": ["$[/exports/report.txt]"],
                 "will_continue_work": False,
             },
@@ -1785,6 +1977,7 @@ class NativeDiscordBotTests(TestCase):
         result = execute_send_discord_message(
             self.agent,
             {
+                "guild_id": "100",
                 "channel_name": "#Releases",
                 "message": "Shipped.",
                 "will_continue_work": False,
@@ -1792,8 +1985,10 @@ class NativeDiscordBotTests(TestCase):
         )
 
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["channel_id"], "10")
+        self.assertEqual(result["guild_id"], "100")
+        self.assertEqual(result["guild_name"], "Support")
         self.assertEqual(result["channel_name"], "releases")
+        self.assertNotIn("channel_id", result)
         send_mock.assert_called_once_with(
             self.agent,
             channel_id="10",
@@ -1805,9 +2000,8 @@ class NativeDiscordBotTests(TestCase):
     @patch("api.agent.tools.send_discord_message.resolve_filespace_attachments", return_value=[])
     @patch("api.agent.tools.send_discord_message.send_channel_message")
     def test_send_message_tool_rejects_ambiguous_channel_name(self, send_mock, _resolve_mock):
-        first_guild = self._guild(guild_id="100", name="Support")
-        second_guild = self._guild(guild_id="200", name="Engineering")
-        for guild, channel_id in ((first_guild, "10"), (second_guild, "20")):
+        guild = self._guild(guild_id="100", name="Support")
+        for channel_id in ("10", "20"):
             PersistentAgentDiscordChannelSubscription.objects.create(
                 agent=self.agent,
                 guild=guild,
@@ -1818,6 +2012,7 @@ class NativeDiscordBotTests(TestCase):
         result = execute_send_discord_message(
             self.agent,
             {
+                "guild_id": "100",
                 "channel_name": "updates",
                 "message": "Shipped.",
                 "will_continue_work": False,
@@ -1825,8 +2020,8 @@ class NativeDiscordBotTests(TestCase):
         )
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("matches more than one subscribed channel", result["message"])
-        self.assertIn("guild_id", result["message"])
+        self.assertIn("matches more than one active subscription", result["message"])
+        self.assertNotIn("channel_id", result["message"])
         send_mock.assert_not_called()
 
     @tag("batch_agent_webhooks")

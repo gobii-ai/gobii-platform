@@ -1181,12 +1181,16 @@ def _get_shared_channel_names(agent: PersistentAgent) -> dict:
     """
     active = PersistentAgentDiscordChannelSubscription.Status.ACTIVE
     subscriptions = PersistentAgentDiscordChannelSubscription.objects.filter(status=active)
-    own = dict(subscriptions.filter(agent=agent).values_list("channel_id", "channel_name"))
+    own = {
+        channel_id: channel_name
+        for channel_id, channel_name in subscriptions.filter(agent=agent).values_list("channel_id", "channel_name")
+        if str(channel_name or "").strip()
+    }
     shared: dict = {}
     for other_id, channel_id in (
         subscriptions.filter(channel_id__in=list(own)).exclude(agent_id=agent.id).values_list("agent_id", "channel_id")
     ):
-        shared.setdefault(other_id, []).append(f"#{str(own.get(channel_id) or channel_id).lstrip('#')}")
+        shared.setdefault(other_id, []).append(f"#{str(own[channel_id]).lstrip('#')}")
     return shared
 
 
@@ -2633,6 +2637,7 @@ def _build_contacts_block(
     # Agent endpoints currently available for outbound communication (highlight primary)
     agent_eps_qs = (
         PersistentAgentCommsEndpoint.objects.filter(owner_agent=agent)
+        .exclude(channel=CommsChannel.DISCORD)
         .order_by("channel", "address")
     )
     if agent.sms_disabled:
@@ -2668,6 +2673,7 @@ def _build_contacts_block(
             conversation_memberships__conversation__owner_agent=agent
         )
         .exclude(owner_agent=agent)
+        .exclude(channel=CommsChannel.DISCORD)
         .alias(
             has_mcp_sender_message=Exists(mcp_sender_messages),
             has_non_mcp_sender_message=Exists(non_mcp_sender_messages),
@@ -2758,6 +2764,15 @@ def _build_contacts_block(
                 endpoint_address = endpoint.address
         if not endpoint_address:
             continue
+        if endpoint_channel == CommsChannel.DISCORD:
+            raw_payload = msg.raw_payload if isinstance(msg.raw_payload, dict) else {}
+            guild_id = str(raw_payload.get("discord_guild_id") or "").strip()
+            guild_name = str(raw_payload.get("discord_guild_name") or "").strip()
+            channel_name = str(raw_payload.get("discord_channel_name") or "").strip().lstrip("#")
+            if not guild_id or not channel_name:
+                continue
+            server_label = guild_name or "Discord server"
+            endpoint_address = f"{server_label} / #{channel_name} (guild_id={guild_id})"
         key = (endpoint_channel, endpoint_address)
         if endpoint is not None and endpoint.channel == CommsChannel.WEB:
             recent_web_endpoints[endpoint.id] = endpoint
@@ -4642,6 +4657,104 @@ def _format_discord_reply_context(raw_payload: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_DISCORD_AGENT_TOOL_NAMES = {
+    "discord_channel_subscriptions",
+    "send_discord_message",
+    "add_discord_reaction",
+}
+_DISCORD_CHANNEL_ID_KEYS = {"channel_id", "discord_channel_id"}
+
+
+def _discord_subscription_names_by_channel_id(agent: PersistentAgent) -> dict[str, dict[str, str]]:
+    subscriptions = (
+        PersistentAgentDiscordChannelSubscription.objects.select_related("guild")
+        .filter(agent=agent)
+        .order_by("-updated_at")
+    )
+    names: dict[str, dict[str, str]] = {}
+    for subscription in subscriptions:
+        names.setdefault(
+            subscription.channel_id,
+            {
+                "guild_id": subscription.guild.guild_id,
+                "guild_name": subscription.guild.name,
+                "channel_name": subscription.channel_name,
+            },
+        )
+    return names
+
+
+def _sanitize_discord_tool_payload_for_prompt(
+    agent: PersistentAgent,
+    tool_name: str,
+    payload: Any,
+    *,
+    channel_names: Mapping[str, Mapping[str, str]] | None = None,
+) -> Any:
+    if tool_name not in _DISCORD_AGENT_TOOL_NAMES:
+        return payload
+
+    if channel_names is None:
+        channel_names = _discord_subscription_names_by_channel_id(agent)
+
+    def sanitize(value: Any) -> Any:
+        if isinstance(value, list):
+            return [sanitize(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+
+        channel_id = next(
+            (
+                str(value.get(key) or "").strip()
+                for key in _DISCORD_CHANNEL_ID_KEYS
+                if str(value.get(key) or "").strip()
+            ),
+            "",
+        )
+        sanitized = {
+            key: sanitize(item)
+            for key, item in value.items()
+            if key not in _DISCORD_CHANNEL_ID_KEYS
+            and key not in {"agent_id", "subscription_id"}
+            and not (
+                key == "id"
+                and "channel_name" in value
+                and ("guild_id" in value or "guild_name" in value)
+            )
+        }
+        if channel_id:
+            for key, item in channel_names.get(channel_id, {}).items():
+                sanitized.setdefault(key, item)
+        return sanitized
+
+    return sanitize(payload)
+
+
+def _sanitize_discord_tool_result_for_prompt(
+    agent: PersistentAgent,
+    tool_name: str,
+    result_text: str,
+    *,
+    channel_names: Mapping[str, Mapping[str, str]] | None = None,
+) -> str:
+    if tool_name not in _DISCORD_AGENT_TOOL_NAMES:
+        return result_text
+    try:
+        payload = json.loads(result_text)
+    except (TypeError, ValueError):
+        return result_text
+    return json.dumps(
+        _sanitize_discord_tool_payload_for_prompt(
+            agent,
+            tool_name,
+            payload,
+            channel_names=channel_names,
+        ),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
 def _build_peer_message_prompt_components(
     *,
     header: str,
@@ -5058,6 +5171,7 @@ def _get_unified_history_prompt(
     delivered_mcp_tasks = {str(task.id): task for task in mcp_task_results}
     recency_positions: Dict[str, int] = {}
     fresh_tool_call_step_ids: Set[str] = set()
+    discord_channel_names: dict[str, dict[str, str]] | None = None
     if steps:
         step_lookup = {str(step.id): step for step in steps}
         tool_call_completion_ids: Dict[str, Optional[str]] = {}
@@ -5132,6 +5246,14 @@ def _get_unified_history_prompt(
                     )
             tool_name = row.get("tool_name") or ""
             tool_params = row.get("tool_params")
+            if tool_name in _DISCORD_AGENT_TOOL_NAMES and discord_channel_names is None:
+                discord_channel_names = _discord_subscription_names_by_channel_id(agent)
+            result_text = _sanitize_discord_tool_result_for_prompt(
+                agent,
+                tool_name,
+                result_text,
+                channel_names=discord_channel_names,
+            )
             source_bearing = _tool_result_is_source_bearing(tool_name, tool_params)
             tool_call_records.append(
                 ToolCallResultRecord(
@@ -5184,6 +5306,14 @@ def _get_unified_history_prompt(
                 tool_call_completion_ids[step_id] = str(completion_id) if completion_id else None
                 tool_name = row.get("tool_name") or ""
                 tool_params = row.get("tool_params")
+                if tool_name in _DISCORD_AGENT_TOOL_NAMES and discord_channel_names is None:
+                    discord_channel_names = _discord_subscription_names_by_channel_id(agent)
+                result_text = _sanitize_discord_tool_result_for_prompt(
+                    agent,
+                    tool_name,
+                    result_text,
+                    channel_names=discord_channel_names,
+                )
                 source_bearing = _tool_result_is_source_bearing(tool_name, tool_params)
                 tool_call_records.append(
                     ToolCallResultRecord(
@@ -5313,11 +5443,20 @@ def _get_unified_history_prompt(
             if system_step is not None and system_step.code == PersistentAgentSystemStep.Code.PROCESS_EVENTS:
                 continue
             tc = s.tool_call
+            if tc.tool_name in _DISCORD_AGENT_TOOL_NAMES and discord_channel_names is None:
+                discord_channel_names = _discord_subscription_names_by_channel_id(agent)
 
             components = {
                 "meta": f"[{s.created_at.isoformat()}] Tool {tc.tool_name} called.",
                 "params": rewrite_prompt_urls(
-                    json.dumps(tc.tool_params),
+                    json.dumps(
+                        _sanitize_discord_tool_payload_for_prompt(
+                            agent,
+                            tc.tool_name,
+                            tc.tool_params,
+                            channel_names=discord_channel_names,
+                        )
+                    ),
                     agent,
                     create=False,
                 ),
@@ -5560,9 +5699,15 @@ def _get_unified_history_prompt(
                         "is necessary before responding. Explicit author type is authoritative; display names and "
                         "handles are not identity evidence."
                     )
-                discord_channel_id = str(raw_payload.get("discord_channel_id") or "").strip()
-                if discord_channel_id:
-                    components["discord_channel_id"] = discord_channel_id
+                discord_guild_id = str(raw_payload.get("discord_guild_id") or "").strip()
+                if discord_guild_id:
+                    components["discord_guild_id"] = discord_guild_id
+                discord_guild_name = str(raw_payload.get("discord_guild_name") or "").strip()
+                if discord_guild_name:
+                    components["discord_guild_name"] = discord_guild_name
+                discord_channel_name = str(raw_payload.get("discord_channel_name") or "").strip()
+                if discord_channel_name:
+                    components["discord_channel_name"] = discord_channel_name
                 discord_message_id = str(raw_payload.get("discord_message_id") or "").strip()
                 if discord_message_id:
                     components["discord_message_id"] = discord_message_id
@@ -5696,7 +5841,9 @@ def _get_unified_history_prompt(
             "description": 2, # Medium priority for step descriptions
             "header": 3,      # High priority - message routing info
             "webhook_meta": 3, # High priority - webhook request metadata
-            "discord_channel_id": 3, # High priority - required to target Discord actions
+            "discord_guild_id": 3, # High priority - required to target Discord actions
+            "discord_guild_name": 2, # Medium priority - keeps server context human-readable
+            "discord_channel_name": 3, # High priority - required to target Discord actions
             "discord_message_id": 3, # High priority - required to target Discord reactions
             "discord_reply_context": 2, # Medium priority - preserves the message a Discord reply references
             "reply_to_message_id": 2,  # Medium priority - needed for explicit email threading

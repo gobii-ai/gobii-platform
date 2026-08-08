@@ -6161,7 +6161,8 @@ class EventProcessingRuntimeGuardTests(TestCase):
             idx=0,
             tool_name="add_discord_reaction",
             tool_params={
-                "channel_id": "channel-1",
+                "guild_id": "guild-1",
+                "channel_name": "team-chat",
                 "message_id": "message-1",
                 "emoji": "🎉",
                 "will_continue_work": False,
