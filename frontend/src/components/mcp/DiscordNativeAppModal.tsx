@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, Hash, Loader2, Plus, Plug, Save, Settings, Trash2 } from 'lucide-react'
 
@@ -17,6 +17,7 @@ import {
   type DiscordSubscriptionSelection,
 } from '../../api/discordNative'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
+import { useWindowMessage } from '../../hooks/useWindowMessage'
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { useSettingsSurfaceVariant } from '../common/SettingsSurface'
 import { PipedreamEmptyState, PipedreamErrorState, PipedreamListFrame, PipedreamLoadingState, PipedreamStatusBanner, type PipedreamStatusMessage } from './PipedreamAppsShared'
@@ -43,24 +44,17 @@ export function useDiscordOAuthCompleteRefetch({
 }) {
   const queryClient = useQueryClient()
 
-  useEffect(() => {
-    const handleDiscordOAuthComplete = (event: MessageEvent<{ type?: unknown; status?: unknown; agent_id?: unknown }>) => {
-      if (event.origin !== window.location.origin || event.data?.type !== 'gobii:discord_oauth_complete') {
-        return
-      }
-      const completedAgentId = typeof event.data.agent_id === 'string' ? event.data.agent_id : agentId
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
-      void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
-      if (completedAgentId) {
-        void queryClient.invalidateQueries({ queryKey: agentDiscordAppQueryKey(completedAgentId) })
-      }
-      if (event.data.status !== 'success') {
-        onError('Unable to complete the Discord connection.')
-      }
+  useWindowMessage<{ type?: unknown; status?: unknown; agent_id?: unknown }>('gobii:discord_oauth_complete', (message) => {
+    const completedAgentId = typeof message.agent_id === 'string' ? message.agent_id : agentId
+    void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+    void queryClient.invalidateQueries({ queryKey: discordContextAppQueryKey() })
+    if (completedAgentId) {
+      void queryClient.invalidateQueries({ queryKey: agentDiscordAppQueryKey(completedAgentId) })
     }
-    window.addEventListener('message', handleDiscordOAuthComplete)
-    return () => window.removeEventListener('message', handleDiscordOAuthComplete)
-  }, [agentId, onError, queryClient])
+    if (message.status !== 'success') {
+      onError('Unable to complete the Discord connection.')
+    }
+  })
 }
 
 export function useDiscordNativeAgentActions({

@@ -15,6 +15,7 @@ import {
   startNativeIntegrationConnect,
 } from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
+import { useWindowMessage } from '../../hooks/useWindowMessage'
 import { readStoredConsoleContext } from '../../util/consoleContextStorage'
 import { useSettingsSurfaceVariant } from '../common/SettingsSurface'
 import { IntegrationConnectionButton } from './IntegrationActionButtons'
@@ -115,42 +116,12 @@ export function useNativeIntegrationRefreshEffects({
 }) {
   const queryClient = useQueryClient()
 
-  useEffect(() => {
-    const handleComplete = (payload: NativeOAuthCompleteMessage) => {
-      if (!payload || payload.type !== NATIVE_OAUTH_COMPLETE_MESSAGE) {
-        return
-      }
-
-      queryClient.invalidateQueries({ queryKey })
-      if (payload.ok) {
-        return
-      }
+  useWindowMessage<NativeOAuthCompleteMessage>(NATIVE_OAUTH_COMPLETE_MESSAGE, (payload) => {
+    queryClient.invalidateQueries({ queryKey })
+    if (!payload.ok) {
       onError(String(payload.error || 'Unable to complete the native app connection.'))
     }
-    const handleMessage = (event: MessageEvent<NativeOAuthCompleteMessage>) => {
-      if (event.origin === window.location.origin) {
-        handleComplete(event.data)
-      }
-    }
-    const handleStorage = (event: StorageEvent) => {
-      if (!event.key?.startsWith(NATIVE_OAUTH_COMPLETE_PREFIX) || !event.newValue) {
-        return
-      }
-      try {
-        handleComplete(JSON.parse(event.newValue))
-        localStorage.removeItem(event.key)
-      } catch (error) {
-        console.warn('Invalid native integration OAuth completion payload', error)
-      }
-    }
-
-    window.addEventListener('message', handleMessage)
-    window.addEventListener('storage', handleStorage)
-    return () => {
-      window.removeEventListener('message', handleMessage)
-      window.removeEventListener('storage', handleStorage)
-    }
-  }, [onError, queryClient, queryKey])
+  }, { storageKeyPrefix: NATIVE_OAUTH_COMPLETE_PREFIX })
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)

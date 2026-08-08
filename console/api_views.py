@@ -117,6 +117,7 @@ from api.models import (
     ProfilePersistentTierEndpoint,
     ProfileTokenRange,
     PersistentAgentPromptArchive,
+    UserDiscordIdentity,
     SmsContactPurpose,
     AgentFileSpaceAccess,
     AgentFsNode,
@@ -163,6 +164,7 @@ from api.services.email_verification import (
 from api.services.agent_planning import skip_agent_planning
 from api.services.agent_lifecycle import activate_agent, build_agent_inactive_payload
 from api.services.referral_service import ReferralService
+from api.services.discord_bot import claimed_guild_queryset_for_owner
 from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, end_web_session, heartbeat_web_session, start_web_session, touch_web_session
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
 
@@ -640,6 +642,31 @@ def _serialize_user_profile_options(form: UserProfileForm) -> list[dict[str, str
     ]
 
 
+def _serialize_user_discord_identity(request: HttpRequest) -> dict[str, Any] | None:
+    context = build_console_context(request)
+    if context.current_context.type == "organization":
+        context_connected = claimed_guild_queryset_for_owner(
+            organization=context.current_membership.org,
+        ).exists()
+    else:
+        context_connected = claimed_guild_queryset_for_owner(owner_user=request.user).exists()
+
+    identity = UserDiscordIdentity.objects.filter(user=request.user).first()
+    if identity is None and not context_connected:
+        return None
+    oauth_callback = urlparse(settings.DISCORD_OAUTH_REDIRECT_URI)
+    return {
+        "contextConnected": context_connected,
+        "linked": identity is not None,
+        "username": identity.username if identity else None,
+        "displayName": identity.global_name if identity and identity.global_name else None,
+        "canConfigureInCurrentContext": bool(identity and context_connected and context.can_manage_org_agents),
+        "oauthCallbackOrigin": f"{oauth_callback.scheme}://{oauth_callback.netloc}",
+        "connectUrl": reverse("discord_identity_oauth_start"),
+        "disconnectUrl": reverse("discord_identity"),
+    }
+
+
 def _serialize_user_profile_payload(request: HttpRequest) -> dict[str, Any]:
     user = request.user
     form = UserProfileForm(instance=user)
@@ -665,6 +692,7 @@ def _serialize_user_profile_payload(request: HttpRequest) -> dict[str, Any]:
         "phone": serialize_phone(verified_phone),
         "pendingPhone": serialize_phone(pending_phone),
         "supportedPhoneRegions": serialize_supported_phone_regions(),
+        "discordIdentity": _serialize_user_discord_identity(request),
     }
 
 

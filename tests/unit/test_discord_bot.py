@@ -41,6 +41,7 @@ from api.models import (
     PersistentAgentMessageAttachment,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
+    UserDiscordIdentity,
 )
 from api.services.discord_bot import (
     add_discord_reaction,
@@ -49,11 +50,13 @@ from api.services.discord_bot import (
     DiscordGatewayMessage,
     discover_channels,
     ensure_subscription,
+    handle_discord_identity_oauth_callback,
     handle_discord_oauth_callback,
     ingest_gateway_message,
     send_inactive_discord_auto_reply,
     send_channel_message,
     start_discord_oauth,
+    start_discord_identity_oauth,
     _agent_webhook_username,
     _raise_for_discord_status,
     _webhook_echo_signature,
@@ -110,6 +113,165 @@ class NativeDiscordBotTests(TestCase):
         self.client.force_login(self.user)
 
     @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.get")
+    @patch("api.services.discord_bot.requests.post")
+    def test_identity_oauth_links_verified_discord_user_without_storing_token(self, post_mock, get_mock):
+        auth_url = start_discord_identity_oauth(self.user)
+        auth_query = parse_qs(urlsplit(auth_url).query)
+        self.assertEqual(auth_query["scope"], ["identify"])
+        self.assertNotIn("permissions", auth_query)
+        self.assertNotIn("integration_type", auth_query)
+
+        state = auth_query["state"][0]
+        self.assertTrue(state.startswith("identity_"))
+        post_mock.return_value = _response({
+            "access_token": "short-lived-token",
+            "scope": "identify",
+        })
+        get_mock.return_value = _response({
+            "id": "177593384389705729",
+            "username": "verified_user",
+            "global_name": "Verified User",
+        })
+
+        identity = handle_discord_identity_oauth_callback(
+            state=state,
+            code="identity-code",
+            user=self.user,
+        )
+
+        self.assertEqual(identity.discord_user_id, "177593384389705729")
+        self.assertEqual(identity.username, "verified_user")
+        self.assertEqual(identity.global_name, "Verified User")
+        self.assertFalse(hasattr(identity, "access_token"))
+        self.assertEqual(get_mock.call_args.kwargs["headers"], {"Authorization": "Bearer short-lived-token"})
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot._fetch_discord_current_user")
+    @patch("api.services.discord_bot._exchange_oauth_code")
+    def test_identity_oauth_rejects_discord_account_linked_to_another_user(self, exchange_mock, user_mock):
+        other_user = get_user_model().objects.create_user(
+            username="other-discord-user",
+            email="other-discord-user@example.test",
+            password="pw",
+        )
+        UserDiscordIdentity.objects.create(
+            user=other_user,
+            discord_user_id="177593384389705729",
+            username="already_linked",
+            verified_at=timezone.now(),
+        )
+        auth_url = start_discord_identity_oauth(self.user)
+        state = parse_qs(urlsplit(auth_url).query)["state"][0]
+        exchange_mock.return_value = {"access_token": "token", "scope": "identify"}
+        user_mock.return_value = {
+            "id": "177593384389705729",
+            "username": "already_linked",
+            "global_name": "",
+        }
+
+        with self.assertRaisesMessage(DiscordBotIntegrationError, "already linked to another Gobii user"):
+            handle_discord_identity_oauth_callback(
+                state=state,
+                code="identity-code",
+                user=self.user,
+            )
+
+        self.assertFalse(UserDiscordIdentity.objects.filter(user=self.user).exists())
+
+    @tag("batch_agent_webhooks")
+    @override_settings(ALLOWED_HOSTS=["profile.example.test", "callback.example.test"])
+    @patch("api.services.discord_bot._fetch_discord_current_user")
+    @patch("api.services.discord_bot._exchange_oauth_code")
+    def test_identity_oauth_routes_complete_profile_link(self, exchange_mock, user_mock):
+        self.client.force_login(self.user)
+        start_response = self.client.get(
+            reverse("discord_identity_oauth_start"),
+            HTTP_HOST="profile.example.test",
+            secure=True,
+        )
+        self.assertEqual(start_response.status_code, 302)
+        self.assertEqual(parse_qs(urlsplit(start_response.url).query)["scope"], ["identify"])
+        state = parse_qs(urlsplit(start_response.url).query)["state"][0]
+        exchange_mock.return_value = {"access_token": "token", "scope": "identify"}
+        user_mock.return_value = {
+            "id": "177593384389705729",
+            "username": "route_verified",
+            "global_name": "Route Verified",
+        }
+
+        callback_response = self.client.get(
+            reverse("discord_oauth_callback"),
+            {"state": state, "code": "identity-code"},
+            HTTP_HOST="callback.example.test",
+            secure=True,
+        )
+
+        self.assertEqual(callback_response.status_code, 200)
+        self.assertContains(callback_response, "gobii:discord_identity_oauth_complete")
+        self.assertContains(callback_response, '"status": "success"')
+        self.assertContains(callback_response, '"https://profile.example.test"')
+        self.assertContains(callback_response, "window.opener.postMessage(payload, targetOrigin)")
+        self.assertContains(callback_response, "localStorage.setItem(`gobii:oauth_complete:")
+        identity = UserDiscordIdentity.objects.get(user=self.user)
+        self.assertEqual(identity.discord_user_id, "177593384389705729")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.DISCORD_IDENTITY_OAUTH_STATE_MAX_AGE_SECONDS", -1)
+    @patch("api.services.discord_bot._exchange_oauth_code")
+    def test_expired_identity_oauth_session_is_rejected_before_token_exchange(self, exchange_mock):
+        auth_url = start_discord_identity_oauth(self.user)
+        state = parse_qs(urlsplit(auth_url).query)["state"][0]
+
+        with self.assertRaisesMessage(DiscordBotIntegrationError, "has expired"):
+            handle_discord_identity_oauth_callback(
+                state=state,
+                code="identity-code",
+                user=self.user,
+            )
+
+        exchange_mock.assert_not_called()
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot._exchange_oauth_code")
+    def test_identity_oauth_state_is_bound_to_gobii_user(self, exchange_mock):
+        auth_url = start_discord_identity_oauth(self.user)
+        state = parse_qs(urlsplit(auth_url).query)["state"][0]
+        other_user = get_user_model().objects.create_user(username="discord-state-other")
+
+        with self.assertRaisesMessage(DiscordBotIntegrationError, "not created for this user"):
+            handle_discord_identity_oauth_callback(
+                state=state,
+                code="identity-code",
+                user=other_user,
+            )
+
+        exchange_mock.assert_not_called()
+
+    @tag("batch_agent_webhooks")
+    def test_discord_skill_prompt_lists_active_server_and_channel_names_and_ids(self):
+        guild = self._guild(guild_id="100", name="Product Team")
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="200",
+            channel_name="agent-ops",
+        )
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="201",
+            channel_name="disabled-channel",
+            status=PersistentAgentDiscordChannelSubscription.Status.DISABLED,
+        )
+
+        context = get_system_skill_definition("discord_native").render_prompt_context(self.agent)
+
+        self.assertIn("Product Team (guild_id=100)", context)
+        self.assertIn("#agent-ops (channel_id=200)", context)
+        self.assertNotIn("disabled-channel", context)
+
+    @tag("batch_agent_webhooks")
     def test_discord_http_error_preserves_escaped_response_body(self):
         response = _response(status_code=400)
         response.text = (
@@ -164,7 +326,7 @@ class NativeDiscordBotTests(TestCase):
         auth_query = parse_qs(urlsplit(auth_url).query)
         self.assertEqual(
             auth_query["scope"],
-            ["bot applications.commands"],
+            ["bot applications.commands identify"],
         )
         self.assertEqual(auth_query["permissions"], ["536939584"])
         self.assertEqual(auth_query["response_type"], ["code"])
@@ -172,10 +334,13 @@ class NativeDiscordBotTests(TestCase):
         session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
         post_mock.return_value = _response({
             "access_token": "oauth-token",
-            "scope": "bot applications.commands",
+            "scope": "bot applications.commands identify",
             "guild": {"id": "100", "name": "Claimed", "icon": "abc"},
         })
-        get_mock.return_value = _response({"id": "100", "name": "Claimed", "icon": "abc"})
+        get_mock.side_effect = [
+            _response({"id": "100", "name": "Claimed", "icon": "abc"}),
+            _response({"id": "177593384389705729", "username": "discord-owner", "global_name": "Discord Owner"}),
+        ]
 
         with self.captureOnCommitCallbacks(execute=True):
             result = handle_discord_oauth_callback(
@@ -198,6 +363,9 @@ class NativeDiscordBotTests(TestCase):
             PersistentAgentDiscordGuild.AuthorizationSource.EXPLICIT_OAUTH,
         )
         self.assertFalse(PersistentAgentDiscordGuild.objects.filter(guild_id="200").exists())
+        identity = UserDiscordIdentity.objects.get(user=self.user)
+        self.assertEqual(identity.discord_user_id, "177593384389705729")
+        self.assertEqual(identity.global_name, "Discord Owner")
         self.assertNotIn("/users/@me/guilds", get_mock.call_args.args[0])
         system_step = PersistentAgentSystemStep.objects.get(
             step__agent=self.agent,
@@ -206,6 +374,48 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("Discord connection completed", system_step.step.description)
         self.assertIn("discover_channels", system_step.step.description)
         self.assertIn('"selected_guild_id":"100"', system_step.notes)
+        delay_mock.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    @patch("api.services.discord_bot._fetch_discord_current_user")
+    @patch("api.services.discord_bot._fetch_bot_guild")
+    @patch("api.services.discord_bot._exchange_oauth_code")
+    def test_oauth_callback_keeps_guild_connected_when_discord_identity_belongs_to_another_user(
+        self,
+        exchange_mock,
+        fetch_bot_guild_mock,
+        fetch_discord_user_mock,
+        delay_mock,
+    ):
+        other_user = get_user_model().objects.create_user(username="existing-discord-owner")
+        UserDiscordIdentity.objects.create(
+            user=other_user,
+            discord_user_id="177593384389705729",
+            username="already-linked",
+            verified_at=timezone.now(),
+        )
+        start_discord_oauth(self.agent, self.user)
+        session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
+        exchange_mock.return_value = {
+            "access_token": "oauth-token",
+            "scope": "bot applications.commands identify",
+            "guild": {"id": "100", "name": "Claimed"},
+        }
+        fetch_bot_guild_mock.return_value = {"id": "100", "name": "Claimed"}
+        fetch_discord_user_mock.return_value = {
+            "id": "177593384389705729",
+            "username": "already-linked",
+        }
+
+        with self.assertLogs("api.services.discord_bot", level="WARNING") as logs:
+            with self.captureOnCommitCallbacks(execute=True):
+                result = handle_discord_oauth_callback(state=session.state, code="code-1")
+
+        self.assertEqual(result["guild_id"], "100")
+        self.assertTrue(PersistentAgentDiscordGuild.objects.filter(guild_id="100").exists())
+        self.assertFalse(UserDiscordIdentity.objects.filter(user=self.user).exists())
+        self.assertIn("automatic identity verification failed", " ".join(logs.output))
         delay_mock.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
@@ -256,9 +466,13 @@ class NativeDiscordBotTests(TestCase):
         session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
         post_mock.return_value = _response({
             "access_token": "oauth-token",
+            "scope": "bot applications.commands identify",
             "guild": {"id": "100", "name": "Claimed", "icon": "abc"},
         })
-        get_mock.return_value = _response({"id": "100", "name": "Claimed", "icon": "abc"})
+        get_mock.side_effect = [
+            _response({"id": "100", "name": "Claimed", "icon": "abc"}),
+            _response({"id": "177593384389705729", "username": "discord-owner", "global_name": "Discord Owner"}),
+        ]
 
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(
@@ -272,6 +486,7 @@ class NativeDiscordBotTests(TestCase):
         session.refresh_from_db()
         self.assertEqual(session.selected_guild_id, "100")
         self.assertTrue(PersistentAgentDiscordGuild.objects.filter(guild_id="100").exists())
+        self.assertTrue(UserDiscordIdentity.objects.filter(user=self.user).exists())
         delay_mock.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
@@ -1913,6 +2128,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("filespace paths or $[/path]", skill.prompt_instructions)
         self.assertIn("Body text never attaches files", skill.prompt_instructions)
         self.assertIn("Use `add_discord_reaction`", skill.prompt_instructions)
+        self.assertIn("Only verified Discord senders marked `[can configure]`", skill.prompt_instructions)
         self.assertIn("A direct reply to someone else is not your social moment", skill.prompt_instructions)
         self.assertIn("Discord cannot render tables", skill.prompt_instructions)
         self.assertIn("never send pipe-separated columns with a hyphen-divider row", skill.prompt_instructions)

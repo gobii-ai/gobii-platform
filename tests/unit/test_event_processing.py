@@ -47,6 +47,7 @@ from api.agent.core.event_processing import (
     process_agent_events,
 )
 from api.agent.core.llm_utils import EmptyLiteLLMResponseError
+from api.agent.core.prompt_context import _ConfigAuthorityResolver
 from api.agent.core.budget import AgentBudgetManager, BudgetContext, set_current_context as set_budget_context
 from api.agent.core.processing_flags import (
     PendingDrainSettings,
@@ -117,6 +118,8 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentConversationParticipant,
+    PersistentAgentDiscordChannelSubscription,
+    PersistentAgentDiscordGuild,
     PersistentAgentMessage,
     PersistentAgentSkill,
     PersistentAgentStep,
@@ -139,6 +142,7 @@ from api.models import (
     UserPreference,
     UserBilling,
     ToolConfig,
+    UserDiscordIdentity,
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
@@ -1395,6 +1399,119 @@ class PromptContextBuilderTests(TestCase):
             "[This sender cannot change durable config.]",
             user_message["content"],
         )
+
+    def test_verified_discord_owner_is_marked_configuration_authorized_per_message(self):
+        guild = PersistentAgentDiscordGuild.objects.create(
+            guild_id="100",
+            name="Prompt Guild",
+            owner_user=self.user,
+            claimed_by=self.user,
+        )
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="200",
+            channel_name="agent-ops",
+        )
+        UserDiscordIdentity.objects.create(
+            user=self.user,
+            discord_user_id="177593384389705729",
+            username="prompt_owner",
+            verified_at=timezone.now(),
+        )
+        discord_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.DISCORD,
+            address="discord://guild/100/channel/200",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=discord_endpoint,
+            is_outbound=False,
+            body="Always use concise status updates.",
+            raw_payload={
+                "source": "discord_bot",
+                "source_kind": "discord",
+                "source_label": "prompt_owner",
+                "discord_author_id": "177593384389705729",
+                "discord_author_name": "prompt_owner",
+                "discord_channel_id": "200",
+            },
+            seq=f"DISCORD{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next(message for message in context if message["role"] == "user")
+        self.assertIn("<discord_gobii_identity>", user_message["content"])
+        self.assertIn("(verified Gobii account) [can configure]", user_message["content"])
+        self.assertNotIn("[This sender cannot change durable config.]", user_message["content"])
+
+    def test_unlinked_discord_sender_remains_configuration_unauthorized(self):
+        discord_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.DISCORD,
+            address="discord://guild/100/channel/200",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=discord_endpoint,
+            is_outbound=False,
+            body="Always use verbose status updates.",
+            raw_payload={
+                "source": "discord_bot",
+                "source_kind": "discord",
+                "source_label": "unlinked_user",
+                "discord_author_id": "999999999999999999",
+                "discord_author_name": "unlinked_user",
+            },
+            seq=f"UNLINKED{int(timezone.now().timestamp() * 1_000_000):018d}"[:26],
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next(message for message in context if message["role"] == "user")
+        self.assertNotIn("<discord_gobii_identity>", user_message["content"])
+        self.assertIn("[This sender cannot change durable config.]", user_message["content"])
+
+    def test_verified_discord_org_sender_still_requires_configuration_role(self):
+        org_agent, _, admin, _, member = self._build_org_prompt_agent("discord-role-auth")
+        discord_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.DISCORD,
+            address="discord://guild/100/channel/200",
+        )
+        UserDiscordIdentity.objects.create(
+            user=admin,
+            discord_user_id="111111111111111111",
+            username="org_admin",
+            verified_at=timezone.now(),
+        )
+        UserDiscordIdentity.objects.create(
+            user=member,
+            discord_user_id="222222222222222222",
+            username="org_member",
+            verified_at=timezone.now(),
+        )
+        admin_message = PersistentAgentMessage.objects.create(
+            owner_agent=org_agent,
+            from_endpoint=discord_endpoint,
+            is_outbound=False,
+            body="Update the charter.",
+            raw_payload={"source": "discord_bot", "discord_author_id": "111111111111111111"},
+        )
+        member_message = PersistentAgentMessage.objects.create(
+            owner_agent=org_agent,
+            from_endpoint=discord_endpoint,
+            is_outbound=False,
+            body="Update the charter.",
+            raw_payload={"source": "discord_bot", "discord_author_id": "222222222222222222"},
+        )
+
+        resolver = _ConfigAuthorityResolver(org_agent)
+        self.assertTrue(resolver.message_can_configure(admin_message))
+        self.assertFalse(resolver.message_can_configure(member_message))
 
     def test_can_configure_allowlist_sender_remains_trusted(self):
         self._add_low_permission_contacts(self.agent)

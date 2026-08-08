@@ -11,7 +11,15 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
-from api.models import AgentOwnerCustomInstructions, Organization, UserPhoneNumber, UserPreference
+from api.models import (
+    AgentOwnerCustomInstructions,
+    Organization,
+    OrganizationMembership,
+    PersistentAgentDiscordGuild,
+    UserDiscordIdentity,
+    UserPhoneNumber,
+    UserPreference,
+)
 from api.services.agent_owner_custom_instructions import (
     get_custom_instructions_for_organization_id,
     get_custom_instructions_for_user_id,
@@ -85,6 +93,95 @@ class ConsoleUserProfileApiTests(TestCase):
         self.assertEqual(payload["phone"]["number"], "+15551234567")
         self.assertTrue(payload["phone"]["isVerified"])
         self.assertIsNotNone(payload["phone"]["verifiedAt"])
+        self.assertIsNone(payload["discordIdentity"])
+
+    @override_settings(DISCORD_OAUTH_REDIRECT_URI="https://callback.example.test/console/api/discord/oauth/callback/")
+    def test_get_surfaces_unlinked_discord_identity_when_current_context_is_connected(self):
+        PersistentAgentDiscordGuild.objects.create(
+            guild_id="100",
+            name="Profile Guild",
+            owner_user=self.user,
+            claimed_by=self.user,
+        )
+
+        payload = self.client.get(self.url).json()["discordIdentity"]
+
+        self.assertTrue(payload["contextConnected"])
+        self.assertFalse(payload["linked"])
+        self.assertEqual(payload["oauthCallbackOrigin"], "https://callback.example.test")
+        self.assertEqual(payload["connectUrl"], reverse("discord_identity_oauth_start"))
+
+    def test_get_keeps_linked_discord_identity_visible_without_connected_context(self):
+        verified_at = timezone.now()
+        UserDiscordIdentity.objects.create(
+            user=self.user,
+            discord_user_id="177593384389705729",
+            username="profile_owner",
+            global_name="Profile Owner",
+            verified_at=verified_at,
+        )
+
+        payload = self.client.get(self.url).json()["discordIdentity"]
+
+        self.assertFalse(payload["contextConnected"])
+        self.assertTrue(payload["linked"])
+        self.assertEqual(payload["username"], "profile_owner")
+        self.assertEqual(payload["displayName"], "Profile Owner")
+        self.assertFalse(payload["canConfigureInCurrentContext"])
+
+    def test_org_discord_identity_respects_current_membership_role(self):
+        organization = Organization.objects.create(
+            name="Profile Team",
+            slug="profile-team",
+            plan="free",
+            created_by=self.user,
+        )
+        membership = OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        PersistentAgentDiscordGuild.objects.create(
+            guild_id="101",
+            name="Team Guild",
+            organization=organization,
+            claimed_by=self.user,
+        )
+        UserDiscordIdentity.objects.create(
+            user=self.user,
+            discord_user_id="177593384389705729",
+            username="team_member",
+            verified_at=timezone.now(),
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
+        member_payload = self.client.get(self.url).json()["discordIdentity"]
+        self.assertTrue(member_payload["contextConnected"])
+        self.assertFalse(member_payload["canConfigureInCurrentContext"])
+
+        membership.role = OrganizationMembership.OrgRole.ADMIN
+        membership.save(update_fields=["role"])
+        admin_payload = self.client.get(self.url).json()["discordIdentity"]
+        self.assertTrue(admin_payload["canConfigureInCurrentContext"])
+
+    def test_delete_unlinks_discord_identity(self):
+        UserDiscordIdentity.objects.create(
+            user=self.user,
+            discord_user_id="177593384389705729",
+            username="profile_owner",
+            verified_at=timezone.now(),
+        )
+
+        response = self.client.delete(reverse("discord_identity"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["disconnected"])
+        self.assertFalse(UserDiscordIdentity.objects.filter(user=self.user).exists())
 
     @override_settings(AGENT_OWNER_CUSTOM_INSTRUCTIONS_MAX_CHARS=123)
     def test_get_returns_custom_instructions_settings(self):

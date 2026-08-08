@@ -34,13 +34,8 @@ class DiscordNativeScenarioTests(SimpleTestCase):
         self.assertEqual(tuple(suite.scenario_slugs), DISCORD_NATIVE_SCENARIO_SLUGS)
         self.assertIsNotNone(scenario)
         self.assertIn("real_harness", scenario.get_metadata().tags)
-        self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_REACTION_SHARED_WIN))
-        self.assertIsNotNone(
-            ScenarioRegistry.get(DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT)
-        )
-        self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_READABLE_COMPARISON))
-        self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_RESEARCH_KICKOFF))
-        self.assertIsNotNone(ScenarioRegistry.get(DISCORD_NATIVE_GATEWAY_WAKE))
+        for slug in DISCORD_NATIVE_SCENARIO_SLUGS:
+            self.assertIsNotNone(ScenarioRegistry.get(slug))
 
     def test_readable_comparison_prompt_does_not_prescribe_formatting_contract(self):
         prompt = DISCORD_READABLE_COMPARISON_PROMPT.casefold()

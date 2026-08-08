@@ -13,6 +13,7 @@ from urllib.parse import quote, urlencode
 
 import requests
 from django.conf import settings
+from django.core import signing
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q
 from django.urls import reverse
@@ -34,6 +35,7 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemStep,
+    UserDiscordIdentity,
 )
 from api.services.inactive_agent_notifications import (
     INACTIVE_AUTO_REPLY_KIND,
@@ -65,8 +67,11 @@ DISCORD_OAUTH_TOKEN_URL = "https://discord.com/api/oauth2/token"
 DISCORD_WEBHOOK_USERNAME_MAX_LENGTH = 80
 DISCORD_TEXT_CHANNEL_TYPES = {0, 5}
 DISCORD_WEBHOOK_MAX_FILES = 10
-DISCORD_OAUTH_BOT_INSTALL_SCOPES = ("bot", "applications.commands")
+DISCORD_OAUTH_BOT_INSTALL_SCOPES = ("bot", "applications.commands", "identify")
 DISCORD_GUILD_INSTALL_TYPE = 0
+DISCORD_IDENTITY_OAUTH_STATE_PREFIX = "identity_"
+DISCORD_IDENTITY_OAUTH_STATE_SALT = "gobii.discord.identity_oauth_state"
+DISCORD_IDENTITY_OAUTH_STATE_MAX_AGE_SECONDS = 15 * 60
 
 
 class DiscordBotIntegrationError(RuntimeError):
@@ -244,6 +249,18 @@ def _discord_oauth_url(session: PersistentAgentDiscordOAuthSession) -> str:
     return f"{DISCORD_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
 
+def _discord_identity_oauth_url(state: str) -> str:
+    params = {
+        "client_id": settings.DISCORD_CLIENT_ID,
+        "redirect_uri": _oauth_redirect_uri(),
+        "response_type": "code",
+        "scope": "identify",
+        "state": state,
+        "prompt": "consent",
+    }
+    return f"{DISCORD_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
+
+
 def discord_setup_required_response(agent: PersistentAgent) -> dict[str, Any]:
     return {
         "status": "action_required",
@@ -277,7 +294,23 @@ def start_discord_oauth(agent: PersistentAgent, initiated_by, *, requested_guild
     return _discord_oauth_url(session)
 
 
-def _exchange_oauth_code(code: str) -> Mapping[str, Any]:
+def start_discord_identity_oauth(user, *, return_origin: str = "") -> str:
+    if not settings.DISCORD_CLIENT_ID or not settings.DISCORD_CLIENT_SECRET:
+        raise DiscordBotIntegrationError("Discord OAuth is not configured.")
+
+    state = signing.dumps(
+        {
+            "user_id": str(user.pk),
+            "nonce": secrets.token_urlsafe(16),
+            "return_origin": str(return_origin or "").rstrip("/"),
+        },
+        salt=DISCORD_IDENTITY_OAUTH_STATE_SALT,
+        compress=True,
+    )
+    return _discord_identity_oauth_url(f"{DISCORD_IDENTITY_OAUTH_STATE_PREFIX}{state}")
+
+
+def _exchange_oauth_code(code: str, *, required_scope: str = "") -> Mapping[str, Any]:
     try:
         response = requests.post(
             DISCORD_OAUTH_TOKEN_URL,
@@ -300,13 +333,104 @@ def _exchange_oauth_code(code: str) -> Mapping[str, Any]:
     access_token = str(payload.get("access_token") or "").strip()
     if not access_token:
         raise DiscordBotIntegrationError("Discord OAuth did not return an access token.")
-    guild = payload.get("guild")
-    if not isinstance(guild, Mapping) or not str(guild.get("id") or "").strip():
+    if required_scope:
+        scopes = {scope.strip() for scope in str(payload.get("scope") or "").split() if scope.strip()}
+        if required_scope not in scopes:
+            raise DiscordBotIntegrationError(f"Discord OAuth did not grant {required_scope} access.")
+    else:
+        guild = payload.get("guild")
+        if isinstance(guild, Mapping) and str(guild.get("id") or "").strip():
+            return payload
         raise DiscordBotIntegrationError(
             "Discord OAuth did not identify the installed server. "
             "Enable Require OAuth2 Code Grant for the Gobii Discord application, then try again."
         )
     return payload
+
+
+def _validate_discord_identity_oauth_state(state: str, user) -> Mapping[str, Any]:
+    if not state.startswith(DISCORD_IDENTITY_OAUTH_STATE_PREFIX):
+        raise DiscordBotIntegrationError("Discord identity authorization is invalid. Start verification again.")
+    try:
+        payload = signing.loads(
+            state.removeprefix(DISCORD_IDENTITY_OAUTH_STATE_PREFIX),
+            salt=DISCORD_IDENTITY_OAUTH_STATE_SALT,
+            max_age=DISCORD_IDENTITY_OAUTH_STATE_MAX_AGE_SECONDS,
+        )
+    except signing.SignatureExpired as exc:
+        raise DiscordBotIntegrationError(
+            "This Discord identity authorization has expired. Start verification again."
+        ) from exc
+    except signing.BadSignature as exc:
+        raise DiscordBotIntegrationError(
+            "Discord identity authorization is invalid. Start verification again."
+        ) from exc
+    if not isinstance(payload, Mapping) or payload.get("user_id") != str(user.pk):
+        raise DiscordBotIntegrationError("Discord identity authorization was not created for this user.")
+    return payload
+
+
+def discord_identity_oauth_return_origin(state: str, user) -> str:
+    payload = _validate_discord_identity_oauth_state(state, user)
+    return str(payload.get("return_origin") or "").rstrip("/")
+
+
+def _fetch_discord_current_user(access_token: str) -> Mapping[str, Any]:
+    try:
+        response = requests.get(
+            f"{DISCORD_API_BASE}/users/@me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise DiscordBotIntegrationError("Gobii could not verify the Discord account.") from exc
+    _raise_for_discord_status(response, action="account verification")
+    payload = response.json() or {}
+    discord_user_id = str(payload.get("id") or "").strip() if isinstance(payload, Mapping) else ""
+    username = str(payload.get("username") or "").strip() if isinstance(payload, Mapping) else ""
+    if not discord_user_id.isdigit() or not username:
+        raise DiscordBotIntegrationError("Discord returned an invalid account identity.")
+    return payload
+
+
+def _save_discord_identity(user, access_token: str) -> UserDiscordIdentity:
+    discord_user = _fetch_discord_current_user(access_token)
+    discord_user_id = str(discord_user["id"]).strip()
+    username = str(discord_user["username"]).strip()[:255]
+    global_name = str(discord_user.get("global_name") or "").strip()[:255]
+
+    try:
+        identity, _created = UserDiscordIdentity.objects.update_or_create(
+            user=user,
+            defaults={
+                "discord_user_id": discord_user_id,
+                "username": username,
+                "global_name": global_name,
+                "verified_at": timezone.now(),
+            },
+        )
+    except IntegrityError as exc:
+        raise DiscordBotIntegrationError("This Discord account is already linked to another Gobii user.") from exc
+    return identity
+
+
+def handle_discord_identity_oauth_callback(*, state: str, code: str, user) -> UserDiscordIdentity:
+    _validate_discord_identity_oauth_state(state, user)
+    token_payload = _exchange_oauth_code(code, required_scope="identify")
+    return _save_discord_identity(user, str(token_payload["access_token"]))
+
+
+def _verify_discord_oauth_initiator(user, token_payload: Mapping[str, Any]) -> None:
+    if user is None or "identify" not in str(token_payload.get("scope") or "").split():
+        return
+    try:
+        _save_discord_identity(user, str(token_payload["access_token"]))
+    except DiscordBotIntegrationError as exc:
+        logger.warning(
+            "Discord server connected, but automatic identity verification failed for Gobii user %s: %s",
+            user.pk,
+            exc,
+        )
 
 
 def _fetch_bot_guild(guild_id: str) -> Mapping[str, Any]:
@@ -431,11 +555,12 @@ def handle_discord_oauth_callback(
     state: str,
     code: str,
 ) -> dict[str, str]:
-    session = PersistentAgentDiscordOAuthSession.objects.get(state=state)
+    session = PersistentAgentDiscordOAuthSession.objects.select_related("initiated_by").get(state=state)
     if session.completed_at:
         raise DiscordBotIntegrationError("This Discord authorization has already been used.")
     if session.is_expired():
         raise DiscordBotIntegrationError("This Discord authorization has expired. Start the connection again.")
+    initiated_by = session.initiated_by
 
     token_payload = _exchange_oauth_code(code)
     token_guild = token_payload["guild"]
@@ -479,6 +604,7 @@ def handle_discord_oauth_callback(
         session.selected_guild_id = authoritative_guild_id
         session.save(update_fields=["completed_at", "selected_guild_id"])
         guild = serialize_guild(guild_claim)
+        transaction.on_commit(lambda: _verify_discord_oauth_initiator(initiated_by, token_payload))
         _queue_discord_oauth_completion_processing(session, guild)
     return guild
 

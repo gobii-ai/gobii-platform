@@ -1,0 +1,32 @@
+{% extends "console/oauth_callback_shell.html" %}
+
+{% block oauth_callback_title %}Discord Connection - Gobii{% endblock %}
+{% block oauth_callback_heading %}Discord connection{% endblock %}
+{% block oauth_callback_status_id %}discord-oauth-status{% endblock %}
+{% block oauth_callback_error_id %}discord-oauth-error{% endblock %}
+{% block oauth_callback_script %}
+  {{ payload|json_script:"discord-oauth-payload" }}
+  {{ target_origin|json_script:"discord-oauth-target-origin" }}
+  <script>
+    const payload = JSON.parse(document.getElementById("discord-oauth-payload").textContent);
+    const targetOrigin = JSON.parse(document.getElementById("discord-oauth-target-origin").textContent);
+    const statusEl = document.getElementById("discord-oauth-status");
+    const errorEl = document.getElementById("discord-oauth-error");
+    statusEl.textContent = payload.status === "success" ? payload.message : "Unable to complete the Discord connection.";
+    if (payload.status !== "success") {
+      errorEl.textContent = payload.message;
+      errorEl.classList.remove("hidden");
+    }
+    try {
+      localStorage.setItem(`gobii:oauth_complete:${Date.now()}`, JSON.stringify(payload));
+    } catch {
+      // postMessage remains available when storage access is restricted.
+    }
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage(payload, targetOrigin);
+    }
+    if (payload.status === "success") {
+      window.setTimeout(() => window.close(), 250);
+    }
+  </script>
+{% endblock %}
