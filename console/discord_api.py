@@ -22,6 +22,7 @@ from api.services.discord_bot import (
     build_discord_oauth_start_url,
     disconnect_discord_guild_for_owner,
     disconnect_discord_native_integration,
+    discord_identity_oauth_return_origin,
     disable_subscription,
     discover_channels,
     ensure_subscription,
@@ -95,8 +96,20 @@ def _enable_discord_native_skill(agent) -> dict[str, object]:
     return enable_system_skills(agent, [DISCORD_NATIVE_SYSTEM_SKILL_KEY])
 
 
-def _discord_oauth_complete_response(request: HttpRequest, payload: dict[str, Any]) -> HttpResponse:
-    return render(request, "console/discord_oauth_callback.html", {"payload": payload})
+def _discord_oauth_complete_response(
+    request: HttpRequest,
+    payload: dict[str, Any],
+    *,
+    target_origin: str = "",
+) -> HttpResponse:
+    return render(
+        request,
+        "console/discord_oauth_callback.html",
+        {
+            "payload": payload,
+            "target_origin": target_origin or request.build_absolute_uri("/").rstrip("/"),
+        },
+    )
 
 
 def _discord_identity_oauth_complete_response(
@@ -104,10 +117,12 @@ def _discord_identity_oauth_complete_response(
     *,
     status: str,
     message: str,
+    target_origin: str = "",
 ) -> HttpResponse:
     return _discord_oauth_complete_response(
         request,
         {"type": "gobii:discord_identity_oauth_complete", "status": status, "message": message},
+        target_origin=target_origin,
     )
 
 
@@ -116,7 +131,12 @@ class DiscordIdentityOAuthStartView(ApiLoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         try:
-            return HttpResponseRedirect(start_discord_identity_oauth(request.user))
+            return HttpResponseRedirect(
+                start_discord_identity_oauth(
+                    request.user,
+                    return_origin=request.build_absolute_uri("/").rstrip("/"),
+                )
+            )
         except DiscordBotIntegrationError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
 
@@ -160,15 +180,24 @@ class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
         identity_flow = state.startswith(DISCORD_IDENTITY_OAUTH_STATE_PREFIX)
         if error:
             if identity_flow:
+                try:
+                    target_origin = discord_identity_oauth_return_origin(state, request.user)
+                except DiscordBotIntegrationError:
+                    target_origin = ""
                 return _discord_identity_oauth_complete_response(
-                    request, status="error", message=error,
+                    request,
+                    status="error",
+                    message=error,
+                    target_origin=target_origin,
                 )
             return JsonResponse({"error": error}, status=400)
         code = str(request.GET.get("code") or "").strip()
         if not state or not code:
             return HttpResponseBadRequest("state and code are required.")
         if identity_flow:
+            target_origin = ""
             try:
+                target_origin = discord_identity_oauth_return_origin(state, request.user)
                 handle_discord_identity_oauth_callback(
                     state=state,
                     code=code,
@@ -176,12 +205,16 @@ class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
                 )
             except DiscordBotIntegrationError as exc:
                 return _discord_identity_oauth_complete_response(
-                    request, status="error", message=str(exc),
+                    request,
+                    status="error",
+                    message=str(exc),
+                    target_origin=target_origin,
                 )
             return _discord_identity_oauth_complete_response(
                 request,
                 status="success",
                 message="Your Discord account is now linked to your Gobii profile.",
+                target_origin=target_origin,
             )
         try:
             session = PersistentAgentDiscordOAuthSession.objects.select_related("agent").get(state=state)

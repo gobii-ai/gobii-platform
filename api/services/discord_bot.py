@@ -294,12 +294,16 @@ def start_discord_oauth(agent: PersistentAgent, initiated_by, *, requested_guild
     return _discord_oauth_url(session)
 
 
-def start_discord_identity_oauth(user) -> str:
+def start_discord_identity_oauth(user, *, return_origin: str = "") -> str:
     if not settings.DISCORD_CLIENT_ID or not settings.DISCORD_CLIENT_SECRET:
         raise DiscordBotIntegrationError("Discord OAuth is not configured.")
 
     state = signing.dumps(
-        {"user_id": str(user.pk), "nonce": secrets.token_urlsafe(16)},
+        {
+            "user_id": str(user.pk),
+            "nonce": secrets.token_urlsafe(16),
+            "return_origin": str(return_origin or "").rstrip("/"),
+        },
         salt=DISCORD_IDENTITY_OAUTH_STATE_SALT,
         compress=True,
     )
@@ -344,7 +348,7 @@ def _exchange_oauth_code(code: str, *, required_scope: str = "") -> Mapping[str,
     return payload
 
 
-def _validate_discord_identity_oauth_state(state: str, user) -> None:
+def _validate_discord_identity_oauth_state(state: str, user) -> Mapping[str, Any]:
     if not state.startswith(DISCORD_IDENTITY_OAUTH_STATE_PREFIX):
         raise DiscordBotIntegrationError("Discord identity authorization is invalid. Start verification again.")
     try:
@@ -363,6 +367,12 @@ def _validate_discord_identity_oauth_state(state: str, user) -> None:
         ) from exc
     if not isinstance(payload, Mapping) or payload.get("user_id") != str(user.pk):
         raise DiscordBotIntegrationError("Discord identity authorization was not created for this user.")
+    return payload
+
+
+def discord_identity_oauth_return_origin(state: str, user) -> str:
+    payload = _validate_discord_identity_oauth_state(state, user)
+    return str(payload.get("return_origin") or "").rstrip("/")
 
 
 def _fetch_discord_current_user(access_token: str) -> Mapping[str, Any]:

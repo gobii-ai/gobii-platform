@@ -180,11 +180,16 @@ class NativeDiscordBotTests(TestCase):
         self.assertFalse(UserDiscordIdentity.objects.filter(user=self.user).exists())
 
     @tag("batch_agent_webhooks")
+    @override_settings(ALLOWED_HOSTS=["profile.example.test", "callback.example.test"])
     @patch("api.services.discord_bot._fetch_discord_current_user")
     @patch("api.services.discord_bot._exchange_oauth_code")
     def test_identity_oauth_routes_complete_profile_link(self, exchange_mock, user_mock):
         self.client.force_login(self.user)
-        start_response = self.client.get(reverse("discord_identity_oauth_start"))
+        start_response = self.client.get(
+            reverse("discord_identity_oauth_start"),
+            HTTP_HOST="profile.example.test",
+            secure=True,
+        )
         self.assertEqual(start_response.status_code, 302)
         self.assertEqual(parse_qs(urlsplit(start_response.url).query)["scope"], ["identify"])
         state = parse_qs(urlsplit(start_response.url).query)["state"][0]
@@ -198,11 +203,16 @@ class NativeDiscordBotTests(TestCase):
         callback_response = self.client.get(
             reverse("discord_oauth_callback"),
             {"state": state, "code": "identity-code"},
+            HTTP_HOST="callback.example.test",
+            secure=True,
         )
 
         self.assertEqual(callback_response.status_code, 200)
         self.assertContains(callback_response, "gobii:discord_identity_oauth_complete")
         self.assertContains(callback_response, '"status": "success"')
+        self.assertContains(callback_response, '"https://profile.example.test"')
+        self.assertContains(callback_response, "window.opener.postMessage(payload, targetOrigin)")
+        self.assertContains(callback_response, "localStorage.setItem(`gobii:oauth_complete:")
         identity = UserDiscordIdentity.objects.get(user=self.user)
         self.assertEqual(identity.discord_user_id, "177593384389705729")
 
