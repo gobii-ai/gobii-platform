@@ -326,7 +326,7 @@ class NativeDiscordBotTests(TestCase):
         auth_query = parse_qs(urlsplit(auth_url).query)
         self.assertEqual(
             auth_query["scope"],
-            ["bot applications.commands"],
+            ["bot applications.commands identify"],
         )
         self.assertEqual(auth_query["permissions"], ["536939584"])
         self.assertEqual(auth_query["response_type"], ["code"])
@@ -334,10 +334,13 @@ class NativeDiscordBotTests(TestCase):
         session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
         post_mock.return_value = _response({
             "access_token": "oauth-token",
-            "scope": "bot applications.commands",
+            "scope": "bot applications.commands identify",
             "guild": {"id": "100", "name": "Claimed", "icon": "abc"},
         })
-        get_mock.return_value = _response({"id": "100", "name": "Claimed", "icon": "abc"})
+        get_mock.side_effect = [
+            _response({"id": "100", "name": "Claimed", "icon": "abc"}),
+            _response({"id": "177593384389705729", "username": "discord-owner", "global_name": "Discord Owner"}),
+        ]
 
         with self.captureOnCommitCallbacks(execute=True):
             result = handle_discord_oauth_callback(
@@ -360,6 +363,9 @@ class NativeDiscordBotTests(TestCase):
             PersistentAgentDiscordGuild.AuthorizationSource.EXPLICIT_OAUTH,
         )
         self.assertFalse(PersistentAgentDiscordGuild.objects.filter(guild_id="200").exists())
+        identity = UserDiscordIdentity.objects.get(user=self.user)
+        self.assertEqual(identity.discord_user_id, "177593384389705729")
+        self.assertEqual(identity.global_name, "Discord Owner")
         self.assertNotIn("/users/@me/guilds", get_mock.call_args.args[0])
         system_step = PersistentAgentSystemStep.objects.get(
             step__agent=self.agent,
@@ -368,6 +374,48 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("Discord connection completed", system_step.step.description)
         self.assertIn("discover_channels", system_step.step.description)
         self.assertIn('"selected_guild_id":"100"', system_step.notes)
+        delay_mock.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    @patch("api.services.discord_bot._fetch_discord_current_user")
+    @patch("api.services.discord_bot._fetch_bot_guild")
+    @patch("api.services.discord_bot._exchange_oauth_code")
+    def test_oauth_callback_keeps_guild_connected_when_discord_identity_belongs_to_another_user(
+        self,
+        exchange_mock,
+        fetch_bot_guild_mock,
+        fetch_discord_user_mock,
+        delay_mock,
+    ):
+        other_user = get_user_model().objects.create_user(username="existing-discord-owner")
+        UserDiscordIdentity.objects.create(
+            user=other_user,
+            discord_user_id="177593384389705729",
+            username="already-linked",
+            verified_at=timezone.now(),
+        )
+        start_discord_oauth(self.agent, self.user)
+        session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
+        exchange_mock.return_value = {
+            "access_token": "oauth-token",
+            "scope": "bot applications.commands identify",
+            "guild": {"id": "100", "name": "Claimed"},
+        }
+        fetch_bot_guild_mock.return_value = {"id": "100", "name": "Claimed"}
+        fetch_discord_user_mock.return_value = {
+            "id": "177593384389705729",
+            "username": "already-linked",
+        }
+
+        with self.assertLogs("api.services.discord_bot", level="WARNING") as logs:
+            with self.captureOnCommitCallbacks(execute=True):
+                result = handle_discord_oauth_callback(state=session.state, code="code-1")
+
+        self.assertEqual(result["guild_id"], "100")
+        self.assertTrue(PersistentAgentDiscordGuild.objects.filter(guild_id="100").exists())
+        self.assertFalse(UserDiscordIdentity.objects.filter(user=self.user).exists())
+        self.assertIn("automatic identity verification failed", " ".join(logs.output))
         delay_mock.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
@@ -418,9 +466,13 @@ class NativeDiscordBotTests(TestCase):
         session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
         post_mock.return_value = _response({
             "access_token": "oauth-token",
+            "scope": "bot applications.commands identify",
             "guild": {"id": "100", "name": "Claimed", "icon": "abc"},
         })
-        get_mock.return_value = _response({"id": "100", "name": "Claimed", "icon": "abc"})
+        get_mock.side_effect = [
+            _response({"id": "100", "name": "Claimed", "icon": "abc"}),
+            _response({"id": "177593384389705729", "username": "discord-owner", "global_name": "Discord Owner"}),
+        ]
 
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(
@@ -434,6 +486,7 @@ class NativeDiscordBotTests(TestCase):
         session.refresh_from_db()
         self.assertEqual(session.selected_guild_id, "100")
         self.assertTrue(PersistentAgentDiscordGuild.objects.filter(guild_id="100").exists())
+        self.assertTrue(UserDiscordIdentity.objects.filter(user=self.user).exists())
         delay_mock.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
