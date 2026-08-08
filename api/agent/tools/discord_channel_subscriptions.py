@@ -16,7 +16,7 @@ from api.services.discord_bot import (
     latest_selected_guild,
     list_claimed_guilds,
     list_subscriptions,
-    resolve_active_subscription,
+    resolve_subscription_for_disable,
 )
 
 logger = logging.getLogger(__name__)
@@ -169,7 +169,7 @@ def execute_discord_channel_subscriptions(agent: PersistentAgent, params: Dict[s
             channel_name = str(params.get("channel_name") or "").strip()
             if not guild_id or not channel_name:
                 return {"status": "error", "message": "guild_id and channel_name are required for disable."}
-            subscription = resolve_active_subscription(
+            subscription = resolve_subscription_for_disable(
                 agent,
                 guild_id=guild_id,
                 channel_name=channel_name,

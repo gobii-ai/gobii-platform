@@ -69,12 +69,12 @@ def ensure_conversation_participant(
     )
 
 
-def display_name_for_channel(channel_id: str, channel_name: str = "") -> str:
+def display_name_for_channel(channel_name: str = "") -> str:
     return f"#{channel_name.lstrip('#')}" if channel_name else "Discord channel"
 
 
-def discord_channel_source_label(channel_id: str, channel_name: str = "") -> str:
-    return display_name_for_channel(channel_id, channel_name)
+def discord_channel_source_label(channel_name: str = "") -> str:
+    return display_name_for_channel(channel_name)
 
 
 def get_or_create_discord_conversation(
@@ -84,7 +84,7 @@ def get_or_create_discord_conversation(
     channel_id: str,
     channel_name: str = "",
 ) -> PersistentAgentConversation:
-    display_name = display_name_for_channel(channel_id, channel_name)
+    display_name = display_name_for_channel(channel_name)
     conversation, created = PersistentAgentConversation.objects.get_or_create(
         channel=CommsChannel.DISCORD,
         address=address,
@@ -161,7 +161,7 @@ def create_discord_outbound_message(
     payload.setdefault("discord_channel_name", channel_name)
     payload.setdefault("discord_platform_channel_address", channel_endpoint.address)
     payload.setdefault("discord_conversation_address", conversation.address)
-    payload.setdefault("source_label", discord_channel_source_label(channel_id, channel_name))
+    payload.setdefault("source_label", discord_channel_source_label(channel_name))
     return PersistentAgentMessage.objects.create(
         owner_agent=agent,
         from_endpoint=from_endpoint,

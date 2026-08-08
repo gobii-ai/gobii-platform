@@ -342,7 +342,7 @@ def _merge_discord_echo_into_outbound(
             "discord_attachments": raw_payload.get("discord_attachments", []),
             "discord_platform_channel_address": platform_channel_address,
             "discord_conversation_address": message.conversation.address if message.conversation_id else "",
-            "source_label": _discord_channel_source_label(channel_id, channel_name),
+            "source_label": _discord_channel_source_label(channel_name),
             "pipedream_trigger_echo_payload": raw_payload.get("pipedream_payload", {}),
         }
     )
@@ -384,7 +384,7 @@ def _upsert_discord_outbound_echo(
         "event_type": subscription.event_type,
         "discord_channel_id": channel_id,
         "discord_channel_name": channel_name,
-        "source_label": _discord_channel_source_label(channel_id, channel_name),
+        "source_label": _discord_channel_source_label(channel_name),
         "discord_message_id": raw_payload.get("discord_message_id", ""),
         "discord_guild_id": raw_payload.get("discord_guild_id", ""),
         "discord_guild_name": raw_payload.get("discord_guild_name", ""),

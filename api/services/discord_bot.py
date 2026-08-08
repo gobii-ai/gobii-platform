@@ -822,6 +822,43 @@ def resolve_active_subscription(
     return subscriptions[0]
 
 
+def resolve_subscription_for_disable(
+    agent: PersistentAgent,
+    *,
+    channel_name: str,
+    guild_id: str,
+) -> PersistentAgentDiscordChannelSubscription:
+    requested_name = _normalized_channel_name(channel_name)
+    requested_guild_id = guild_id.strip()
+    if not requested_name:
+        raise DiscordBotIntegrationError("channel_name is required.")
+
+    subscriptions = [
+        subscription
+        for subscription in (
+            PersistentAgentDiscordChannelSubscription.objects.select_related("guild")
+            .filter(agent=agent, guild__guild_id=requested_guild_id)
+            .order_by("-updated_at", "channel_id")
+        )
+        if _normalized_channel_name(subscription.channel_name) == requested_name
+    ]
+    active_subscriptions = [
+        subscription
+        for subscription in subscriptions
+        if subscription.status == PersistentAgentDiscordChannelSubscription.Status.ACTIVE
+    ]
+    if len(active_subscriptions) > 1:
+        raise DiscordBotIntegrationError(
+            "That channel name matches more than one active subscription in the selected server. "
+            "Rename or remove the duplicate channels before trying again."
+        )
+    if active_subscriptions:
+        return active_subscriptions[0]
+    if subscriptions:
+        return subscriptions[0]
+    raise DiscordBotIntegrationError("No native Discord subscription matched that channel.")
+
+
 def ensure_subscription(
     agent: PersistentAgent,
     *,
@@ -973,7 +1010,7 @@ def _ingest_gateway_message_for_subscription(
 
     platform_channel_address = discord_channel_address(message.guild_id, message.channel_id)
     conversation_address = discord_conversation_address(agent.id, message.guild_id, message.channel_id)
-    source_label = message.author_name or discord_channel_source_label(message.channel_id, message.channel_name)
+    source_label = message.author_name or discord_channel_source_label(message.channel_name)
     raw_payload = {
         "source": "discord_bot",
         "source_kind": "discord",
@@ -1149,6 +1186,21 @@ def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
     )
     if not subscriptions:
         return {"ignored": True, "reason": "no_subscription"}
+
+    current_channel_name = str(message.channel_name or "").strip().lstrip("#")
+    renamed_subscriptions = [
+        subscription
+        for subscription in subscriptions
+        if current_channel_name and subscription.channel_name != current_channel_name
+    ]
+    if renamed_subscriptions:
+        renamed_at = timezone.now()
+        PersistentAgentDiscordChannelSubscription.objects.filter(
+            id__in=[subscription.id for subscription in renamed_subscriptions]
+        ).update(channel_name=current_channel_name, updated_at=renamed_at)
+        for subscription in renamed_subscriptions:
+            subscription.channel_name = current_channel_name
+            subscription.updated_at = renamed_at
 
     own_echo_agent_ids = _own_webhook_echo_agent_ids(message, subscriptions)
     skipped_subscription_ids = []
@@ -1346,7 +1398,7 @@ def send_channel_message(
         "webhook_id": webhook.webhook_id,
         "webhook_echo_marker_id": str(echo_marker.id),
         "webhook_echo_signature": echo_signature,
-        "source_label": discord_channel_source_label(subscription.channel_id, subscription.channel_name),
+        "source_label": discord_channel_source_label(subscription.channel_name),
         "discord_sent_attachments": sent_attachments,
         "discord_response": response_payload if isinstance(response_payload, Mapping) else {},
         **dict(metadata or {}),

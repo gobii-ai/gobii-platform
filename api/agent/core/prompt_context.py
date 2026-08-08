@@ -2769,10 +2769,9 @@ def _build_contacts_block(
             guild_id = str(raw_payload.get("discord_guild_id") or "").strip()
             guild_name = str(raw_payload.get("discord_guild_name") or "").strip()
             channel_name = str(raw_payload.get("discord_channel_name") or "").strip().lstrip("#")
-            if not guild_id or not channel_name:
-                continue
-            server_label = guild_name or "Discord server"
-            endpoint_address = f"{server_label} / #{channel_name} (guild_id={guild_id})"
+            if guild_id and channel_name:
+                server_label = guild_name or "Discord server"
+                endpoint_address = f"{server_label} / #{channel_name} (guild_id={guild_id})"
         key = (endpoint_channel, endpoint_address)
         if endpoint is not None and endpoint.channel == CommsChannel.WEB:
             recent_web_endpoints[endpoint.id] = endpoint

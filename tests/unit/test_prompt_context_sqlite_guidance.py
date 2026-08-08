@@ -17,6 +17,11 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     UserPhoneNumber,
 )
+from api.services.discord_messages import (
+    create_discord_outbound_message,
+    discord_channel_address,
+    discord_conversation_address,
+)
 
 
 @tag("batch_promptree")
@@ -695,6 +700,35 @@ class PromptContextContactsGuidanceTests(TestCase):
         self.assertEqual(extracted, source_url)
         rendered = prompt_context.rewrite_prompt_urls(source_url, self.agent, create=False)
         self.assertRegex(rendered, r"^\$\[link:L[0-9A-Z]{16}\]$")
+
+    def test_recent_discord_contact_falls_back_to_conversation_address_without_guild_metadata(self):
+        conversation_address = discord_conversation_address(self.agent.id, "100", "10")
+        create_discord_outbound_message(
+            self.agent,
+            channel_id="10",
+            channel_name="general",
+            body="Inactive notice",
+            conversation_address=conversation_address,
+            platform_channel_address=discord_channel_address("100", "10"),
+            raw_payload={"kind": "agent_inactive_auto_reply"},
+        )
+        collector = _PromptSectionCollector()
+        config_authority = prompt_context._ConfigAuthorityResolver(self.agent)
+        contact_records = prompt_context.build_contacts_snapshot_records(
+            self.agent,
+            display_name_for_user=prompt_context._build_user_display_name,
+            user_can_configure=config_authority.user_can_configure,
+        )
+
+        recent_contacts = prompt_context._build_contacts_block(
+            self.agent,
+            collector,
+            _NoopSpan(),
+            config_authority,
+            contact_records,
+        )
+
+        self.assertIn(conversation_address, recent_contacts)
 
     def test_runtime_config_note_does_not_direct_one_off_feedback_into_config(self):
         with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(

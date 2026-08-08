@@ -684,6 +684,19 @@ class NativeDiscordBotTests(TestCase):
         self.assertNotIn("channel_id", result["subscription"])
         self.assertEqual(subscription.status, PersistentAgentDiscordChannelSubscription.Status.DISABLED)
 
+        repeated_result = execute_discord_channel_subscriptions(
+            self.agent,
+            {
+                "action": "disable",
+                "guild_id": guild.guild_id,
+                "channel_name": "general",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(repeated_result["status"], "success")
+        self.assertEqual(repeated_result["subscription"]["status"], "disabled")
+
     @tag("batch_agent_webhooks")
     def test_discord_skill_context_lists_only_active_named_subscriptions(self):
         skill = get_system_skill_definition("discord_native")
@@ -1114,6 +1127,62 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("guild_id", user_prompt)
         self.assertNotIn("channel_id", user_prompt)
         self.assertNotIn("hidden-channel-id", user_prompt)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_gateway_message_refreshes_renamed_subscription_for_outbound_tools(self, schedule_mock):
+        guild = self._guild(name="Support")
+        subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="old-name",
+        )
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+
+        ingest_gateway_message(
+            DiscordGatewayMessage(
+                message_id="500",
+                channel_id="10",
+                channel_name="new-name",
+                guild_id="100",
+                guild_name="Support",
+                author_id="300",
+                author_name="Human",
+                content="Please reply here",
+                attachments=[],
+                embeds=[],
+            )
+        )
+
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.channel_name, "new-name")
+
+        with patch(
+            "api.agent.tools.send_discord_message.resolve_filespace_attachments",
+            return_value=[],
+        ), patch("api.agent.tools.send_discord_message.send_channel_message") as send_mock:
+            send_mock.return_value = SimpleNamespace(
+                id="message-1",
+                raw_payload={"discord_message_id": "discord-message-1"},
+            )
+            result = execute_send_discord_message(
+                self.agent,
+                {
+                    "guild_id": "100",
+                    "channel_name": "new-name",
+                    "message": "Replying after the rename.",
+                    "will_continue_work": False,
+                },
+            )
+
+        self.assertEqual(result["status"], "success")
+        send_mock.assert_called_once_with(
+            self.agent,
+            channel_id="10",
+            body="Replying after the rename.",
+            attachments=[],
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.requests.head")
