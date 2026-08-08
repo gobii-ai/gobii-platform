@@ -10,7 +10,7 @@ from api.agent.files.attachment_helpers import AttachmentResolutionError, resolv
 from api.agent.comms.outbound_content_policy import markdown_only_error
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.agent_variables import substitute_variables_with_filespace
-from api.agent.core.link_references import handle_link_reference_errors, resolve_nested_link_references
+from api.agent.core.link_references import handle_link_reference_errors
 from api.models import PersistentAgent
 from api.services.discord_bot import (
     DiscordBotIntegrationError,
@@ -87,8 +87,9 @@ def execute_send_discord_message(agent: PersistentAgent, params: Dict[str, Any])
     guild_id = str(params.get("guild_id") or "").strip()
     body = str(params.get("message") or "").strip()
     attachment_paths = params.get("attachments")
+    substituted_embeds = substitute_variables_with_filespace(params.get("embeds"), agent)
     try:
-        embeds = normalize_discord_embeds(resolve_nested_link_references(params.get("embeds"), agent))
+        embeds = normalize_discord_embeds(substituted_embeds)
     except ValueError as exc:
         return {"status": "error", "message": str(exc)}
     body = substitute_variables_with_filespace(body, agent)

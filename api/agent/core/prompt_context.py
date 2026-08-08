@@ -5756,6 +5756,7 @@ def _get_unified_history_prompt(
             "webhook_meta": 3, # High priority - webhook request metadata
             "discord_channel_id": 3, # High priority - required to target Discord actions
             "discord_message_id": 3, # High priority - required to target Discord reactions
+            "discord_embeds": 2, # Medium priority - may contain the message's only structured content
             "discord_reply_context": 2, # Medium priority - preserves the message a Discord reply references
             "reply_to_message_id": 2,  # Medium priority - needed for explicit email threading
             "subject": 2,     # Medium priority - email subject

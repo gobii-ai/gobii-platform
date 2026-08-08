@@ -19,7 +19,6 @@ from api.agent.core.link_references import (
     resolve_link_reference_params,
     resolve_link_references,
     resolve_link_references_for_display,
-    resolve_nested_link_references,
     rewrite_prompt_urls,
 )
 from api.agent.core.event_processing import (
@@ -302,8 +301,13 @@ class LinkReferenceTests(TestCase):
 
     def test_discord_embed_references_pass_runtime_policy_for_tool_resolution(self):
         token = rewrite_prompt_urls("https://status.example.test/deploy/42", self.agent, create=True)
+        set_agent_variable("deployment_label", "Production")
         params = {
-            "embeds": [{"title": "Deployment", "url": token, "fields": [{"name": "Source", "value": token}]}],
+            "embeds": [{
+                "title": "$[deployment_label] deployment",
+                "url": token,
+                "fields": [{"name": "Source", "value": token}],
+            }],
             "will_continue_work": False,
         }
 
@@ -311,10 +315,9 @@ class LinkReferenceTests(TestCase):
             resolve_link_reference_params(params, self.agent, tool_name="send_discord_message"),
             params,
         )
-        self.assertEqual(
-            resolve_nested_link_references(params["embeds"], self.agent)[0]["url"],
-            "https://status.example.test/deploy/42",
-        )
+        resolved_embeds = substitute_variables_with_filespace(params["embeds"], self.agent)
+        self.assertEqual(resolved_embeds[0]["title"], "Production deployment")
+        self.assertEqual(resolved_embeds[0]["url"], "https://status.example.test/deploy/42")
 
     def test_meta_gobii_resolves_verified_links_before_persisting_charters(self):
         url = "https://public.example.test/templates/outreach?version=3"
@@ -673,6 +676,14 @@ class LinkReferenceTests(TestCase):
                 {
                     "channel_id": "123456789",
                     "message": malformed,
+                    "will_continue_work": False,
+                },
+            ),
+            execute_send_discord_message(
+                self.agent,
+                {
+                    "channel_id": "123456789",
+                    "embeds": [{"title": "Source", "url": malformed}],
                     "will_continue_work": False,
                 },
             ),

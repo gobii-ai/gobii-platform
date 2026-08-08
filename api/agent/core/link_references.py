@@ -171,14 +171,6 @@ def resolve_link_references(text: str, agent) -> str:
     return _REFERENCE_RE.sub(lambda match: references[match.group(1).upper()], text)
 
 
-def resolve_nested_link_references(value, agent):
-    if isinstance(value, dict):
-        return {key: resolve_nested_link_references(item, agent) for key, item in value.items()}
-    if isinstance(value, list):
-        return [resolve_nested_link_references(item, agent) for item in value]
-    return resolve_link_references(value, agent) if isinstance(value, str) else value
-
-
 def resolve_link_references_for_display(value, agent):
     if isinstance(value, dict):
         return {key: resolve_link_references_for_display(item, agent) for key, item in value.items()}
