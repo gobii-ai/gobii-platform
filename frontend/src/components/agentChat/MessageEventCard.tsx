@@ -420,12 +420,12 @@ export const MessageEventCard = memo(function MessageEventCard({
                   />
                 ))}
                 {(message.replyTo.embeds?.length || 0) > 2 ? (
-                  <span className="chat-reply-context__more">
+                  <span className="mt-1.5 block text-xs text-slate-500">
                     +{(message.replyTo.embeds?.length || 0) - 2} more embeds
                   </span>
                 ) : null}
                 {message.replyTo.attachmentFilenames?.length ? (
-                  <span className="chat-reply-context__attachments">
+                  <span className="mt-1.5 block text-xs text-slate-500">
                     Attachments: {message.replyTo.attachmentFilenames.join(', ')}
                   </span>
                 ) : null}

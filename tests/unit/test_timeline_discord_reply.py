@@ -66,10 +66,6 @@ class TimelineDiscordReplyTests(TestCase):
         self.assertEqual(payload["replyTo"], {
             "authorName": "Alyssa Perkins",
             "bodyText": "honestly maybe like a 30. it's strip-mall Frederick right off 26.",
-            "embeds": [],
-            "attachmentFilenames": [],
-            "messageId": None,
-            "unavailable": False,
         })
 
     def test_an_unavailable_reply_keeps_the_reply_relationship_visible(self):
@@ -87,9 +83,6 @@ class TimelineDiscordReplyTests(TestCase):
         self.assertEqual(payload["replyTo"], {
             "authorName": "Alyssa Perkins",
             "bodyText": "Original Discord message is unavailable.",
-            "embeds": [],
-            "attachmentFilenames": [],
-            "messageId": None,
             "unavailable": True,
         })
 
@@ -163,4 +156,4 @@ class TimelineDiscordReplyTests(TestCase):
         payload = serialize_message_event(message)["message"]
 
         self.assertIsNone(payload["replyTo"])
-        self.assertEqual(payload["discordEmbeds"], [])
+        self.assertNotIn("discordEmbeds", payload)

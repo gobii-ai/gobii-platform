@@ -1,3 +1,5 @@
+import json
+
 from django.test import SimpleTestCase, tag
 
 from api.services.discord_embeds import (
@@ -9,10 +11,10 @@ from api.services.discord_embeds import (
     DISCORD_MAX_EMBED_FIELDS,
     DISCORD_MAX_EMBEDS,
     discord_embed_signature_projection,
-    discord_embed_timeline_projection,
     discord_embed_tool_schema,
     format_discord_embeds,
     normalize_discord_embeds,
+    project_discord_embeds,
 )
 
 
@@ -170,24 +172,25 @@ class DiscordEmbedTests(SimpleTestCase):
             "video": {"url": "https://example.test/video.mp4"},
         }])
 
-        for expected in (
-            "Title: Deployment",
-            "Description:\nHealthy",
-            "Color: #22C55E",
-            "Author: Release Bot",
-            "Author URL: https://example.test/author",
-            "Provider: Status — https://example.test",
-            "- Version (inline): v42",
-            "Footer: Updated",
-            "Image: https://example.test/image.png",
-            "Thumbnail: https://example.test/thumb.png",
-            "Video: https://example.test/video.mp4",
-        ):
-            with self.subTest(expected=expected):
-                self.assertIn(expected, rendered)
+        self.assertEqual(json.loads(rendered), project_discord_embeds([{
+            "title": "Deployment",
+            "description": "Healthy",
+            "color": 0x22C55E,
+            "author": {
+                "name": "Release Bot",
+                "url": "https://example.test/author",
+                "icon_url": "https://example.test/author.png",
+            },
+            "provider": {"name": "Status", "url": "https://example.test"},
+            "fields": [{"name": "Version", "value": "v42", "inline": True}],
+            "footer": {"text": "Updated", "icon_url": "https://example.test/footer.png"},
+            "image": {"url": "https://example.test/image.png"},
+            "thumbnail": {"url": "https://example.test/thumb.png"},
+            "video": {"url": "https://example.test/video.mp4"},
+        }]))
 
     def test_projects_received_metadata_for_live_chat(self):
-        projected = discord_embed_timeline_projection([{
+        projected = project_discord_embeds([{
             "title": "Deployment",
             "description": "Healthy",
             "url": "https://example.test/deploy",
@@ -227,7 +230,7 @@ class DiscordEmbedTests(SimpleTestCase):
         }])
 
     def test_live_chat_projection_drops_unsafe_urls(self):
-        projected = discord_embed_timeline_projection([{
+        projected = project_discord_embeds([{
             "title": "Safe text",
             "url": "javascript:alert(1)",
             "image": {"url": "data:text/html,bad"},

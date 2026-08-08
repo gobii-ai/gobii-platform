@@ -19,6 +19,7 @@ from api.agent.core.link_references import (
     resolve_link_reference_params,
     resolve_link_references,
     resolve_link_references_for_display,
+    resolve_nested_link_references,
     rewrite_prompt_urls,
 )
 from api.agent.core.event_processing import (
@@ -297,6 +298,22 @@ class LinkReferenceTests(TestCase):
                 tool_name="http_request",
             ),
             {"url": "https://sheets.googleapis.com/v4/spreadsheets/123/values/A1", "body": json.dumps({"values": [[url]]})},
+        )
+
+    def test_discord_embed_references_pass_runtime_policy_for_tool_resolution(self):
+        token = rewrite_prompt_urls("https://status.example.test/deploy/42", self.agent, create=True)
+        params = {
+            "embeds": [{"title": "Deployment", "url": token, "fields": [{"name": "Source", "value": token}]}],
+            "will_continue_work": False,
+        }
+
+        self.assertEqual(
+            resolve_link_reference_params(params, self.agent, tool_name="send_discord_message"),
+            params,
+        )
+        self.assertEqual(
+            resolve_nested_link_references(params["embeds"], self.agent)[0]["url"],
+            "https://status.example.test/deploy/42",
         )
 
     def test_meta_gobii_resolves_verified_links_before_persisting_charters(self):

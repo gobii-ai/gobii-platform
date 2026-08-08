@@ -1,7 +1,8 @@
 """Validation and presentation helpers for Discord embeds."""
 
+import json
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 from urllib.parse import urlparse
 
 from api.agent.comms.outbound_content_policy import contains_raw_html
@@ -223,10 +224,6 @@ def _mapping(value: object) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _media_url(embed: Mapping[str, Any], key: str) -> str:
-    return _text(_mapping(embed.get(key)).get("url"))
-
-
 def _display_color(value: object) -> str:
     if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 0xFFFFFF:
         return f"#{value:06X}"
@@ -243,8 +240,8 @@ def _http_url(value: object) -> str:
     return url
 
 
-def discord_embed_timeline_projection(raw_embeds: object) -> list[dict[str, Any]]:
-    """Project provider embeds onto the display-safe fields understood by Live Chat."""
+def project_discord_embeds(raw_embeds: object) -> list[dict[str, Any]]:
+    """Project provider embeds onto the display-safe fields shared by prompts and Live Chat."""
 
     if not isinstance(raw_embeds, list):
         return []
@@ -314,92 +311,11 @@ def discord_embed_timeline_projection(raw_embeds: object) -> list[dict[str, Any]
     return projected
 
 
-def format_discord_embeds(raw_embeds: object, *, compact: bool = False) -> str:
-    """Render arbitrary received Discord embeds without hiding read-only metadata."""
+def format_discord_embeds(raw_embeds: object) -> str:
+    """Serialize meaningful received embed fields for agent context."""
 
-    if not isinstance(raw_embeds, list):
-        return ""
-    rendered: list[str] = []
-    for embed_index, raw_embed in enumerate(raw_embeds, start=1):
-        if not isinstance(raw_embed, Mapping):
-            continue
-        title = _text(raw_embed.get("title"))
-        description = _text(raw_embed.get("description"))
-        url = _text(raw_embed.get("url"))
-        color = _display_color(raw_embed.get("color"))
-        author = _mapping(raw_embed.get("author"))
-        footer = _mapping(raw_embed.get("footer"))
-        provider = _mapping(raw_embed.get("provider"))
-        fields = raw_embed.get("fields") if isinstance(raw_embed.get("fields"), list) else []
-        media = [
-            ("Image", _media_url(raw_embed, "image")),
-            ("Thumbnail", _media_url(raw_embed, "thumbnail")),
-            ("Video", _media_url(raw_embed, "video")),
-        ]
-
-        if compact:
-            parts = []
-            if title:
-                parts.append(title)
-            if description:
-                parts.append(description)
-            for field in fields:
-                if not isinstance(field, Mapping):
-                    continue
-                name = _text(field.get("name"))
-                value = _text(field.get("value"))
-                if name and value:
-                    parts.append(f"{name}: {value}")
-            if url:
-                parts.append(url)
-            for label, media_url in media:
-                if media_url:
-                    parts.append(f"{label}: {media_url}")
-            if parts:
-                rendered.append(f"Embed {embed_index}: " + " · ".join(parts))
-            continue
-
-        lines = [f"Embed {embed_index}:"]
-        if title:
-            lines.append(f"Title: {title}")
-        if description:
-            lines.extend(("Description:", description))
-        if url:
-            lines.append(f"URL: {url}")
-        if color:
-            lines.append(f"Color: {color}")
-        author_name = _text(author.get("name"))
-        if author_name:
-            lines.append(f"Author: {author_name}")
-        for label, key in (("Author URL", "url"), ("Author icon", "icon_url")):
-            value = _text(author.get(key))
-            if value:
-                lines.append(f"{label}: {value}")
-        provider_name = _text(provider.get("name"))
-        provider_url = _text(provider.get("url"))
-        if provider_name or provider_url:
-            lines.append(f"Provider: {' — '.join(value for value in (provider_name, provider_url) if value)}")
-        if fields:
-            lines.append("Fields:")
-            for field in fields:
-                if not isinstance(field, Mapping):
-                    continue
-                name = _text(field.get("name")) or "(unnamed)"
-                value = _text(field.get("value")) or "(empty)"
-                inline = " (inline)" if field.get("inline") is True else ""
-                lines.append(f"- {name}{inline}: {value}")
-        footer_text = _text(footer.get("text"))
-        if footer_text:
-            lines.append(f"Footer: {footer_text}")
-        footer_icon = _text(footer.get("icon_url"))
-        if footer_icon:
-            lines.append(f"Footer icon: {footer_icon}")
-        for label, media_url in media:
-            if media_url:
-                lines.append(f"{label}: {media_url}")
-        if len(lines) > 1:
-            rendered.append("\n".join(lines))
-    return "\n\n".join(rendered)
+    embeds = project_discord_embeds(raw_embeds)
+    return json.dumps(embeds, ensure_ascii=False, separators=(",", ":")) if embeds else ""
 
 
 def discord_embed_signature_projection(raw_embeds: object) -> list[dict[str, Any]]:
@@ -407,60 +323,16 @@ def discord_embed_signature_projection(raw_embeds: object) -> list[dict[str, Any
 
     if not isinstance(raw_embeds, list):
         return []
-    projected: list[dict[str, Any]] = []
-    for raw_embed in raw_embeds:
-        if not isinstance(raw_embed, Mapping):
-            continue
-        embed_type = _text(raw_embed.get("type")).casefold()
-        if embed_type and embed_type != "rich":
-            continue
-        embed: dict[str, Any] = {}
-        for key in ("title", "description", "url"):
-            value = _text(raw_embed.get(key))
-            if value:
-                embed[key] = value
-        color = raw_embed.get("color")
-        if isinstance(color, int) and not isinstance(color, bool):
-            embed["color"] = color
-        fields = []
-        raw_fields = raw_embed.get("fields")
-        if isinstance(raw_fields, list):
-            for raw_field in raw_fields:
-                if not isinstance(raw_field, Mapping):
-                    continue
-                name = _text(raw_field.get("name"))
-                value = _text(raw_field.get("value"))
-                if name and value:
-                    fields.append({"name": name, "value": value, "inline": raw_field.get("inline") is True})
-        if fields:
-            embed["fields"] = fields
-        if embed:
-            projected.append(embed)
+    rich_embeds = [
+        embed
+        for embed in raw_embeds
+        if isinstance(embed, Mapping) and _text(embed.get("type")).casefold() in {"", "rich"}
+    ]
+    projected = []
+    for embed in project_discord_embeds(rich_embeds):
+        signature = {key: embed[key] for key in ("title", "description", "url", "fields") if key in embed}
+        if "color" in embed:
+            signature["color"] = int(embed["color"][1:], 16)
+        if signature:
+            projected.append(signature)
     return projected
-
-
-def discord_reply_preview_text(
-    *,
-    content: object,
-    embeds: object,
-    attachment_filenames: Iterable[object] | None,
-    unavailable: bool,
-    empty_fallback: bool = True,
-) -> str:
-    parts = []
-    content_text = _text(content)
-    if content_text:
-        parts.append(content_text)
-    embed_text = format_discord_embeds(embeds, compact=True)
-    if embed_text:
-        parts.append(embed_text)
-    filenames = [_text(filename) for filename in (attachment_filenames or []) if _text(filename)]
-    if filenames:
-        parts.append(f"Attachments: {', '.join(filenames)}")
-    if parts:
-        return " · ".join(parts)
-    if unavailable:
-        return "Original Discord message is unavailable."
-    if empty_fallback:
-        return "Original Discord message has no text, embed, or attachment context."
-    return ""

@@ -14,67 +14,70 @@ function safeColor(color?: string): string | undefined {
 
 function ExternalLink({ href, children }: { href?: string; children: ReactNode }) {
   if (!href) return <>{children}</>
-  return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
+  return <a className="text-indigo-600 no-underline hover:underline" href={href} target="_blank" rel="noopener noreferrer">{children}</a>
 }
 
 export function DiscordEmbedCard({ embed, compact = false, onLinkClick }: DiscordEmbedCardProps) {
   const color = safeColor(embed.color)
   const fields = embed.fields || []
+  const cardClass = `not-prose w-full rounded-md border border-indigo-200/70 border-l-4 text-[13px] leading-[1.35] text-slate-700 ${
+    compact ? 'mt-1.5 bg-white/60 px-2.5 py-2' : 'mt-2 max-w-lg bg-white/70 px-3 py-2.5'
+  }`
 
   return (
     <section
-      className={`discord-embed-card not-prose${compact ? ' discord-embed-card--compact' : ''}`}
+      className={cardClass}
       style={color ? { borderLeftColor: color } : undefined}
       data-testid="discord-embed"
     >
       {embed.author ? (
-        <div className="discord-embed-card__author">
-          {embed.author.iconUrl ? <img src={embed.author.iconUrl} alt="" /> : null}
+        <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold">
+          {embed.author.iconUrl ? <img className="h-4 w-4 rounded-full object-cover" src={embed.author.iconUrl} alt="" loading="lazy" /> : null}
           <ExternalLink href={embed.author.url}>{embed.author.name || embed.author.url}</ExternalLink>
         </div>
       ) : null}
-      <div className={embed.thumbnailUrl ? 'discord-embed-card__with-thumbnail' : undefined}>
-        <div className="discord-embed-card__main">
+      <div className={embed.thumbnailUrl ? 'flex items-start gap-3' : undefined}>
+        <div className="min-w-0 flex-1">
           {embed.provider ? (
-            <div className="discord-embed-card__provider">
+            <div className="text-[11px] text-slate-500">
               <ExternalLink href={embed.provider.url}>{embed.provider.name || embed.provider.url}</ExternalLink>
             </div>
           ) : null}
           {embed.title ? (
-            <div className="discord-embed-card__title">
+            <div className="mb-1 font-bold text-slate-900">
               <ExternalLink href={embed.url}>{embed.title}</ExternalLink>
             </div>
           ) : null}
           {embed.description ? (
-            <div className="discord-embed-card__description">
+            <div className={`${compact ? 'line-clamp-3' : ''} [&_p:first-child]:mt-0 [&_p:last-child]:mb-0`}>
               <MessageContent bodyText={embed.description} showEmptyState={false} onLinkClick={onLinkClick} />
             </div>
           ) : null}
           {fields.length ? (
-            <div className="discord-embed-card__fields">
+            <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               {fields.map((field, index) => (
                 <div
-                  className={`discord-embed-card__field${field.inline ? ' discord-embed-card__field--inline' : ''}`}
+                  className={`${field.inline ? '' : 'sm:col-span-3'} min-w-0 ${compact ? 'line-clamp-3' : ''} [&_p:first-child]:mt-0 [&_p:last-child]:mb-0`}
                   key={`${field.name}:${index}`}
                 >
-                  <div className="discord-embed-card__field-name">{field.name}</div>
+                  <div className="mb-0.5 font-semibold text-slate-900">{field.name}</div>
                   <MessageContent bodyText={field.value} showEmptyState={false} onLinkClick={onLinkClick} />
                 </div>
               ))}
             </div>
           ) : null}
         </div>
-        {embed.thumbnailUrl ? <img className="discord-embed-card__thumbnail" src={embed.thumbnailUrl} alt="" /> : null}
+        {embed.thumbnailUrl ? <img className="h-20 w-20 shrink-0 rounded-md object-cover" src={embed.thumbnailUrl} alt="" loading="lazy" /> : null}
       </div>
-      {embed.imageUrl ? <img className="discord-embed-card__image" src={embed.imageUrl} alt="" /> : null}
+      {embed.imageUrl ? <img className={`mt-2.5 max-w-full rounded-md object-contain ${compact ? 'max-h-28' : 'max-h-80'}`} src={embed.imageUrl} alt="" loading="lazy" /> : null}
       {embed.videoUrl ? (
-        <a className="discord-embed-card__video" href={embed.videoUrl} target="_blank" rel="noopener noreferrer">
+        <a className="mt-2 inline-block text-xs font-semibold text-indigo-600 no-underline hover:underline" href={embed.videoUrl} target="_blank" rel="noopener noreferrer">
           Open embedded video
         </a>
       ) : null}
       {embed.footer ? (
-        <div className="discord-embed-card__footer">
-          {embed.footer.iconUrl ? <img src={embed.footer.iconUrl} alt="" /> : null}
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+          {embed.footer.iconUrl ? <img className="h-4 w-4 rounded-full object-cover" src={embed.footer.iconUrl} alt="" loading="lazy" /> : null}
           <span>{embed.footer.text}</span>
         </div>
       ) : null}
