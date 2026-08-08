@@ -273,8 +273,13 @@ def llm_summarise_comms(
             "content": (
                 "Maintain a compact current-state memory from an existing conversation summary and new messages. "
                 "Preserve exact identifiers, owners, deadlines, evidence links, durable decisions, commitments, and "
-                "unresolved work. Replace superseded state with the newest explicit correction; never retain replaced "
-                "values as history. Keep competing claims only while unresolved. Drop resolved singletons; collapse closed batches to counts. Delete repeated chatter/status and message "
+                "unresolved work. Preserve still-operative scoped directives—including ownership changes, handoffs, "
+                "stop/do-not-act instructions, permission boundaries, and commitments—with their actor, source, scope "
+                "identifier, and effective constraint. A resolved event can have a continuing consequence: condense the "
+                "event but retain that consequence until explicitly superseded, expired, or reassigned. Replace superseded "
+                "state with the newest explicit correction; never retain replaced values as history. Keep competing claims "
+                "only while unresolved. Drop resolved singletons only when they have no continuing consequence; collapse "
+                "closed batches to counts. Delete repeated chatter/status and message "
                 "mechanics unless they constrain current work. Default to under 2,000 characters; exceed that only when omitting unresolved facts would change a decision. Preserve who said, requested, observed, or changed each retained item and its source "
                 "channel. Never transfer a statement to another person; keep uncertain attribution explicit."
             ),

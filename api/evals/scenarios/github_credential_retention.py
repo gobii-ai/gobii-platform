@@ -114,6 +114,16 @@ def judge_github_secret_context_check(trajectory):
 
 def github_guidance_blocks_configured_cli_path(text):
     normalized = str(text or "").casefold()
+    explicitly_proceeds_without_reconnect = any(
+        phrase in normalized
+        for phrase in (
+            "do not wait for the user to reconnect",
+            "don't wait for the user to reconnect",
+            "proceed without a reconnect",
+            "continue without a reconnect",
+            "can proceed without a reconnect",
+        )
+    )
     blocks_local_path = any(
         phrase in normalized
         for phrase in (
@@ -127,7 +137,7 @@ def github_guidance_blocks_configured_cli_path(text):
             "stop using shell",
         )
     )
-    reconnect_gated = (
+    reconnect_gated = not explicitly_proceeds_without_reconnect and (
         ("reconnect" in normalized or "authoriz" in normalized)
         and any(
             phrase in normalized

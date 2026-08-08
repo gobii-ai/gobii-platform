@@ -1,11 +1,14 @@
 from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.conf import settings
 
 from api.agent.core.internal_reasoning import build_internal_reasoning_description
-from api.agent.core.step_compaction import ensure_steps_compacted
+from api.agent.core.step_compaction import ensure_steps_compacted, llm_summarise_steps
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
@@ -391,3 +394,28 @@ class StepCompactionTests(TestCase):
         self.assertEqual(PersistentAgentStepSnapshot.objects.count(), 1)
         snapshot = PersistentAgentStepSnapshot.objects.first()
         self.assertEqual(snapshot.summary, "Manual snapshot") 
+
+    def test_llm_compaction_preserves_active_scoped_directives(self):
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="summary"))]
+        )
+
+        with patch(
+            "api.agent.core.step_compaction.get_summarization_llm_config",
+            return_value=("openai", "openai/test", {}),
+        ), patch(
+            "api.agent.core.step_compaction.run_completion",
+            return_value=response,
+        ) as run_completion_mock, patch(
+            "api.agent.core.step_compaction.log_agent_completion",
+            return_value=(None, {}),
+        ), patch("api.agent.core.step_compaction.set_usage_span_attributes"):
+            summary = llm_summarise_steps("", [], agent=self.agent)
+
+        self.assertEqual(summary, "summary")
+        system_prompt = run_completion_mock.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("still-operative scoped directives", system_prompt)
+        self.assertIn("stop/do-not-act instructions", system_prompt)
+        self.assertIn("actor or source, scope identifier, and effective constraint", system_prompt)
+        self.assertIn("until explicitly superseded, expired, or reassigned", system_prompt)
+        self.assertIn("no continuing consequence", system_prompt)
