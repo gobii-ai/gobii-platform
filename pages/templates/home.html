@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% load static %}
 {% load cta_tags %}
+{% load inline_static %}
+{% block segment_bootstrap_js %}<script>{% inline_minified_static_js 'js/segment_bootstrap.js' %}</script>{% endblock %}
+{% block lucide_js %}{% if not home_use_k %}{{ block.super }}{% endif %}{% endblock %}
 {% block tailwind_css %}
   {% if home_use_k %}
   <link rel="stylesheet" href="{% static 'css/home_tailwind.css' %}">

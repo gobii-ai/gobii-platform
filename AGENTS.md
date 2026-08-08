@@ -43,6 +43,20 @@ Design/UX:
 - Use existing components where possible
   - Extract out common/new components as needed
 - Reference preline components in vendor/
+- For Lucide icons in Django templates, load `lucide_icons` and render the SVG on the server:
+  `{% load lucide_icons %}` then `{% lucide "circle-help" class="h-4 w-4" %}`.
+  Icon names may also come from template variables. Decorative icons are hidden from assistive
+  technology by default; add `label="Help"` when the icon itself conveys meaning. The tag also
+  accepts `stroke_width`, but do not pass arbitrary SVG attributes.
+- Do not add new `data-lucide` placeholders, handwritten copies of Lucide SVGs, or another browser
+  Lucide script. React code should continue using named imports from `lucide-react`.
+- The Django icon catalog is generated from the exact `lucide-static` version pinned in
+  `frontend/package.json`. Never edit `vendor/lucide/icons.json` by hand. After changing the pinned
+  version, run `npm install --prefix frontend` and `npm run vendor:lucide --prefix frontend`, then
+  commit the package files and generated catalog together.
+- Keep the legacy browser Lucide bundle on a page until every render branch and included partial on
+  that page has migrated away from `data-lucide`. When removing it, add a render test that asserts
+  both that the page has no `data-lucide` nodes and that it does not load the browser bundle.
 - Do not use light gray backgrounds for anything
 - Do not use horizontal rules
 - Keep components "integrated" --avoid container-in-container looks

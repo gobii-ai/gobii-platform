@@ -511,6 +511,8 @@ TEMPLATES = [
             "libraries": {
                 "form_extras": "templatetags.form_extras",
                 "analytics_tags": "templatetags.analytics_tags",
+                "inline_static": "templatetags.inline_static",
+                "lucide_icons": "templatetags.lucide_icons",
                 "social_extras": "templatetags.social_extras",
                 "vite_tags": "templatetags.vite_tags",
             },

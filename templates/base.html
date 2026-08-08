@@ -72,6 +72,7 @@
   {% block showcase_css %}{% endblock %}
   {% block early_head_styles %}{% endblock %}
 
+  {% block lucide_js %}
   <script defer src="https://unpkg.com/lucide@0.546.0"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
@@ -85,6 +86,7 @@
       }
     });
   </script>
+  {% endblock %}
 
   {% block canonical_link %}
     {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and canonical_url %}
@@ -168,7 +170,9 @@
   {% endif %}
 
 
+  {% block segment_bootstrap_js %}
   <script src="{% static 'js/segment_bootstrap.js' %}"></script>
+  {% endblock %}
   <script>
     (function () {
       const segmentEnabled = window.GobiiSegmentBootstrap && window.GobiiSegmentBootstrap.init({

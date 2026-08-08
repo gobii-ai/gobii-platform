@@ -91,6 +91,7 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertContains(response, 'let gaPageTitle = "Marketing - Teams";')
         self.assertContains(response, 'let pageCategory = "Marketing";')
         self.assertContains(response, 'let pageName = "Teams";')
+        self.assertContains(response, 'src="/static/js/segment_bootstrap.js"')
 
     @override_settings(
         DEBUG=True,
@@ -102,7 +103,9 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         content = response.content.decode("utf-8")
-        self.assertIn('src="/static/js/segment_bootstrap.js"', content)
+        self.assertNotIn('src="/static/js/segment_bootstrap.js"', content)
+        self.assertIn("<script>(function(){function ensureStub()", content)
+        self.assertIn("window.GobiiSegmentBootstrap={", content)
         self.assertIn('writeKey: "segment\\u002Dweb\\u002Dtest"', content)
         self.assertIn("enabled: true,", content)
         self.assertNotIn('analytics.load("segment-web-test");', content)
@@ -117,7 +120,9 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         content = response.content.decode("utf-8")
-        self.assertIn('src="/static/js/segment_bootstrap.js"', content)
+        self.assertNotIn('src="/static/js/segment_bootstrap.js"', content)
+        self.assertIn("<script>(function(){function ensureStub()", content)
+        self.assertIn("window.GobiiSegmentBootstrap={", content)
         self.assertIn('writeKey: "segment\\u002Dweb\\u002Dtest"', content)
         self.assertIn("enabled: false,", content)
         self.assertNotIn('analytics.load("segment-web-test");', content)

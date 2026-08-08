@@ -132,6 +132,19 @@ class HomePageTests(TestCase):
         self.assertEqual(len(main_landmarks), 1)
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_modern_homepage_renders_lucide_icons_without_browser_bundle(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["home_use_k"])
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        self.assertFalse(soup.select("[data-lucide]"))
+        self.assertIsNone(
+            soup.find("script", src="https://unpkg.com/lucide@0.546.0")
+        )
+        self.assertIsNotNone(soup.select_one("svg.lucide-layout-grid[aria-hidden='true']"))
+
     @override_settings(
         PUBLIC_BRAND_NAME="Acme",
         PUBLIC_SITE_URL="https://gobii.ai",
@@ -1239,6 +1252,9 @@ class HomePageTests(TestCase):
         }
         self.assertIn(static("css/tailwind.css"), stylesheet_urls)
         self.assertNotIn(static("css/home_tailwind.css"), stylesheet_urls)
+        self.assertIsNotNone(
+            soup.find("script", src="https://unpkg.com/lucide@0.546.0")
+        )
         self.assertIsNone(
             soup.find(
                 "script",

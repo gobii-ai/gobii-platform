@@ -143,6 +143,7 @@ dependencies = [
   "socksio>=1.0.0",
   "clevercsv>=0.8.4",
   "regex>=2025.8.29",
+  "rjsmin~=1.2.2",
 ]
 
 [build-system]
