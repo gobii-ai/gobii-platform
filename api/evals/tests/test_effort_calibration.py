@@ -2668,25 +2668,27 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Use SQLite for material row reconciliation", system_prompt)
         self.assertIn("For prose, inspect once", system_prompt)
         self.assertIn("aggregate-only and SELECT-all are incomplete", system_prompt)
-        self.assertIn("Delete/update all contradicted behavior in one span", system_prompt)
-        self.assertIn("append only if no related clause", system_prompt)
-        self.assertIn("Correction plus task/recurrence: patch and complete both", system_prompt)
-        self.assertIn("batching config/task/schedules", system_prompt)
-        self.assertIn("Non-config work needs a result", system_prompt)
+        self.assertIn("Do not stop after the first lasting correction", system_prompt)
+        self.assertIn("use one sqlite_batch Charter patch for all lasting corrections", system_prompt)
+        self.assertIn("patch the Charter and complete that work too", system_prompt)
+        self.assertIn("bind :old='' and put only the new short sentence", system_prompt)
+        self.assertIn("bind the smallest exact Charter span", system_prompt)
+        self.assertIn("replace that combined span with one clear rule", system_prompt)
+        self.assertIn("Non-config work needs its result", system_prompt)
         self.assertIn(
-            "A named task/batch/day/run/project/case scope is finite",
+            "A behavior correction is lasting unless the user limits it to this time or this batch",
             system_prompt,
         )
         self.assertIn(
-            "Other critique, preference, or recurring factual refinement",
+            "A correction to a fact, comparison, or distinction used by your ongoing Charter work is also lasting",
             system_prompt,
         )
         self.assertIn(
-            "Output critique/rules default durable",
+            "Format, style, and delivery preferences are new rules",
             system_prompt,
         )
-        self.assertIn("requires sqlite_batch charter patch before reply", system_prompt)
-        self.assertIn("Only agent_config_update proving updated/unchanged counts", system_prompt)
+        self.assertIn("Feedback addressed to someone else is not yours", system_prompt)
+        self.assertIn("Trust only agent_config_update for whether config changed", system_prompt)
         self.assertIn("Set false after delivery/config; future schedules, queued conversations", system_prompt)
         self.assertIn(
             "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
