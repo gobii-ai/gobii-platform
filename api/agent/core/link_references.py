@@ -194,6 +194,8 @@ def _param_path(path: tuple[object, ...]) -> str:
 
 def _embedded_fields(tool_name: str, params) -> set[str]:
     fields = {_EMBEDDED_FIELDS[tool_name]} if tool_name in _EMBEDDED_FIELDS else set()
+    if tool_name == "send_discord_message":
+        fields.add("embeds")
     if tool_name == "create_file" and str(params.get("mime_type", "")).split(";", 1)[0].strip().lower() in DOCUMENT_MIME_TYPES:
         fields.add("content")
     return fields

@@ -83,13 +83,11 @@ def substitute_variables(text: str) -> str:
     return _PLACEHOLDER_PATTERN.sub(replace_match, text)
 
 
-def substitute_variables_with_filespace(text: str, agent) -> str:
-    if not text:
-        return text
+def substitute_variables_with_filespace(value, agent):
+    if not value:
+        return value
 
     from api.agent.core.link_references import resolve_link_references
-
-    text = resolve_link_references(text, agent)
 
     variables = _agent_variables.get({})
     filespace = None
@@ -104,9 +102,6 @@ def substitute_variables_with_filespace(text: str, agent) -> str:
                 getattr(agent, "id", None),
             )
             filespace = None
-
-    if not variables and not filespace:
-        return text
 
     url_cache: Dict[str, str] = {}
 
@@ -157,8 +152,6 @@ def substitute_variables_with_filespace(text: str, agent) -> str:
         logger.debug("Variable $[%s] not found, keeping placeholder", var_name)
         return match.group(0)
 
-    substituted = _PLACEHOLDER_PATTERN.sub(replace_match, text)
-
     def replace_markdown_image(match: re.Match) -> str:
         raw_url = match.group("url")
         resolved = _resolve_value(raw_url)
@@ -175,9 +168,22 @@ def substitute_variables_with_filespace(text: str, agent) -> str:
         quote = match.group("quote")
         return f"{match.group(1)}{quote}{resolved}{quote}"
 
-    substituted = _MARKDOWN_IMAGE_PATTERN.sub(replace_markdown_image, substituted)
-    substituted = _HTML_IMG_SRC_PATTERN.sub(replace_html_image, substituted)
-    return substituted
+    def substitute_text(text: str) -> str:
+        text = resolve_link_references(text, agent)
+        if not variables and not filespace:
+            return text
+        substituted = _PLACEHOLDER_PATTERN.sub(replace_match, text)
+        substituted = _MARKDOWN_IMAGE_PATTERN.sub(replace_markdown_image, substituted)
+        return _HTML_IMG_SRC_PATTERN.sub(replace_html_image, substituted)
+
+    def substitute_nested(item):
+        if isinstance(item, dict):
+            return {key: substitute_nested(nested) for key, nested in item.items()}
+        if isinstance(item, list):
+            return [substitute_nested(nested) for nested in item]
+        return substitute_text(item) if isinstance(item, str) else item
+
+    return substitute_nested(value)
 
 
 def format_variables_for_prompt() -> str:

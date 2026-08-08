@@ -36,6 +36,7 @@ from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 _HTML_TAG_RE = re.compile(r"<\s*(?:!doctype|[a-zA-Z][a-zA-Z0-9-]*)[\s>/]", re.IGNORECASE)
 from api.agent.comms.source_metadata import get_message_source_metadata, get_webhook_timeline_metadata
 from api.agent.structured_peer_payload import get_structured_peer_payload
+from api.services.discord_embeds import project_discord_embeds
 from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
@@ -694,14 +695,35 @@ def _serialize_message(
     reply_to_payload: dict | None = None
     raw_message_payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
     structured_payload = get_structured_peer_payload(raw_message_payload)
+    raw_discord_embeds = raw_message_payload.get("discord_embeds")
+    if message.is_outbound and raw_message_payload.get("discord_sent_embeds") is not None:
+        raw_discord_embeds = raw_message_payload.get("discord_sent_embeds")
+    discord_embeds = project_discord_embeds(raw_discord_embeds)
     reply_raw = raw_message_payload.get("discord_reply_to")
-    if isinstance(reply_raw, Mapping) and not reply_raw.get("unavailable"):
+    if isinstance(reply_raw, Mapping):
+        reply_embeds = project_discord_embeds(reply_raw.get("embeds"))
+        reply_attachment_filenames = [
+            filename.strip()
+            for filename in (
+                reply_raw.get("attachment_filenames")
+                if isinstance(reply_raw.get("attachment_filenames"), list)
+                else []
+            )
+            if isinstance(filename, str) and filename.strip()
+        ]
         reply_body = str(reply_raw.get("content") or "").strip()
-        if reply_body:
-            reply_to_payload = {
-                "authorName": str(reply_raw.get("author_name") or "").strip() or None,
-                "bodyText": reply_body,
-            }
+        if not reply_body and reply_raw.get("unavailable") is True:
+            reply_body = "Original Discord message is unavailable."
+        elif not reply_body and not reply_embeds and not reply_attachment_filenames:
+            reply_body = "Original Discord message has no text, embed, or attachment context."
+        reply_to_payload = {
+            "authorName": str(reply_raw.get("author_name") or "").strip() or None,
+            "bodyText": reply_body,
+            **({"embeds": reply_embeds} if reply_embeds else {}),
+            **({"attachmentFilenames": reply_attachment_filenames} if reply_attachment_filenames else {}),
+            **({"messageId": str(reply_raw["message_id"])} if reply_raw.get("message_id") else {}),
+            **({"unavailable": True} if reply_raw.get("unavailable") is True else {}),
+        }
     outbox_review = None
     try:
         review = message.outbound_email_review
@@ -739,6 +761,7 @@ def _serialize_message(
             "recipientName": recipient_name,
             "recipientAddress": recipient_address,
             "replyTo": reply_to_payload,
+            **({"discordEmbeds": discord_embeds} if discord_embeds else {}),
             "ccAddresses": cc_addresses,
             "bccAddresses": bcc_addresses,
             "sourceKind": source_kind,

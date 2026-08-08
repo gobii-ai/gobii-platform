@@ -44,6 +44,7 @@ DISCORD_NATIVE_REACTION_SERIOUS_REQUEST_RESTRAINT = (
 DISCORD_NATIVE_READABLE_COMPARISON = "discord_native_readable_comparison"
 DISCORD_NATIVE_RESEARCH_KICKOFF = "discord_native_research_kickoff"
 DISCORD_NATIVE_GATEWAY_WAKE = "discord_native_gateway_wake"
+DISCORD_NATIVE_EMBED_ROUND_TRIP = "discord_native_embed_round_trip"
 DISCORD_NATIVE_CONFIG_AUTHORITY_LINKED = "discord_native_config_authority_linked"
 DISCORD_NATIVE_CONFIG_AUTHORITY_UNLINKED = "discord_native_config_authority_unlinked"
 DISCORD_NATIVE_SCENARIO_SLUGS = (
@@ -53,6 +54,7 @@ DISCORD_NATIVE_SCENARIO_SLUGS = (
     DISCORD_NATIVE_READABLE_COMPARISON,
     DISCORD_NATIVE_RESEARCH_KICKOFF,
     DISCORD_NATIVE_GATEWAY_WAKE,
+    DISCORD_NATIVE_EMBED_ROUND_TRIP,
     DISCORD_NATIVE_CONFIG_AUTHORITY_LINKED,
     DISCORD_NATIVE_CONFIG_AUTHORITY_UNLINKED,
 )
@@ -938,4 +940,142 @@ class DiscordNativeGatewayWakeScenario(EvalScenario, ScenarioExecutionTools):
                 else f"Expected one substantive same-channel reply; saw {len(reply_calls)}."
             ),
             artifacts={"step": reply_calls[0].step} if reply_calls else {},
+        )
+
+
+@register_scenario
+class DiscordNativeEmbedRoundTripScenario(EvalScenario, ScenarioExecutionTools):
+    slug = DISCORD_NATIVE_EMBED_ROUND_TRIP
+    description = "An agent should read inbound Discord embed details and send a simple status card."
+    tier = "core"
+    category = "native_integrations"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("discord", "native_integration", "real_harness", "embeds")
+    prompt = "Please repost the deployment details below as a compact status card."
+    tasks = [
+        ScenarioTask(name="inject_embed", assertion_type="manual"),
+        ScenarioTask(name="verify_embed_send", assertion_type="tool_call"),
+    ]
+
+    @staticmethod
+    def _embed_call_matches(call, *, channel_id: str) -> bool:
+        if call.tool_name != "send_discord_message":
+            return False
+        params = call.tool_params or {}
+        embeds = params.get("embeds")
+        if not isinstance(embeds, list) or not embeds:
+            return False
+        rendered = json.dumps(embeds, sort_keys=True).casefold()
+        result = DiscordNativeReactionScenario._parsed_result(call)
+        return (
+            params.get("channel_id") == channel_id
+            and params.get("will_continue_work") is False
+            and "deployment" in rendered
+            and "v42" in rendered
+            and ("production" in rendered or "healthy" in rendered)
+            and isinstance(result, dict)
+            and result.get("status") == "success"
+        )
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        PersistentAgent.objects.filter(id=agent_id).update(
+            charter="Participate helpfully and naturally in subscribed Discord channels.",
+            planning_state=PersistentAgent.PlanningState.SKIPPED,
+        )
+        agent = PersistentAgent.objects.get(id=agent_id)
+        skill_result = enable_system_skills(agent, [DISCORD_NATIVE_SYSTEM_SKILL_KEY])
+        if skill_result.get("invalid"):
+            raise ValueError(f"Could not enable Discord system skill: {skill_result}")
+
+        run_suffix = str(run_id)[:8]
+        channel_id = f"eval-discord-embeds-{run_suffix}"
+        guild_id = "eval-discord-guild"
+        conversation = get_or_create_discord_conversation(
+            agent,
+            address=discord_conversation_address(agent.id, guild_id, channel_id),
+            channel_id=channel_id,
+            channel_name="deployments",
+        )
+        agent_endpoint, channel_endpoint = ensure_discord_conversation_participants(
+            agent,
+            conversation,
+            platform_channel_address=discord_channel_address(guild_id, channel_id),
+        )
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=channel_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body=self.prompt,
+            raw_payload={
+                "source": "discord_bot",
+                "source_kind": "discord",
+                "source_label": "Maya in #deployments",
+                "discord_message_id": f"eval-discord-embed-message-{run_suffix}",
+                "discord_channel_id": channel_id,
+                "discord_channel_name": "deployments",
+                "discord_author_name": "Maya",
+                "discord_embeds": [{
+                    "title": "Deployment 42",
+                    "description": "Production is healthy.",
+                    "color": 0x22C55E,
+                    "fields": [
+                        {"name": "Version", "value": "v42", "inline": True},
+                        {"name": "Environment", "value": "production", "inline": True},
+                    ],
+                }],
+            },
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_embed",
+            observed_summary="A Discord message with deployment details in an embed entered the real harness.",
+            artifacts={"message": inbound},
+        )
+
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            self.trigger_processing(
+                agent_id,
+                eval_run_id=run_id,
+                mock_config={
+                    "send_discord_message": {
+                        "status": "success",
+                        "message_id": "eval-discord-embed-reply",
+                        "channel_id": channel_id,
+                        "embed_count": 1,
+                        "auto_sleep_ok": True,
+                    },
+                },
+                eval_stop_policy={
+                    "ignored_tool_names": ["sleep_until_next_trigger", "update_plan"],
+                    "stop_on_tool_names_after_finish": ["send_discord_message"],
+                    "max_relevant_tool_calls": 3,
+                },
+            )
+
+        calls = list(
+            PersistentAgentToolCall.objects.filter(
+                step__eval_run_id=run_id,
+                step__created_at__gte=inbound.timestamp,
+                tool_name="send_discord_message",
+            ).order_by("step__created_at", "step__id")
+        )
+        passed = len(calls) == 1 and self._embed_call_matches(calls[0], channel_id=channel_id)
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
+            task_name="verify_embed_send",
+            observed_summary=(
+                "The agent read the inbound deployment embed and sent a matching Discord status card."
+                if passed
+                else f"Expected one matching Discord embed send; saw {len(calls)} send call(s)."
+            ),
+            artifacts={"step": calls[0].step} if calls else {},
         )

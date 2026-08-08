@@ -74,6 +74,14 @@ def _reply_reference_payload(message) -> dict[str, object] | None:
             for attachment in (() if unavailable else (getattr(resolved, "attachments", None) or []))
             if str(getattr(attachment, "filename", "") or "")
         ],
+        "embeds": [
+            payload
+            for payload in (
+                _embed_payload(embed)
+                for embed in (() if unavailable else (getattr(resolved, "embeds", None) or []))
+            )
+            if payload
+        ],
         "unavailable": unavailable,
     }
 

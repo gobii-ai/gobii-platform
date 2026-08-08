@@ -299,6 +299,26 @@ class LinkReferenceTests(TestCase):
             {"url": "https://sheets.googleapis.com/v4/spreadsheets/123/values/A1", "body": json.dumps({"values": [[url]]})},
         )
 
+    def test_discord_embed_references_pass_runtime_policy_for_tool_resolution(self):
+        token = rewrite_prompt_urls("https://status.example.test/deploy/42", self.agent, create=True)
+        set_agent_variable("deployment_label", "Production")
+        params = {
+            "embeds": [{
+                "title": "$[deployment_label] deployment",
+                "url": token,
+                "fields": [{"name": "Source", "value": token}],
+            }],
+            "will_continue_work": False,
+        }
+
+        self.assertEqual(
+            resolve_link_reference_params(params, self.agent, tool_name="send_discord_message"),
+            params,
+        )
+        resolved_embeds = substitute_variables_with_filespace(params["embeds"], self.agent)
+        self.assertEqual(resolved_embeds[0]["title"], "Production deployment")
+        self.assertEqual(resolved_embeds[0]["url"], "https://status.example.test/deploy/42")
+
     def test_meta_gobii_resolves_verified_links_before_persisting_charters(self):
         url = "https://public.example.test/templates/outreach?version=3"
         token = rewrite_prompt_urls(url, self.agent, create=True)
@@ -656,6 +676,14 @@ class LinkReferenceTests(TestCase):
                 {
                     "channel_id": "123456789",
                     "message": malformed,
+                    "will_continue_work": False,
+                },
+            ),
+            execute_send_discord_message(
+                self.agent,
+                {
+                    "channel_id": "123456789",
+                    "embeds": [{"title": "Source", "url": malformed}],
                     "will_continue_work": False,
                 },
             ),
