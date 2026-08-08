@@ -1,19 +1,29 @@
 import { useEffect } from 'react'
 
-export function useWindowMessage<T extends { type?: unknown }>(type: string, onMessage: (message: T) => void) {
+type WindowMessageOptions = {
+  origin?: string
+  storageKeyPrefix?: string
+}
+
+export function useWindowMessage<T extends { type?: unknown }>(
+  type: string,
+  onMessage: (message: T) => void,
+  { origin, storageKeyPrefix = 'gobii:oauth_complete:' }: WindowMessageOptions = {},
+) {
   useEffect(() => {
+    const expectedOrigin = origin ?? window.location.origin
     const deliver = (message: T) => {
       if (message?.type === type) {
         onMessage(message)
       }
     }
     const handleMessage = (event: MessageEvent<T>) => {
-      if (event.origin === window.location.origin) {
+      if (event.origin === expectedOrigin) {
         deliver(event.data)
       }
     }
     const handleStorage = (event: StorageEvent) => {
-      if (!event.key?.startsWith('gobii:oauth_complete:') || !event.newValue) {
+      if (!storageKeyPrefix || !event.key?.startsWith(storageKeyPrefix) || !event.newValue) {
         return
       }
       try {
@@ -29,5 +39,5 @@ export function useWindowMessage<T extends { type?: unknown }>(type: string, onM
       window.removeEventListener('message', handleMessage)
       window.removeEventListener('storage', handleStorage)
     }
-  }, [onMessage, type])
+  }, [onMessage, origin, storageKeyPrefix, type])
 }

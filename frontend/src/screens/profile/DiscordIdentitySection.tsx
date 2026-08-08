@@ -21,18 +21,22 @@ export function DiscordIdentitySection({ identity, onChange }: DiscordIdentitySe
     onChange(profile.discordIdentity)
   }, [onChange])
 
-  useWindowMessage<{ type?: unknown; status?: unknown; message?: unknown }>('gobii:discord_identity_oauth_complete', (oauthMessage) => {
-    if (oauthMessage.status !== 'success') {
-      setError(typeof oauthMessage.message === 'string' ? oauthMessage.message : 'Unable to link Discord account.')
-      return
-    }
-    setBusy(true)
-    setError(null)
-    void refreshIdentity()
-      .then(() => setMessage('Discord account verified.'))
-      .catch((refreshError) => setError(safeErrorMessage(refreshError)))
-      .finally(() => setBusy(false))
-  })
+  useWindowMessage<{ type?: unknown; status?: unknown; message?: unknown }>(
+    'gobii:discord_identity_oauth_complete',
+    (oauthMessage) => {
+      if (oauthMessage.status !== 'success') {
+        setError(typeof oauthMessage.message === 'string' ? oauthMessage.message : 'Unable to link Discord account.')
+        return
+      }
+      setBusy(true)
+      setError(null)
+      void refreshIdentity()
+        .then(() => setMessage('Discord account verified.'))
+        .catch((refreshError) => setError(safeErrorMessage(refreshError)))
+        .finally(() => setBusy(false))
+    },
+    { origin: identity.oauthCallbackOrigin },
+  )
 
   const startLink = useCallback(() => {
     setMessage(null)

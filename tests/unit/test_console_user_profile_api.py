@@ -95,6 +95,7 @@ class ConsoleUserProfileApiTests(TestCase):
         self.assertIsNotNone(payload["phone"]["verifiedAt"])
         self.assertIsNone(payload["discordIdentity"])
 
+    @override_settings(DISCORD_OAUTH_REDIRECT_URI="https://callback.example.test/console/api/discord/oauth/callback/")
     def test_get_surfaces_unlinked_discord_identity_when_current_context_is_connected(self):
         PersistentAgentDiscordGuild.objects.create(
             guild_id="100",
@@ -107,6 +108,7 @@ class ConsoleUserProfileApiTests(TestCase):
 
         self.assertTrue(payload["contextConnected"])
         self.assertFalse(payload["linked"])
+        self.assertEqual(payload["oauthCallbackOrigin"], "https://callback.example.test")
         self.assertEqual(payload["connectUrl"], reverse("discord_identity_oauth_start"))
 
     def test_get_keeps_linked_discord_identity_visible_without_connected_context(self):

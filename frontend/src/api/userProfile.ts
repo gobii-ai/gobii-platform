@@ -25,6 +25,7 @@ export type DiscordIdentityState = {
   username: string | null
   displayName: string | null
   canConfigureInCurrentContext: boolean
+  oauthCallbackOrigin: string
   connectUrl: string
   disconnectUrl: string
 }

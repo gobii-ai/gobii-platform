@@ -654,12 +654,14 @@ def _serialize_user_discord_identity(request: HttpRequest) -> dict[str, Any] | N
     identity = UserDiscordIdentity.objects.filter(user=request.user).first()
     if identity is None and not context_connected:
         return None
+    oauth_callback = urlparse(settings.DISCORD_OAUTH_REDIRECT_URI)
     return {
         "contextConnected": context_connected,
         "linked": identity is not None,
         "username": identity.username if identity else None,
         "displayName": identity.global_name if identity and identity.global_name else None,
         "canConfigureInCurrentContext": bool(identity and context_connected and context.can_manage_org_agents),
+        "oauthCallbackOrigin": f"{oauth_callback.scheme}://{oauth_callback.netloc}",
         "connectUrl": reverse("discord_identity_oauth_start"),
         "disconnectUrl": reverse("discord_identity"),
     }
