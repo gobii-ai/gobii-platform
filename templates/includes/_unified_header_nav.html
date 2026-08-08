@@ -1,4 +1,5 @@
 {% load i18n %}
+{% load lucide_icons %}
 {% url 'account_login' as account_login_url %}
 
 <style>
@@ -77,27 +78,27 @@
           </button>
           <span class="gk-dd-panel" id="gk-dd-panel"><span class="gk-dd-inner">
             <a class="gk-dd-item" href="{% url 'pages:library' %}">
-              <span class="gk-dd-ic"><i data-lucide="layout-grid" class="h-4 w-4"></i></span>
+              <span class="gk-dd-ic">{% lucide "layout-grid" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">Agent library</span><span class="gk-dd-s">Premade agents, ready to hire</span></span>
             </a>
             <a class="gk-dd-item" href="{% url 'pages:solution' slug='recruiting' %}">
-              <span class="gk-dd-ic"><i data-lucide="users" class="h-4 w-4"></i></span>
+              <span class="gk-dd-ic">{% lucide "users" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">Recruiting</span><span class="gk-dd-s">Candidates, weekly</span></span>
             </a>
             <a class="gk-dd-item" href="{% url 'pages:solution' slug='sales' %}">
-              <span class="gk-dd-ic"><i data-lucide="briefcase" class="h-4 w-4"></i></span>
+              <span class="gk-dd-ic">{% lucide "briefcase" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">Sales</span><span class="gk-dd-s">Qualified leads</span></span>
             </a>
             <a class="gk-dd-item" href="{% url 'proprietary:teams' %}">
-              <span class="gk-dd-ic"><i data-lucide="users-round" class="h-4 w-4"></i></span>
+              <span class="gk-dd-ic">{% lucide "users-round" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">Teams</span><span class="gk-dd-s">Shared workspaces</span></span>
             </a>
             <a class="gk-dd-item" href="{% url 'pages:solution' slug='engineering' %}">
-              <span class="gk-dd-ic"><i data-lucide="cpu" class="h-4 w-4"></i></span>
+              <span class="gk-dd-ic">{% lucide "cpu" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">API</span><span class="gk-dd-s">Agents in one request</span></span>
             </a>
             <a class="gk-dd-item" href="{% url 'pages:solutions' %}">
-              <span class="gk-dd-ic"><i data-lucide="grip" class="h-4 w-4"></i></span>
+              <span class="gk-dd-ic">{% lucide "grip" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">All Solutions</span><span class="gk-dd-s">Every workflow we cover</span></span>
             </a>
           </span></span>
@@ -159,43 +160,43 @@
               {% if request.user.is_staff %}
               <div class="py-1">
                 <a href="{% url 'admin:index' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                  <i aria-hidden="true" data-lucide="columns-3-cog" class="h-4 w-4 text-slate-500"></i>
+                  {% lucide "columns-3-cog" class="h-4 w-4 text-slate-500" %}
                   Django Admin
                 </a>
               </div>
               <div class="py-1">
                 <a href="{% url 'llm-config' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                  <i aria-hidden="true" data-lucide="settings-2" class="h-4 w-4 text-slate-500"></i>
+                  {% lucide "settings-2" class="h-4 w-4 text-slate-500" %}
                   LLM Config
                 </a>
               </div>
               <div class="py-1">
                 <a href="{% url 'staff-platform-mcp' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                  <i aria-hidden="true" data-lucide="server-cog" class="h-4 w-4 text-slate-500"></i>
+                  {% lucide "server-cog" class="h-4 w-4 text-slate-500" %}
                   Platform MCP
                 </a>
               </div>
               <div class="py-1">
                 <a href="{% url 'evals' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                  <i aria-hidden="true" data-lucide="beaker" class="h-4 w-4 text-slate-500"></i>
+                  {% lucide "beaker" class="h-4 w-4 text-slate-500" %}
                   Evals
                 </a>
               </div>
               <div class="py-1">
                 <a href="{% url 'system-settings' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                  <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 text-slate-500"></i>
+                  {% lucide "sliders" class="h-4 w-4 text-slate-500" %}
                   System Settings
                 </a>
               </div>
               <div class="py-1">
                 <a href="{% url 'console-status' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                  <i aria-hidden="true" data-lucide="activity" class="h-4 w-4 text-slate-500"></i>
+                  {% lucide "activity" class="h-4 w-4 text-slate-500" %}
                   Status
                 </a>
               </div>
               <div class="py-1">
                 <a href="{% url 'staff-users' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                  <i aria-hidden="true" data-lucide="users-round" class="h-4 w-4 text-slate-500"></i>
+                  {% lucide "users-round" class="h-4 w-4 text-slate-500" %}
                   Users &amp; Orgs
                 </a>
               </div>
@@ -203,12 +204,12 @@
               <div class="py-1">
                 {% if request.session.context_type == 'organization' and request.session.context_id %}
                   <a href="{% url 'organization_detail' org_id=request.session.context_id %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="building-2" class="h-4 w-4 text-slate-500"></i>
+                    {% lucide "building-2" class="h-4 w-4 text-slate-500" %}
                     Organization
                   </a>
                 {% else %}
                   <a href="{% url 'profile' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="user-round" class="h-4 w-4 text-slate-500"></i>
+                    {% lucide "user-round" class="h-4 w-4 text-slate-500" %}
                     Profile
                   </a>
                 {% endif %}
@@ -218,7 +219,7 @@
                   {% csrf_token %}
                   <button type="submit"
                           class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-violet-50 rounded-md transition-colors">
-                    <i aria-hidden="true" data-lucide="log-out" class="h-4 w-4 text-slate-500"></i>
+                    {% lucide "log-out" class="h-4 w-4 text-slate-500" %}
                     {% translate 'Sign Out' %}
                   </button>
                 </form>
