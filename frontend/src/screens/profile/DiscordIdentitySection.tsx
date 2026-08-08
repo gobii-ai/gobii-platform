@@ -1,19 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { CheckCircle2, Link2, Trash2 } from 'lucide-react'
 
 import { disconnectUserDiscordIdentity, fetchUserProfile } from '../../api/userProfile'
 import type { DiscordIdentityState } from '../../api/userProfile'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
+import { useWindowMessage } from '../../hooks/useWindowMessage'
 
 type DiscordIdentitySectionProps = {
   identity: DiscordIdentityState
   onChange: (identity: DiscordIdentityState | null) => void
-}
-
-type DiscordIdentityOAuthMessage = {
-  type?: unknown
-  status?: unknown
-  message?: unknown
 }
 
 export function DiscordIdentitySection({ identity, onChange }: DiscordIdentitySectionProps) {
@@ -26,25 +21,18 @@ export function DiscordIdentitySection({ identity, onChange }: DiscordIdentitySe
     onChange(profile.discordIdentity)
   }, [onChange])
 
-  useEffect(() => {
-    const handleOAuthComplete = (event: MessageEvent<DiscordIdentityOAuthMessage>) => {
-      if (event.origin !== window.location.origin || event.data?.type !== 'gobii:discord_identity_oauth_complete') {
-        return
-      }
-      if (event.data.status !== 'success') {
-        setError(typeof event.data.message === 'string' ? event.data.message : 'Unable to link Discord account.')
-        return
-      }
-      setBusy(true)
-      setError(null)
-      void refreshIdentity()
-        .then(() => setMessage('Discord account verified.'))
-        .catch((refreshError) => setError(safeErrorMessage(refreshError)))
-        .finally(() => setBusy(false))
+  useWindowMessage<{ type?: unknown; status?: unknown; message?: unknown }>('gobii:discord_identity_oauth_complete', (oauthMessage) => {
+    if (oauthMessage.status !== 'success') {
+      setError(typeof oauthMessage.message === 'string' ? oauthMessage.message : 'Unable to link Discord account.')
+      return
     }
-    window.addEventListener('message', handleOAuthComplete)
-    return () => window.removeEventListener('message', handleOAuthComplete)
-  }, [refreshIdentity])
+    setBusy(true)
+    setError(null)
+    void refreshIdentity()
+      .then(() => setMessage('Discord account verified.'))
+      .catch((refreshError) => setError(safeErrorMessage(refreshError)))
+      .finally(() => setBusy(false))
+  })
 
   const startLink = useCallback(() => {
     setMessage(null)

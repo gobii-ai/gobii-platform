@@ -24,7 +24,6 @@ export type DiscordIdentityState = {
   linked: boolean
   username: string | null
   displayName: string | null
-  verifiedAt: string | null
   canConfigureInCurrentContext: boolean
   connectUrl: string
   disconnectUrl: string

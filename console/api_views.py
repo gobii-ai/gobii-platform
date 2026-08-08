@@ -165,7 +165,6 @@ from api.services.agent_planning import skip_agent_planning
 from api.services.agent_lifecycle import activate_agent, build_agent_inactive_payload
 from api.services.referral_service import ReferralService
 from api.services.discord_bot import claimed_guild_queryset_for_owner
-from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
 from api.services.web_sessions import WEB_SESSION_TTL_SECONDS, end_web_session, heartbeat_web_session, start_web_session, touch_web_session
 from api.services.sms_contact_purpose import sms_contact_purpose_required, track_sms_contact_approval
 
@@ -646,23 +645,11 @@ def _serialize_user_profile_options(form: UserProfileForm) -> list[dict[str, str
 def _serialize_user_discord_identity(request: HttpRequest) -> dict[str, Any] | None:
     context = build_console_context(request)
     if context.current_context.type == "organization":
-        organization = (
-            context.current_membership.org
-            if context.current_membership is not None
-            else Organization.objects.filter(id=context.current_context.id).first()
-        )
-        context_connected = bool(
-            organization
-            and claimed_guild_queryset_for_owner(organization=organization).exists()
-        )
-        can_configure = bool(
-            context.current_membership
-            and context.current_membership.status == OrganizationMembership.OrgStatus.ACTIVE
-            and context.current_membership.role in ORG_AGENT_CONFIG_AUTHORITY_ROLES
-        )
+        context_connected = claimed_guild_queryset_for_owner(
+            organization=context.current_membership.org,
+        ).exists()
     else:
         context_connected = claimed_guild_queryset_for_owner(owner_user=request.user).exists()
-        can_configure = str(context.current_context.id) == str(request.user.id)
 
     identity = UserDiscordIdentity.objects.filter(user=request.user).first()
     if identity is None and not context_connected:
@@ -672,8 +659,7 @@ def _serialize_user_discord_identity(request: HttpRequest) -> dict[str, Any] | N
         "linked": identity is not None,
         "username": identity.username if identity else None,
         "displayName": identity.global_name if identity and identity.global_name else None,
-        "verifiedAt": identity.verified_at.isoformat() if identity else None,
-        "canConfigureInCurrentContext": bool(identity and context_connected and can_configure),
+        "canConfigureInCurrentContext": bool(identity and context_connected and context.can_manage_org_agents),
         "connectUrl": reverse("discord_identity_oauth_start"),
         "disconnectUrl": reverse("discord_identity"),
     }

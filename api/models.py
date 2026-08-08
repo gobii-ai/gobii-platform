@@ -9825,29 +9825,6 @@ class UserDiscordIdentity(models.Model):
         return f"UserDiscordIdentity<{self.user_id}:{self.discord_user_id}>"
 
 
-class UserDiscordIdentityOAuthSession(models.Model):
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    state = models.CharField(max_length=128, unique=True)
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="discord_identity_oauth_sessions",
-    )
-    expires_at = models.DateTimeField()
-    completed_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=["state"], name="user_discord_oauth_state_idx"),
-            models.Index(fields=["user", "expires_at"], name="user_discord_oauth_user_idx"),
-        ]
-
-    def is_expired(self) -> bool:
-        return timezone.now() >= self.expires_at
-
-
 class PersistentAgentDiscordOAuthSession(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

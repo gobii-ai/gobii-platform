@@ -1,11 +1,10 @@
 """Console endpoints for native Discord bot OAuth."""
 
-import json
 from typing import Any
 
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
-from django.utils.html import escape
+from django.shortcuts import render
 from django.views import View
 
 from api.agent.system_skills.defaults import DISCORD_NATIVE_SYSTEM_SKILL_KEY
@@ -16,7 +15,6 @@ from api.models import (
     PersistentAgentDiscordOAuthSession,
     PersistentAgentSystemSkillState,
     UserDiscordIdentity,
-    UserDiscordIdentityOAuthSession,
 )
 from api.services.discord_bot import (
     DISCORD_IDENTITY_OAUTH_STATE_PREFIX,
@@ -97,84 +95,20 @@ def _enable_discord_native_skill(agent) -> dict[str, object]:
     return enable_system_skills(agent, [DISCORD_NATIVE_SYSTEM_SKILL_KEY])
 
 
-def _discord_oauth_complete_response(*, agent_id: str) -> HttpResponse:
-    payload = json.dumps(
-        {
-            "type": "gobii:discord_oauth_complete",
-            "status": "success",
-            "agent_id": agent_id,
-            "guild_count": 1,
-        }
-    ).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    html = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Discord Connected</title>
-</head>
-<body>
-  <p id="status">Discord connected. This tab will close automatically.</p>
-  <button type="button" id="close-button">Close tab</button>
-  <script>
-    (function() {{
-      var payload = {payload};
-      function closeTab() {{
-        window.close();
-        window.setTimeout(function() {{
-          document.getElementById("status").textContent = "Discord connected. You can close this tab.";
-        }}, 500);
-      }}
-      if (window.opener && !window.opener.closed) {{
-        window.opener.postMessage(payload, window.location.origin);
-      }}
-      document.getElementById("close-button").addEventListener("click", closeTab);
-      closeTab();
-    }}());
-  </script>
-</body>
-</html>"""
-    return HttpResponse(html, content_type="text/html")
+def _discord_oauth_complete_response(request: HttpRequest, payload: dict[str, Any]) -> HttpResponse:
+    return render(request, "console/discord_oauth_callback.html", {"payload": payload})
 
 
-def _discord_identity_oauth_complete_response(*, status: str, message: str = "") -> HttpResponse:
-    payload = json.dumps(
-        {
-            "type": "gobii:discord_identity_oauth_complete",
-            "status": status,
-            "message": message,
-        }
-    ).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    heading = "Discord account linked" if status == "success" else "Discord account link failed"
-    detail = message or (
-        "Your Discord account is now linked to your Gobii profile."
-        if status == "success"
-        else "Unable to link your Discord account."
+def _discord_identity_oauth_complete_response(
+    request: HttpRequest,
+    *,
+    status: str,
+    message: str,
+) -> HttpResponse:
+    return _discord_oauth_complete_response(
+        request,
+        {"type": "gobii:discord_identity_oauth_complete", "status": status, "message": message},
     )
-    html = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{heading}</title>
-</head>
-<body>
-  <p id="status">{escape(detail)}</p>
-  <button type="button" id="close-button">Close tab</button>
-  <script>
-    (function() {{
-      var payload = {payload};
-      function closeTab() {{ window.close(); }}
-      if (window.opener && !window.opener.closed) {{
-        window.opener.postMessage(payload, window.location.origin);
-      }}
-      document.getElementById("close-button").addEventListener("click", closeTab);
-      if (payload.status === "success") {{ window.setTimeout(closeTab, 250); }}
-    }}());
-  </script>
-</body>
-</html>"""
-    return HttpResponse(html, content_type="text/html")
 
 
 class DiscordIdentityOAuthStartView(ApiLoginRequiredMixin, View):
@@ -226,27 +160,29 @@ class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
         identity_flow = state.startswith(DISCORD_IDENTITY_OAUTH_STATE_PREFIX)
         if error:
             if identity_flow:
-                return _discord_identity_oauth_complete_response(status="error", message=error)
+                return _discord_identity_oauth_complete_response(
+                    request, status="error", message=error,
+                )
             return JsonResponse({"error": error}, status=400)
         code = str(request.GET.get("code") or "").strip()
         if not state or not code:
             return HttpResponseBadRequest("state and code are required.")
         if identity_flow:
             try:
-                UserDiscordIdentityOAuthSession.objects.get(state=state, user=request.user)
                 handle_discord_identity_oauth_callback(
                     state=state,
                     code=code,
                     user=request.user,
                 )
-            except UserDiscordIdentityOAuthSession.DoesNotExist:
-                return _discord_identity_oauth_complete_response(
-                    status="error",
-                    message="Discord identity authorization was not found for this user.",
-                )
             except DiscordBotIntegrationError as exc:
-                return _discord_identity_oauth_complete_response(status="error", message=str(exc))
-            return _discord_identity_oauth_complete_response(status="success")
+                return _discord_identity_oauth_complete_response(
+                    request, status="error", message=str(exc),
+                )
+            return _discord_identity_oauth_complete_response(
+                request,
+                status="success",
+                message="Your Discord account is now linked to your Gobii profile.",
+            )
         try:
             session = PersistentAgentDiscordOAuthSession.objects.select_related("agent").get(state=state)
             agent_id = str(session.agent_id)
@@ -266,7 +202,16 @@ class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
         except DiscordBotIntegrationError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
 
-        return _discord_oauth_complete_response(agent_id=agent_id)
+        return _discord_oauth_complete_response(
+            request,
+            {
+                "type": "gobii:discord_oauth_complete",
+                "status": "success",
+                "agent_id": agent_id,
+                "guild_count": 1,
+                "message": "Discord connected. This tab will close automatically.",
+            },
+        )
 
 
 class AgentDiscordAppView(ApiLoginRequiredMixin, View):

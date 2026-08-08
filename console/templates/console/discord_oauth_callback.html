@@ -1,0 +1,25 @@
+{% extends "console/oauth_callback_shell.html" %}
+
+{% block oauth_callback_title %}Discord Connection - Gobii{% endblock %}
+{% block oauth_callback_heading %}Discord connection{% endblock %}
+{% block oauth_callback_status_id %}discord-oauth-status{% endblock %}
+{% block oauth_callback_error_id %}discord-oauth-error{% endblock %}
+{% block oauth_callback_script %}
+  {{ payload|json_script:"discord-oauth-payload" }}
+  <script>
+    const payload = JSON.parse(document.getElementById("discord-oauth-payload").textContent);
+    const statusEl = document.getElementById("discord-oauth-status");
+    const errorEl = document.getElementById("discord-oauth-error");
+    statusEl.textContent = payload.status === "success" ? payload.message : "Unable to complete the Discord connection.";
+    if (payload.status !== "success") {
+      errorEl.textContent = payload.message;
+      errorEl.classList.remove("hidden");
+    }
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage(payload, window.location.origin);
+    }
+    if (payload.status === "success") {
+      window.setTimeout(() => window.close(), 250);
+    }
+  </script>
+{% endblock %}
