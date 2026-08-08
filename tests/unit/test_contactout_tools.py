@@ -78,12 +78,19 @@ class ContactOutNativeToolTests(SimpleTestCase):
         company_filters = properties["company_filters"]["properties"]
         self.assertEqual(people_filters["years_of_experience"]["minItems"], 1)
         self.assertEqual(people_filters["years_of_experience"]["items"]["pattern"], r"^\d+(?:_\d+)?$")
+        self.assertIn("Overall professional experience", people_filters["years_of_experience"]["description"])
+        self.assertIn("nearby metro areas", people_filters["location"]["description"])
+        self.assertIn("reduce result size", people_filters["output_fields"]["description"])
+        self.assertIn("company.name", people_filters["output_fields"]["description"])
+        self.assertIn("LinkedIn URLs are supplied separately", people_filters["output_fields"]["description"])
         self.assertEqual(people_filters["educations"]["items"]["minProperties"], 1)
         self.assertEqual(people_filters["company_size"]["items"]["enum"][0], "1_10")
         self.assertEqual(people_filters["company_size"]["items"]["enum"][-1], "10001")
         self.assertEqual(company_filters["year_founded_to"]["maximum"], date.today().year)
         self.assertIn("bare company slugs", company_filters["linkedin_url"]["description"])
         self.assertIn("Use `X_Y` strings for experience ranges", CONTACTOUT_SYSTEM_SKILL.prompt_instructions)
+        self.assertIn("skill experience such as Python experience", CONTACTOUT_SYSTEM_SKILL.prompt_instructions)
+        self.assertIn("`content.profile_list`", CONTACTOUT_SYSTEM_SKILL.prompt_instructions)
         self.assertEqual(properties["required_contact_data_types"]["minItems"], 1)
         self.assertEqual(people_filters["page_size"]["maximum"], 25)
         self.assertEqual(properties["domains"]["maxItems"], 30)
@@ -92,7 +99,20 @@ class ContactOutNativeToolTests(SimpleTestCase):
     def test_people_search_defaults_to_profile_only_data(self, mock_post, _mock_enabled):
         provider_payload = {
             "status_code": 200,
-            "profiles": {"https://linkedin.com/in/ada": {"full_name": "Ada Lovelace"}},
+            "profiles": {
+                "https://linkedin.com/in/ada": {
+                    "full_name": "Ada Lovelace",
+                    "title": "Chief Technology Officer",
+                    "company": {
+                        "name": "Analytical Engines",
+                        "overview": "Intentionally omitted from the compact profile list.",
+                    },
+                    "location": "London, England, United Kingdom",
+                    "skills": ["Python", "Mathematics"],
+                    "experience": ["Chief Technology Officer at Analytical Engines"],
+                    "contact_info": {"personal_emails": ["ada@example.test"]},
+                }
+            },
         }
         mock_post.return_value = _response(provider_payload)
 
@@ -106,7 +126,22 @@ class ContactOutNativeToolTests(SimpleTestCase):
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["provider"], "contactout")
-        self.assertEqual(result["content"], provider_payload)
+        self.assertEqual(result["content"]["profiles"], provider_payload["profiles"])
+        self.assertEqual(
+            result["content"]["profile_list"],
+            [
+                {
+                    "linkedin_url": "https://linkedin.com/in/ada",
+                    "full_name": "Ada Lovelace",
+                    "title": "Chief Technology Officer",
+                    "company_name": "Analytical Engines",
+                    "location": "London, England, United Kingdom",
+                    "skills": ["Python", "Mathematics"],
+                }
+            ],
+        )
+        self.assertNotIn("experience", result["content"]["profile_list"][0])
+        self.assertNotIn("contact_info", result["content"]["profile_list"][0])
         mock_post.assert_called_once_with(
             f"{CONTACTOUT_API_URL}/v1/people/search",
             headers={
@@ -146,6 +181,7 @@ class ContactOutNativeToolTests(SimpleTestCase):
         )
 
         self.assertEqual(result["status"], "success")
+        self.assertEqual(result["content"]["profile_list"], [])
         self.assertEqual(
             mock_post.call_args.kwargs["json"],
             {

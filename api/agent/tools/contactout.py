@@ -228,7 +228,13 @@ def _people_filter_schema() -> dict[str, Any]:
                 "additionalProperties": False,
             }
         ),
-        "location": _array_schema(),
+        "location": {
+            **_array_schema(),
+            "description": (
+                "Candidate location search. Results can include nearby metro areas; verify each returned profile "
+                "location against the user's requested geography."
+            ),
+        },
         "location_radius": {
             "type": "integer",
             "minimum": 1,
@@ -249,7 +255,13 @@ def _people_filter_schema() -> dict[str, Any]:
             max_items=8,
             item_schema={"type": "string", "enum": list(_COMPANY_SIZE_RANGES)},
         ),
-        "years_of_experience": _year_range_schema(subject="years-of-experience"),
+        "years_of_experience": {
+            **_year_range_schema(subject="years-of-experience"),
+            "description": (
+                "Overall professional experience, not years using a particular skill. Only set this when the user "
+                "explicitly requests an overall experience range."
+            ),
+        },
         "years_in_current_role": {
             **_year_range_schema(subject="years-in-current-role"),
             "description": "Cannot be combined with recently_changed_jobs=true.",
@@ -257,10 +269,17 @@ def _people_filter_schema() -> dict[str, Any]:
         "recently_changed_jobs": {"type": "boolean", "default": False},
         "detailed_experience": {"type": "boolean", "default": False},
         "detailed_education": {"type": "boolean", "default": False},
-        "output_fields": _array_schema(
-            max_items=16,
-            item_schema={"type": "string", "enum": list(_OUTPUT_FIELDS)},
-        ),
+        "output_fields": {
+            **_array_schema(
+                max_items=16,
+                item_schema={"type": "string", "enum": list(_OUTPUT_FIELDS)},
+            ),
+            "description": (
+                "Limit returned profile data to fields needed for the task. Prefer this for search_people to reduce "
+                f"result size. Supported values: {', '.join(_OUTPUT_FIELDS)}. LinkedIn URLs are supplied separately "
+                "in content.profile_list."
+            ),
+        },
     }
     return {"type": "object", "properties": properties, "additionalProperties": False}
 
@@ -676,6 +695,32 @@ def _retry_after(response: Response) -> Optional[str]:
     return str(value) if value not in (None, "") else None
 
 
+def _add_compact_profile_list(payload: Any) -> Any:
+    if not isinstance(payload, dict) or not isinstance(payload.get("profiles"), dict):
+        return payload
+
+    profile_list = []
+    for linkedin_url, profile in payload["profiles"].items():
+        if not isinstance(profile, dict):
+            continue
+        company = profile.get("company")
+        company_name = company.get("name") if isinstance(company, dict) else company
+        profile_list.append(
+            {
+                "linkedin_url": linkedin_url,
+                "full_name": profile.get("full_name"),
+                "title": profile.get("title"),
+                "company_name": company_name,
+                "location": profile.get("location"),
+                "skills": profile.get("skills", []),
+            }
+        )
+
+    normalized_payload = dict(payload)
+    normalized_payload["profile_list"] = profile_list
+    return normalized_payload
+
+
 def _response_error(
     response: Response,
     operation: str,
@@ -750,11 +795,12 @@ def _request_contactout(
         body_status = None
     if body_status is not None and body_status >= 400:
         return _response_error(response, operation, parsed, status_code=body_status)
+    content = _add_compact_profile_list(parsed) if operation == SEARCH_PEOPLE else parsed
     return {
         "status": "success",
         "provider": "contactout",
         "operation": operation,
-        "content": parsed,
+        "content": content,
     }
 
 
