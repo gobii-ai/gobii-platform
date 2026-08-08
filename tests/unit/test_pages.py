@@ -1238,6 +1238,10 @@ class HomePageTests(TestCase):
         }
         self.assertIn(static("css/home_tailwind.css"), stylesheet_urls)
         self.assertNotIn(static("css/tailwind.css"), stylesheet_urls)
+        self.assertNotIn(static("css/globals.css"), stylesheet_urls)
+        self.assertIsNone(
+            soup.find("link", rel="preconnect", href="https://static.gobii.ai")
+        )
         undimensioned_images = [
             image.get("src")
             for image in soup.select("#main-content img")
@@ -1345,6 +1349,10 @@ class HomePageTests(TestCase):
         }
         self.assertIn(static("css/tailwind.css"), stylesheet_urls)
         self.assertNotIn(static("css/home_tailwind.css"), stylesheet_urls)
+        self.assertIn(static("css/globals.css"), stylesheet_urls)
+        self.assertIsNotNone(
+            soup.find("link", rel="preconnect", href="https://static.gobii.ai")
+        )
         self.assertIsNotNone(
             soup.find("script", src="https://unpkg.com/lucide@0.546.0")
         )

@@ -1375,6 +1375,8 @@ class HomePage(TemplateView):
                 or context.get("agent_charter_saved")
             )
             context["home_use_k"] = home_use_k
+            context["suppress_globals_css"] = home_use_k
+            context["suppress_vite_asset_preconnect"] = home_use_k
             if home_use_k:
                 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 
