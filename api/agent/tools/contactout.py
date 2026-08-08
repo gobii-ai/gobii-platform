@@ -153,6 +153,7 @@ def _array_schema(*, max_items: int = 50, item_schema: Optional[dict[str, Any]] 
     return {
         "type": "array",
         "items": item_schema or {"type": "string"},
+        "minItems": 1,
         "maxItems": max_items,
     }
 
@@ -274,6 +275,7 @@ def get_contactout_tool() -> dict[str, Any]:
                     "required_contact_data_types": {
                         "type": "array",
                         "items": {"type": "string", "enum": sorted(_CONTACT_DATA_TYPES)},
+                        "minItems": 1,
                         "uniqueItems": True,
                         "description": (
                             "Availability filter only: require profiles to have at least one selected contact type. "
@@ -309,6 +311,14 @@ def _error(message: str, *, operation: str = "", retryable: bool = False, **deta
 
 def _is_nonempty(value: Any) -> bool:
     return value not in (None, False, "", [], {})
+
+
+def _omit_empty_optional_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in filters.items()
+        if value not in (None, "", [], {})
+    }
 
 
 def _validate_list_limits(values: dict[str, Any], limits: dict[str, int]) -> Optional[str]:
@@ -349,11 +359,12 @@ def _validate_people_filters(raw_filters: Any) -> tuple[Optional[dict[str, Any]]
     if unknown:
         return None, f"Unsupported people_filters: {', '.join(unknown)}."
 
-    list_error = _validate_list_limits(raw_filters, _PEOPLE_LIST_LIMITS)
+    filters = _omit_empty_optional_filters(raw_filters)
+    list_error = _validate_list_limits(filters, _PEOPLE_LIST_LIMITS)
     if list_error:
         return None, list_error
     for field, minimum, maximum in (("page", 1, None), ("page_size", 1, 25), ("location_radius", 1, 500)):
-        integer_error = _validate_bounded_integer(raw_filters, field, minimum, maximum)
+        integer_error = _validate_bounded_integer(filters, field, minimum, maximum)
         if integer_error:
             return None, integer_error
 
@@ -363,13 +374,13 @@ def _validate_people_filters(raw_filters: Any) -> tuple[Optional[dict[str, Any]]
         "company_filter": {"current", "past", "past_only", "both"},
     }
     for field, choices in enum_fields.items():
-        value = raw_filters.get(field)
+        value = filters.get(field)
         if value is not None and value not in choices:
             return None, f"{field} must be one of: {', '.join(sorted(choices))}."
 
-    if raw_filters.get("years_in_current_role") and raw_filters.get("recently_changed_jobs") is True:
+    if filters.get("years_in_current_role") and filters.get("recently_changed_jobs") is True:
         return None, "years_in_current_role cannot be combined with recently_changed_jobs=true."
-    return dict(raw_filters), None
+    return filters, None
 
 
 def _validate_linkedin_url(value: Any, *, company: bool = False) -> tuple[Optional[str], Optional[str]]:
@@ -406,17 +417,17 @@ def _validate_company_filters(raw_filters: Any) -> tuple[Optional[dict[str, Any]
     unknown = sorted(set(raw_filters) - _COMPANY_FILTER_KEYS)
     if unknown:
         return None, f"Unsupported company_filters: {', '.join(unknown)}."
-    list_error = _validate_list_limits(raw_filters, _COMPANY_LIST_LIMITS)
+    filters = _omit_empty_optional_filters(raw_filters)
+    list_error = _validate_list_limits(filters, _COMPANY_LIST_LIMITS)
     if list_error:
         return None, list_error
-    page_error = _validate_bounded_integer(raw_filters, "page", 1)
+    page_error = _validate_bounded_integer(filters, "page", 1)
     if page_error:
         return None, page_error
-    founded_error = _validate_bounded_integer(raw_filters, "year_founded_from", 1985)
+    founded_error = _validate_bounded_integer(filters, "year_founded_from", 1985)
     if founded_error:
         return None, founded_error
 
-    filters = dict(raw_filters)
     linkedin_urls = filters.get("linkedin_url") or []
     if linkedin_urls:
         other_filters = [

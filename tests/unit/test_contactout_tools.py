@@ -73,6 +73,8 @@ class ContactOutNativeToolTests(SimpleTestCase):
         self.assertFalse(properties["reveal_all_contact_info"]["default"])
         self.assertIn("cannot reveal only a subset", properties["reveal_all_contact_info"]["description"])
         self.assertIn("Availability filter only", properties["required_contact_data_types"]["description"])
+        self.assertEqual(properties["people_filters"]["properties"]["years_of_experience"]["minItems"], 1)
+        self.assertEqual(properties["required_contact_data_types"]["minItems"], 1)
         self.assertEqual(properties["people_filters"]["properties"]["page_size"]["maximum"], 25)
         self.assertEqual(properties["domains"]["maxItems"], 30)
 
@@ -107,6 +109,41 @@ class ContactOutNativeToolTests(SimpleTestCase):
             json={
                 "job_title": ["CTO OR VP Engineering"],
                 "page_size": 12,
+                "reveal_info": False,
+            },
+        )
+
+    @patch("api.agent.tools.contactout.requests.post")
+    def test_people_search_omits_empty_optional_filters(self, mock_post, _mock_enabled):
+        mock_post.return_value = _response({"status_code": 200, "profiles": {}})
+
+        result = execute_contactout(
+            MagicMock(),
+            {
+                "operation": SEARCH_PEOPLE,
+                "people_filters": {
+                    "job_title": ["CTO", "VP Engineering"],
+                    "location": ["New York"],
+                    "page": 1,
+                    "page_size": 25,
+                    "recently_changed_jobs": False,
+                    "seniority": [],
+                    "skills": [],
+                    "years_of_experience": [],
+                },
+                "reveal_all_contact_info": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"],
+            {
+                "job_title": ["CTO", "VP Engineering"],
+                "location": ["New York"],
+                "page": 1,
+                "page_size": 25,
+                "recently_changed_jobs": False,
                 "reveal_info": False,
             },
         )
@@ -230,7 +267,13 @@ class ContactOutNativeToolTests(SimpleTestCase):
             MagicMock(),
             {
                 "operation": SEARCH_COMPANIES,
-                "company_filters": {"industry": ["Software"], "min_revenue": 10, "max_revenue": 100},
+                "company_filters": {
+                    "industry": ["Software"],
+                    "technologies": [],
+                    "hq_only": False,
+                    "min_revenue": 10,
+                    "max_revenue": 100,
+                },
             },
         )
         domain_result = execute_contactout(
@@ -244,6 +287,15 @@ class ContactOutNativeToolTests(SimpleTestCase):
         self.assertEqual(search_result["status"], "success")
         self.assertEqual(domain_result["status"], "success")
         self.assertEqual(mock_post.call_args_list[0].args[0], f"{CONTACTOUT_API_URL}/v1/company/search")
+        self.assertEqual(
+            mock_post.call_args_list[0].kwargs["json"],
+            {
+                "industry": ["Software"],
+                "hq_only": False,
+                "min_revenue": 10,
+                "max_revenue": 100,
+            },
+        )
         self.assertEqual(
             mock_post.call_args_list[1].kwargs["json"],
             {"domains": ["gobii.ai", "contactout.com"]},
