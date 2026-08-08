@@ -440,8 +440,14 @@ def llm_summarise_steps(
             "role": "system",
             "content": (
                 "Maintain a compact current-state summary of an agent's execution. Preserve durable outcomes, exact "
-                "identifiers, created artifacts, source provenance, unresolved work, and active blockers. Replace superseded "
-                "state; omit repeated attempts, resolved mechanics, and transient reasoning. Default to under 2,000 characters; exceed that only when omitting unresolved facts would change a decision. Given the existing summary and new raw steps, rewrite the concise execution state rather than appending a log."
+                "identifiers, created artifacts, source provenance, unresolved work, and active blockers. Preserve "
+                "still-operative scoped directives—including ownership changes, handoffs, stop/do-not-act instructions, "
+                "permission boundaries, and commitments—with their actor or source, scope identifier, and effective "
+                "constraint. A resolved event can have a continuing consequence: condense the event but retain that "
+                "consequence until explicitly superseded, expired, or reassigned. Replace superseded state; omit repeated "
+                "attempts, resolved mechanics with no continuing consequence, and transient reasoning. Default to under "
+                "2,000 characters; exceed that only when omitting unresolved facts would change a decision. Given the "
+                "existing summary and new raw steps, rewrite the concise execution state rather than appending a log."
             ),
         },
         {

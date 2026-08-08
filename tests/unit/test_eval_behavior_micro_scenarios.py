@@ -72,6 +72,9 @@ from api.evals.scenarios.behavior_micro import (
     get_plan_activity_calls_for_run,
     get_pending_human_input_requests,
     get_planning_mutation_calls_before_end_planning,
+    _requires_low_recipient_effort,
+    _requires_morgan_routing_boundary,
+    _uses_one_focused_charter_patch,
     explicit_stop_is_bounded_to_plan_closeout,
     tool_call_is_plan_activity,
 )
@@ -1030,6 +1033,60 @@ class BehaviorMicroHelperTests(TestCase):
 
         self.assertTrue(no_action_passed, no_action_detail)
         self.assertTrue(cli_passed, cli_detail)
+
+    def test_judge_guidance_scoring_accepts_explicit_no_reconnect_wait(self):
+        guidance = {
+            "ran": True,
+            "status": "completed",
+            "suggestion_type": "strategy_shift",
+            "suggestion": {
+                "message": "Use the configured CLI path.",
+                "agentDirective": (
+                    "Do not wait for the user to reconnect the native GitHub integration. "
+                    "Proceed without a reconnect through run_command and the configured GitHub App env vars."
+                ),
+            },
+        }
+
+        passed, detail = judge_guidance_preserves_cli_github_path(guidance)
+
+        self.assertTrue(passed, detail)
+
+    def test_morgan_routing_boundary_accepts_combined_correct_assignments(self):
+        combined = (
+            "Route routine follow-ups to Morgan and pull the owner in only on a real blocker."
+        )
+        reversed_assignments = (
+            "Route routine follow-ups to the owner and send real blockers to Morgan."
+        )
+
+        self.assertTrue(_requires_morgan_routing_boundary(combined))
+        self.assertFalse(_requires_morgan_routing_boundary(reversed_assignments))
+
+    def test_low_recipient_effort_accepts_positive_rule_with_negative_explanation(self):
+        charter = (
+            "For prospect outreach, give useful context first and ask a simple, specific question "
+            "that doesn't make the recipient do the work."
+        )
+
+        self.assertTrue(_requires_low_recipient_effort(charter))
+
+    def test_focused_patch_ignores_patch_text_in_followup_select(self):
+        existing = "Describe self-hosted products as requiring technical setup."
+        call = SimpleNamespace(
+            tool_params={
+                "sql": (
+                    "UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1; "
+                    "SELECT patch_text(charter,'','') FROM __agent_config WHERE id=1;"
+                ),
+                "bindings": {
+                    "old": "",
+                    "new": "Self-hosted products require ongoing engineering support.",
+                },
+            }
+        )
+
+        self.assertTrue(_uses_one_focused_charter_patch([call], existing))
 
     def test_cli_secret_charter_check_requires_one_patch_and_preserves_workflow(self):
         scenario = ScenarioRegistry.get(CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION)

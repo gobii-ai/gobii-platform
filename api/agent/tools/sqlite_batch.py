@@ -2460,7 +2460,17 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                         "description": (
                             "Semicolon-separated SQL. Prose joins json_each(:rows) to __tool_results by result_id and "
                             "extracts $.fields.*. Message writes derive payload/message_id from __messages, or one bound "
-                            "payload when absent. Config uses patch_text(charter,:old,:new). INSERT SELECT requires "
+                            "payload when absent. Config uses patch_text(charter,:old,:new). A rule not already written in "
+                            "Charter is an addition: old='' and new is only that separate short rule. New format, style, "
+                            "and delivery preferences are additions even when they affect an existing job. Do not blend "
+                            "an addition into an existing sentence. A correction to a quoted or labeled output changes only "
+                            "the Charter sentence with that same label; leave differently labeled rules unchanged. For a "
+                            "change, old is the smallest exact existing sentence being replaced and new is only its "
+                            "replacement. If two adjacent sentences both directly conflict "
+                            "with one correction, combine those exact sentences in one old value and replace them with "
+                            "one clear new rule in one patch_text. Never put the whole Charter in old/new just to add one rule. "
+                            "To verify a Charter update, SELECT charter directly; never call patch_text inside SELECT. "
+                            "INSERT SELECT requires "
                             "WHERE 1=1 before ON CONFLICT. End writes with the requested decision/evidence SELECT."
                         ),
                     },

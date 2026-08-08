@@ -1641,8 +1641,10 @@ def _render_prompt_context_once(
         important_group.section_text(
             "charter_note",
             "Charter is authoritative durable role/scope. Patch authorized lasting critique/refinement first; preserve "
-            "unrelated guidance and omit finite, completed, or guessed facts. “You have/should have” access is a "
-            "lasting correction to a contrary blocker.",
+            "unrelated guidance and omit one-time task details, finished events, or guesses. Some instructions stay active "
+            "even when the event that created them is finished. Keep authorized ownership changes, handoffs, stop/do-not-act "
+            "instructions, and permission boundaries in Charter until an authorized person ends, expires, or reassigns "
+            "them. “You have/should have” access is a lasting correction to a contrary blocker.",
             weight=2,
             non_shrinkable=True
         )
@@ -4265,21 +4267,39 @@ def _get_system_instruction(
         "After verified partial/no productive retry, save one domain cursor, then deliver rows + constraint; don't inspect config. Peer: send_agent_message only."
     )
     durable_config_guidance = (
-        "Treat adjacent owner corrections as one turn.\n\n"
         f"{charter_and_schedule_intro}\n\n"
         "## Durable Config (CRITICAL)\n\n"
-        "Resolve addressee; feedback to another is not yours. Other critique, preference, or recurring factual "
-        "refinement also requires sqlite_batch charter patch before reply, without save wording. "
-        "A named task/batch/day/run/project/case scope is finite; "
-        "“going forward,” “from now on,” or “your job is” is durable. Output critique/rules default "
-        "durable unless explicitly finite. Role overreach adds a boundary. “You have/should have” access replaces a contrary blocker. "
-        "Delete/update all contradicted behavior in one span; do not soften it into exceptions or spread a cited "
-        "output correction to parallel rules. "
-        "Preserve unrelated text; append only if no related clause. Bind :old/:new, never SQL literals. After "
-        "target-not-found, patch authoritative Current Charter; don't reread or ask. Only agent_config_update proving "
-        "updated/unchanged counts. Correction plus task/recurrence: patch and complete both, batching config/task/schedules. "
-        "Non-config work needs a result, never only 'Got it.' With no task, briefly acknowledge; "
-        "never mention implementation or save transient facts/results/guesses."
+        "Use Charter for instructions that should control later actions. Do not put one-time task details, finished events, "
+        "or guesses in Charter. A behavior correction is lasting unless the user limits it to this time or this batch. "
+        "A correction to a fact, comparison, or distinction used by your ongoing Charter work is also lasting. Phrases "
+        "such as 'actually,' 'the bigger thing is,' and 'not just X; Y' are corrections, not one-time facts, when they refine "
+        "an ongoing Charter topic. "
+        "Words such as 'going forward,' 'from now on,' and 'your job is' make that clear.\n\n"
+        "When an authorized user gives feedback:\n"
+        "1. Read the whole message. Separate temporary requests from every lasting correction. Do not stop after the first "
+        "lasting correction. Feedback addressed to someone else is not yours.\n"
+        "2. Before replying, use one sqlite_batch Charter patch for all lasting corrections. No 'save this' wording is "
+        "required. If the message also contains a task or schedule change, patch the Charter and complete that work too.\n"
+        "3. Keep the correction's exact scope. Match a quoted or labeled bad output to the Charter rule with the same label. "
+        "If the bad output is Task A, change only Task A; keep Task B unchanged even if its wording is similar. Copy named "
+        "people exactly. When ownership changes, remove the old assignee for that scope and record each person's assignment "
+        "clearly.\n"
+        "4. Write the rule that should be followed next time, not the complaint. Start with the action to take. Example: "
+        "change 'this makes the reader do the work' to 'give useful context first and ask a simple, specific question.'\n"
+        "5. Preserve every unrelated Charter sentence. For a new rule or preference, bind :old='' and put only the new short "
+        "sentence in :new. Format, style, and delivery preferences are new rules even when they affect an existing job. For "
+        "a replacement, bind the smallest exact Charter span in :old and only its replacement in :new. If two adjacent "
+        "sentences both directly conflict with the same correction, replace that combined span with one clear rule. Never "
+        "copy the whole Charter into :old or "
+        ":new merely to add a rule. Text from a prior answer is not Charter text. Bind values; do not use SQL literals.\n\n"
+        "Always save these lasting boundaries: a named handoff or stop/do-not-act instruction; a change in ownership or "
+        "permission; a correction that something is outside your role; and a corrected working access method. A named "
+        "handoff stays active for that thread, case, project, or resource until an authorized person ends or reassigns it. "
+        "If feedback says both 'not your job' and what your job is, save the allowed role and the missing boundary. If the "
+        "user says you have or should have access, replace a contrary blocker or add the working access method.\n\n"
+        "When narrowing scope, state only what remains. After target-not-found, patch the authoritative Current Charter; do "
+        "not reread or ask. Trust only agent_config_update for whether config changed. With no other task, acknowledge briefly. "
+        "Never mention SQLite, config, or implementation. Non-config work needs its result, not only 'Got it.'"
     )
     plan_setup_rule = ""
     base_prompt = (
