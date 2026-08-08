@@ -178,6 +178,17 @@ def environment_info(request):
     }
 
 
+def public_facing_page(request):
+    """Identify routes where public-site marketing scripts may run."""
+    resolver_match = request.resolver_match
+    namespace = resolver_match.namespace if resolver_match else ""
+    url_name = (resolver_match.url_name or "") if resolver_match else ""
+    is_public = namespace in {"pages", "proprietary"} or url_name.startswith(
+        ("account_", "socialaccount_")
+    )
+    return {"is_public_facing_page": is_public}
+
+
 def show_signup_tracking(request):
     """
     Adds a flag to the context to control whether to show signup tracking.

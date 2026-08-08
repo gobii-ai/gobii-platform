@@ -116,6 +116,24 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "script.bullseye.so")
 
+    @override_settings(
+        GOBII_RELEASE_ENV="production",
+        GOBII_PROPRIETARY_MODE=True,
+        BULLSEYE_PIXEL_ID="bullseye-test-id",
+    )
+    def test_staff_page_does_not_render_public_bullseye_pixel(self):
+        admin_user = User.objects.create_superuser(
+            username="bullseye-admin@example.com",
+            email="bullseye-admin@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(admin_user)
+
+        response = self.client.get(reverse("staff-users"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "script.bullseye.so")
+
     @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123")
     def test_base_template_uses_page_meta_title_in_ga_config(self):
         response = self.client.get(reverse("pages:home"))
