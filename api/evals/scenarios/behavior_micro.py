@@ -2739,6 +2739,7 @@ class CharterMemoryScenario(BehaviorMicroScenario):
     existing_charter = ""
     prompt = ""
     prior_outbound_body = ""
+    seed_prior_outbound_web_message = True
     verification_task_name = ""
     success_summary = ""
     failure_summary = ""
@@ -2769,7 +2770,7 @@ class CharterMemoryScenario(BehaviorMicroScenario):
         PersistentAgent.objects.filter(id=agent_id).update(charter=self.existing_charter)
         self._seed_prior_processing_run(agent_id)
         self._enable_builtin_tools(agent_id, ["sqlite_batch"])
-        if self.prior_outbound_body:
+        if self.prior_outbound_body and self.seed_prior_outbound_web_message:
             self._seed_prior_outbound_message(agent_id, self.prior_outbound_body)
 
     def _seed_prior_outbound_message(self, agent_id, body):
@@ -3541,10 +3542,17 @@ class CharterAddsPlainPreferenceWithoutSaveWordScenario(CharterMemoryScenario):
     feedback_reply_options = {"required_reply_concepts": (("table",), ("bullet", "takeaway"))}
 
     def _charter_check(self, agent, mutation_calls):
-        charter = (agent.charter or "").casefold()
-        preserved_job = all(
-            term in charter
-            for term in ("weekly", "market brief", "source", "finding")
+        preserved_job = _has_clause_rule(
+            agent.charter,
+            (r"\bweekly\b",),
+            (r"\bmarket briefs?\b",),
+            (r"\buser\b",),
+            (r"\b(?:current|timely|up-to-date)\b",),
+            (
+                r"\bsource[- ]backed\b",
+                r"\bsources?\b.{0,35}\bfindings?\b",
+                r"\bfindings?\b.{0,35}\bsources?\b",
+            ),
         )
         added_format_preference = _requires_comparison_table_takeaways(agent.charter)
         passed = _uses_one_focused_charter_patch(mutation_calls, self.existing_charter) and preserved_job and added_format_preference
@@ -4314,6 +4322,7 @@ class CharterRecordsAuthorizedScopedHandoffScenario(CharterMemoryScenario):
         "Subject: Seven billion in CGM\n\n"
         "Badia, Abbott Diabetes Care's growth makes FreeStyle Libre the leader in a rapidly expanding CGM market."
     )
+    seed_prior_outbound_web_message = False
     prompt = (
         "Thanks - I will be replying to Badia, including you and Andrew. Andrew and I will be taking over though, "
         "so you wont need to reply to her\n\nThanks!"
@@ -4332,47 +4341,66 @@ class CharterRecordsAuthorizedScopedHandoffScenario(CharterMemoryScenario):
     def _will_email(agent_id):
         return f"will-{agent_id}@gobii.eval"
 
+    @staticmethod
+    def _agent_email(agent_id):
+        return f"gianna-{agent_id}@dawnopslab.eval"
+
+    @staticmethod
+    def _organization_slug(agent_id):
+        return f"scoped-handoff-{agent_id.hex}"
+
     def _seed_charter_agent(self, agent_id):
         from django.contrib.auth import get_user_model
 
         super()._seed_charter_agent(agent_id)
         agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
         will_email = self._will_email(agent.id)
-        will = get_user_model().objects.create_user(
+        will, _ = get_user_model().objects.get_or_create(
             username=will_email,
-            email=will_email,
-            first_name="Will",
-            last_name="Bonde",
+            defaults={
+                "email": will_email,
+                "first_name": "Will",
+                "last_name": "Bonde",
+            },
         )
-        organization = Organization.objects.create(
-            name=f"Scoped handoff eval {str(agent.id)[:8]}",
-            slug=f"scoped-handoff-{agent.id.hex}",
-            created_by=will,
+        organization, _ = Organization.objects.get_or_create(
+            slug=self._organization_slug(agent.id),
+            defaults={
+                "name": f"Scoped handoff eval {str(agent.id)[:8]}",
+                "created_by": will,
+            },
         )
         organization.billing.purchased_seats = 2
         organization.billing.save(update_fields=["purchased_seats"])
-        OrganizationMembership.objects.create(
+        OrganizationMembership.objects.update_or_create(
             org=organization,
             user=will,
-            role=OrganizationMembership.OrgRole.OWNER,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
+            defaults={
+                "role": OrganizationMembership.OrgRole.OWNER,
+                "status": OrganizationMembership.OrgStatus.ACTIVE,
+            },
         )
-        OrganizationMembership.objects.create(
+        OrganizationMembership.objects.update_or_create(
             org=organization,
             user=agent.user,
-            role=OrganizationMembership.OrgRole.MEMBER,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
+            defaults={
+                "role": OrganizationMembership.OrgRole.MEMBER,
+                "status": OrganizationMembership.OrgStatus.ACTIVE,
+            },
         )
         agent.organization = organization
         agent.save(update_fields=["organization", "updated_at"])
 
-        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+        agent_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
             owner_agent=agent,
             channel=CommsChannel.EMAIL,
-            address=f"gianna-{agent.id}@dawnopslab.eval",
-            is_primary=True,
+            address=self._agent_email(agent.id),
+            defaults={"is_primary": True},
         )
-        will_endpoint = PersistentAgentCommsEndpoint.objects.create(
+        if not agent_endpoint.is_primary:
+            agent_endpoint.is_primary = True
+            agent_endpoint.save(update_fields=["is_primary"])
+        will_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
             channel=CommsChannel.EMAIL,
             address=will_email,
         )
@@ -4406,6 +4434,40 @@ class CharterRecordsAuthorizedScopedHandoffScenario(CharterMemoryScenario):
         )
         agent.preferred_contact_endpoint = will_endpoint
         agent.save(update_fields=["preferred_contact_endpoint", "updated_at"])
+
+    def run(self, run_id, agent_id):
+        agent = PersistentAgent.objects.only(
+            "organization_id",
+            "preferred_contact_endpoint_id",
+            "user_id",
+        ).get(id=agent_id)
+        original_organization_id = agent.organization_id
+        original_preferred_endpoint_id = agent.preferred_contact_endpoint_id
+        try:
+            return super().run(run_id, agent_id)
+        finally:
+            synthetic_organization = Organization.objects.filter(
+                slug=self._organization_slug(agent.id),
+            ).only("id").first()
+            PersistentAgent.objects.filter(id=agent_id).update(
+                organization_id=original_organization_id,
+                preferred_contact_endpoint_id=original_preferred_endpoint_id,
+            )
+            CommsAllowlistEntry.objects.filter(
+                agent_id=agent_id,
+                channel=CommsChannel.EMAIL,
+                address=self._will_email(agent.id),
+            ).delete()
+            PersistentAgentCommsEndpoint.objects.filter(
+                owner_agent_id=agent_id,
+                channel=CommsChannel.EMAIL,
+                address=self._agent_email(agent.id),
+            ).update(is_primary=False)
+            if synthetic_organization is not None:
+                OrganizationMembership.objects.filter(
+                    org=synthetic_organization,
+                    user_id=agent.user_id,
+                ).delete()
 
     def _inject_charter_prompt(self, run_id, agent_id):
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")

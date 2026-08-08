@@ -42,8 +42,10 @@ from api.evals.scenarios.behavior_micro import (
     CHARTER_INTERPRETS_ROLE_BOUNDARY_CORRECTION,
     CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
+    CHARTER_RECORDS_AUTHORIZED_SCOPED_HANDOFF,
     CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION,
     CHARTER_UNICODE_ROUTING_PATCHES_FIRST_TRY,
+    CharterMemoryScenario,
     CommonUseCaseEvalDefinition,
     CommonUseCaseToolChoiceScenario,
     COMMON_USE_CASE_EVAL_CASES,
@@ -116,6 +118,8 @@ from api.models import (
     CommsChannel,
     EvalRun,
     EvalRunTask,
+    Organization,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentCompletion,
@@ -1087,6 +1091,102 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertTrue(_uses_one_focused_charter_patch([call], existing))
+
+    def test_plain_preference_preservation_requires_one_intact_job_clause(self):
+        scenario = ScenarioRegistry.get(CHARTER_ADDS_PLAIN_PREFERENCE_WITHOUT_SAVE_WORD)
+        call = SimpleNamespace(
+            tool_params={
+                "sql": (
+                    "UPDATE __agent_config SET charter=patch_text(charter,:old,:new) WHERE id=1"
+                ),
+                "bindings": {
+                    "old": "",
+                    "new": "Present briefs as comparison tables with bullet takeaways.",
+                },
+            }
+        )
+        preserved = SimpleNamespace(
+            charter=(
+                "For the user, prepare a current weekly market brief with source-backed findings. "
+                "Present briefs as comparison tables with bullet takeaways."
+            )
+        )
+        scattered_keywords = SimpleNamespace(
+            charter=(
+                "Send something weekly. Use a market brief template. Mention the user. "
+                "Include a current source and one finding. "
+                "Present briefs as comparison tables with bullet takeaways."
+            )
+        )
+
+        preserved_passed, _ = scenario._charter_check(preserved, [call])
+        scattered_passed, _ = scenario._charter_check(scattered_keywords, [call])
+
+        self.assertTrue(preserved_passed)
+        self.assertFalse(scattered_passed)
+
+    def test_scoped_handoff_restores_reused_agent_owner_context(self):
+        scenario = ScenarioRegistry.get(CHARTER_RECORDS_AUTHORIZED_SCOPED_HANDOFF)
+        original_organization = Organization.objects.create(
+            name="Original eval organization",
+            slug=f"original-eval-{self.agent.id.hex}",
+            created_by=self.user,
+        )
+        original_organization.billing.purchased_seats = 1
+        original_organization.billing.save(update_fields=["purchased_seats"])
+        self.agent.organization = original_organization
+        self.agent.save(update_fields=["organization", "updated_at"])
+        synthetic_organization_ids = []
+
+        def seed_scenario(scenario_self, _run_id, agent_id):
+            scenario_self._seed_charter_agent(agent_id)
+            seeded_agent = PersistentAgent.objects.get(id=agent_id)
+            synthetic_organization_ids.append(seeded_agent.organization_id)
+
+        with patch.object(
+            CharterMemoryScenario,
+            "run",
+            autospec=True,
+            side_effect=seed_scenario,
+        ):
+            scenario.run(str(self.run.id), self.agent.id)
+
+        self.agent.refresh_from_db()
+        synthetic_organization_id = synthetic_organization_ids[0]
+        will_email = scenario._will_email(self.agent.id)
+        seeded_messages = PersistentAgentMessage.objects.filter(
+            owner_agent=self.agent,
+            body=scenario.prior_outbound_body,
+        )
+
+        self.assertEqual(self.agent.organization_id, original_organization.id)
+        self.assertIsNone(self.agent.preferred_contact_endpoint_id)
+        self.assertNotEqual(synthetic_organization_id, original_organization.id)
+        self.assertFalse(
+            OrganizationMembership.objects.filter(
+                org_id=synthetic_organization_id,
+                user=self.user,
+            ).exists()
+        )
+        self.assertFalse(
+            CommsAllowlistEntry.objects.filter(
+                agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address=will_email,
+            ).exists()
+        )
+        self.assertFalse(
+            PersistentAgentCommsEndpoint.objects.get(
+                owner_agent=self.agent,
+                channel=CommsChannel.EMAIL,
+                address=scenario._agent_email(self.agent.id),
+            ).is_primary
+        )
+        self.assertEqual(seeded_messages.count(), 1)
+        self.assertEqual(seeded_messages.get().conversation.channel, CommsChannel.EMAIL)
+        self.assertFalse(
+            seeded_messages.filter(conversation__channel=CommsChannel.WEB).exists()
+        )
 
     def test_cli_secret_charter_check_requires_one_patch_and_preserves_workflow(self):
         scenario = ScenarioRegistry.get(CHARTER_RECORDS_CLI_GITHUB_SECRETS_CORRECTION)
