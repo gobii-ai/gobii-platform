@@ -332,16 +332,12 @@ class SystemSkillDiscoveryTests(TestCase):
     def test_rendered_user_prompt_includes_discovery_hint_and_system_prompt_stays_stable(self):
         self._inbound("Please summarize our current research priorities.")
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             messages_without_hint, _tokens, _metadata = build_prompt_context_preview(self.agent)
 
         self._inbound("Please source candidates for this role.")
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             messages_with_hint, _tokens, _metadata = build_prompt_context_preview(self.agent)
 
         system_prompt_without_hint = next(
@@ -378,9 +374,7 @@ class SystemSkillDiscoveryTests(TestCase):
             "used": 2,
         }
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             messages, _tokens, _metadata = build_prompt_context_preview(
                 self.agent,
                 daily_credit_state=daily_credit_state,
@@ -393,9 +387,7 @@ class SystemSkillDiscoveryTests(TestCase):
     def test_task_credit_mode_omits_discovery_hint(self):
         self._inbound("Find 10 candidates for this role.")
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             messages, _tokens, _metadata = build_prompt_context_preview(
                 self.agent,
                 daily_credit_state={},

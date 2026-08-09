@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """On-demand *step* history compaction for persistent agents.
 
 This mirrors :pymod:`api.agent.core.compaction` (message compaction) but works on
@@ -35,6 +33,7 @@ import logging
 from opentelemetry import trace
 
 from . import internal_reasoning
+from .compaction_exceptions import CompactionSummaryError
 from .llm_config import get_summarization_llm_config
 from .llm_utils import run_completion
 from .token_usage import log_agent_completion, set_usage_span_attributes
@@ -50,12 +49,12 @@ __all__ = [
 #  Tunables                                                                   #
 # --------------------------------------------------------------------------- #
 
-RAW_STEP_LIMIT: int = getattr(settings, "PA_RAW_STEP_LIMIT", 100)
+RAW_STEP_LIMIT: int = settings.PA_RAW_STEP_LIMIT
 """Number of raw steps allowed after the last snapshot before triggering
 compaction.  Override with ``PA_RAW_STEP_LIMIT`` in Django settings for
 experimentation."""
 
-STEP_COMPACTION_TAIL: int = getattr(settings, "PA_STEP_COMPACTION_TAIL", 10)
+STEP_COMPACTION_TAIL: int = settings.PA_STEP_COMPACTION_TAIL
 """Number of most-recent steps to keep raw (uncompacted) after snapshotting.
 Override with ``PA_STEP_COMPACTION_TAIL`` in Django settings."""
 
@@ -167,8 +166,8 @@ def ensure_steps_compacted(
     # Determine the current limit dynamically so that test overrides using
     # `@override_settings(PA_RAW_STEP_LIMIT=...)` take effect even though
     # the module-level constant is evaluated at import time.
-    raw_limit: int = getattr(settings, "PA_RAW_STEP_LIMIT", RAW_STEP_LIMIT)
-    tail_limit: int = max(0, getattr(settings, "PA_STEP_COMPACTION_TAIL", STEP_COMPACTION_TAIL))
+    raw_limit: int = settings.PA_RAW_STEP_LIMIT
+    tail_limit: int = max(0, settings.PA_STEP_COMPACTION_TAIL)
 
     # ------------------------------ Phase 1 ------------------------------ #
     # Decide *if* compaction is needed under a short lock.
@@ -189,7 +188,7 @@ def ensure_steps_compacted(
         raw_qs = (
             PersistentAgentStep.objects
             .filter(agent=agent_locked, created_at__gt=lower_bound)
-            .order_by("created_at")
+            .order_by("created_at", "id")
         )
 
         raw_count = raw_qs.count()
@@ -210,7 +209,38 @@ def ensure_steps_compacted(
             raw_qs.values_list("created_at", flat=True)[compacted_count - 1]
         )
 
+        # Queued and pending tool records are mutable. Keep them, and every
+        # record sharing their timestamp, on the raw side of the cursor.
+        earliest_mutable_tool_at = (
+            raw_qs.filter(
+                tool_call__status__in=(
+                    PersistentAgentToolCall.Status.QUEUED,
+                    PersistentAgentToolCall.Status.PENDING,
+                )
+            )
+            .order_by("created_at", "id")
+            .values_list("created_at", flat=True)
+            .first()
+        )
+        if earliest_mutable_tool_at is not None and earliest_mutable_tool_at <= snapshot_until:
+            stable_cutoff = (
+                raw_qs.filter(created_at__lt=earliest_mutable_tool_at)
+                .order_by("-created_at", "-id")
+                .values_list("created_at", flat=True)
+                .first()
+            )
+            if stable_cutoff is None:
+                return
+            snapshot_until = stable_cutoff
+
         previous_summary = last_snap.summary if last_snap else ""
+
+        captured_step_ids = tuple(
+            str(step_id)
+            for step_id in raw_qs.filter(created_at__lte=snapshot_until)
+            .order_by("created_at", "id")
+            .values_list("id", flat=True)
+        )
 
     # ------------------------------ Phase 2 ------------------------------ #
     # Slow work: fetch & summarise *outside* the lock.
@@ -222,9 +252,16 @@ def ensure_steps_compacted(
             with tracer.start_as_current_span("COMPACT Step Summarise") as summarise_span:
                 summarise_span.set_attribute("steps.count", len(raw_steps_struct))
                 new_summary = summarise_fn(previous_summary, raw_steps_struct, safety_identifier)
-        except Exception:  # pragma: no cover – downstream can retry
-            logger.exception("step summarise_fn failed; skipping compaction for agent %s", agent.id)
-            return
+        except CompactionSummaryError:
+            raise
+        except Exception as exc:
+            raise CompactionSummaryError(
+                f"Step summarization failed for agent {agent.id}"
+            ) from exc
+        if not isinstance(new_summary, str) or not new_summary.strip():
+            raise CompactionSummaryError(
+                f"Step summarization returned an empty summary for agent {agent.id}"
+            )
 
     # ------------------------------ Phase 3 ------------------------------ #
     # Persist snapshot under lock if no-one beat us.
@@ -238,6 +275,28 @@ def ensure_steps_compacted(
         )
         if race:
             span.set_attribute("compaction.skipped", True)
+            return
+
+        current_step_ids = tuple(
+            str(step_id)
+            for step_id in PersistentAgentStep.objects.filter(
+                agent=agent_locked,
+                created_at__gt=lower_bound,
+                created_at__lte=snapshot_until,
+            ).order_by("created_at", "id").values_list("id", flat=True)
+        )
+        mutable_tool_exists = PersistentAgentToolCall.objects.filter(
+            step__agent=agent_locked,
+            step__created_at__gt=lower_bound,
+            step__created_at__lte=snapshot_until,
+            status__in=(
+                PersistentAgentToolCall.Status.QUEUED,
+                PersistentAgentToolCall.Status.PENDING,
+            ),
+        ).exists()
+        if current_step_ids != captured_step_ids or mutable_tool_exists:
+            span.set_attribute("compaction.skipped", True)
+            span.set_attribute("compaction.skip_reason", "captured_range_changed")
             return
 
         prev_snap = (
@@ -284,7 +343,7 @@ def _fetch_and_structurise_steps(
         .select_related("tool_call", "cron_trigger", "system_step")
         # Defer the potentially huge text blob – we'll bulk-fetch it later.
         .defer("tool_call__result")
-        .order_by("created_at")
+        .order_by("created_at", "id")
     )
 
     steps: List[PersistentAgentStep] = list(qs)
@@ -417,11 +476,13 @@ def llm_summarise_steps(
     *,
     agent: Optional[PersistentAgent] = None,
     routing_profile=None,
+    eval_run_id: str | None = None,
 ) -> str:
     """Summarise *previous* + *steps* via LiteLLM.
 
     This is the primary summarisation function used in production.  Unit-tests
-    can inject the deterministic placeholder instead.  Failure gracefully falls back.
+    can inject the deterministic placeholder instead. Failures raise
+    ``CompactionSummaryError`` so a worker can retry without advancing the snapshot.
 
     Args:
         previous: Previous summary text to extend.
@@ -429,6 +490,7 @@ def llm_summarise_steps(
         safety_identifier: Optional safety identifier for API calls.
         agent: Optional agent instance for config lookup.
         routing_profile: Optional LLMRoutingProfile for eval routing.
+        eval_run_id: Optional eval run associated with completion accounting.
     """
 
     # Convert structured dataclasses to concise text lines.
@@ -475,6 +537,7 @@ def llm_summarise_steps(
         token_usage, usage = log_agent_completion(
             agent,
             completion_type=PersistentAgentCompletion.CompletionType.STEP_COMPACTION,
+            eval_run_id=eval_run_id,
             response=resp,
             model=model,
             provider=provider,
@@ -485,6 +548,8 @@ def llm_summarise_steps(
         set_usage_span_attributes(trace.get_current_span(), usage)
 
         return resp.choices[0].message.content.strip()
-    except Exception:
-        logger.exception("LiteLLM step summarisation failed – falling back to fallback summariser")
-        return _default_summarise(previous, steps, safety_identifier)
+    except CompactionSummaryError:
+        raise
+    except Exception as exc:
+        logger.exception("LiteLLM step summarization failed")
+        raise CompactionSummaryError("LiteLLM step summarization failed") from exc

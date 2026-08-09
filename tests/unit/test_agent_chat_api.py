@@ -1928,10 +1928,13 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(mock_delay.call_count, 3)
 
     @tag("batch_agent_chat")
-    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
-    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    @patch("api.agent.core.prompt_context.enqueue_history_compaction")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    def test_prompt_context_uses_webhook_label_for_other_channel_messages(self, mock_delay, _mock_comms_compacted, _mock_steps_compacted):
+    def test_prompt_context_uses_webhook_label_for_other_channel_messages(
+        self,
+        mock_delay,
+        _mock_compaction,
+    ):
         webhook = PersistentAgentInboundWebhook.objects.create(agent=self.agent, name="Pager Trigger")
         with self.captureOnCommitCallbacks(execute=True):
             ingest_inbound_webhook_message(

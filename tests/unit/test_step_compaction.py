@@ -7,6 +7,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.conf import settings
 
+from api.agent.core.compaction_exceptions import CompactionSummaryError
 from api.agent.core.internal_reasoning import build_internal_reasoning_description
 from api.agent.core.step_compaction import ensure_steps_compacted, llm_summarise_steps
 from api.models import (
@@ -91,6 +92,12 @@ class StepCompactionTests(TestCase):
             description=description,
             created_at=ts,
         )
+
+    @staticmethod
+    def _set_step_time(step, ts):
+        PersistentAgentStep.objects.filter(id=step.id).update(created_at=ts)
+        step.created_at = ts
+        return step
 
     @tag("batch_step_compaction")
     def test_compaction_triggered_when_over_limit(self):
@@ -395,6 +402,154 @@ class StepCompactionTests(TestCase):
         snapshot = PersistentAgentStepSnapshot.objects.first()
         self.assertEqual(snapshot.summary, "Manual snapshot") 
 
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=0)
+    def test_pending_tool_call_stays_on_raw_side_of_snapshot(self):
+        base_time = self.agent.created_at
+        first = self._set_step_time(
+            self._make_generic_step(base_time, "stable one"),
+            base_time + timedelta(seconds=1),
+        )
+        second = self._set_step_time(
+            self._make_generic_step(base_time, "stable two"),
+            base_time + timedelta(seconds=2),
+        )
+        pending = self._set_step_time(
+            self._make_tool_call_step(base_time, "pending_tool"),
+            base_time + timedelta(seconds=3),
+        )
+        pending.tool_call.status = PersistentAgentToolCall.Status.PENDING
+        pending.tool_call.save(update_fields=["status"])
+        latest = self._set_step_time(
+            self._make_generic_step(base_time, "stable after pending"),
+            base_time + timedelta(seconds=4),
+        )
+
+        ensure_steps_compacted(agent=self.agent)
+
+        snapshot = PersistentAgentStepSnapshot.objects.get()
+        self.assertEqual(snapshot.snapshot_until, second.created_at)
+        self.assertEqual(
+            set(
+                PersistentAgentStep.objects.filter(
+                    created_at__gt=snapshot.snapshot_until
+                ).values_list("id", flat=True)
+            ),
+            {pending.id, latest.id},
+        )
+        self.assertIn("stable one", snapshot.summary)
+        self.assertIn("stable two", snapshot.summary)
+        self.assertNotIn("pending_tool", snapshot.summary)
+        self.assertEqual(first.agent_id, self.agent.id)
+
+        pending.tool_call.status = PersistentAgentToolCall.Status.COMPLETE
+        pending.tool_call.save(update_fields=["status"])
+        for second_offset in (5, 6):
+            added = self._make_generic_step(base_time, f"stable {second_offset}")
+            self._set_step_time(added, base_time + timedelta(seconds=second_offset))
+
+        ensure_steps_compacted(agent=self.agent)
+
+        finalized_snapshot = PersistentAgentStepSnapshot.objects.latest("snapshot_until")
+        self.assertGreater(finalized_snapshot.snapshot_until, pending.created_at)
+        self.assertIn("pending_tool", finalized_snapshot.summary)
+
+    @override_settings(PA_RAW_STEP_LIMIT=4, PA_STEP_COMPACTION_TAIL=2)
+    def test_cutoff_includes_every_step_with_the_same_timestamp(self):
+        base_time = self.agent.created_at
+        shared_time = base_time + timedelta(seconds=3)
+        timestamps = (
+            base_time + timedelta(seconds=1),
+            base_time + timedelta(seconds=2),
+            shared_time,
+            shared_time,
+            base_time + timedelta(seconds=4),
+        )
+        steps = []
+        for index, timestamp in enumerate(timestamps):
+            step = self._make_generic_step(base_time, f"step {index}")
+            steps.append(self._set_step_time(step, timestamp))
+        summarized_ids = []
+
+        def summarize(_previous, selected, _safety_identifier):
+            summarized_ids.extend(step.step_id for step in selected)
+            return "summary"
+
+        ensure_steps_compacted(agent=self.agent, summarise_fn=summarize)
+
+        snapshot = PersistentAgentStepSnapshot.objects.get()
+        self.assertEqual(snapshot.snapshot_until, shared_time)
+        self.assertCountEqual(
+            summarized_ids,
+            [str(step.id) for step in steps[:4]],
+        )
+        self.assertEqual(
+            list(
+                PersistentAgentStep.objects.filter(
+                    created_at__gt=snapshot.snapshot_until
+                ).values_list("description", flat=True)
+            ),
+            ["step 4"],
+        )
+
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=1)
+    def test_backdated_step_during_summary_aborts_snapshot(self):
+        base_time = self.agent.created_at
+        for index in range(4):
+            step = self._make_generic_step(base_time, f"original {index}")
+            self._set_step_time(step, base_time + timedelta(seconds=index + 1))
+
+        def summarize(_previous, selected, _safety_identifier):
+            inserted = self._make_generic_step(base_time, "arrived during summary")
+            self._set_step_time(inserted, selected[-1].created_at)
+            return "summary"
+
+        ensure_steps_compacted(agent=self.agent, summarise_fn=summarize)
+
+        self.assertFalse(PersistentAgentStepSnapshot.objects.exists())
+        self.assertEqual(PersistentAgentStep.objects.count(), 5)
+
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=1)
+    def test_step_arriving_after_cutoff_remains_raw(self):
+        base_time = self.agent.created_at
+        for index in range(4):
+            step = self._make_generic_step(base_time, f"original {index}")
+            self._set_step_time(step, base_time + timedelta(seconds=index + 1))
+
+        def summarize(_previous, selected, _safety_identifier):
+            inserted = self._make_generic_step(base_time, "arrived after cutoff")
+            self._set_step_time(
+                inserted,
+                selected[-1].created_at + timedelta(seconds=10),
+            )
+            return "summary"
+
+        ensure_steps_compacted(agent=self.agent, summarise_fn=summarize)
+
+        snapshot = PersistentAgentStepSnapshot.objects.get()
+        self.assertCountEqual(
+            list(
+                PersistentAgentStep.objects.filter(
+                    created_at__gt=snapshot.snapshot_until,
+                ).values_list("description", flat=True)
+            ),
+            ["original 3", "arrived after cutoff"],
+        )
+
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=1)
+    def test_empty_summary_does_not_advance_snapshot(self):
+        base_time = self.agent.created_at
+        for index in range(4):
+            step = self._make_generic_step(base_time, f"step {index}")
+            self._set_step_time(step, base_time + timedelta(seconds=index + 1))
+
+        with self.assertRaises(CompactionSummaryError):
+            ensure_steps_compacted(
+                agent=self.agent,
+                summarise_fn=lambda _previous, _steps, _safety_identifier: "",
+            )
+
+        self.assertFalse(PersistentAgentStepSnapshot.objects.exists())
+
     def test_llm_compaction_preserves_active_scoped_directives(self):
         response = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content="summary"))]
@@ -419,3 +574,14 @@ class StepCompactionTests(TestCase):
         self.assertIn("actor or source, scope identifier, and effective constraint", system_prompt)
         self.assertIn("until explicitly superseded, expired, or reassigned", system_prompt)
         self.assertIn("no continuing consequence", system_prompt)
+
+    def test_llm_failure_raises_retryable_compaction_error(self):
+        with patch(
+            "api.agent.core.step_compaction.get_summarization_llm_config",
+            return_value=("openai", "openai/test", {}),
+        ), patch(
+            "api.agent.core.step_compaction.run_completion",
+            side_effect=RuntimeError("provider unavailable"),
+        ):
+            with self.assertRaises(CompactionSummaryError):
+                llm_summarise_steps("", [], agent=self.agent)

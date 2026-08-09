@@ -57,9 +57,7 @@ class AgentCapabilitiesPromptTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = build_prompt_context(agent)
         return "\n".join(message["content"] for message in context)
 

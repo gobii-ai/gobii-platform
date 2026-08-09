@@ -2561,9 +2561,7 @@ class FirstRunPromptCalibrationTests(TestCase):
             preferred_contact_endpoint=endpoint,
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ), patch(
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), patch(
             "api.agent.core.prompt_context.get_llm_config_with_failover",
             return_value=[("endpoint", "openai/gpt-4o-mini", {})],
         ):
@@ -2599,9 +2597,7 @@ class FirstRunPromptCalibrationTests(TestCase):
             preferred_contact_endpoint=endpoint,
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ), patch(
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), patch(
             "api.agent.core.prompt_context.get_llm_config_with_failover",
             return_value=[("endpoint", "openai/gpt-4o-mini", {})],
         ):
@@ -2634,9 +2630,7 @@ class FirstRunPromptCalibrationTests(TestCase):
             preferred_contact_endpoint=endpoint,
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ), patch(
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), patch(
             "api.agent.core.prompt_context.get_llm_config_with_failover",
             return_value=[("endpoint", "openai/gpt-4o-mini", {})],
         ):

@@ -491,7 +491,12 @@ class TokenUsageTrackingTest(TestCase):
 
         with patch("api.agent.core.token_usage.litellm.get_model_info") as mock_get_model_info:
             mock_get_model_info.side_effect = self._pricing_for_provider_hint
-            summary = llm_summarise_comms("", [], agent=self.agent)
+            summary = llm_summarise_comms(
+                "",
+                [],
+                agent=self.agent,
+                eval_run_id=str(self.eval_run.id),
+            )
 
         self.assertEqual(summary, "Result")
         completion = PersistentAgentCompletion.objects.filter(
@@ -500,6 +505,7 @@ class TokenUsageTrackingTest(TestCase):
         ).latest("created_at")
         self.assertEqual(completion.llm_model, "model-name")
         self.assertEqual(completion.llm_provider, "provider-key")
+        self.assertEqual(completion.eval_run, self.eval_run)
         self.assertEqual(completion.prompt_tokens, 10)
         self.assertEqual(completion.input_cost_total, Decimal("0.000018"))
         self.assertEqual(completion.total_cost, Decimal("0.000038"))
@@ -516,7 +522,12 @@ class TokenUsageTrackingTest(TestCase):
 
         with patch("api.agent.core.token_usage.litellm.get_model_info") as mock_get_model_info:
             mock_get_model_info.side_effect = self._pricing_for_provider_hint
-            summary = llm_summarise_steps("", [], agent=self.agent)
+            summary = llm_summarise_steps(
+                "",
+                [],
+                agent=self.agent,
+                eval_run_id=str(self.eval_run.id),
+            )
 
         self.assertEqual(summary, "Step summary")
         completion = PersistentAgentCompletion.objects.filter(
@@ -525,6 +536,7 @@ class TokenUsageTrackingTest(TestCase):
         ).latest("created_at")
         self.assertEqual(completion.llm_model, "step-model")
         self.assertEqual(completion.llm_provider, "provider-key")
+        self.assertEqual(completion.eval_run, self.eval_run)
         self.assertEqual(completion.input_cost_total, Decimal("0.000018"))
         self.assertEqual(completion.total_cost, Decimal("0.000038"))
 

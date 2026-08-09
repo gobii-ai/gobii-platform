@@ -1089,14 +1089,12 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(notice.raw_payload["discord_message_id"], "discord-message-1")
 
     @tag("batch_agent_webhooks")
-    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
-    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    @patch("api.agent.core.prompt_context.enqueue_history_compaction")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
     def test_inbound_reply_context_is_persisted_and_rendered_for_agent(
         self,
         schedule_mock,
-        _comms_compacted_mock,
-        _steps_compacted_mock,
+        _compaction_mock,
     ):
         guild = self._guild()
         PersistentAgentDiscordChannelSubscription.objects.create(
@@ -1160,14 +1158,12 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn('"value":"v42"', user_prompt)
 
     @tag("batch_agent_webhooks")
-    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
-    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    @patch("api.agent.core.prompt_context.enqueue_history_compaction")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
     def test_inbound_embed_only_message_is_readable_in_agent_prompt(
         self,
         schedule_mock,
-        _comms_compacted_mock,
-        _steps_compacted_mock,
+        _compaction_mock,
     ):
         guild = self._guild()
         PersistentAgentDiscordChannelSubscription.objects.create(
