@@ -138,7 +138,7 @@
         </nav>
         <p class="gk-eyebrow">Gobii Agent API</p>
         <h1 id="engineering-title" class="gk-display">
-          Build persistent agents
+          Build persistent AI agents
           <span class="gk-accent">with one API</span>
         </h1>
         <p class="gk-sub">
@@ -186,10 +186,28 @@ curl <span class="flag">-X</span> POST \
     "schedule": "@daily"
   }'</span> \
   https://gobii.ai/api/v1/agents/</code></pre>
+        <div class="eng-codebar">
+          <span class="eng-code-title">Response excerpt</span>
+          <button type="button" class="eng-copy-button" data-copy-code-target="agent-quickstart-response" aria-describedby="agent-response-copy-status">
+            {% lucide "copy" class="h-3.5 w-3.5" %}
+            <span data-copy-label>Copy</span>
+          </button>
+        </div>
+        <pre id="agent-quickstart-response" tabindex="0"><code>{
+    "id": "b0bd82a5-ed5a-43f4-87f9-242585a2428f",
+    "name": "Market Monitor",
+    "schedule": "@daily",
+    "is_active": true,
+    "life_state": "active",
+    "created_at": "2026-08-09T22:02:50.916739Z"
+}</code></pre>
         <p class="eng-code-caption">
+          Additional response fields omitted for brevity.
+          <br>
           Verified against the current <a class="eng-inline-link" href="https://docs.gobii.ai/developers/developer-agents#create-an-agent">Agent API create example</a>.
         </p>
         <span id="agent-copy-status" class="sr-only" aria-live="polite"></span>
+        <span id="agent-response-copy-status" class="sr-only" aria-live="polite"></span>
       </div>
     </div>
   </section>

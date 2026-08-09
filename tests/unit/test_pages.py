@@ -4477,7 +4477,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
         page_text = soup.get_text(" ", strip=True)
-        expected_title = "Agent API for Persistent AI Agents | Gobii"
+        expected_title = "AI Agent API for Persistent, Always-On Agents | Gobii"
         expected_description = (
             "Build persistent agents with Gobii's Agent API. Schedule or trigger work, "
             "connect tools and files, inspect timelines, and deploy in Gobii Cloud or self-hosted."
@@ -4506,7 +4506,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertEqual(len(soup.find_all("h1")), 1)
         self.assertEqual(
             soup.find("h1").get_text(" ", strip=True),
-            "Build persistent agents with one API",
+            "Build persistent AI agents with one API",
         )
         self.assertIn("One agent resource across the lifecycle", page_text)
         self.assertIn("What teams build with the Agent API", page_text)
@@ -4536,6 +4536,38 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         copy_button = soup.find("button", attrs={"data-copy-code-target": "agent-quickstart"})
         self.assertIsNotNone(copy_button)
         self.assertEqual(copy_button.get("aria-describedby"), "agent-copy-status")
+        response_example = soup.find("pre", id="agent-quickstart-response")
+        self.assertIsNotNone(response_example)
+        self.assertEqual(
+            response_example.get_text(),
+            """{
+    "id": "b0bd82a5-ed5a-43f4-87f9-242585a2428f",
+    "name": "Market Monitor",
+    "schedule": "@daily",
+    "is_active": true,
+    "life_state": "active",
+    "created_at": "2026-08-09T22:02:50.916739Z"
+}""",
+        )
+        response_bar = response_example.find_previous_sibling("div", class_="eng-codebar")
+        self.assertEqual(
+            response_bar.find(class_="eng-code-title").get_text(strip=True),
+            "Response excerpt",
+        )
+        response_caption = response_example.find_next_sibling("p", class_="eng-code-caption")
+        self.assertIn(
+            "Additional response fields omitted for brevity.",
+            response_caption.get_text(" ", strip=True),
+        )
+        response_copy_button = soup.find(
+            "button",
+            attrs={"data-copy-code-target": "agent-quickstart-response"},
+        )
+        self.assertIsNotNone(response_copy_button)
+        self.assertEqual(
+            response_copy_button.get("aria-describedby"),
+            "agent-response-copy-status",
+        )
 
         hrefs = {link.get("href") for link in soup.find_all("a")}
         expected_links = {

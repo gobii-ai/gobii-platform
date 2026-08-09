@@ -5000,7 +5000,7 @@ class SolutionView(TemplateView):
             'title': 'API',
             'tagline': "Build persistent agents with Gobii's Agent API.",
             'description': 'Create persistent agents, schedule or trigger work, connect tools and files, inspect timelines, and manage the agent lifecycle through one API.',
-            'seo_title': 'Agent API for Persistent AI Agents | Gobii',
+            'seo_title': 'AI Agent API for Persistent, Always-On Agents | Gobii',
             'seo_description': "Build persistent agents with Gobii's Agent API. Schedule or trigger work, connect tools and files, inspect timelines, and deploy in Gobii Cloud or self-hosted.",
             'date_modified': '2026-08-09',
             'social_image': 'images/solutions/engineering-hero.jpg',
