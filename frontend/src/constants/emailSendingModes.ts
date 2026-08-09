@@ -7,7 +7,7 @@ export const EMAIL_SENDING_MODE_OPTIONS = [
   {
     value: 'review_new_contacts',
     title: 'Review only new contacts',
-    description: 'Known contacts send immediately; newly auto-approved external recipients wait for review.',
+    description: 'Contacts you add or approve send immediately. If this agent can add email contacts automatically, its first email to each new contact waits in Outbox.',
   },
   {
     value: 'send_automatically',
