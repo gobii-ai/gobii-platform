@@ -1820,7 +1820,10 @@ class LibraryViewTests(TestCase):
         self.assertEqual(curated_agent["templateUrl"], "/library/team-ops/gobii-project-manager/")
         self.assertEqual(curated_agent["publicProfileHandle"], "")
         self.assertFalse(curated_agent["isOfficial"])
-        self.assertContains(response, "AI Employee Template Library")
+        self.assertContains(
+            response,
+            "AI Agent Templates for Sales, Recruiting, Research, and Operations",
+        )
         self.assertEqual(
             response.context["library_page_title"],
             "AI Employee Template Library: Business Roles | Gobii",

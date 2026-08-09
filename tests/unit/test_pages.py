@@ -4590,7 +4590,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         library_soup = BeautifulSoup(library_response.content, "html.parser")
         self.assertEqual(
             library_soup.find("h1").get_text(" ", strip=True),
-            "AI Employee Template Library",
+            "AI Agent Templates for Sales, Recruiting, Research, and Operations",
         )
 
         detail_response = self.client.get(

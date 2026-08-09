@@ -973,7 +973,7 @@ export function LibraryScreen({
     ? `${officialOnly ? 'Official ' : ''}${selectedCategory} AI Employee Templates`
     : officialOnly
       ? 'Official Gobii AI Employee Templates'
-      : 'AI Employee Template Library'
+      : 'AI Agent Templates for Sales, Recruiting, Research, and Operations'
   const pageDescription = selectedCategory
     ? officialOnly
       ? `Browse official ${selectedCategory} AI employee templates maintained by Gobii.`
