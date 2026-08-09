@@ -77,6 +77,10 @@
             <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>
           </button>
           <span class="gk-dd-panel" id="gk-dd-panel"><span class="gk-dd-inner">
+            <a class="gk-dd-item" href="{% url 'pages:ai_employees' %}">
+              <span class="gk-dd-ic">{% lucide "workflow" class="h-4 w-4" %}</span>
+              <span class="gk-dd-tx"><span class="gk-dd-t">How AI employees work</span><span class="gk-dd-s">Capabilities, oversight, and handoffs</span></span>
+            </a>
             <a class="gk-dd-item" href="{% url 'pages:library' %}">
               <span class="gk-dd-ic">{% lucide "layout-grid" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">Agent library</span><span class="gk-dd-s">Premade agents, ready to hire</span></span>
@@ -260,7 +264,17 @@
   function inTri(pt,v1,v2,v3){ var d1=sgn(pt,v1,v2), d2=sgn(pt,v2,v3), d3=sgn(pt,v3,v1);
     return !(((d1<0)||(d2<0)||(d3<0)) && ((d1>0)||(d2>0)||(d3>0))); }
   trigger.addEventListener('mouseenter', function(){ clearTimeout(closeTimer); setOpen(true); });
-  trigger.addEventListener('click', function(e){ e.preventDefault(); setOpen(!open); });
+  trigger.addEventListener('click', function(e){
+    e.preventDefault();
+    // Pointer activation follows mouseenter on desktop and emulated touch devices.
+    // Keep that menu open; keyboard activation is handled explicitly below.
+    if (e.detail !== 0) setOpen(true);
+  });
+  trigger.addEventListener('keydown', function(e){
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    setOpen(!open);
+  });
   dd.addEventListener('mouseleave', scheduleClose);
   panel.addEventListener('mouseenter', function(){ clearTimeout(closeTimer); });
   document.addEventListener('click', function(e){ if (open && !dd.contains(e.target)) setOpen(false); });
@@ -291,6 +305,7 @@
        class="gk-mobile-panel"
        x-cloak>
     {% if settings.GOBII_PROPRIETARY_MODE %}
+      <a href="{% url 'pages:ai_employees' %}">How AI employees work</a>
       <a href="{% url 'pages:library' %}">Agent library</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='recruiting' %}">Recruiting</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='sales' %}">Sales</a>
