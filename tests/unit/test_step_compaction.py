@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from openai import OpenAIError
 
 from api.agent.core.compaction_exceptions import CompactionSummaryError
 from api.agent.core.internal_reasoning import build_internal_reasoning_description
@@ -585,7 +586,18 @@ class StepCompactionTests(TestCase):
             return_value=("openai", "openai/test", {}),
         ), patch(
             "api.agent.core.step_compaction.run_completion",
-            side_effect=RuntimeError("provider unavailable"),
+            side_effect=OpenAIError("provider unavailable"),
         ):
             with self.assertRaises(CompactionSummaryError):
+                llm_summarise_steps("", [], agent=self.agent)
+
+    def test_unexpected_llm_error_is_not_marked_retryable(self):
+        with patch(
+            "api.agent.core.step_compaction.get_summarization_llm_config",
+            return_value=("openai", "openai/test", {}),
+        ), patch(
+            "api.agent.core.step_compaction.run_completion",
+            side_effect=RuntimeError("bug"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "bug"):
                 llm_summarise_steps("", [], agent=self.agent)

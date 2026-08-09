@@ -7,6 +7,7 @@ from typing import Callable, List, Sequence, Optional
 
 from django.conf import settings
 from django.db import transaction
+from openai import OpenAIError
 
 from ...models import PersistentAgent, PersistentAgentMessage, PersistentAgentCommsSnapshot, PersistentAgentCompletion
 
@@ -15,8 +16,8 @@ import logging
 from opentelemetry import trace
 
 from .compaction_exceptions import CompactionSummaryError
-from .llm_config import get_summarization_llm_config
-from .llm_utils import run_completion
+from .llm_config import LLMNotConfiguredError, get_summarization_llm_config
+from .llm_utils import LiteLLMResponseError, run_completion
 from .token_usage import log_agent_completion, set_usage_span_attributes
 from ..structured_peer_payload import (
     StructuredPeerPayload,
@@ -292,20 +293,21 @@ def llm_summarise_comms(
                 params["safety_identifier"] = str(safety_identifier)
 
         response = run_completion(model=model, messages=prompt, params=params)
-        token_usage, usage = log_agent_completion(
-            agent,
-            completion_type=PersistentAgentCompletion.CompletionType.COMPACTION,
-            eval_run_id=eval_run_id,
-            response=response,
-            model=model,
-            provider=provider,
-            pricing_model=params.get("pricing_model"),
-            prompt_messages=prompt,
-        )
-
-        set_usage_span_attributes(trace.get_current_span(), usage)
-
-        return response.choices[0].message.content.strip()
-    except Exception as exc:
+    except (LLMNotConfiguredError, OpenAIError, LiteLLMResponseError) as exc:
         logger.exception("LiteLLM communication summarization failed")
         raise CompactionSummaryError("LiteLLM communication summarization failed") from exc
+
+    token_usage, usage = log_agent_completion(
+        agent,
+        completion_type=PersistentAgentCompletion.CompletionType.COMPACTION,
+        eval_run_id=eval_run_id,
+        response=response,
+        model=model,
+        provider=provider,
+        pricing_model=params.get("pricing_model"),
+        prompt_messages=prompt,
+    )
+
+    set_usage_span_attributes(trace.get_current_span(), usage)
+
+    return response.choices[0].message.content.strip()

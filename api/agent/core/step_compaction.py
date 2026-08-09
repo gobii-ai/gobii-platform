@@ -26,6 +26,7 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Case, F, TextField, Value, When
 from django.db.models.functions import Concat, Length, Substr, Greatest
+from openai import OpenAIError
 
 from ...models import PersistentAgent, PersistentAgentStep, PersistentAgentStepSnapshot, PersistentAgentToolCall, PersistentAgentCronTrigger, PersistentAgentSystemStep, PersistentAgentCompletion
 
@@ -34,8 +35,8 @@ from opentelemetry import trace
 
 from . import internal_reasoning
 from .compaction_exceptions import CompactionSummaryError
-from .llm_config import get_summarization_llm_config
-from .llm_utils import run_completion
+from .llm_config import LLMNotConfiguredError, get_summarization_llm_config
+from .llm_utils import LiteLLMResponseError, run_completion
 from .token_usage import log_agent_completion, set_usage_span_attributes
 
 MAX_TOOL_RESULT_CHARS: int = 200_000
@@ -477,20 +478,21 @@ def llm_summarise_steps(
             messages=prompt,
             params=params,
         )
-        token_usage, usage = log_agent_completion(
-            agent,
-            completion_type=PersistentAgentCompletion.CompletionType.STEP_COMPACTION,
-            eval_run_id=eval_run_id,
-            response=resp,
-            model=model,
-            provider=provider,
-            pricing_model=params.get("pricing_model"),
-            prompt_messages=prompt,
-        )
-
-        set_usage_span_attributes(trace.get_current_span(), usage)
-
-        return resp.choices[0].message.content.strip()
-    except Exception as exc:
+    except (LLMNotConfiguredError, OpenAIError, LiteLLMResponseError) as exc:
         logger.exception("LiteLLM step summarization failed")
         raise CompactionSummaryError("LiteLLM step summarization failed") from exc
+
+    token_usage, usage = log_agent_completion(
+        agent,
+        completion_type=PersistentAgentCompletion.CompletionType.STEP_COMPACTION,
+        eval_run_id=eval_run_id,
+        response=resp,
+        model=model,
+        provider=provider,
+        pricing_model=params.get("pricing_model"),
+        prompt_messages=prompt,
+    )
+
+    set_usage_span_attributes(trace.get_current_span(), usage)
+
+    return resp.choices[0].message.content.strip()

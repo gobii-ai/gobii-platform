@@ -12,6 +12,7 @@ from redis.exceptions import RedisError
 
 from config.redis_client import get_redis_client
 
+from . import internal_reasoning
 from ...models import (
     PersistentAgent,
     PersistentAgentCommsSnapshot,
@@ -42,7 +43,7 @@ def history_compaction_needed(agent: PersistentAgent) -> bool:
     step_qs = PersistentAgentStep.objects.filter(
         agent=agent,
         created_at__gt=step_cutoff,
-    )
+    ).exclude(description__startswith=internal_reasoning.INTERNAL_REASONING_PREFIX)
     if _has_more_than(step_qs, settings.PA_RAW_STEP_LIMIT):
         return True
 
@@ -157,7 +158,7 @@ def enqueue_history_compaction(
             args=[str(agent.id), lease_token, routing_profile_id, eval_run_id],
             queue="celery",
         )
-    except (CeleryError, KombuOperationalError):
+    except (CeleryError, KombuOperationalError, OSError):
         logger.warning(
             "Unable to enqueue history compaction for agent %s",
             agent.id,

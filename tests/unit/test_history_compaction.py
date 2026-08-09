@@ -11,6 +11,7 @@ from api.agent.core.compaction_exceptions import CompactionSummaryError
 from api.agent.core.history_compaction import enqueue_history_compaction
 from api.agent.core.history_compaction import history_compaction_needed
 from api.agent.core.history_compaction import release_history_compaction_lease
+from api.agent.core.internal_reasoning import build_internal_reasoning_description
 from api.agent.tasks.history_compaction import compact_agent_history_task
 from api.models import BrowserUseAgent, LLMRoutingProfile, PersistentAgent, PersistentAgentStep
 from config.redis_client import get_redis_client
@@ -63,13 +64,27 @@ class AsyncHistoryCompactionTests(TestCase):
 
         self.assertTrue(history_compaction_needed(self.agent))
 
+    @override_settings(PA_RAW_STEP_LIMIT=2)
+    def test_threshold_ignores_internal_reasoning_steps(self):
+        for index in range(3):
+            PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description=build_internal_reasoning_description(f"thought {index}"),
+            )
+
+        self.assertFalse(history_compaction_needed(self.agent))
+
     @patch("api.agent.tasks.history_compaction.compact_agent_history_task.apply_async")
     @patch("api.agent.core.history_compaction.history_compaction_needed", return_value=True)
     def test_publish_failure_releases_lease(self, _needed_mock, apply_async_mock):
-        apply_async_mock.side_effect = [KombuOperationalError("publish failed"), None]
+        lease_key = f"agent-history-compaction:{self.agent.id}"
+        for error in (KombuOperationalError("publish failed"), OSError("connection reset")):
+            apply_async_mock.side_effect = error
 
-        self.assertFalse(enqueue_history_compaction(agent=self.agent))
-        self.assertTrue(enqueue_history_compaction(agent=self.agent))
+            with self.subTest(error=type(error).__name__):
+                self.assertFalse(enqueue_history_compaction(agent=self.agent))
+                self.assertIsNone(self.redis.get(lease_key))
+
         self.assertEqual(apply_async_mock.call_count, 2)
 
     @patch("api.agent.tasks.history_compaction.compact_agent_history_task.apply_async")

@@ -7,6 +7,7 @@ from django.conf import settings
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+from openai import OpenAIError
 
 from api.agent.core.compaction import ensure_comms_compacted, llm_summarise_comms
 from api.agent.core.compaction_exceptions import CompactionSummaryError
@@ -359,9 +360,20 @@ class CompactionTests(TestCase):
             return_value=("openai", "openai/test", {}),
         ), patch(
             "api.agent.core.compaction.run_completion",
-            side_effect=RuntimeError("provider unavailable"),
+            side_effect=OpenAIError("provider unavailable"),
         ):
             with self.assertRaises(CompactionSummaryError):
+                llm_summarise_comms("", [], agent=self.agent)
+
+    def test_unexpected_llm_error_is_not_marked_retryable(self):
+        with patch(
+            "api.agent.core.compaction.get_summarization_llm_config",
+            return_value=("openai", "openai/test", {}),
+        ), patch(
+            "api.agent.core.compaction.run_completion",
+            side_effect=RuntimeError("bug"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "bug"):
                 llm_summarise_comms("", [], agent=self.agent)
 
     def test_llm_compaction_preserves_actor_and_channel_identity(self):
