@@ -1826,7 +1826,13 @@ class LibraryViewTests(TestCase):
         )
         self.assertEqual(
             response.context["library_page_title"],
-            "AI Employee Template Library: Business Roles | Gobii",
+            "AI Agent Templates for Sales, Recruiting & More | Gobii",
+        )
+        self.assertEqual(
+            response.context["library_page_description"],
+            "Explore AI agent templates for sales, recruiting, research, "
+            "operations, finance, and more. Customize any template into a "
+            "Gobii AI Employee for your workflow.",
         )
         self.assertLessEqual(len(response.context["library_page_title"]), 60)
         self.assertLessEqual(len(response.context["library_page_description"]), 160)

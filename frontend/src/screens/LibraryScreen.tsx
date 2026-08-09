@@ -980,7 +980,7 @@ export function LibraryScreen({
       : `Browse publicly shared ${selectedCategory} AI employee templates.`
     : officialOnly
       ? 'Browse AI employee templates maintained by Gobii for common workflows.'
-      : 'Choose a role from Gobii and the community, then customize the AI employee for your workflow.'
+      : 'Choose an AI agent template from Gobii and the community, then customize it into a Gobii AI Employee for your workflow.'
 
   const navigateToFilters = useCallback((filters: LibraryHistoryFilters) => {
     const nextUrl = buildLibraryUrl(filters.categorySlug, filters.officialOnly)
