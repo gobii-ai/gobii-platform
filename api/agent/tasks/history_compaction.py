@@ -4,6 +4,7 @@ import logging
 from functools import partial
 
 from celery import shared_task
+from celery.exceptions import Retry
 from django.db import DatabaseError
 
 from api.agent.core.compaction import ensure_comms_compacted, llm_summarise_comms
@@ -86,9 +87,12 @@ def compact_agent_history_task(
     except (CompactionSummaryError, DatabaseError) as exc:
         retries = int(self.request.retries or 0)
         if retries < self.max_retries:
-            retrying = True
             refresh_history_compaction_lease(persistent_agent_id, lease_token)
-            raise self.retry(exc=exc, countdown=_RETRY_DELAYS_SECONDS[retries])
+            try:
+                self.retry(exc=exc, countdown=_RETRY_DELAYS_SECONDS[retries])
+            except Retry:
+                retrying = True
+                raise
         logger.warning(
             "History compaction exhausted retries for agent %s",
             persistent_agent_id,
@@ -97,6 +101,3 @@ def compact_agent_history_task(
     finally:
         if not retrying:
             release_history_compaction_lease(persistent_agent_id, lease_token)
-
-
-__all__ = ["compact_agent_history_task"]

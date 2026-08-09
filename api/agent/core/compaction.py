@@ -25,32 +25,20 @@ from ..structured_peer_payload import (
 )
 from ..comms.source_metadata import get_message_source_metadata
 
-RAW_MSG_LIMIT: int = settings.PA_RAW_MSG_LIMIT
-COMMS_COMPACTION_TAIL: int = max(0, settings.PA_COMMS_COMPACTION_TAIL)
 COMMS_COMPACTION_COMPONENT_CHAR_LIMIT = 4000
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "ensure_comms_compacted",
-    "RAW_MSG_LIMIT",
-    "COMMS_COMPACTION_TAIL",
-    "ensure_steps_compacted",
-    "llm_summarise_comms",
-]
 
 @tracer.start_as_current_span("COMPACT Comms History")
 def ensure_comms_compacted(
     *,
     agent: PersistentAgent,
-    summarise_fn: Callable[[str, Sequence[PersistentAgentMessage], str], str] | None = None,
+    summarise_fn: Callable[[str, Sequence[PersistentAgentMessage], str | None], str],
     safety_identifier: str | None = None,
 ) -> None:
     """Summarize old messages when the uncompacted history exceeds its limit."""
-    if summarise_fn is None:
-        summarise_fn = _default_summarise  # type: ignore[assignment]
-
     # ------------------------------ Phase 1 ------------------------------ #
     # Decide *whether* we need to compact while holding the lock.  This keeps
     # the critical section extremely small – just a couple of quick queries –
@@ -106,21 +94,14 @@ def ensure_comms_compacted(
             message for message in raw_messages
             if message.timestamp <= snapshot_until
         ]
-        captured_message_ids = tuple(str(message.id) for message in messages_to_compact)
+        captured_message_ids = frozenset(message.id for message in messages_to_compact)
         previous_summary = last_snap.summary if last_snap else ""
 
     # ------------------------------ Phase 2 ------------------------------ #
     # Slow work happens *outside* the lock.
-    try:
-        with tracer.start_as_current_span("COMPACT Summarise") as summarise_span:
-            summarise_span.set_attribute("messages.count", len(messages_to_compact))
-            new_summary = summarise_fn(previous_summary, messages_to_compact, safety_identifier)
-    except CompactionSummaryError:
-        raise
-    except Exception as exc:
-        raise CompactionSummaryError(
-            f"Communication summarization failed for agent {agent.id}"
-        ) from exc
+    with tracer.start_as_current_span("COMPACT Summarise") as summarise_span:
+        summarise_span.set_attribute("messages.count", len(messages_to_compact))
+        new_summary = summarise_fn(previous_summary, messages_to_compact, safety_identifier)
     if not isinstance(new_summary, str) or not new_summary.strip():
         raise CompactionSummaryError(
             f"Communication summarization returned an empty summary for agent {agent.id}"
@@ -144,13 +125,12 @@ def ensure_comms_compacted(
             span.set_attribute("compaction.skipped", True)
             return
 
-        current_message_ids = tuple(
-            str(message_id)
-            for message_id in PersistentAgentMessage.objects.filter(
+        current_message_ids = frozenset(
+            PersistentAgentMessage.objects.filter(
                 owner_agent=agent_locked,
                 timestamp__gt=lower_bound,
                 timestamp__lte=snapshot_until,
-            ).order_by("timestamp", "id").values_list("id", flat=True)
+            ).values_list("id", flat=True)
         )
         if current_message_ids != captured_message_ids:
             span.set_attribute("compaction.skipped", True)
@@ -176,26 +156,6 @@ def ensure_comms_compacted(
 
         # Again: do **not** delete raw messages; long-term pruning is out of
         # scope and can be handled by a background retention policy.
-
-
-def _default_summarise(
-    previous: str,
-    messages: Sequence[PersistentAgentMessage],
-    safety_identifier: str | None = None,
-) -> str:
-    """Fallback summariser for testing and error cases.
-
-    Provides deterministic output for unit tests and serves as a fallback when
-    LLM summarisation fails. Simply concatenates the previous summary with a 
-    placeholder line indicating the number of messages processed.
-    """
-    return (
-        previous
-        + ("\n" if previous else "")
-        + f"[SUMMARY PLACEHOLDER for {len(messages)} messages]"
-        + ("\n")
-        + (f"[Called for {safety_identifier}]" if safety_identifier else "")
-    )
 
 
 def _format_structured_payload_for_compaction(payload: StructuredPeerPayload) -> str:
@@ -346,11 +306,6 @@ def llm_summarise_comms(
         set_usage_span_attributes(trace.get_current_span(), usage)
 
         return response.choices[0].message.content.strip()
-    except CompactionSummaryError:
-        raise
     except Exception as exc:
         logger.exception("LiteLLM communication summarization failed")
         raise CompactionSummaryError("LiteLLM communication summarization failed") from exc
-
-# Re-export for convenience – avoids changing existing imports elsewhere
-from .step_compaction import ensure_steps_compacted  # noqa: E402, isort:skip 

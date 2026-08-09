@@ -22,12 +22,9 @@ from ...models import (
 
 logger = logging.getLogger(__name__)
 
-HISTORY_COMPACTION_QUEUE = "celery"
-_LEASE_KEY_TEMPLATE = "agent-history-compaction:{agent_id}"
-
 
 def _lease_key(agent_id: Any) -> str:
-    return _LEASE_KEY_TEMPLATE.format(agent_id=agent_id)
+    return f"agent-history-compaction:{agent_id}"
 
 
 def _has_more_than(queryset, limit: int) -> bool:
@@ -36,29 +33,29 @@ def _has_more_than(queryset, limit: int) -> bool:
 
 def history_compaction_needed(agent: PersistentAgent) -> bool:
     """Return whether either uncompacted history stream exceeds its limit."""
-    step_snapshot = (
+    step_cutoff = (
         PersistentAgentStepSnapshot.objects.filter(agent=agent)
         .order_by("-snapshot_until")
+        .values_list("snapshot_until", flat=True)
         .first()
-    )
-    step_lower_bound = step_snapshot.snapshot_until if step_snapshot else agent.created_at
+    ) or agent.created_at
     step_qs = PersistentAgentStep.objects.filter(
         agent=agent,
-        created_at__gt=step_lower_bound,
-    ).order_by("created_at", "id")
+        created_at__gt=step_cutoff,
+    )
     if _has_more_than(step_qs, settings.PA_RAW_STEP_LIMIT):
         return True
 
-    comms_snapshot = (
+    comms_cutoff = (
         PersistentAgentCommsSnapshot.objects.filter(agent=agent)
         .order_by("-snapshot_until")
+        .values_list("snapshot_until", flat=True)
         .first()
-    )
-    comms_lower_bound = comms_snapshot.snapshot_until if comms_snapshot else agent.created_at
+    ) or agent.created_at
     comms_qs = PersistentAgentMessage.objects.filter(
         owner_agent=agent,
-        timestamp__gt=comms_lower_bound,
-    ).order_by("timestamp", "id")
+        timestamp__gt=comms_cutoff,
+    )
     return _has_more_than(comms_qs, settings.PA_RAW_MSG_LIMIT)
 
 
@@ -133,10 +130,8 @@ def enqueue_history_compaction(
         return False
 
     lease_token = uuid.uuid4().hex
-    redis_client = None
     try:
-        redis_client = get_redis_client()
-        acquired = redis_client.set(
+        acquired = get_redis_client().set(
             _lease_key(agent.id),
             lease_token,
             nx=True,
@@ -152,7 +147,6 @@ def enqueue_history_compaction(
             agent.id,
             exc_info=True,
         )
-        redis_client = None
         lease_token = ""
 
     routing_profile_id = str(routing_profile.id) if routing_profile is not None else None
@@ -161,7 +155,7 @@ def enqueue_history_compaction(
 
         compact_agent_history_task.apply_async(
             args=[str(agent.id), lease_token, routing_profile_id, eval_run_id],
-            queue=HISTORY_COMPACTION_QUEUE,
+            queue="celery",
         )
     except (CeleryError, KombuOperationalError):
         logger.warning(
@@ -169,15 +163,6 @@ def enqueue_history_compaction(
             agent.id,
             exc_info=True,
         )
-        if redis_client is not None:
-            release_history_compaction_lease(agent.id, lease_token)
+        release_history_compaction_lease(agent.id, lease_token)
         return False
     return True
-
-
-__all__ = [
-    "enqueue_history_compaction",
-    "history_compaction_needed",
-    "refresh_history_compaction_lease",
-    "release_history_compaction_lease",
-]

@@ -73,6 +73,17 @@ class CompactionTests(TestCase):
         message.timestamp = ts
         return message
 
+    def _compact(self):
+        def summarize(previous, messages, safety_identifier):
+            return (
+                previous
+                + ("\n" if previous else "")
+                + f"[SUMMARY PLACEHOLDER for {len(messages)} messages]\n"
+                + (f"[Called for {safety_identifier}]" if safety_identifier else "")
+            )
+
+        ensure_comms_compacted(agent=self.agent, summarise_fn=summarize)
+
     @tag("batch_compaction")
     def test_compaction_triggered_when_over_limit(self):
         """When raw messages > limit, a new snapshot is created."""
@@ -85,7 +96,7 @@ class CompactionTests(TestCase):
             self._make_message(self.agent.created_at + timedelta(seconds=i + 1))
 
         # Run compaction
-        ensure_comms_compacted(agent=self.agent)
+        self._compact()
 
         # A snapshot should have been created
         self.assertEqual(PersistentAgentCommsSnapshot.objects.count(), 1)
@@ -118,7 +129,7 @@ class CompactionTests(TestCase):
             self._make_message(self.agent.created_at + timedelta(seconds=i + 1))
 
         # Run compaction
-        ensure_comms_compacted(agent=self.agent)
+        self._compact()
 
         # Still no snapshots expected
         self.assertEqual(PersistentAgentCommsSnapshot.objects.count(), 0)
@@ -131,7 +142,7 @@ class CompactionTests(TestCase):
         for i in range(first_batch):
             self._make_message(self.agent.created_at + timedelta(seconds=i + 1))
 
-        ensure_comms_compacted(agent=self.agent)
+        self._compact()
         self.assertEqual(PersistentAgentCommsSnapshot.objects.count(), 1)
         first_snapshot = PersistentAgentCommsSnapshot.objects.first()
         self.assertIsNotNone(first_snapshot)
@@ -142,7 +153,7 @@ class CompactionTests(TestCase):
         for i in range(second_batch):
             self._make_message(self.agent.created_at + timedelta(seconds=start_sec + i))
 
-        ensure_comms_compacted(agent=self.agent)
+        self._compact()
 
         # We should now have exactly two snapshots.
         self.assertEqual(PersistentAgentCommsSnapshot.objects.count(), 2)

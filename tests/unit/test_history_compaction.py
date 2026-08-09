@@ -1,7 +1,7 @@
 import uuid
 from unittest.mock import patch
 
-from celery.exceptions import Retry
+from celery.exceptions import Reject, Retry
 from kombu.exceptions import OperationalError as KombuOperationalError
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
@@ -177,6 +177,23 @@ class AsyncHistoryCompactionTests(TestCase):
         self.assertEqual(self.redis.get(lease_key), lease_token)
         self.assertGreater(self.redis.ttl(lease_key), 1)
         self.assertEqual(retry_mock.call_args.kwargs["countdown"], 5)
+
+    @patch("api.agent.tasks.history_compaction.ensure_steps_compacted")
+    def test_retry_publish_failure_releases_lease(self, ensure_steps_mock):
+        ensure_steps_mock.side_effect = CompactionSummaryError("retry")
+        lease_token = "retry-publish-failed-token"
+        lease_key = f"agent-history-compaction:{self.agent.id}"
+        self.redis.set(lease_key, lease_token, ex=3600)
+
+        with patch.object(
+            compact_agent_history_task,
+            "retry",
+            side_effect=Reject(RuntimeError("broker unavailable"), requeue=False),
+        ):
+            with self.assertRaises(Reject):
+                compact_agent_history_task.run(str(self.agent.id), lease_token)
+
+        self.assertIsNone(self.redis.get(lease_key))
 
     def test_old_worker_cannot_release_replacement_lease(self):
         lease_key = f"agent-history-compaction:{self.agent.id}"

@@ -4,7 +4,7 @@ This mirrors :pymod:`api.agent.core.compaction` (message compaction) but works o
 :class:`~api.models.PersistentAgentStep` records.  The algorithm is identical:
 
 1. Hold a short DB lock to decide if compaction is needed.
-2. If raw steps > ``RAW_STEP_LIMIT`` fetch them *outside* the lock and generate a
+2. If raw steps exceed the configured limit, fetch them *outside* the lock and generate a
    new summary (typically via an LLM).
 3. Re-acquire the lock to materialise a
    :class:`~api.models.PersistentAgentStepSnapshot`, aborting if another process
@@ -37,26 +37,6 @@ from .compaction_exceptions import CompactionSummaryError
 from .llm_config import get_summarization_llm_config
 from .llm_utils import run_completion
 from .token_usage import log_agent_completion, set_usage_span_attributes
-
-__all__ = [
-    "ensure_steps_compacted",
-    "RAW_STEP_LIMIT",
-    "STEP_COMPACTION_TAIL",
-    "llm_summarise_steps",
-]
-
-# --------------------------------------------------------------------------- #
-#  Tunables                                                                   #
-# --------------------------------------------------------------------------- #
-
-RAW_STEP_LIMIT: int = settings.PA_RAW_STEP_LIMIT
-"""Number of raw steps allowed after the last snapshot before triggering
-compaction.  Override with ``PA_RAW_STEP_LIMIT`` in Django settings for
-experimentation."""
-
-STEP_COMPACTION_TAIL: int = settings.PA_STEP_COMPACTION_TAIL
-"""Number of most-recent steps to keep raw (uncompacted) after snapshotting.
-Override with ``PA_STEP_COMPACTION_TAIL`` in Django settings."""
 
 MAX_TOOL_RESULT_CHARS: int = 200_000
 """Maximum number of *trailing* characters retained from ``tool_call.result`` when
@@ -147,7 +127,7 @@ StepData = Union[ToolCallStep, CronTriggerStep, SystemStep, GenericStep]
 def ensure_steps_compacted(
     *,
     agent: PersistentAgent,
-    summarise_fn: Callable[[str, Sequence[StepData], str], str] | None = None,
+    summarise_fn: Callable[[str, Sequence[StepData], str | None], str],
     safety_identifier: str | None = None,
 ) -> None:
     """Ensure the agent's *step* history is compacted up-to-date.
@@ -156,9 +136,6 @@ def ensure_steps_compacted(
     operates on :class:`~api.models.PersistentAgentStep` and produces
     :class:`~api.models.PersistentAgentStepSnapshot` records.
     """
-
-    if summarise_fn is None:
-        summarise_fn = _default_summarise  # type: ignore[assignment]
 
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
@@ -235,29 +212,21 @@ def ensure_steps_compacted(
 
         previous_summary = last_snap.summary if last_snap else ""
 
-        captured_step_ids = tuple(
-            str(step_id)
-            for step_id in raw_qs.filter(created_at__lte=snapshot_until)
-            .order_by("created_at", "id")
-            .values_list("id", flat=True)
+        captured_step_ids = frozenset(
+            raw_qs.filter(created_at__lte=snapshot_until).values_list("id", flat=True)
         )
 
     # ------------------------------ Phase 2 ------------------------------ #
     # Slow work: fetch & summarise *outside* the lock.
     raw_steps_struct = _fetch_and_structurise_steps(agent, lower_bound, snapshot_until)
     if not raw_steps_struct:
+        if not previous_summary:
+            return
         new_summary = previous_summary
     else:
-        try:
-            with tracer.start_as_current_span("COMPACT Step Summarise") as summarise_span:
-                summarise_span.set_attribute("steps.count", len(raw_steps_struct))
-                new_summary = summarise_fn(previous_summary, raw_steps_struct, safety_identifier)
-        except CompactionSummaryError:
-            raise
-        except Exception as exc:
-            raise CompactionSummaryError(
-                f"Step summarization failed for agent {agent.id}"
-            ) from exc
+        with tracer.start_as_current_span("COMPACT Step Summarise") as summarise_span:
+            summarise_span.set_attribute("steps.count", len(raw_steps_struct))
+            new_summary = summarise_fn(previous_summary, raw_steps_struct, safety_identifier)
         if not isinstance(new_summary, str) or not new_summary.strip():
             raise CompactionSummaryError(
                 f"Step summarization returned an empty summary for agent {agent.id}"
@@ -277,13 +246,12 @@ def ensure_steps_compacted(
             span.set_attribute("compaction.skipped", True)
             return
 
-        current_step_ids = tuple(
-            str(step_id)
-            for step_id in PersistentAgentStep.objects.filter(
+        current_step_ids = frozenset(
+            PersistentAgentStep.objects.filter(
                 agent=agent_locked,
                 created_at__gt=lower_bound,
                 created_at__lte=snapshot_until,
-            ).order_by("created_at", "id").values_list("id", flat=True)
+            ).values_list("id", flat=True)
         )
         mutable_tool_exists = PersistentAgentToolCall.objects.filter(
             step__agent=agent_locked,
@@ -441,31 +409,6 @@ def _convert_step(step: PersistentAgentStep, result_map: dict[str, str]) -> Step
 
 
 # --------------------------------------------------------------------------- #
-#  Default summariser (placeholder)                                           #
-# --------------------------------------------------------------------------- #
-
-def _default_summarise(previous: str, steps: Sequence[StepData], safety_identifier: str | None = None) -> str:  # noqa: D401 Simple verb
-    """Fallback summariser for testing and error cases.
-
-    Groups recent steps by type and appends bullet-point lines under an
-    "--- Recent Steps ---" header.  Used as a fallback when LLM summarisation
-    fails and for deterministic behavior in tests.
-    """
-
-    if not steps:
-        return previous
-
-    # Split by type for deterministic output useful in tests.
-    recent_lines: List[str] = ["--- Recent Steps (%d) ---" % len(steps)]
-    for s in steps:
-        recent_lines.append("• " + s.to_summary_str())
-
-    joined = "\n".join(recent_lines)
-    joined = joined + "\n" + ("Safety ID: " + str(safety_identifier) if safety_identifier else "")
-    return previous + ("\n" if previous else "") + joined 
-
-
-# --------------------------------------------------------------------------- #
 #  Optional LiteLLM-powered summariser                                         
 # --------------------------------------------------------------------------- #
 
@@ -548,8 +491,6 @@ def llm_summarise_steps(
         set_usage_span_attributes(trace.get_current_span(), usage)
 
         return resp.choices[0].message.content.strip()
-    except CompactionSummaryError:
-        raise
     except Exception as exc:
         logger.exception("LiteLLM step summarization failed")
         raise CompactionSummaryError("LiteLLM step summarization failed") from exc
