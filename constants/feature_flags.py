@@ -8,6 +8,9 @@ CONTACT_AUTO_APPROVE_EMAIL = "contact_auto_approve_email"
 # Deterministic human approval gate for Gobii-managed outbound email delivery.
 EMAIL_REVIEW_OUTBOX = "email_review_outbox"
 
+# Restricts Review Before Send UI controls to paid plans.
+OUTBOX_NO_FREE_USERS = "outbox_no_free_users"
+
 # Soft-expiration for free-plan agents that go inactive
 AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
 

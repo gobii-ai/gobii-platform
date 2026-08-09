@@ -17,7 +17,8 @@ from api.services.agent_webhooks import (
     AgentWebhookService,
     build_inbound_webhook_url,
 )
-from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
+from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL, OUTBOX_NO_FREE_USERS
+from constants.plans import PlanNames
 from api.services.outbound_email_policy import (
     email_review_outbox_enabled,
     get_effective_email_sending_mode,
@@ -949,6 +950,16 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             owner_type = 'user'
             organization = None
 
+        billing = getattr(owner, 'billing', None)
+        restrict_review_before_send_to_paid_plans = flag_is_active(request, OUTBOX_NO_FREE_USERS)
+        review_before_send_available = bool(
+            not restrict_review_before_send_to_paid_plans
+            or not settings.GOBII_PROPRIETARY_MODE
+            or (
+                billing is not None
+                and getattr(billing, 'subscription', PlanNames.FREE) != PlanNames.FREE
+            )
+        )
         llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
 
         def _datetime_display(value, fmt: str):
@@ -1078,6 +1089,8 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             'organizations': flag_is_active(request, 'organizations'),
             'contactAutoApproveEmail': flag_is_active(request, CONTACT_AUTO_APPROVE_EMAIL),
             'emailReviewOutbox': email_review_outbox_enabled(agent.user),
+            'reviewBeforeSendAvailable': review_before_send_available,
+            'reviewBeforeSendUpgradeUrl': upgrade_url,
         }
 
         can_reassign = bool(context.get('can_reassign'))

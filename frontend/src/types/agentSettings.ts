@@ -238,6 +238,8 @@ export type AgentSettingsData = {
     organizations: boolean
     contactAutoApproveEmail: boolean
     emailReviewOutbox: boolean
+    reviewBeforeSendAvailable: boolean
+    reviewBeforeSendUpgradeUrl: string | null
   }
   reassignment: AgentSettingsReassignmentInfo
   llmIntelligence: LlmIntelligenceConfig | null

@@ -14,8 +14,10 @@ from api.models import (
     CommsAllowlistRequest,
     CommsChannel,
     PersistentAgent,
+    UserBilling,
 )
-from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL, EMAIL_REVIEW_OUTBOX
+from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL, EMAIL_REVIEW_OUTBOX, OUTBOX_NO_FREE_USERS
+from constants.plans import PlanNames
 
 
 @tag("batch_console_allowlist")
@@ -74,6 +76,61 @@ class AgentSettingsContactApprovalTests(TestCase):
 
         self.assertFalse(disabled_response.json()["features"]["contactAutoApproveEmail"])
         self.assertTrue(enabled_response.json()["features"]["contactAutoApproveEmail"])
+
+    @patch("console.agent_settings.service.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("console.agent_settings.service.reconcile_user_plan_from_stripe")
+    def test_settings_payload_limits_review_before_send_to_paid_plans(self, mock_reconcile):
+        billing, _ = UserBilling.objects.get_or_create(user=self.owner)
+        self.client.force_login(self.owner)
+
+        billing.subscription = PlanNames.FREE
+        billing.save(update_fields=["subscription"])
+        mock_reconcile.return_value = {"id": PlanNames.FREE}
+        with override_flag(OUTBOX_NO_FREE_USERS, active=True):
+            free_response = self.client.get(self.url)
+
+        billing.subscription = PlanNames.STARTUP
+        billing.save(update_fields=["subscription"])
+        mock_reconcile.return_value = {"id": PlanNames.STARTUP}
+        with override_flag(OUTBOX_NO_FREE_USERS, active=True):
+            paid_response = self.client.get(self.url)
+
+        self.assertFalse(free_response.json()["features"]["reviewBeforeSendAvailable"])
+        self.assertTrue(paid_response.json()["features"]["reviewBeforeSendAvailable"])
+        self.assertTrue(free_response.json()["features"]["reviewBeforeSendUpgradeUrl"])
+
+    @patch("console.agent_settings.service.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("console.agent_settings.service.reconcile_user_plan_from_stripe", return_value={"id": PlanNames.FREE})
+    def test_settings_payload_allows_free_review_before_send_when_paywall_flag_is_off(self, _mock_reconcile):
+        billing, _ = UserBilling.objects.get_or_create(user=self.owner)
+        billing.subscription = PlanNames.FREE
+        billing.save(update_fields=["subscription"])
+        self.client.force_login(self.owner)
+
+        with override_flag(OUTBOX_NO_FREE_USERS, active=False):
+            response = self.client.get(self.url)
+
+        self.assertTrue(response.json()["features"]["reviewBeforeSendAvailable"])
+
+    def test_outbox_no_free_users_flag_migration_defaults_off_and_preserves_existing_value(self):
+        migration = import_module("api.migrations.0456_add_outbox_no_free_users_flag")
+        Flag = get_waffle_flag_model()
+        Flag.objects.filter(name=OUTBOX_NO_FREE_USERS).delete()
+
+        migration.add_flag(apps, None)
+
+        flag = Flag.objects.get(name=OUTBOX_NO_FREE_USERS)
+        self.assertIsNone(flag.everyone)
+        self.assertEqual(flag.percent, 0)
+        self.assertFalse(flag.superusers)
+        self.assertFalse(flag.staff)
+        self.assertFalse(flag.authenticated)
+
+        flag.everyone = True
+        flag.save(update_fields=["everyone"])
+        migration.add_flag(apps, None)
+        flag.refresh_from_db()
+        self.assertTrue(flag.everyone)
 
     def test_settings_update_changes_mode_without_resolving_pending_requests(self):
         pending = CommsAllowlistRequest.objects.create(
