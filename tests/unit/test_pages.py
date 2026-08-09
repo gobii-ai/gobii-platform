@@ -4670,7 +4670,10 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         soup = BeautifulSoup(response.content, "html.parser")
         self.assertIsNone(soup.find("a", {"href": reverse("pages:solutions")}))
         self.assertIsNone(
-            soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "engineering"})})
+            soup.find(
+                "a",
+                {"href": reverse("pages:solution", kwargs={"slug": "engineering"})},
+            )
         )
         self.assertIsNotNone(soup.find("a", {"href": reverse("pages:library")}))
         self.assertNotIn("Solutions", soup.get_text(" ", strip=True))
