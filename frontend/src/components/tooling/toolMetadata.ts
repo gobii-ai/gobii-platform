@@ -28,6 +28,7 @@ import {
   BarChart3,
   Image as ImageIcon,
   Video,
+  Monitor,
   type LucideIcon,
 } from 'lucide-react'
 import { summarizeSchedule } from '../../util/schedule'
@@ -502,6 +503,23 @@ function deriveDiscordReaction(
 }
 
 export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
+  {
+    name: 'mcp_computer',
+    label: 'Computer',
+    icon: Monitor,
+    iconBgClass: 'bg-indigo-100',
+    iconColorClass: 'text-indigo-700',
+    detailKind: 'default',
+    derive(entry) {
+      const action = (entry.toolName ?? '')
+        .replace(/^mcp_computer_/i, '')
+        .replace(/^[0-9a-f]{8}_/i, '')
+      return {
+        label: action ? titleCase(action) : 'Computer',
+        caption: 'Computer',
+      }
+    },
+  },
   {
     name: 'run_command',
     label: 'Run command',
