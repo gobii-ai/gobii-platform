@@ -145,3 +145,8 @@ from .computer_integration import (
     COMPUTER_INTEGRATION_SUITE_SLUG,
     ComputerIntegrationScenario,
 )
+from .compaction_quality import (
+    COMPACTION_QUALITY_SCENARIO_SLUGS,
+    COMPACTION_QUALITY_SUITE_SLUG,
+    CompactionQualityScenario,
+)

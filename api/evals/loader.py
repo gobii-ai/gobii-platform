@@ -64,6 +64,10 @@ from api.evals.scenarios.computer_integration import (
     COMPUTER_INTEGRATION_SCENARIO_SLUGS,
     COMPUTER_INTEGRATION_SUITE_SLUG,
 )
+from api.evals.scenarios.compaction_quality import (
+    COMPACTION_QUALITY_SCENARIO_SLUGS,
+    COMPACTION_QUALITY_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -86,8 +90,12 @@ register_builtin_suites(
         ),
         EvalSuite(
             slug="core",
-            description="Core regression: all registered scenarios.",
-            scenario_slugs=[scenario.slug for scenario in ScenarioRegistry.list_all().values()],
+            description="Core regression: all scenarios included in the default aggregate.",
+            scenario_slugs=[
+                scenario.slug
+                for scenario in ScenarioRegistry.list_all().values()
+                if scenario.include_in_default_suites
+            ],
         ),
         EvalSuite(
             slug="agent_behavior_micro",
@@ -193,6 +201,11 @@ register_builtin_suites(
             slug=COMPUTER_INTEGRATION_SUITE_SLUG,
             description="Connected-computer tool choice, blocker handling, and safe setup guidance.",
             scenario_slugs=COMPUTER_INTEGRATION_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=COMPACTION_QUALITY_SUITE_SLUG,
+            description="Communication and step compaction prompt quality across production-shaped histories.",
+            scenario_slugs=list(COMPACTION_QUALITY_SCENARIO_SLUGS),
         ),
         EvalSuite(
             slug=SECURE_CREDENTIAL_DELEGATION_SUITE_SLUG,

@@ -59,6 +59,7 @@ class EvalScenario:
     required_fixtures: tuple[str, ...] = ()
     required_secrets: tuple[str, ...] = ()
     requires_personal_agent: bool = False
+    include_in_default_suites: bool = True
 
     def get_metadata(self) -> ScenarioMetadata:
         metadata = self.metadata or ScenarioMetadata(

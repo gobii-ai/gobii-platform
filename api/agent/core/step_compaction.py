@@ -446,14 +446,24 @@ def llm_summarise_steps(
             "role": "system",
             "content": (
                 "Maintain a compact current-state summary of an agent's execution. Preserve durable outcomes, exact "
-                "identifiers, created artifacts, source provenance, unresolved work, and active blockers. Preserve "
+                "identifiers, created artifacts, source provenance, unresolved work, and active blockers. Copy opaque "
+                "values such as identifiers, URLs, paths, timestamps, credentials, status tokens, and assignment IDs "
+                "verbatim; never alter their case, punctuation, spacing, or characters. Preserve "
                 "still-operative scoped directives—including ownership changes, handoffs, stop/do-not-act instructions, "
                 "permission boundaries, and commitments—with their actor or source, scope identifier, and effective "
                 "constraint. A resolved event can have a continuing consequence: condense the event but retain that "
-                "consequence until explicitly superseded, expired, or reassigned. Replace superseded state; omit repeated "
-                "attempts, resolved mechanics with no continuing consequence, and transient reasoning. Default to under "
-                "2,000 characters; exceed that only when omitting unresolved facts would change a decision. Given the "
-                "existing summary and new raw steps, rewrite the concise execution state rather than appending a log."
+                "consequence until explicitly superseded, expired, or reassigned. Replace superseded state and never "
+                "mention replaced values, even to explain the correction. Aggregate repeated no-op polling or cron cycles "
+                "instead of listing individual occurrences; retain only the current schedule, active blocker, or meaningful "
+                "state change. Omit other repeated attempts, resolved mechanics with no continuing consequence, and "
+                "transient reasoning. State active prohibitions explicitly; never weaken forbidden work into pending, "
+                "unknown, or not-yet-done work. The summary must be at most 2,000 characters. Given the "
+                "existing summary and new raw steps, rewrite the concise execution state rather than appending a log. "
+                "Before returning, silently audit the draft: delete every superseded value and every resolved item with "
+                "no continuing consequence, including their identifiers; verify each retained directive's actor or "
+                "source, scope, and effective constraint; compare every opaque value character-for-character with the "
+                "input; preserve distinctions between lifecycle states without inferring outcomes; and ensure repeated "
+                "mechanics are aggregated."
             ),
         },
         {
