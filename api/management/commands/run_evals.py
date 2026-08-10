@@ -30,6 +30,45 @@ class EvalExecutionPlan:
     warn_sqlite_serial: bool
 
 
+def validate_compaction_quality_profiles(suites, routing_profiles) -> None:
+    """Ensure compaction candidates share one judge without grading themselves."""
+    compaction_selected = any(
+        "compaction_quality" in get_scenario_metadata(scenario).tags
+        for _suite_slug, scenario_slugs, _description in suites
+        for scenario_slug in scenario_slugs
+        if (scenario := ScenarioRegistry.get(scenario_slug)) is not None
+    )
+    if not compaction_selected:
+        return
+    if not routing_profiles:
+        raise CommandError(
+            "Compaction quality evals require at least one explicit --routing-profile with separate "
+            "summarization and eval-judge endpoints."
+        )
+
+    judge_endpoint_ids: set[str] = set()
+    for profile in routing_profiles:
+        if not profile.summarization_endpoint_id:
+            raise CommandError(
+                f"Routing profile '{profile.name}' has no summarization endpoint for compaction evaluation."
+            )
+        if not profile.eval_judge_endpoint_id:
+            raise CommandError(
+                f"Routing profile '{profile.name}' has no eval-judge endpoint for compaction evaluation."
+            )
+        if profile.summarization_endpoint_id == profile.eval_judge_endpoint_id:
+            raise CommandError(
+                f"Routing profile '{profile.name}' uses the same endpoint for summarization and judging. "
+                "Choose an independent fixed eval-judge endpoint."
+            )
+        judge_endpoint_ids.add(str(profile.eval_judge_endpoint_id))
+
+    if len(judge_endpoint_ids) != 1:
+        raise CommandError(
+            "All routing profiles in a compaction quality matrix must use the same fixed eval-judge endpoint."
+        )
+
+
 def ensure_local_eval_sandbox_flag(stdout=None) -> None:
     if not settings.EVAL_LOCAL_SETUP_ENABLED or not settings.SANDBOX_COMPUTE_ENABLED:
         return
@@ -527,6 +566,7 @@ class Command(BaseCommand):
             self._resolve_routing_profile(ref)
             for ref in routing_profile_refs
         ]
+        validate_compaction_quality_profiles(suites, source_routing_profiles)
         if source_routing_profiles:
             if len(source_routing_profiles) > 1:
                 self.stdout.write(

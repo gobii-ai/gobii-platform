@@ -37,7 +37,7 @@ Keep those categories separate in reports. Passing unit tests does not mean eval
 | `EvalRunTask` | `api/models.py` | One scored task/assertion inside a run. |
 | `run_evals` | `api/management/commands/run_evals.py` | The only CLI entry point for canonical evals. |
 
-`api/evals/loader.py` imports scenario modules and registers built-in suites. `run_evals` loads that registry directly, so a clean CLI invocation does not depend on test imports.
+`api/evals/loader.py` imports scenario modules and registers built-in suites. `run_evals` loads that registry directly, so a clean CLI invocation does not depend on test imports. Specialized component scenarios may opt out of the default `core` and `all` aggregates while remaining available through their focused suite.
 
 ## Local setup
 
@@ -179,6 +179,34 @@ uv run python manage.py run_evals \
 
 Each profile gets its own `EvalSuiteRun` with a routing-profile snapshot. Use the console comparison view or compare APIs to group by model/profile after the matrix finishes.
 
+### Compaction model comparisons
+
+The `compaction_quality` suite directly evaluates the production communication and step
+summarization prompts over 12 synthetic, production-shaped histories. Candidate profiles must
+use different `summarization_endpoint` values while sharing one fixed `eval_judge_endpoint`;
+the judge endpoint cannot also be a candidate's summarization endpoint.
+
+Run the standard three-repeat comparison with one profile per candidate:
+
+```bash
+uv run python manage.py run_evals \
+  --suite compaction_quality \
+  --sync \
+  --n-runs 3 \
+  --routing-profile compaction-candidate-a \
+  --routing-profile compaction-candidate-b \
+  --settings=config.eval_local_settings
+```
+
+Each scenario records exactly one scored task. Opaque values such as identifiers, credentials,
+URLs, and paths use verbatim checks. Human-readable facts use case- and Unicode-tolerant checks;
+the semantic judge handles attribution, scope, and equivalent natural-language phrasing. A case
+passes only when those required-value, superseded-value, length, and code-fence checks pass and
+the fixed semantic judge passes the summary. A candidate qualifies when critical deterministic
+checks pass in all 36 outcomes and at least 33 of the 36 scenario runs pass overall. Compare
+qualifying models by pass rate, then candidate compaction cost, then output length. Judge calls
+are not included in candidate cost.
+
 OpenRouter Qwen:
 
 ```bash
@@ -287,7 +315,7 @@ EvalSuite(
 )
 ```
 
-Use a focused suite when developers should run a related group repeatedly. The dynamic `all` suite already covers every registered scenario.
+Use a focused suite when developers should run a related group repeatedly. The dynamic `all` suite covers every scenario included in the default aggregate; specialized component evals such as `compaction_quality` run only through their focused suite.
 
 ## Scoring and stop policies
 

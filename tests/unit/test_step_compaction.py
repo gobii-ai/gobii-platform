@@ -579,6 +579,16 @@ class StepCompactionTests(TestCase):
         self.assertIn("actor or source, scope identifier, and effective constraint", system_prompt)
         self.assertIn("until explicitly superseded, expired, or reassigned", system_prompt)
         self.assertIn("no continuing consequence", system_prompt)
+        self.assertIn("Copy opaque values", system_prompt)
+        self.assertIn("never alter their case, punctuation, spacing, or characters", system_prompt)
+        self.assertIn("never mention replaced values", system_prompt)
+        self.assertIn("Aggregate repeated no-op polling or cron cycles", system_prompt)
+        self.assertIn("never weaken forbidden work", system_prompt)
+        self.assertIn("must be at most 2,000 characters", system_prompt)
+        self.assertIn("silently audit the draft", system_prompt)
+        self.assertIn("delete every superseded value", system_prompt)
+        self.assertIn("compare every opaque value character-for-character", system_prompt)
+        self.assertIn("sent, delivered, and confirmed are not interchangeable", system_prompt)
 
     def test_llm_failure_raises_retryable_compaction_error(self):
         with patch(

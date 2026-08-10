@@ -34,11 +34,15 @@ class SuiteRegistry:
 
     @classmethod
     def _build_all_suite(cls) -> EvalSuite:
-        scenarios = list(ScenarioRegistry.list_all().values())
+        scenarios = [
+            scenario
+            for scenario in ScenarioRegistry.list_all().values()
+            if scenario.include_in_default_suites
+        ]
         scenario_slugs = [scenario.slug for scenario in scenarios]
         return EvalSuite(
             slug="all",
-            description="Run every registered scenario concurrently.",
+            description="Run every scenario included in the default aggregate concurrently.",
             scenario_slugs=scenario_slugs,
         )
 
@@ -46,4 +50,3 @@ class SuiteRegistry:
 def register_builtin_suites(suites: Iterable[EvalSuite]) -> None:
     for suite in suites:
         SuiteRegistry.register(suite)
-
