@@ -40,6 +40,7 @@ from api.models import (
     PersistentAgentMessageAttachment,
     PersistentAgentUserActionEvent,
     UserPreference,
+    UserBilling,
 )
 from api.services.outbound_email_policy import (
     classify_email_recipients,
@@ -63,7 +64,8 @@ from api.tasks.outbox import reconcile_approved_outbox_emails
 from console.agent_chat.pending_actions import list_pending_action_requests
 from console.outbox_api_views import serialize_outbox_review
 from config.redis_client import _FakeRedis
-from constants.feature_flags import EMAIL_REVIEW_OUTBOX
+from constants.feature_flags import EMAIL_REVIEW_OUTBOX, OUTBOX_NO_FREE_USERS
+from constants.plans import PlanNames
 
 
 User = get_user_model()
@@ -967,6 +969,28 @@ class EmailReviewOutboxTests(TestCase):
             organization_response.json()["defaultMode"],
             PersistentAgent.EmailSendingMode.SEND_AUTOMATICALLY,
         )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_policy_api_reports_review_before_send_ui_availability(self):
+        billing, _ = UserBilling.objects.get_or_create(user=self.owner)
+        billing.subscription = PlanNames.FREE
+        billing.save(update_fields=["subscription"])
+        self.client.force_login(self.owner)
+
+        with override_flag(OUTBOX_NO_FREE_USERS, active=False):
+            unrestricted_response = self.client.get(reverse("console_email_sending_policy"))
+        with override_flag(OUTBOX_NO_FREE_USERS, active=True):
+            free_response = self.client.get(reverse("console_email_sending_policy"))
+
+        billing.subscription = PlanNames.STARTUP
+        billing.save(update_fields=["subscription"])
+        with override_flag(OUTBOX_NO_FREE_USERS, active=True):
+            paid_response = self.client.get(reverse("console_email_sending_policy"))
+
+        self.assertTrue(unrestricted_response.json()["reviewBeforeSendAvailable"])
+        self.assertFalse(free_response.json()["reviewBeforeSendAvailable"])
+        self.assertTrue(free_response.json()["reviewBeforeSendUpgradeUrl"])
+        self.assertTrue(paid_response.json()["reviewBeforeSendAvailable"])
 
     @override_flag(EMAIL_REVIEW_OUTBOX, active=True)
     @patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True)

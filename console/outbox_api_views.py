@@ -2,13 +2,16 @@ import base64
 import json
 from typing import Any
 
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Q
 from django.http import HttpRequest, JsonResponse
 from django.template.loader import render_to_string
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from django.views import View
+from waffle import flag_is_active
 
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.agent.comms.email_threading import get_message_contact_address
@@ -24,6 +27,7 @@ from api.services.outbound_email_policy import (
     email_review_outbox_enabled,
     get_organization_minimum_email_sending_mode,
     get_workspace_default_email_sending_mode,
+    is_review_before_send_available,
     normalize_email_address,
     set_workspace_email_sending_policy,
 )
@@ -42,6 +46,7 @@ from api.services.outbound_email_review import (
 from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
 from console.context_helpers import resolve_console_context
 from console.context_overrides import get_context_override
+from constants.feature_flags import OUTBOX_NO_FREE_USERS
 
 
 PAGE_SIZE = 30
@@ -432,12 +437,25 @@ class EmailSendingPolicyAPIView(ApiLoginRequiredMixin, View):
         except OutboundEmailReviewError as exc:
             return JsonResponse({"error": str(exc)}, status=403)
         preferences = UserPreference.resolve_known_preferences(request.user)
+        owner = organization or request.user
+        review_before_send_available = is_review_before_send_available(
+            owner,
+            restrict_free_users=flag_is_active(request, OUTBOX_NO_FREE_USERS),
+        )
+        upgrade_url = None
+        if not review_before_send_available and settings.GOBII_PROPRIETARY_MODE:
+            try:
+                upgrade_url = reverse("proprietary:pricing")
+            except NoReverseMatch:
+                pass
         return JsonResponse(
             {
                 "defaultMode": get_workspace_default_email_sending_mode(user=request.user, organization=organization),
                 "minimumMode": get_organization_minimum_email_sending_mode(organization),
                 "canSetMinimum": organization is not None and context_info.can_manage_org_agents,
                 "emailNotificationsEnabled": preferences[UserPreference.KEY_OUTBOX_EMAIL_NOTIFICATIONS_ENABLED],
+                "reviewBeforeSendAvailable": review_before_send_available,
+                "reviewBeforeSendUpgradeUrl": upgrade_url,
             }
         )
 

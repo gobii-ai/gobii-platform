@@ -77,6 +77,7 @@ class AgentSettingsContactApprovalTests(TestCase):
         self.assertFalse(disabled_response.json()["features"]["contactAutoApproveEmail"])
         self.assertTrue(enabled_response.json()["features"]["contactAutoApproveEmail"])
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("console.agent_settings.service.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("console.agent_settings.service.reconcile_user_plan_from_stripe")
     def test_settings_payload_limits_review_before_send_to_paid_plans(self, mock_reconcile):
@@ -99,6 +100,7 @@ class AgentSettingsContactApprovalTests(TestCase):
         self.assertTrue(paid_response.json()["features"]["reviewBeforeSendAvailable"])
         self.assertTrue(free_response.json()["features"]["reviewBeforeSendUpgradeUrl"])
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("console.agent_settings.service.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("console.agent_settings.service.reconcile_user_plan_from_stripe", return_value={"id": PlanNames.FREE})
     def test_settings_payload_allows_free_review_before_send_when_paywall_flag_is_off(self, _mock_reconcile):

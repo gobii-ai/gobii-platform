@@ -18,11 +18,11 @@ from api.services.agent_webhooks import (
     build_inbound_webhook_url,
 )
 from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL, OUTBOX_NO_FREE_USERS
-from constants.plans import PlanNames
 from api.services.outbound_email_policy import (
     email_review_outbox_enabled,
     get_effective_email_sending_mode,
     get_organization_minimum_email_sending_mode,
+    is_review_before_send_available,
 )
 
 
@@ -950,15 +950,10 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             owner_type = 'user'
             organization = None
 
-        billing = getattr(owner, 'billing', None)
         restrict_review_before_send_to_paid_plans = flag_is_active(request, OUTBOX_NO_FREE_USERS)
-        review_before_send_available = bool(
-            not restrict_review_before_send_to_paid_plans
-            or not settings.GOBII_PROPRIETARY_MODE
-            or (
-                billing is not None
-                and getattr(billing, 'subscription', PlanNames.FREE) != PlanNames.FREE
-            )
+        review_before_send_available = is_review_before_send_available(
+            owner,
+            restrict_free_users=restrict_review_before_send_to_paid_plans,
         )
         llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
 

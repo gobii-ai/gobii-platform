@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from email.utils import parseaddr
 
 from allauth.account.models import EmailAddress
+from django.conf import settings
 from django.db import transaction
 from waffle import get_waffle_flag_model
 
@@ -14,6 +15,7 @@ from api.models import (
     UserPreference,
 )
 from constants.feature_flags import EMAIL_REVIEW_OUTBOX
+from constants.plans import PlanNames
 
 
 ORGANIZATION_DEFAULT_KEY = "default_email_sending_mode"
@@ -50,6 +52,18 @@ def email_review_outbox_enabled(user) -> bool:
     if flag.everyone is not None:
         return flag.everyone
     return bool(flag.is_active_for_user(user))
+
+
+def is_review_before_send_available(owner, *, restrict_free_users: bool) -> bool:
+    """Return whether the owner may select a Review Before Send policy in the UI."""
+    if not restrict_free_users or not settings.GOBII_PROPRIETARY_MODE:
+        return True
+
+    billing = getattr(owner, "billing", None)
+    return bool(
+        billing is not None
+        and getattr(billing, "subscription", PlanNames.FREE) != PlanNames.FREE
+    )
 
 
 def normalize_email_address(address: str | None) -> str:

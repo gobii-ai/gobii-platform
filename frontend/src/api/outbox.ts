@@ -63,6 +63,8 @@ export type EmailSendingPolicy = {
   minimumMode: EmailSendingMode | null
   canSetMinimum: boolean
   emailNotificationsEnabled: boolean
+  reviewBeforeSendAvailable: boolean
+  reviewBeforeSendUpgradeUrl: string | null
 }
 
 export function fetchOutbox(status: string, search: string): Promise<OutboxListResponse> {

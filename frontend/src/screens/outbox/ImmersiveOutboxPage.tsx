@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Clock3, Mail, Pencil, RotateCcw, Search, Send, Trash2, X } from 'lucide-react'
+import { Check, Clock3, Lock, Mail, Pencil, RotateCcw, Search, Send, Trash2, X } from 'lucide-react'
 
 import {
   bulkDiscardOutbox,
@@ -70,6 +70,11 @@ function OutboxPolicyPanel({ enabled }: { enabled: boolean }) {
   })
   const policy = policyQuery.data
   if (!enabled || !policy) return null
+  const reviewBeforeSendAvailable = policy.reviewBeforeSendAvailable !== false
+  const requiresUpgrade = (mode: string | null) => (
+    !reviewBeforeSendAvailable && Boolean(mode) && mode !== 'send_automatically'
+  )
+  const defaultRequiresUpgrade = requiresUpgrade(policy.defaultMode)
   return (
     <details className="rounded-2xl border border-slate-700/70 bg-slate-950/35 px-4 py-3 text-slate-100">
       <summary className="cursor-pointer text-sm font-semibold">Review Before Send policy</summary>
@@ -78,10 +83,17 @@ function OutboxPolicyPanel({ enabled }: { enabled: boolean }) {
           Default for new agents
           <select
             value={policy.defaultMode}
-            onChange={(event) => mutation.mutate({ defaultMode: event.target.value })}
+            disabled={mutation.isPending}
+            onChange={(event) => {
+              if (!requiresUpgrade(event.target.value)) mutation.mutate({ defaultMode: event.target.value })
+            }}
             className="mt-2 block w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
           >
-            {EMAIL_SENDING_MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.title}</option>)}
+            {EMAIL_SENDING_MODE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value} disabled={requiresUpgrade(option.value)}>
+                {option.title}{requiresUpgrade(option.value) ? ' (Paid)' : ''}
+              </option>
+            ))}
           </select>
         </label>
         {policy.canSetMinimum ? (
@@ -89,11 +101,19 @@ function OutboxPolicyPanel({ enabled }: { enabled: boolean }) {
             Organization minimum
             <select
               value={policy.minimumMode ?? ''}
-              onChange={(event) => mutation.mutate({ minimumMode: event.target.value || null })}
+              disabled={mutation.isPending}
+              onChange={(event) => {
+                const mode = event.target.value || null
+                if (!requiresUpgrade(mode)) mutation.mutate({ minimumMode: mode })
+              }}
               className="mt-2 block w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
             >
               <option value="">No minimum</option>
-              {EMAIL_SENDING_MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.title}</option>)}
+              {EMAIL_SENDING_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value} disabled={requiresUpgrade(option.value)}>
+                  {option.title}{requiresUpgrade(option.value) ? ' (Paid)' : ''}
+                </option>
+              ))}
             </select>
           </label>
         ) : <div />}
@@ -107,9 +127,24 @@ function OutboxPolicyPanel({ enabled }: { enabled: boolean }) {
           Email me about pending reviews
         </label>
       </div>
+      {!reviewBeforeSendAvailable ? (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3 text-xs leading-5 text-amber-100">
+          <Lock className="mt-0.5 size-4 shrink-0 text-amber-300" aria-hidden="true" />
+          <p>
+            Review Before Send is available on paid plans.{' '}
+            {policy.reviewBeforeSendUpgradeUrl ? (
+              <a href={policy.reviewBeforeSendUpgradeUrl} className="font-semibold underline hover:text-white">
+                Upgrade your plan
+              </a>
+            ) : (
+              <span className="font-semibold">Upgrade your plan to turn it on.</span>
+            )}
+          </p>
+        </div>
+      ) : null}
       <button
         type="button"
-        disabled={mutation.isPending}
+        disabled={mutation.isPending || defaultRequiresUpgrade}
         onClick={() => mutation.mutate({ defaultMode: policy.defaultMode, minimumMode: policy.minimumMode, applyToExisting: true })}
         className="mt-4 rounded-lg border border-blue-400/50 px-3 py-2 text-xs font-semibold text-blue-200 hover:bg-blue-500/10 disabled:opacity-50"
       >
