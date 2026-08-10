@@ -51,6 +51,7 @@ import { sanitizeHtml } from '../../util/sanitize'
 import { clearAgentChatMessageDraft, readAgentChatMessageDraft, writeAgentChatMessageDraft } from '../../util/agentChatDraftStorage'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import { useModal } from '../../hooks/useModal'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { AgentChatMenuItem } from './uiPrimitives'
 
 // Detect if user is on macOS
@@ -774,6 +775,7 @@ export const AgentComposer = memo(function AgentComposer({
   const [pendingQuestionsForceExpanded, setPendingQuestionsForceExpanded] = useState(hasPendingQuestions)
   const { isProprietaryMode } = useAppSelector(selectSubscriptionState)
   const [appsModal, showAppsModal] = useModal()
+  const isMobile = useIsMobile()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const composedShellRef = useCallback((node: HTMLDivElement | null) => {
     if (typeof externalShellRef === 'function') {
@@ -1171,8 +1173,7 @@ export const AgentComposer = memo(function AgentComposer({
       setCountdownProgress(progress)
     }
 
-    // Update every 100ms for smooth animation
-    countdownIntervalRef.current = setInterval(updateProgress, 100)
+    countdownIntervalRef.current = setInterval(updateProgress, isMobile ? 250 : 100)
     updateProgress()
 
     return () => {
@@ -1181,7 +1182,7 @@ export const AgentComposer = memo(function AgentComposer({
         countdownIntervalRef.current = null
       }
     }
-  }, [hasMultipleInsights, isInsightsPaused, isProcessing])
+  }, [hasMultipleInsights, isInsightsPaused, isMobile, isProcessing])
 
   useEffect(() => {
     if (!hasMultipleInsights || isInsightsPaused || !isProcessing) {

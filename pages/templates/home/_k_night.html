@@ -416,12 +416,10 @@
     var ticks = [].slice.call(sec.querySelectorAll('.gk-nt-tick'));
     var tallies = [].slice.call(end.querySelectorAll('b[data-n]'));
 
-    /* These sections animate on phones too. GobiiHomePerf.shouldReduceHomepageMotion()
-       treats any coarse pointer or narrow screen as reduced motion, which predates this
-       redesign and would silently kill the story animations on every phone. They are
-       IntersectionObserver-gated, pause off-screen, and animate only opacity/transform,
-       so the cost is bounded. Genuine prefers-reduced-motion is still honoured. */
-    var reduced = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
+    var perf = window.GobiiHomePerf;
+    var reduced = (perf && typeof perf.shouldReduceHomepageMotion === 'function' &&
+                   perf.shouldReduceHomepageMotion()) ||
+                  (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
                   /* the cinema layout stacks via display:contents; anything that can't do that
                      gets the static timeline, which is plain block flow. */
                   !(window.CSS && CSS.supports && CSS.supports('display', 'contents'));
@@ -585,10 +583,14 @@
       });
     }
 
+    if (reduced) {
+      staticFinish();
+      return;
+    }
+
     var booted = false;
     function boot() {
       booted = true;
-      if (reduced) { staticFinish(); return; }
       [].forEach.call(sec.querySelectorAll('b[data-n]'), function (el) { el.textContent = '0'; });
       show(0);
       start();

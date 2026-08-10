@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Plus, Zap } from 'lucide-react'
 import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
 import { SubscriptionUpgradeModal } from '../components/common/SubscriptionUpgradeModal'
+import { ImmersivePageFrame } from '../components/common/ImmersivePageFrame'
 import type { SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
 import { AnalyticsEvent } from '../constants/analyticsEvents'
 import { useAgentRoster } from '../hooks/useAgentRoster'
@@ -10,13 +11,11 @@ import { AgentChatPage } from './AgentChatPage'
 import { AgentCollaboratorInviteResponsePage } from './agentCollaborators/AgentCollaboratorInviteResponsePage'
 import { ImmersiveApiKeysPage } from './apiKeys/ImmersiveApiKeysPage'
 import { ImmersiveBillingPage } from './billing/ImmersiveBillingPage'
-import { ImmersiveMcpServersPage } from './integrations/ImmersiveMcpServersPage'
 import { ImmersiveOrganizationPage } from './organization/ImmersiveOrganizationPage'
 import { ImmersiveOutboxPage } from './outbox/ImmersiveOutboxPage'
 import { OrganizationInviteAcceptPage } from './organization/OrganizationInviteAcceptPage'
 import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
 import { ImmersiveSecretsPage } from './secrets/ImmersiveSecretsPage'
-import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
 import { ImmersivePetLayer } from '../components/pets/ImmersivePetLayer'
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions, type PlanTier } from '../store/subscriptionSlice'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
@@ -31,6 +30,13 @@ const APP_BASE = '/app'
 const RETURN_TO_STORAGE_KEY = 'gobii:immersive:return_to'
 const DEFAULT_CLOSE_PATH = '/app/agents'
 const UPGRADE_MODAL_QUERY_PARAM = 'upgrade'
+
+const ImmersiveUsagePage = lazy(() => import('./usage/ImmersiveUsagePage').then((module) => ({
+  default: module.ImmersiveUsagePage,
+})))
+const ImmersiveMcpServersPage = lazy(() => import('./integrations/ImmersiveMcpServersPage').then((module) => ({
+  default: module.ImmersiveMcpServersPage,
+})))
 
 type AppRoute =
   | { kind: 'command-center' }
@@ -85,6 +91,20 @@ type AgentShellPageConfig = {
   render: (context: AgentShellPageRenderContext) => ReactNode
 }
 
+function LazyShellPage({ layout, children }: { layout: AgentShellLayout; children: ReactNode }) {
+  return (
+    <Suspense fallback={(
+      <ImmersivePageFrame layout={layout}>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <p className="text-sm font-medium text-slate-500">Loading workspace…</p>
+        </div>
+      </ImmersivePageFrame>
+    )}>
+      {children}
+    </Suspense>
+  )
+}
+
 const AGENT_SHELL_PRESERVED_QUERY_KEYS = [
   'embed',
   'return_to',
@@ -115,18 +135,24 @@ const AGENT_SHELL_PAGE_CONFIG: Record<AgentShellPage, AgentShellPageConfig> = {
   },
   usage: {
     path: '/app/usage',
-    render: ({ layout, refreshKey }) => <ImmersiveUsagePage layout={layout} refreshKey={refreshKey} />,
+    render: ({ layout, refreshKey }) => (
+      <LazyShellPage layout={layout}>
+        <ImmersiveUsagePage layout={layout} refreshKey={refreshKey} />
+      </LazyShellPage>
+    ),
   },
   integrations: {
     path: '/app/integrations',
     render: ({ layout, refreshKey, pipedreamAppsSettingsUrl, pipedreamAppSearchUrl, nativeIntegrationsUrl }) => (
-      <ImmersiveMcpServersPage
-        layout={layout}
-        refreshKey={refreshKey}
-        nativeIntegrationsUrl={nativeIntegrationsUrl}
-        pipedreamAppsUrl={pipedreamAppsSettingsUrl}
-        pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-      />
+      <LazyShellPage layout={layout}>
+        <ImmersiveMcpServersPage
+          layout={layout}
+          refreshKey={refreshKey}
+          nativeIntegrationsUrl={nativeIntegrationsUrl}
+          pipedreamAppsUrl={pipedreamAppsSettingsUrl}
+          pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+        />
+      </LazyShellPage>
     ),
   },
   'api-keys': {

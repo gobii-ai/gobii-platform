@@ -36,8 +36,8 @@
                  background: linear-gradient(180deg, rgba(16,10,32,.95) 0%, rgba(16,10,32,.82) 58%,
                                              rgba(16,10,32,0) 100%); }
   .gk-pf-vhead b { color: #fff; font-size: clamp(12px,1.3vw,13.5px); font-weight: 600; }
-  .gk-pf-pulse { width: 7px; height: 7px; border-radius: 50%; background: #34d399; flex-shrink: 0;
-                 animation: gk-pf-pl 1.8s infinite; }
+  .gk-pf-pulse { width: 7px; height: 7px; border-radius: 50%; background: #34d399; flex-shrink: 0; }
+  .gk-pf-motion .gk-pf-pulse { animation: gk-pf-pl 1.8s infinite; }
   @keyframes gk-pf-pl { 50% { opacity: .28; } }
   .gk-pf-eg { font-size: 9.5px; font-weight: 700; letter-spacing: 1px; padding: 3px 9px; }
   .gk-pf-cnt { margin-left: auto; font-variant-numeric: tabular-nums; color: #fff; font-weight: 600;
@@ -50,16 +50,18 @@
                                                       rgba(76,29,149,.24) 100%); }
   .gk-pf-surf { position: absolute; left: 0; right: 0; top: -11px; height: 12px; overflow: hidden; }
   .gk-pf-surf svg { position: absolute; top: 0; left: 0; width: 200%; height: 100%; }
-  .gk-pf-surf .gk-pf-w1 { fill: rgba(167,139,250,.55); animation: gk-pf-drift 7s linear infinite; }
-  .gk-pf-surf .gk-pf-w2 { fill: rgba(196,181,253,.32); animation: gk-pf-drift 11s linear infinite reverse; }
+  .gk-pf-surf .gk-pf-w1 { fill: rgba(167,139,250,.55); }
+  .gk-pf-surf .gk-pf-w2 { fill: rgba(196,181,253,.32); }
+  .gk-pf-motion .gk-pf-surf .gk-pf-w1 { animation: gk-pf-drift 7s linear infinite; }
+  .gk-pf-motion .gk-pf-surf .gk-pf-w2 { animation: gk-pf-drift 11s linear infinite reverse; }
   @keyframes gk-pf-drift { to { transform: translateX(-50%); } }
   .gk-pf-meniscus { position: absolute; left: 0; right: 0; top: -1px; height: 2px;
                     background: linear-gradient(90deg, rgba(196,181,253,0), #c4b5fd 22%, #f0abfc 78%,
                                                 rgba(240,171,252,0));
                     box-shadow: 0 0 20px rgba(240,171,252,.75); }
   .gk-pf-bubbles { position: absolute; inset: 0; overflow: hidden; }
-  .gk-pf-bubbles i { position: absolute; bottom: -8px; border-radius: 50%; background: rgba(224,213,255,.34);
-                     animation: gk-pf-rise linear infinite; }
+  .gk-pf-bubbles i { position: absolute; bottom: -8px; border-radius: 50%; background: rgba(224,213,255,.34); }
+  .gk-pf-motion .gk-pf-bubbles i { animation: gk-pf-rise linear infinite; }
   @keyframes gk-pf-rise { 0% { transform: translateY(0) scale(.7); opacity: 0; }
                           12% { opacity: .8; } 100% { transform: translateY(-320px) scale(1.1); opacity: 0; } }
 
@@ -423,8 +425,9 @@
       rate.addEventListener('input', paintRoi);
 
       var perf = window.GobiiHomePerf;
-      var reduced = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
-                    false; /* see note above: phones animate too */
+      var reduced = (perf && typeof perf.shouldReduceHomepageMotion === 'function' &&
+                     perf.shouldReduceHomepageMotion()) ||
+                    (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
       if (reduced || typeof window.IntersectionObserver !== 'function' ||
           typeof window.requestAnimationFrame !== 'function') {
@@ -432,6 +435,7 @@
         return;
       }
 
+      vessel.classList.add('gk-pf-motion');
       paint(0); paintRoi();
 
       var running = false;

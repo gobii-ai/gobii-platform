@@ -4,6 +4,7 @@ import { MarkdownViewer } from '../common/MarkdownViewer'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { looksLikeHtml, sanitizeHtml, stripBlockquoteQuotes } from '../../util/sanitize'
 import { useTypewriter } from '../../hooks/useTypewriter'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { chatActions } from '../../store/chatSlice'
 import { useAppDispatch } from '../../store/hooks'
 import { repairIncompleteMarkdown, splitMarkdownBlocks } from './streamingMarkdownBlocks'
@@ -45,17 +46,19 @@ export function StreamingReplyCard({
   onLinkClick,
 }: StreamingReplyCardProps) {
   const dispatch = useAppDispatch()
+  const isMobile = useIsMobile()
 
   // One reveal path for every arrival pattern: providers may stream the body
   // incrementally or burst it whole at the end (tool-call arguments often arrive as one
   // chunk) — the typewriter decouples what the user sees from how the network delivered
   // it, and accelerates to finish once the stream is done.
-  // ~40fps reveal: every frame feeds the markdown renderer directly (no plain-text
+  // The reveal feeds the markdown renderer directly (no plain-text
   // tail — the in-flight text must LOOK like markdown), and block memoization bounds the
-  // per-frame parse to just the growing tail block.
+  // per-frame parse to just the growing tail block. Phones update less often but reveal
+  // more characters per pass to preserve throughput without reparsing at desktop cadence.
   const { displayedContent, isWaiting } = useTypewriter(content, isStreaming && !done, {
-    charsPerFrame: 6,
-    frameIntervalMs: 24,
+    charsPerFrame: isMobile ? 24 : 6,
+    frameIntervalMs: isMobile ? 100 : 24,
     waitingThresholdMs: 200,
     finishBoost: 4,
   })
