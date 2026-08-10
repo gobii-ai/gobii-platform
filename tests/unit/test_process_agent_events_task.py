@@ -218,6 +218,7 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
 
         call_kwargs = mock_process.call_args.kwargs
         self.assertEqual(call_kwargs["max_loop_iterations"], 10)
+        self.assertEqual(call_kwargs["max_runtime_seconds"], 300)
         self.assertEqual(call_kwargs["max_iterations_followup_delay_seconds"], 0)
         self.assertEqual(call_kwargs["max_iterations_followup_queue"], AGENT_DEFAULT_PROCESSING_QUEUE)
         self.assertIs(call_kwargs["prefer_low_latency"], True)
@@ -249,6 +250,7 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
 
         call_kwargs = mock_process.call_args.kwargs
         self.assertIsNone(call_kwargs["max_loop_iterations"])
+        self.assertIsNone(call_kwargs["max_runtime_seconds"])
         self.assertIsNone(call_kwargs["max_iterations_followup_delay_seconds"])
         self.assertIsNone(call_kwargs["max_iterations_followup_queue"])
         self.assertEqual(call_kwargs["processing_queue"], AGENT_DEFAULT_PROCESSING_QUEUE)
