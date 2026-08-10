@@ -77,10 +77,6 @@
             <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>
           </button>
           <span class="gk-dd-panel" id="gk-dd-panel"><span class="gk-dd-inner">
-            <a class="gk-dd-item" href="{% url 'pages:ai_employees' %}">
-              <span class="gk-dd-ic">{% lucide "workflow" class="h-4 w-4" %}</span>
-              <span class="gk-dd-tx"><span class="gk-dd-t">How AI employees work</span><span class="gk-dd-s">Capabilities, oversight, and handoffs</span></span>
-            </a>
             <a class="gk-dd-item" href="{% url 'pages:library' %}">
               <span class="gk-dd-ic">{% lucide "layout-grid" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">Agent library</span><span class="gk-dd-s">Premade agents, ready to hire</span></span>
@@ -300,7 +296,6 @@
        class="gk-mobile-panel"
        x-cloak>
     {% if settings.GOBII_PROPRIETARY_MODE %}
-      <a href="{% url 'pages:ai_employees' %}">How AI employees work</a>
       <a href="{% url 'pages:library' %}">Agent library</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='recruiting' %}">Recruiting</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='sales' %}">Sales</a>

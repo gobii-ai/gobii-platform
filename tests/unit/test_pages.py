@@ -4288,20 +4288,9 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         ai_employees_url = reverse("pages:ai_employees")
         desktop_product_menu = soup.find(id="gk-dd-panel")
         mobile_menu = soup.select_one(".gk-mobile-panel")
-        self.assertEqual(
-            len(desktop_product_menu.find_all("a", href=ai_employees_url)),
-            1,
-        )
-        self.assertEqual(
-            len(mobile_menu.find_all("a", href=ai_employees_url)),
-            1,
-        )
-        self.assertEqual(
-            desktop_product_menu.find("a", href=ai_employees_url)
-            .select_one(".gk-dd-t")
-            .get_text(" ", strip=True),
-            mobile_menu.find("a", href=ai_employees_url).get_text(" ", strip=True),
-        )
+        self.assertIsNone(desktop_product_menu.find("a", href=ai_employees_url))
+        self.assertIsNone(mobile_menu.find("a", href=ai_employees_url))
+        self.assertIsNone(soup.find("footer").find("a", href=ai_employees_url))
         page_text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
         page_text = page_text.replace(" ,", ",").replace(" .", ".")
         self.assertIn("Solutions", page_text)
