@@ -4441,7 +4441,7 @@ export function AgentChatPage({
         </div>,
       )
     }
-    if (selectionPage !== 'agents') {
+    if (selectionPage !== 'agents' && selectionSidebarMode === 'gallery') {
       return renderSelectionLayout(
         selectionMainPanel ? (
           <div className="flex min-h-full w-full flex-1 md:hidden">
