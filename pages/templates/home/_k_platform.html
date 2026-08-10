@@ -215,6 +215,10 @@
                   margin-top: 3px; line-height: 1.5; }
   .gk-pf-def { color: #8b7fb8; font-size: 14px; line-height: 1.65; text-align: center;
                max-width: 78ch; margin: clamp(20px,2.6vw,28px) auto 0; }
+  .gk-pf-learn { margin: 12px 0 0; text-align: center; font-size: 13.5px; }
+  .gk-pf-learn a { color: #c4b5fd; font-weight: 600; text-decoration: none; }
+  .gk-pf-learn a:hover { color: #fff; text-decoration: underline; text-underline-offset: 4px; }
+  .gk-pf-learn a:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 4px; border-radius: 4px; }
 </style>
 
 <section id="what-is-gobii" class="gk-section gk-pf" aria-labelledby="what-is-gobii-heading" data-animate>
@@ -239,6 +243,12 @@
   </div>
 
   <p class="gk-pf-def">Gobii is an AI agent platform that gives businesses always-on virtual employees capable of browser automation, web research, data collection, and workflow execution.</p>
+  <p class="gk-pf-learn">
+    <a href="{% url 'pages:ai_employees' %}"
+       data-analytics-cta-id="home_k_ai_employees" data-analytics-placement="definition" data-analytics-intent="learn_ai_employees">
+      Learn how Gobii AI employees work <span aria-hidden="true">&rarr;</span>
+    </a>
+  </p>
 </section>
 
 {% comment %}

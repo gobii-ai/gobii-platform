@@ -159,10 +159,14 @@ class HomePageTests(TestCase):
             },
         )
         self.assertEqual(len(contextual_links), 1)
+        contextual_link = contextual_links[0]
         self.assertEqual(
-            contextual_links[0].get_text(" ", strip=True),
-            "How AI employees work",
+            contextual_link.get_text(" ", strip=True),
+            "Learn how Gobii AI employees work →",
         )
+        self.assertEqual(contextual_link["data-analytics-placement"], "definition")
+        self.assertIsNotNone(contextual_link.find_parent("section", id="what-is-gobii"))
+        self.assertIsNone(soup.select_one(".gk-hero [data-analytics-cta-id='home_k_ai_employees']"))
 
     @override_settings(
         PUBLIC_BRAND_NAME="Acme",
