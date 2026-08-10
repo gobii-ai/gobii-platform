@@ -51,6 +51,7 @@ const sidebars = {
         'using-gobii/planning-and-deliverables',
         'using-gobii/peer-linking',
         'using-gobii/approvals-and-requests',
+        'using-gobii/review-before-send',
         'using-gobii/meta-gobii',
         'using-gobii/template-library',
         'using-gobii/share-template',

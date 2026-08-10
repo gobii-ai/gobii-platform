@@ -13,6 +13,7 @@ Approvals are how Gobii keeps humans in control. A Gobii can continue routine wo
 | Human input | Gobii needs a decision, answer, selection, or clarification. |
 | Secret request | Gobii needs credentials or an environment-style value to use a service. |
 | Contact request | Gobii wants permission to communicate with a person or endpoint. |
+| Outbox review | Gobii prepared external email that must be reviewed before delivery. |
 | Spawn request | Gobii or Meta Gobii proposes creating another Gobii. |
 | Change approval | Meta Gobii proposes changing names, charters, links, files, contacts, schedules, or limits. |
 
@@ -63,6 +64,12 @@ Before approving a contact request, check:
 - Whether the approval should be temporary or long-lived.
 
 See [Contact Access And Allowlists](/admin-and-teams/contact-access-and-allowlists).
+
+## Outbox email reviews
+
+When a Gobii's external email policy requires review, the email waits in Outbox until an authorized person approves or discards the exact version. Review the complete recipient list, subject, body, attachments, and warnings before approving. Email approval does not grant contact access.
+
+See [Review Before Send](/using-gobii/review-before-send) for policy options, editing, notifications, expiry, and failed-delivery retries.
 
 ## Meta Gobii approvals
 

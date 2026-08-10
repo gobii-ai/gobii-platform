@@ -10,6 +10,8 @@ Email and SMS let a Gobii communicate outside the web chat timeline. Use them wh
 
 Gobii can use default email delivery where available. If you want a Gobii to use your own mailbox, configure custom SMTP and IMAP.
 
+Use [Review Before Send](/using-gobii/review-before-send) when external email should wait in Outbox for a human to inspect, edit, approve, or discard the exact message before delivery. Contact access remains a separate requirement.
+
 Open email settings:
 
 - Gobii Cloud: `https://gobii.ai/console/agents/<agent_id>/email/`
@@ -44,5 +46,5 @@ Email attachments and MMS files can become files available to the Gobii. Use [Fi
 - Do not paste mailbox passwords into chat.
 - Use app passwords or OAuth where required by the provider.
 - Keep allowed contacts narrow.
-- Ask before external sends when the Gobii is new or the content is sensitive.
+- Use Review Before Send for external sends when the Gobii is new or the content is sensitive.
 - For self-hosted deployments, ensure email workers, provider webhooks, and IMAP services are configured before relying on low-latency inbound mail.
