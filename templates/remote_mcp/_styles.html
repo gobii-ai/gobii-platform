@@ -1,0 +1,196 @@
+<style>
+  .rmcp-page {
+    --rmcp-ink: #f8f7ff;
+    --rmcp-muted: #b9afd4;
+    --rmcp-faint: #8f83b3;
+    --rmcp-violet: #a78bfa;
+    --rmcp-cyan: #67e8f9;
+    background:
+      radial-gradient(circle at 82% 5%, rgba(91, 33, 182, .28), transparent 30rem),
+      radial-gradient(circle at 8% 38%, rgba(8, 145, 178, .14), transparent 26rem),
+      #0b0716;
+    color: var(--rmcp-ink);
+    overflow-x: clip;
+    padding-bottom: 6rem;
+  }
+  .rmcp-page *, .rmcp-page *::before, .rmcp-page *::after { box-sizing: border-box; }
+  .rmcp-shell { width: min(1120px, calc(100% - 3rem)); margin-inline: auto; }
+  .rmcp-section { padding-top: 6.75rem; }
+  .rmcp-section-compact { padding-top: 4.5rem; }
+  .rmcp-kicker { margin: 0 0 .9rem; color: #c4b5fd; font-size: .72rem; font-weight: 700;
+    letter-spacing: .16em; text-transform: uppercase; }
+  .rmcp-heading { margin: 0; color: #fff; font-size: clamp(2rem, 4.5vw, 3.45rem); font-weight: 470;
+    letter-spacing: -.045em; line-height: 1.03; }
+  .rmcp-heading-small { font-size: clamp(1.75rem, 3.2vw, 2.7rem); }
+  .rmcp-lede { max-width: 44rem; margin: 1.1rem 0 0; color: var(--rmcp-muted); font-size: 1.04rem; line-height: 1.75; }
+  .rmcp-section-head { max-width: 47rem; }
+  .rmcp-crumbs { display: flex; align-items: center; gap: .55rem; margin: 0 0 2.2rem; color: var(--rmcp-faint);
+    font-size: .78rem; }
+  .rmcp-crumbs a, .rmcp-text-link { color: #d8ccff; text-decoration: underline; text-decoration-color: rgba(167,139,250,.45);
+    text-underline-offset: .24em; }
+  .rmcp-crumbs a:hover, .rmcp-text-link:hover { color: #fff; }
+  .rmcp-hero { display: grid; grid-template-columns: minmax(0, 1.04fr) minmax(22rem, .96fr); gap: 4rem;
+    align-items: center; padding-top: 5rem; }
+  .rmcp-hero h1 { max-width: 17ch; margin: 0; color: #fff; font-size: clamp(2.65rem, 4.4vw, 4rem);
+    font-weight: 430; letter-spacing: -.055em; line-height: 1; text-wrap: balance; }
+  .rmcp-nowrap { white-space: nowrap; }
+  .rmcp-hero-copy { max-width: 43rem; margin: 1.5rem 0 0; color: #c7bddf; font-size: clamp(1.02rem, 1.55vw, 1.22rem);
+    line-height: 1.7; }
+  .rmcp-actions { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: 1.75rem; }
+  .rmcp-actions form { margin: 0; }
+  .rmcp-actions .gk-btn, .rmcp-actions .gk-btn-quiet { min-height: 3rem; justify-content: center; }
+  .rmcp-proof { display: flex; flex-wrap: wrap; gap: .65rem 1.25rem; margin: 1.45rem 0 0; padding: 0;
+    color: #a99fc5; font-size: .78rem; list-style: none; }
+  .rmcp-proof li { display: inline-flex; align-items: center; gap: .45rem; }
+  .rmcp-proof svg { width: .95rem; height: .95rem; color: var(--rmcp-cyan); }
+  .rmcp-updated { margin: 1rem 0 0; color: #74698f; font-size: .72rem; }
+
+  .rmcp-architecture { position: relative; min-width: 0; padding: 1.25rem; border: 1px solid rgba(196,181,253,.18);
+    border-radius: 1.6rem; background: linear-gradient(145deg, rgba(38,25,72,.9), rgba(15,12,34,.95));
+    box-shadow: 0 28px 70px rgba(2, 1, 8, .42); }
+  .rmcp-architecture::before { content: ''; position: absolute; inset: 12% 14%; z-index: 0; border-radius: 50%;
+    background: rgba(124,58,237,.2); filter: blur(48px); pointer-events: none; }
+  .rmcp-architecture > * { position: relative; z-index: 1; }
+  .rmcp-client-grid, .rmcp-agent-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .55rem; }
+  .rmcp-node { min-width: 0; padding: .75rem .8rem; border: 1px solid rgba(255,255,255,.09); border-radius: .85rem;
+    background: rgba(9,7,25,.72); color: #dcd5ec; font-size: .72rem; text-align: center; }
+  .rmcp-node strong { display: block; color: #fff; font-size: .78rem; }
+  .rmcp-flow { display: grid; justify-items: center; gap: .45rem; margin: .6rem 0; color: #9488b4; font-size: .67rem;
+    letter-spacing: .08em; text-transform: uppercase; }
+  .rmcp-flow svg { width: 1rem; height: 1rem; color: var(--rmcp-violet); }
+  .rmcp-gateway { padding: 1.05rem; border: 1px solid rgba(167,139,250,.38); border-radius: 1rem;
+    background: linear-gradient(120deg, rgba(109,40,217,.4), rgba(8,145,178,.2)); text-align: center; }
+  .rmcp-gateway span { display: block; color: #a99fc5; font-size: .67rem; }
+  .rmcp-gateway strong { display: block; margin-top: .15rem; color: #fff; font-size: .95rem; }
+  .rmcp-agent-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .rmcp-agent-grid .rmcp-node { padding: .65rem .35rem; }
+  .rmcp-architecture-caption { margin: .9rem 0 0; color: #887da6; font-size: .7rem; line-height: 1.5; text-align: center; }
+
+  .rmcp-client-strip { display: grid; grid-template-columns: auto repeat(4, 1fr); align-items: center; gap: .65rem;
+    margin-top: 3.5rem; padding: 1rem 1.15rem; border-block: 1px solid rgba(255,255,255,.08); }
+  .rmcp-client-strip p { margin: 0; color: #7f749e; font-size: .72rem; }
+  .rmcp-client-strip span { color: #d9d1ec; font-size: .78rem; text-align: center; }
+
+  .rmcp-definition { display: grid; grid-template-columns: .8fr 1.2fr; gap: 3rem; align-items: start; padding: 2.1rem 0;
+    border-block: 1px solid rgba(255,255,255,.09); }
+  .rmcp-definition h2 { margin: 0; color: #fff; font-size: clamp(1.6rem, 3vw, 2.4rem); font-weight: 500; letter-spacing: -.035em; }
+  .rmcp-definition p { margin: 0; color: #cec6df; font-size: 1.05rem; line-height: 1.8; }
+  .rmcp-position { margin-top: 1.4rem; padding-left: 1rem; border-left: 3px solid var(--rmcp-violet); color: #e7e1f5;
+    font-size: 1.03rem; }
+  .rmcp-position strong { color: #fff; }
+
+  .rmcp-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 2.4rem; }
+  .rmcp-compare-card { position: relative; min-width: 0; padding: 1.7rem; border: 1px solid rgba(255,255,255,.1);
+    border-radius: 1.2rem; background: rgba(16,12,35,.72); }
+  .rmcp-compare-card[data-kind="persistent"] { border-color: rgba(103,232,249,.25);
+    background: linear-gradient(135deg, rgba(17,51,66,.55), rgba(26,18,55,.78)); }
+  .rmcp-compare-label { color: #8e82ab; font-size: .68rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+  .rmcp-compare-card h3 { margin: .7rem 0 .45rem; color: #fff; font-size: 1.08rem; }
+  .rmcp-compare-card p { margin: 0; color: #aaa0c2; font-size: .84rem; line-height: 1.65; }
+  .rmcp-sequence { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 1.15rem; color: #bcb3d2; font-size: .72rem; }
+  .rmcp-sequence span { display: inline-flex; align-items: center; gap: .4rem; }
+  .rmcp-sequence span:not(:last-child)::after { content: '→'; color: #756a93; }
+
+  .rmcp-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: .9rem; margin-top: 2.3rem; }
+  .rmcp-card { min-width: 0; padding: 1.55rem; border: 1px solid rgba(255,255,255,.09); border-radius: 1.05rem;
+    background: rgba(19,14,40,.72); }
+  .rmcp-card-icon { display: grid; width: 2.3rem; height: 2.3rem; place-items: center; border-radius: .7rem;
+    background: rgba(124,58,237,.2); color: #c4b5fd; }
+  .rmcp-card-icon svg { width: 1.05rem; height: 1.05rem; }
+  .rmcp-card h3 { margin: 1rem 0 .5rem; color: #fff; font-size: 1rem; }
+  .rmcp-card p { margin: 0; color: #a99fc2; font-size: .83rem; line-height: 1.68; }
+  .rmcp-tools { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 1rem; }
+  .rmcp-tools code, .rmcp-inline-code { max-width: 100%; padding: .25rem .45rem; border: 1px solid rgba(167,139,250,.16);
+    border-radius: .4rem; background: rgba(8,6,19,.55); color: #cfc4ed; font-size: .66rem; overflow-wrap: anywhere; }
+
+  .rmcp-workflow-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1rem; margin-top: 2.3rem; }
+  .rmcp-workflow { min-width: 0; padding: 1.7rem; border-top: 2px solid rgba(167,139,250,.45);
+    background: linear-gradient(180deg, rgba(35,23,67,.62), rgba(14,11,30,.4)); border-radius: 0 0 1rem 1rem; }
+  .rmcp-example-label { color: var(--rmcp-cyan); font-size: .66rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+  .rmcp-workflow h3 { margin: .75rem 0 .65rem; color: #fff; font-size: 1.1rem; }
+  .rmcp-workflow p { margin: 0; color: #aca2c5; font-size: .84rem; line-height: 1.68; }
+  .rmcp-workflow-path { display: grid; gap: .45rem; margin: 1.2rem 0 0; padding: 0; list-style: none; }
+  .rmcp-workflow-path li { display: grid; grid-template-columns: 1.2rem 1fr; gap: .5rem; color: #c8c0db; font-size: .75rem; }
+  .rmcp-workflow-path b { color: #8d81ab; font-weight: 600; }
+
+  .rmcp-connect-layout { display: grid; grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr); gap: 3.5rem;
+    align-items: start; margin-top: 2.3rem; }
+  .rmcp-connect-layout > * { min-width: 0; }
+  .rmcp-steps { display: grid; gap: 1.4rem; margin: 0; padding: 0; list-style: none; counter-reset: rmcp-step; }
+  .rmcp-steps li { position: relative; padding-left: 3.5rem; counter-increment: rmcp-step; }
+  .rmcp-steps li::before { content: counter(rmcp-step); position: absolute; left: 0; top: -.1rem; display: grid; width: 2.35rem;
+    height: 2.35rem; place-items: center; border: 1px solid rgba(167,139,250,.38); border-radius: 50%; color: #ddd4f4;
+    background: #1b1233; font-size: .8rem; }
+  .rmcp-steps h3 { margin: 0 0 .35rem; color: #fff; font-size: .98rem; }
+  .rmcp-steps p { margin: 0; color: #a99fc2; font-size: .84rem; line-height: 1.65; }
+  .rmcp-code { min-width: 0; overflow: hidden; border: 1px solid rgba(103,232,249,.16); border-radius: 1rem;
+    background: #080614; box-shadow: 0 24px 58px rgba(2,1,8,.35); }
+  .rmcp-code-head { display: flex; justify-content: space-between; gap: 1rem; padding: .75rem 1rem;
+    border-bottom: 1px solid rgba(255,255,255,.07); color: #84799f; font-size: .7rem; }
+  .rmcp-code pre { max-width: 100%; margin: 0; padding: 1.25rem; overflow-x: auto; color: #dcd7e7; font-size: .78rem;
+    line-height: 1.75; scrollbar-color: #6d28d9 #110c21; }
+  .rmcp-code pre:focus-visible { outline: 2px solid var(--rmcp-cyan); outline-offset: -3px; }
+  .rmcp-code .key { color: #c084fc; } .rmcp-code .value { color: #67e8f9; }
+  .rmcp-code-note { margin: .8rem 0 0; color: #83789f; font-size: .72rem; line-height: 1.6; }
+
+  .rmcp-security { display: grid; grid-template-columns: .78fr 1.22fr; gap: 3rem; align-items: start; }
+  .rmcp-checks { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin: 0; padding: 0; list-style: none; }
+  .rmcp-checks li { display: grid; grid-template-columns: 1.25rem 1fr; gap: .65rem; padding: 1rem;
+    border: 1px solid rgba(255,255,255,.08); border-radius: .85rem; background: rgba(15,12,31,.6); color: #bfb6d2;
+    font-size: .78rem; line-height: 1.55; }
+  .rmcp-checks svg { width: 1rem; height: 1rem; color: var(--rmcp-cyan); margin-top: .12rem; }
+
+  .rmcp-directions { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 2.2rem; }
+  .rmcp-direction { min-width: 0; padding: 1.7rem; border: 1px solid rgba(255,255,255,.1); border-radius: 1.1rem;
+    background: rgba(18,14,38,.7); }
+  .rmcp-direction:first-child { border-color: rgba(167,139,250,.28); }
+  .rmcp-direction:last-child { border-color: rgba(103,232,249,.22); }
+  .rmcp-direction-label { color: #8d81aa; font-size: .68rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  .rmcp-direction-flow { margin: .9rem 0; color: #fff; font-size: 1.04rem; font-weight: 600; overflow-wrap: anywhere; }
+  .rmcp-direction p { margin: 0 0 1rem; color: #aaa0c2; font-size: .83rem; line-height: 1.65; }
+
+  .rmcp-faq { display: grid; grid-template-columns: .72fr 1.28fr; gap: 3rem; align-items: start; }
+  .rmcp-faq-list details { padding: 1.05rem 0; border-bottom: 1px solid rgba(255,255,255,.09); }
+  .rmcp-faq-list details:first-child { border-top: 1px solid rgba(255,255,255,.09); }
+  .rmcp-faq-list summary { display: flex; justify-content: space-between; gap: 1rem; color: #f2eef9; font-size: .93rem;
+    font-weight: 600; cursor: pointer; list-style: none; }
+  .rmcp-faq-list summary::-webkit-details-marker { display: none; }
+  .rmcp-faq-list summary::after { content: '+'; flex: 0 0 auto; color: var(--rmcp-violet); font-size: 1.2rem; font-weight: 400; }
+  .rmcp-faq-list details[open] summary::after { content: '−'; }
+  .rmcp-faq-list summary:focus-visible { outline: 2px solid var(--rmcp-cyan); outline-offset: .35rem; border-radius: .15rem; }
+  .rmcp-faq-list p { margin: .8rem 2rem 0 0; color: #a99fc2; font-size: .83rem; line-height: 1.7; }
+
+  .rmcp-final { margin-top: 6.75rem; padding: 3.5rem; border: 1px solid rgba(167,139,250,.2); border-radius: 1.5rem;
+    background: linear-gradient(120deg, rgba(76,29,149,.42), rgba(14,116,144,.18), rgba(17,12,34,.9)); text-align: center; }
+  .rmcp-final h2 { max-width: 18ch; margin: 0 auto; color: #fff; font-size: clamp(2rem, 4vw, 3.5rem); font-weight: 460;
+    letter-spacing: -.045em; line-height: 1.05; }
+  .rmcp-final p { max-width: 40rem; margin: 1rem auto 0; color: #beb5d2; line-height: 1.7; }
+  .rmcp-final .rmcp-actions { justify-content: center; }
+  .rmcp-final-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem 1.4rem; margin-top: 1.3rem;
+    color: #9d92b8; font-size: .74rem; }
+  .rmcp-final-links a { color: #cfc4e8; }
+
+  @media (max-width: 900px) {
+    .rmcp-hero, .rmcp-definition, .rmcp-connect-layout, .rmcp-security, .rmcp-faq { grid-template-columns: 1fr; }
+    .rmcp-hero { gap: 2.5rem; }
+    .rmcp-hero h1 { max-width: 18ch; }
+    .rmcp-architecture { width: min(100%, 34rem); }
+    .rmcp-grid, .rmcp-workflow-grid { grid-template-columns: 1fr 1fr; }
+    .rmcp-security, .rmcp-faq { gap: 2rem; }
+  }
+  @media (max-width: 640px) {
+    .rmcp-shell { width: min(100% - 2rem, 1120px); }
+    .rmcp-section { padding-top: 5rem; }
+    .rmcp-hero { padding-top: 3.25rem; }
+    .rmcp-hero h1 { font-size: clamp(2.4rem, 11.5vw, 3rem); }
+    .rmcp-client-strip { grid-template-columns: 1fr 1fr; }
+    .rmcp-client-strip p { grid-column: 1 / -1; text-align: center; }
+    .rmcp-compare, .rmcp-grid, .rmcp-workflow-grid, .rmcp-directions, .rmcp-checks { grid-template-columns: 1fr; }
+    .rmcp-definition { gap: 1.25rem; }
+    .rmcp-final { padding: 2.5rem 1.25rem; }
+    .rmcp-actions, .rmcp-actions form, .rmcp-actions .gk-btn, .rmcp-actions .gk-btn-quiet { width: 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rmcp-page *, .rmcp-page *::before, .rmcp-page *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+  }
+</style>

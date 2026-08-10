@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% load static %}
+{% load lucide_icons %}
+
+{% block title %}{{ remote_mcp_seo_title }}{% endblock %}
+
+{% block lucide_js %}{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+{% include "remote_mcp/_seo_meta.html" %}
+{% include "remote_mcp/_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<main class="rmcp-page">
+  <div class="rmcp-shell">
+    <section class="rmcp-hero" aria-labelledby="remote-mcp-title">
+      <div>
+        <nav class="rmcp-crumbs" aria-label="Breadcrumb">
+          <a href="{% url 'pages:home' %}">Home</a>
+          <span aria-hidden="true">/</span>
+          <span aria-current="page">Remote MCP</span>
+        </nav>
+        <p class="rmcp-kicker">Gobii Remote MCP</p>
+        <h1 id="remote-mcp-title">Control persistent AI agents from any <span class="rmcp-nowrap">MCP-compatible</span> client</h1>
+        <p class="rmcp-hero-copy">
+          Bring long-lived Gobii agents into Claude, Codex, Hermes, or your own internal tools. Create agents, send work, coordinate peers, exchange files, and follow one durable timeline over authenticated Remote MCP.
+        </p>
+        <div class="rmcp-actions">
+          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" data-analytics-cta-id="remote_mcp_hero" data-analytics-placement="hero" data-analytics-intent="get_api_keys">
+            {% csrf_token %}
+            <input type="hidden" name="source_page" value="remote_mcp_hero">
+            <input type="hidden" name="trial_onboarding" value="1">
+            <input type="hidden" name="trial_onboarding_target" value="api_keys">
+            <button type="submit" class="gk-btn">
+              Connect Gobii via MCP
+              {% lucide "arrow-right" class="h-4 w-4" %}
+            </button>
+          </form>
+          <a href="https://docs.gobii.ai/developers/mcp-server" class="gk-btn-quiet">
+            Read the MCP docs
+          </a>
+        </div>
+        <ul class="rmcp-proof" aria-label="Remote MCP technical proof">
+          <li>{% lucide "network" class="h-4 w-4" %} Streamable HTTP</li>
+          <li>{% lucide "key-round" class="h-4 w-4" %} API-key authentication</li>
+          <li>{% lucide "server" class="h-4 w-4" %} Gobii Cloud or self-hosted</li>
+        </ul>
+        <p class="rmcp-updated">Last updated <time datetime="{{ remote_mcp_last_updated }}">{{ remote_mcp_last_updated_display|date:"F j, Y" }}</time></p>
+      </div>
+
+      <div>
+        <div class="rmcp-architecture" role="img" aria-label="Claude, Codex, Hermes, and internal tools connect through authenticated Gobii Remote MCP to a persistent agent control plane and three long-lived agents.">
+          <div class="rmcp-client-grid" aria-hidden="true">
+            <div class="rmcp-node"><strong>Claude</strong>MCP client</div>
+            <div class="rmcp-node"><strong>Codex</strong>MCP client</div>
+            <div class="rmcp-node"><strong>Hermes</strong>MCP client</div>
+            <div class="rmcp-node"><strong>Your product</strong>Internal client</div>
+          </div>
+          <div class="rmcp-flow" aria-hidden="true">
+            {% lucide "arrow-down" class="h-4 w-4" %}
+            <span>Authenticated Remote MCP</span>
+          </div>
+          <div class="rmcp-gateway" aria-hidden="true">
+            <span>Stateless endpoint · persistent agent state</span>
+            <strong>Gobii control plane + unified timeline</strong>
+          </div>
+          <div class="rmcp-flow" aria-hidden="true">{% lucide "arrow-down" class="h-4 w-4" %}</div>
+          <div class="rmcp-agent-grid" aria-hidden="true">
+            <div class="rmcp-node"><strong>Agent A</strong>Files</div>
+            <div class="rmcp-node"><strong>Agent B</strong>Tools</div>
+            <div class="rmcp-node"><strong>Agent C</strong>Context</div>
+          </div>
+          <p class="rmcp-architecture-caption" aria-hidden="true">Clients direct the work. Each Gobii keeps its own charter, timeline, workspace, tools, and context.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="rmcp-client-strip" aria-label="Example compatible environments">
+      <p>MCP-compatible environments include</p>
+      <span>Claude</span>
+      <span>Codex</span>
+      <span>Hermes</span>
+      <span>Internal clients</span>
+    </div>
+
+    <section class="rmcp-section-compact" aria-labelledby="what-is-remote-mcp">
+      <div class="rmcp-definition">
+        <h2 id="what-is-remote-mcp">What is Gobii Remote MCP?</h2>
+        <div>
+          <p>Gobii Remote MCP is a hosted Model Context Protocol endpoint that lets external AI clients operate persistent Gobii agents. Instead of exposing only a collection of app actions, it exposes agent lifecycle, messaging, timelines, files, coordination, and bounded event-waiting tools through a standard MCP interface.</p>
+          <div class="rmcp-position"><strong>MCP is the interface.</strong> Persistent agents are the product.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="rmcp-section" aria-labelledby="persistence-heading">
+      <div class="rmcp-section-head">
+        <p class="rmcp-kicker">Durable by design</p>
+        <h2 class="rmcp-heading" id="persistence-heading">Your agent should outlive the chat that assigned the work</h2>
+        <p class="rmcp-lede">Most AI interactions begin and end inside one session. A Gobii keeps a charter, configuration, unified timeline, workspace, and working context of its own. Another client can add work to that same agent and inspect what happens next without creating a second task, run, or conversation model.</p>
+      </div>
+      <div class="rmcp-compare">
+        <article class="rmcp-compare-card" data-kind="session">
+          <span class="rmcp-compare-label">Session-bound interaction</span>
+          <h3>Useful work ends with the current request</h3>
+          <p>The caller owns the context and must rebuild persistence, files, coordination, and status tracking around each new run.</p>
+          <div class="rmcp-sequence" aria-label="Prompt, run, response, context ends">
+            <span>Prompt</span><span>Run</span><span>Response</span><span>Context ends</span>
+          </div>
+        </article>
+        <article class="rmcp-compare-card" data-kind="persistent">
+          <span class="rmcp-compare-label">Gobii Remote MCP</span>
+          <h3>One agent, one continuing work history</h3>
+          <p>Messages, schedules, tools, files, peer activity, and later deliverables accumulate on the agent's durable timeline.</p>
+          <div class="rmcp-sequence" aria-label="Client message, persistent timeline, work, later events">
+            <span>Client message</span><span>Timeline</span><span>Work</span><span>Later events</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="rmcp-section" aria-labelledby="capabilities-heading">
+      <div class="rmcp-section-head">
+        <p class="rmcp-kicker">Agent control plane</p>
+        <h2 class="rmcp-heading" id="capabilities-heading">An MCP control plane for your Gobii fleet</h2>
+        <p class="rmcp-lede">The endpoint exposes a focused conversational agent-timeline interface. These representative tools prove the surface; the complete, current catalog stays in the <a class="rmcp-text-link" href="https://docs.gobii.ai/developers/mcp-server">Remote MCP reference</a>.</p>
+      </div>
+      <div class="rmcp-grid">
+        <article class="rmcp-card">
+          <div class="rmcp-card-icon">{% lucide "bot" class="h-5 w-5" %}</div>
+          <h3>Create and configure agents</h3>
+          <p>Provision a persistent agent and control supported lifecycle, schedule, intelligence, credit, and policy settings.</p>
+          <div class="rmcp-tools"><code>gobii_create_agent</code><code>gobii_update_agent</code></div>
+        </article>
+        <article class="rmcp-card">
+          <div class="rmcp-card-icon">{% lucide "messages-square" class="h-5 w-5" %}</div>
+          <h3>Send work and follow the timeline</h3>
+          <p>Append an authenticated message, read timeline events, and continue from durable cursors instead of inventing a separate run.</p>
+          <div class="rmcp-tools"><code>gobii_send_agent_message</code><code>gobii_get_agent_timeline</code></div>
+        </article>
+        <article class="rmcp-card">
+          <div class="rmcp-card-icon">{% lucide "timer" class="h-5 w-5" %}</div>
+          <h3>Wait for the event you need</h3>
+          <p>Use bounded long-polling and event filters to wait for relevant activity without holding an application request open indefinitely.</p>
+          <div class="rmcp-tools"><code>gobii_wait_for_agent_event</code></div>
+        </article>
+        <article class="rmcp-card">
+          <div class="rmcp-card-icon">{% lucide "files" class="h-5 w-5" %}</div>
+          <h3>Move files with the work</h3>
+          <p>Upload small files, list an agent's filespace, attach existing workspace paths, and read authenticated resource links.</p>
+          <div class="rmcp-tools"><code>gobii_upload_agent_file</code><code>gobii_list_agent_files</code></div>
+        </article>
+        <article class="rmcp-card">
+          <div class="rmcp-card-icon">{% lucide "workflow" class="h-5 w-5" %}</div>
+          <h3>Coordinate specialist agents</h3>
+          <p>Link accessible agents, retain peer-message history, and remove links later without deleting their prior conversations.</p>
+          <div class="rmcp-tools"><code>gobii_link_agents</code><code>gobii_unlink_agents</code></div>
+        </article>
+        <article class="rmcp-card">
+          <div class="rmcp-card-icon">{% lucide "scan-search" class="h-5 w-5" %}</div>
+          <h3>Inspect without exposing secrets</h3>
+          <p>Retrieve bounded, sanitized support context for an agent the supplied API key is already allowed to access.</p>
+          <div class="rmcp-tools"><code>gobii_get_agent_debug_trace</code></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="rmcp-section" aria-labelledby="workflows-heading">
+      <div class="rmcp-section-head">
+        <p class="rmcp-kicker">Example workflows</p>
+        <h2 class="rmcp-heading" id="workflows-heading">Use the right client without giving up durable execution</h2>
+        <p class="rmcp-lede">These are representative patterns, not customer stories. Each keeps the Gobii—not the assigning client—as the durable home for the work.</p>
+      </div>
+      <div class="rmcp-workflow-grid">
+        <article class="rmcp-workflow">
+          <span class="rmcp-example-label">Example workflow 01</span>
+          <h3>Delegate from Codex</h3>
+          <p>Send a research or operations brief to an existing Gobii, attach source files, continue local development, and retrieve new events when the agent responds.</p>
+          <ol class="rmcp-workflow-path"><li><b>1</b><span>Brief + source files</span></li><li><b>2</b><span>Persistent agent work</span></li><li><b>3</b><span>Timeline result</span></li></ol>
+        </article>
+        <article class="rmcp-workflow">
+          <span class="rmcp-example-label">Example workflow 02</span>
+          <h3>Coordinate from another compatible client</h3>
+          <p>Use Claude, Hermes, or another compatible environment to inspect agents, route work to a specialist, link peers, and review their activity.</p>
+          <ol class="rmcp-workflow-path"><li><b>1</b><span>Select a specialist</span></li><li><b>2</b><span>Link collaborating agents</span></li><li><b>3</b><span>Review shared progress</span></li></ol>
+        </article>
+        <article class="rmcp-workflow">
+          <span class="rmcp-example-label">Example workflow 03</span>
+          <h3>Add agents to an internal product</h3>
+          <p>Use a standard MCP client inside an internal tool to provision agents, trigger ongoing work, inspect timelines, and expose selected controls.</p>
+          <ol class="rmcp-workflow-path"><li><b>1</b><span>Internal product event</span></li><li><b>2</b><span>Gobii action</span></li><li><b>3</b><span>Bounded status check</span></li></ol>
+        </article>
+      </div>
+    </section>
+
+    <section class="rmcp-section" aria-labelledby="connect-heading">
+      <div class="rmcp-section-head">
+        <p class="rmcp-kicker">Connection</p>
+        <h2 class="rmcp-heading" id="connect-heading">Connect once. Work with the same agents everywhere.</h2>
+        <p class="rmcp-lede">Client configuration syntax varies. The endpoint, transport, and credential rule remain the same.</p>
+      </div>
+      <div class="rmcp-connect-layout">
+        <ol class="rmcp-steps">
+          <li>
+            <h3>Create your account and API key</h3>
+            <p>Personal keys see agents available to that user. Organization keys operate within their organization scope.</p>
+          </li>
+          <li>
+            <h3>Add the Remote MCP endpoint</h3>
+            <p>Configure <span class="rmcp-inline-code">https://gobii.ai/api/v1/mcp/</span> as a Streamable HTTP server and send the key in an authenticated header.</p>
+          </li>
+          <li>
+            <h3>Discover tools and delegate</h3>
+            <p>Initialize the connection, call <span class="rmcp-inline-code">tools/list</span>, then send work and read or wait on the agent's unified timeline.</p>
+          </li>
+        </ol>
+        <div>
+          <div class="rmcp-code">
+            <div class="rmcp-code-head"><span>Hermes configuration example</span><span>Streamable HTTP</span></div>
+            <pre tabindex="0" aria-label="Horizontally scrollable Remote MCP configuration example"><code>mcp_servers:
+  gobii:
+    <span class="key">url:</span> <span class="value">"https://gobii.ai/api/v1/mcp/"</span>
+    <span class="key">headers:</span>
+      Authorization: <span class="value">"Bearer ${GOBII_API_KEY}"</span>
+    <span class="key">tools:</span>
+      include:
+        - gobii_list_agents
+        - gobii_send_agent_message
+        - gobii_get_agent_timeline</code></pre>
+          </div>
+          <p class="rmcp-code-note">Keep the key in the client environment or a managed secret store. Do not paste keys into shared configuration, chat, source control, or query strings. The Docs include initialization, tool calls, smoke tests, and the full catalog.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="rmcp-section" aria-labelledby="security-heading">
+      <div class="rmcp-security">
+        <div class="rmcp-section-head">
+          <p class="rmcp-kicker">Security and control</p>
+          <h2 class="rmcp-heading rmcp-heading-small" id="security-heading">Give clients access to the agents they are allowed to use</h2>
+          <p class="rmcp-lede">Remote MCP uses existing Gobii API keys. The endpoint does not claim OAuth support; every request carries the key whose scope governs the operation.</p>
+        </div>
+        <ul class="rmcp-checks">
+          <li>{% lucide "check" class="h-4 w-4" %}<span>Personal and organization API keys retain their existing owner scope.</span></li>
+          <li>{% lucide "check" class="h-4 w-4" %}<span>Every tool call executes with the permissions of the supplied key.</span></li>
+          <li>{% lucide "check" class="h-4 w-4" %}<span>Browser-originated requests receive Origin validation to reduce DNS rebinding risk.</span></li>
+          <li>{% lucide "check" class="h-4 w-4" %}<span>Debug output is bounded and conservatively redacts credentials and secret patterns.</span></li>
+          <li>{% lucide "check" class="h-4 w-4" %}<span>Agent configuration supports ownership, credit limits, lifecycle, and policy controls.</span></li>
+          <li>{% lucide "check" class="h-4 w-4" %}<span>Use the Gobii Cloud endpoint or run the open-source platform on your own infrastructure.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="rmcp-section" aria-labelledby="directions-heading">
+      <div class="rmcp-section-head">
+        <p class="rmcp-kicker">Two directions of MCP</p>
+        <h2 class="rmcp-heading" id="directions-heading">Remote MCP in. MCP tools out.</h2>
+        <p class="rmcp-lede">The name is similar; the trust boundary and direction are not. Choose based on which system needs the tools.</p>
+      </div>
+      <div class="rmcp-directions">
+        <article class="rmcp-direction">
+          <span class="rmcp-direction-label">Control Gobii through Remote MCP</span>
+          <div class="rmcp-direction-flow">External MCP client → Gobii Remote MCP → Gobii agents</div>
+          <p>Claude, Codex, Hermes, or an internal client discovers Gobii tools, then manages and messages accessible persistent agents.</p>
+          <a class="rmcp-text-link" href="https://docs.gobii.ai/developers/mcp-server">Read the Remote MCP implementation guide</a>
+        </article>
+        <article class="rmcp-direction">
+          <span class="rmcp-direction-label">Give a Gobii third-party tools</span>
+          <div class="rmcp-direction-flow">Gobii agent → connected MCP server → external tools</div>
+          <p>A Gobii acts as the client and uses tools or data exposed by another MCP server assigned to that agent.</p>
+          <a class="rmcp-text-link" href="https://docs.gobii.ai/using-gobii/mcp-servers">Configure third-party MCP servers for a Gobii</a>
+        </article>
+      </div>
+    </section>
+
+    <section class="rmcp-section rmcp-faq" aria-labelledby="faq-heading">
+      <div class="rmcp-section-head">
+        <p class="rmcp-kicker">Questions</p>
+        <h2 class="rmcp-heading rmcp-heading-small" id="faq-heading">Remote MCP FAQ</h2>
+        <p class="rmcp-lede">Concise answers for product evaluation. For live protocol details and client setup, use the <a class="rmcp-text-link" href="https://docs.gobii.ai/developers/mcp-server">Remote MCP Docs</a>.</p>
+      </div>
+      <div class="rmcp-faq-list">
+        <details open>
+          <summary>What is a remote MCP server?</summary>
+          <p>A remote MCP server is a network endpoint that exposes tools or resources to compatible clients. Gobii's endpoint exposes authenticated tools for operating persistent agents rather than only app-specific actions.</p>
+        </details>
+        <details>
+          <summary>How is Gobii Remote MCP different from the Gobii Agent API?</summary>
+          <p>Use <a class="rmcp-text-link" href="{% url 'pages:solution' slug='engineering' %}">the Gobii Agent API</a> when deterministic application code should call REST resources. Use Remote MCP when an AI client should discover available tools and select the appropriate operation. Both address the same persistent agent model.</p>
+        </details>
+        <details>
+          <summary>Does a Gobii keep its context between MCP calls?</summary>
+          <p>Yes. The MCP endpoint itself is stateless, but the Gobii is long-lived. Its charter, timeline, workspace, files, configuration, peer links, and working context persist between calls.</p>
+        </details>
+        <details>
+          <summary>Which MCP clients can connect to Gobii?</summary>
+          <p>Use an MCP-compatible client that supports remote servers over Streamable HTTP and can send a custom authentication header. Claude, Codex, and Hermes are compatibility examples, not endorsements or partnerships; configuration and security controls vary by client.</p>
+        </details>
+        <details>
+          <summary>How is Remote MCP authenticated?</summary>
+          <p>Send an existing Gobii API key on every request using <span class="rmcp-inline-code">X-Api-Key</span> or <span class="rmcp-inline-code">Authorization: Bearer</span>. Do not put the key in a query string.</p>
+        </details>
+        <details>
+          <summary>Can I use Remote MCP with self-hosted Gobii?</summary>
+          <p>Yes. The documented local endpoint is <span class="rmcp-inline-code">http://localhost:8000/api/v1/mcp/</span>. Review the <a class="rmcp-text-link" href="https://docs.gobii.ai/self-hosted">self-hosting guide</a> and the <a class="rmcp-text-link" href="https://github.com/gobii-ai/gobii-platform">open-source Gobii repository</a> for deployment requirements.</p>
+        </details>
+        <details>
+          <summary>Is Remote MCP the same as connecting an external MCP server to a Gobii?</summary>
+          <p>No. Remote MCP lets an external client operate Gobii. A connected third-party MCP server moves in the opposite direction and gives a Gobii access to that server's tools or data.</p>
+        </details>
+        <details>
+          <summary>Does the current endpoint support standalone SSE or MCP task augmentation?</summary>
+          <p>No. V1 uses stateless Streamable HTTP requests, returns no MCP session ID, exposes no standalone GET SSE stream, and does not add MCP task or progress-stream abstractions. Use bounded event waiting and the durable timeline instead.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="rmcp-final" aria-labelledby="final-cta-heading">
+      <p class="rmcp-kicker">Start with one agent</p>
+      <h2 id="final-cta-heading">Bring persistent agents into your MCP workflow</h2>
+      <p>Create your first Gobii, generate an API key, and start managing long-lived agent work from the compatible client your team already uses.</p>
+      <div class="rmcp-actions">
+        <form method="post" action="{% url 'pages:engineering_pro_signup' %}" data-analytics-cta-id="remote_mcp_final" data-analytics-placement="final_cta" data-analytics-intent="get_api_keys">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="remote_mcp_final">
+          <input type="hidden" name="trial_onboarding" value="1">
+          <input type="hidden" name="trial_onboarding_target" value="api_keys">
+          <button type="submit" class="gk-btn">
+            Connect Gobii via MCP
+            {% lucide "arrow-right" class="h-4 w-4" %}
+          </button>
+        </form>
+        <a href="https://docs.gobii.ai/developers/mcp-server" class="gk-btn-quiet">Explore the Remote MCP docs</a>
+      </div>
+      <div class="rmcp-final-links">
+        <a href="{% url 'proprietary:pricing' %}">Review Gobii pricing</a>
+        <a href="{% url 'pages:solution' slug='engineering' %}">Compare the Agent API</a>
+        <a href="https://docs.gobii.ai/developers/developer-agents">Read the Agent API Docs</a>
+        <a href="https://github.com/gobii-ai/gobii-platform">Explore self-hosting on GitHub</a>
+      </div>
+    </section>
+  </div>
+</main>
+{% endblock %}

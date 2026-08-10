@@ -98,6 +98,10 @@
               <span class="gk-dd-ic">{% lucide "cpu" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">API</span><span class="gk-dd-s">Agents in one request</span></span>
             </a>
+            <a class="gk-dd-item" href="{% url 'pages:remote_mcp' %}">
+              <span class="gk-dd-ic">{% lucide "network" class="h-4 w-4" %}</span>
+              <span class="gk-dd-tx"><span class="gk-dd-t">Remote MCP</span><span class="gk-dd-s">Persistent agents from any client</span></span>
+            </a>
             <a class="gk-dd-item" href="{% url 'pages:solutions' %}">
               <span class="gk-dd-ic">{% lucide "grip" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">All Solutions</span><span class="gk-dd-s">Every workflow we cover</span></span>
@@ -282,6 +286,7 @@
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='recruiting' %}">Recruiting</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='sales' %}">Sales</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='engineering' %}">API</a>
+      <a class="gk-mm-sub" href="{% url 'pages:remote_mcp' %}">Remote MCP</a>
       <a class="gk-mm-sub" href="{% url 'pages:solutions' %}">All Solutions</a>
       <a href="{% url 'proprietary:teams' %}">Teams</a>
       <a href="{% url 'proprietary:pricing' %}">Pricing</a>

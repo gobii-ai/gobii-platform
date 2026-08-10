@@ -147,7 +147,11 @@ from console.context_helpers import build_console_context, resolve_console_conte
 from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import render_public_template_markdown, load_page, get_prev_next, get_all_doc_pages
 from .homepage_cache import get_homepage_integrations_payload, get_homepage_pretrained_payload
-from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, build_homepage_structured_data
+from .homepage_schema import (
+    HOMEPAGE_SOCIAL_IMAGE_PATH,
+    build_homepage_entity_ids,
+    build_homepage_structured_data,
+)
 from .legacy_pretrained_worker_redirects import (
     get_legacy_pretrained_worker_redirect,
     get_retired_library_template_redirect,
@@ -4433,6 +4437,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
         # Proprietary pages live behind the hosted marketing site; community builds expose docs instead.
         if settings.GOBII_PROPRIETARY_MODE:
             items[1:1] = [
+                'pages:remote_mcp',
                 'proprietary:pricing',
                 'proprietary:teams',
                 'proprietary:tos',
@@ -4454,6 +4459,8 @@ class StaticViewSitemap(sitemaps.Sitemap):
         return reverse(item)
 
     def lastmod(self, item):
+        if item == 'pages:remote_mcp':
+            return datetime.strptime(RemoteMCPView.LAST_UPDATED, "%Y-%m-%d").date()
         if item == "pages:ai_employees":
             return datetime.strptime(
                 AI_EMPLOYEES_LAST_MODIFIED_DATE,
@@ -4821,6 +4828,92 @@ class SolutionsIndexView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["suppress_preline"] = True
+        return context
+
+
+class RemoteMCPView(TemplateView):
+    template_name = "remote_mcp/index.html"
+    SEO_TITLE = "Remote MCP Server for Persistent AI Agents | Gobii"
+    SEO_DESCRIPTION = (
+        "Connect Claude, Codex, Hermes, or your own tools to long-lived Gobii agents over "
+        "authenticated Remote MCP. Create, message, coordinate, and monitor agents."
+    )
+    LAST_UPDATED = "2026-08-09"
+    SOCIAL_IMAGE_PATH = "images/blog/newsletters/newsletter-2026-05-19-remote-mcp-hero.webp"
+    SOCIAL_IMAGE_ALT = (
+        "An MCP-compatible client managing persistent Gobii AI agents through an authenticated "
+        "Remote MCP endpoint"
+    )
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            return redirect("/", permanent=True)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        page_url = _public_site_absolute_url(reverse("pages:remote_mcp"))
+        home_url = _public_site_absolute_url(reverse("pages:home"))
+        entity_ids = build_homepage_entity_ids()
+        breadcrumb_id = f"{page_url}#breadcrumb"
+        structured_data = {
+            "@context": "https://schema.org",
+            "@graph": [
+                {
+                    "@type": "WebPage",
+                    "@id": f"{page_url}#webpage",
+                    "name": self.SEO_TITLE,
+                    "description": self.SEO_DESCRIPTION,
+                    "url": page_url,
+                    "dateModified": self.LAST_UPDATED,
+                    "image": _public_site_absolute_url(static(self.SOCIAL_IMAGE_PATH)),
+                    "isPartOf": {"@id": entity_ids["website"]},
+                    "about": {"@id": entity_ids["software"]},
+                    "mainEntity": {"@id": entity_ids["software"]},
+                    "publisher": {"@id": entity_ids["organization"]},
+                    "breadcrumb": {"@id": breadcrumb_id},
+                },
+                {
+                    "@type": "BreadcrumbList",
+                    "@id": breadcrumb_id,
+                    "itemListElement": [
+                        {
+                            "@type": "ListItem",
+                            "position": 1,
+                            "name": "Home",
+                            "item": home_url,
+                        },
+                        {
+                            "@type": "ListItem",
+                            "position": 2,
+                            "name": "Remote MCP",
+                            "item": page_url,
+                        },
+                    ],
+                },
+            ],
+        }
+        context.update(
+            {
+                "suppress_preline": True,
+                "suppress_public_conversion_assets": True,
+                "suppress_phone_format_js": True,
+                "suppress_stripe_js": True,
+                "remote_mcp_seo_title": self.SEO_TITLE,
+                "remote_mcp_seo_description": self.SEO_DESCRIPTION,
+                "remote_mcp_last_updated": self.LAST_UPDATED,
+                "remote_mcp_last_updated_display": datetime.strptime(
+                    self.LAST_UPDATED,
+                    "%Y-%m-%d",
+                ).date(),
+                "remote_mcp_social_image_url": _public_site_absolute_url(
+                    static(self.SOCIAL_IMAGE_PATH)
+                ),
+                "remote_mcp_social_image_alt": self.SOCIAL_IMAGE_ALT,
+                "remote_mcp_structured_data_json": html_safe_json_dumps(structured_data),
+                "canonical_url": page_url,
+            }
+        )
         return context
 
 

@@ -44,6 +44,7 @@
         <li><a href="{% url 'pages:home' %}">Gobii</a></li>
         {% if settings.GOBII_PROPRIETARY_MODE %}
           <li><a href="{% url 'proprietary:teams' %}">Teams</a></li>
+          <li><a href="{% url 'pages:remote_mcp' %}">Remote MCP</a></li>
           <li><a href="{% url 'proprietary:pricing' %}">Pricing</a></li>
         {% endif %}
         <li><a href="{% url 'agents' %}">My Agents</a></li>

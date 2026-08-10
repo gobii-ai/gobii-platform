@@ -15,7 +15,7 @@ from django.contrib.sites.models import Site
 from django.core import signing
 from django.templatetags.static import static
 from django.test import Client, RequestFactory, TestCase, modify_settings, override_settings, tag
-from django.urls import reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
 from waffle.testutils import override_flag, override_switch
 from api.models import (
@@ -4598,6 +4598,165 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         self.assertNotIn('"system_prompt"', page_text)
         self.assertNotIn("24/7", page_text)
         self.assertNotIn("Free tier available", page_text)
+
+
+@override_settings(
+    PUBLIC_SITE_URL="https://gobii.ai",
+    GOBII_RELEASE_ENV="prod",
+    GOBII_PROPRIETARY_MODE=True,
+)
+@tag("batch_pages")
+class RemoteMCPMarketingPageTests(TestCase):
+    expected_title = "Remote MCP Server for Persistent AI Agents | Gobii"
+    expected_description = (
+        "Connect Claude, Codex, Hermes, or your own tools to long-lived Gobii agents over "
+        "authenticated Remote MCP. Create, message, coordinate, and monitor agents."
+    )
+    expected_url = "https://gobii.ai/remote-mcp/"
+
+    def _get_page(self):
+        response = self.client.get(reverse("pages:remote_mcp"), HTTP_HOST="preview.local")
+        self.assertEqual(response.status_code, 200)
+        return response, BeautifulSoup(response.content, "html.parser")
+
+    def test_page_renders_required_targeting_and_social_metadata(self):
+        response, soup = self._get_page()
+
+        self.assertEqual(soup.title.get_text(strip=True), self.expected_title)
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            self.expected_description,
+        )
+        headings = soup.find_all("h1")
+        self.assertEqual(len(headings), 1)
+        self.assertEqual(
+            headings[0].get_text(" ", strip=True),
+            "Control persistent AI agents from any MCP-compatible client",
+        )
+
+        canonicals = soup.find_all("link", rel="canonical")
+        self.assertEqual(len(canonicals), 1)
+        self.assertEqual(canonicals[0]["href"], self.expected_url)
+        self.assertEqual(soup.find("meta", property="og:url")["content"], self.expected_url)
+        self.assertEqual(
+            soup.find("meta", property="og:title")["content"],
+            self.expected_title,
+        )
+        self.assertEqual(
+            soup.find("meta", property="og:description")["content"],
+            self.expected_description,
+        )
+        self.assertEqual(soup.find("meta", property="og:image:width")["content"], "1200")
+        self.assertEqual(soup.find("meta", property="og:image:height")["content"], "630")
+        self.assertTrue(soup.find("meta", property="og:image:alt")["content"])
+        self.assertIsNone(soup.find("meta", attrs={"name": "robots", "content": re.compile("noindex")}))
+        self.assertNotIn("X-Robots-Tag", response)
+
+        definition = soup.find("h2", string="What is Gobii Remote MCP?").find_next("p")
+        definition_word_count = len(definition.get_text(" ", strip=True).split())
+        self.assertGreaterEqual(definition_word_count, 40)
+        self.assertLessEqual(definition_word_count, 70)
+
+    def test_schema_references_shared_homepage_entities_and_breadcrumb(self):
+        _, soup = self._get_page()
+        scripts = soup.find_all("script", type="application/ld+json")
+        self.assertEqual(len(scripts), 1)
+        structured_data = json.loads(scripts[0].string)
+        graph = structured_data["@graph"]
+        page_schema = next(node for node in graph if node["@type"] == "WebPage")
+        breadcrumb_schema = next(node for node in graph if node["@type"] == "BreadcrumbList")
+        entity_ids = homepage_schema.build_homepage_entity_ids()
+
+        self.assertEqual(page_schema["@id"], f"{self.expected_url}#webpage")
+        self.assertEqual(page_schema["url"], self.expected_url)
+        self.assertEqual(page_schema["dateModified"], "2026-08-09")
+        self.assertEqual(page_schema["isPartOf"]["@id"], entity_ids["website"])
+        self.assertEqual(page_schema["publisher"]["@id"], entity_ids["organization"])
+        self.assertEqual(page_schema["about"]["@id"], entity_ids["software"])
+        self.assertEqual(page_schema["mainEntity"]["@id"], entity_ids["software"])
+        self.assertFalse(
+            any(node["@type"] in {"Organization", "WebSite", "SoftwareApplication"} for node in graph)
+        )
+        self.assertEqual(
+            breadcrumb_schema["itemListElement"][-1],
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Remote MCP",
+                "item": self.expected_url,
+            },
+        )
+
+    def test_navigation_ctas_internal_links_and_code_accessibility(self):
+        _, soup = self._get_page()
+        required_external_links = {
+            "https://docs.gobii.ai/developers/mcp-server",
+            "https://docs.gobii.ai/developers/developer-agents",
+            "https://docs.gobii.ai/using-gobii/mcp-servers",
+            "https://docs.gobii.ai/self-hosted",
+            "https://github.com/gobii-ai/gobii-platform",
+        }
+        hrefs = [anchor.get("href") for anchor in soup.find_all("a")]
+
+        self.assertFalse(any(not href or href == "#" for href in hrefs))
+        self.assertTrue(required_external_links.issubset(set(hrefs)))
+        for href in hrefs:
+            if href.startswith("/"):
+                with self.subTest(href=href):
+                    resolve(urlparse(href).path)
+
+        remote_mcp_nav_links = soup.find_all("a", href=reverse("pages:remote_mcp"))
+        self.assertGreaterEqual(len(remote_mcp_nav_links), 3)
+        cta_forms = soup.find_all("form", action=reverse("pages:engineering_pro_signup"))
+        self.assertEqual(len(cta_forms), 2)
+        for form in cta_forms:
+            self.assertEqual(form.find("input", attrs={"name": "trial_onboarding_target"})["value"], "api_keys")
+
+        example = soup.find("pre", attrs={"aria-label": re.compile("scrollable Remote MCP")})
+        self.assertIsNotNone(example)
+        self.assertEqual(example.get("tabindex"), "0")
+        rendered_html = str(soup)
+        self.assertIn(".rmcp-code pre", rendered_html)
+        self.assertIn("overflow-x: auto", rendered_html)
+        self.assertEqual(soup.select("[data-lucide]"), [])
+        self.assertIsNone(soup.find("script", src="https://unpkg.com/lucide@0.546.0"))
+
+        engineering = self.client.get(reverse("pages:solution", kwargs={"slug": "engineering"}))
+        self.assertContains(
+            engineering,
+            f'href="{reverse("pages:remote_mcp")}"',
+            html=False,
+        )
+
+    def test_sitemap_has_one_canonical_entry_with_stable_lastmod(self):
+        response = self.client.get("/sitemap.xml")
+        self.assertEqual(response.status_code, 200)
+        sitemap = BeautifulSoup(response.content, "xml")
+        matching_urls = [
+            url
+            for url in sitemap.find_all("url")
+            if url.loc and url.loc.get_text(strip=True).endswith("/remote-mcp/")
+        ]
+        self.assertEqual(len(matching_urls), 1)
+        self.assertEqual(matching_urls[0].lastmod.get_text(strip=True), "2026-08-09")
+        self.assertNotContains(
+            response,
+            "/blog/newsletter-2026-05-19-remote-mcp/",
+        )
+
+    def test_announcement_permanently_redirects_in_one_hop(self):
+        response = self.client.get("/blog/newsletter-2026-05-19-remote-mcp/")
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], reverse("pages:remote_mcp"))
+
+        destination = self.client.get(response["Location"])
+        self.assertEqual(destination.status_code, 200)
+
+    def test_production_robots_allows_the_page(self):
+        response = self.client.get("/robots.txt")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Allow: /")
+        self.assertNotContains(response, "Disallow: /remote-mcp/")
 
 
 @tag("batch_pages")

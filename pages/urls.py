@@ -26,6 +26,7 @@ from .views import (
     PretrainedWorkerLaunchRedirectView,
     EngineeringProSignupView,
     AIEmployeesView,
+    RemoteMCPView,
     SolutionsIndexView,
     SolutionView,
     SolutionsSitemap,
@@ -80,6 +81,7 @@ _home_redirect = RedirectView.as_view(url="/", permanent=True)
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
+    path("remote-mcp/", RemoteMCPView.as_view(), name="remote_mcp"),
     path("bot-check/", bot_check_page, name="bot_check"),
     path("bot-check/api/start/", bot_check_start, name="bot_check_start"),
     path("bot-check/api/complete/", bot_check_complete, name="bot_check_complete"),

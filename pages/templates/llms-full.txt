@@ -16,6 +16,7 @@ Recruiting operations are a major Gobii solution: users enter a role, and Gobii 
 - Teams: {{ base_url }}/teams/
 - Solutions: {{ base_url }}/solutions/
 - API: {{ base_url }}/solutions/engineering/ — Create long-lived AI employees, schedule work, connect tools, send messages, inspect timelines, and manage their lifecycle.
+- Remote MCP: {{ base_url }}/remote-mcp/ — Create, message, coordinate, and monitor persistent agents from MCP-compatible clients.
 - Documentation: https://docs.gobii.ai/
 - Pricing: {{ base_url }}/pricing/
 - Terms of service: {{ base_url }}/tos/

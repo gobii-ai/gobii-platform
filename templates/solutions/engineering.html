@@ -221,6 +221,109 @@ curl <span class="flag">-X</span> POST \
         <span id="agent-copy-status" class="sr-only" aria-live="polite"></span>
         <span id="agent-response-copy-status" class="sr-only" aria-live="polite"></span>
       </div>
+
+      <!-- Tools and connected apps -->
+      <div class="gk-card-glass eng-card">
+        <div class="eng-card-ic">
+          <i data-lucide="plug" class="w-5 h-5"></i>
+        </div>
+        <h3>Tools and connected apps</h3>
+        <p>
+          Equip each employee with MCP servers and connected app tools. When an outside client needs to operate the agent instead, use <a href="{% url 'pages:remote_mcp' %}" style="color:#c4b5fd;text-underline-offset:3px">Remote MCP for persistent agents</a>.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">MCP</span>
+          <span class="gk-chip">Agent-scoped access</span>
+        </div>
+      </div>
+
+      <!-- Persistent workspace - Large -->
+      <div class="gk-card-edge eng-card eng-span2">
+        <div class="eng-card-top">
+          <div class="eng-card-ic">
+            <i data-lucide="database" class="w-5 h-5"></i>
+          </div>
+          <span class="gk-chip">Per-Agent</span>
+        </div>
+        <h3>Persistent workspace</h3>
+        <p>
+          Give every employee durable files, structured data, browser state, and working context. Their workspace survives across scheduled runs, messages, and tool calls.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Files</span>
+          <span class="gk-chip">SQLite</span>
+          <span class="gk-chip">Browser state</span>
+          <span class="gk-chip">Cross-session context</span>
+        </div>
+      </div>
+
+      <!-- Messages and timelines -->
+      <div class="gk-card-glass eng-card">
+        <div class="eng-card-ic">
+          <i data-lucide="messages-square" class="w-5 h-5"></i>
+        </div>
+        <h3>Messages and timelines</h3>
+        <p>
+          Send work into an employee, fetch its event timeline, check processing state, and inspect recent browser tasks from your own application.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Messages</span>
+          <span class="gk-chip">Activity timeline</span>
+        </div>
+      </div>
+
+      <!-- Browser automation -->
+      <div class="gk-card-glass eng-card">
+        <div class="eng-card-ic">
+          <i data-lucide="monitor" class="w-5 h-5"></i>
+        </div>
+        <h3>Browser automation</h3>
+        <p>
+          Employees can use real cloud browsers for multistep web work, preserve authenticated sessions, download files, and capture visual output.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Real Chrome</span>
+          <span class="gk-chip">Persistent sessions</span>
+        </div>
+      </div>
+
+      <!-- Team controls -->
+      <div class="gk-card-glass eng-card">
+        <div class="eng-card-ic">
+          <i data-lucide="users" class="w-5 h-5"></i>
+        </div>
+        <h3>Team controls</h3>
+        <p>
+          Create organization-owned employees with shared API keys, choose intelligence tiers, set daily credit limits, and keep ownership separate from individual users.
+        </p>
+        <div class="eng-chips">
+          <span class="gk-chip">Organizations</span>
+          <span class="gk-chip">Usage controls</span>
+        </div>
+      </div>
+
+      <!-- Open source deployment -->
+      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="gk-card-edge eng-card eng-span3" style="text-decoration:none">
+        <div class="flex flex-col md:flex-row md:items-center gap-6">
+          <div class="eng-card-ic" style="flex-shrink:0">
+            <i data-lucide="github" class="w-5 h-5"></i>
+          </div>
+          <div style="flex-grow:1">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+              <h3 style="margin:0">Gobii Cloud or self-hosted</h3>
+              <span class="gk-chip">Open Source</span>
+            </div>
+            <p style="margin:0">
+              Use Gobii Cloud for the fastest path to production, or run the same open-source platform in your infrastructure. Gobii builds on browser-use and adds the durable runtime, communication, memory, tools, and controls needed for always-on employees.
+            </p>
+          </div>
+          <div class="eng-chips" style="flex-shrink:0">
+            <span class="gk-chip">Managed cloud</span>
+            <span class="gk-chip">Self-hosted</span>
+          </div>
+        </div>
+      </a>
+
     </div>
   </section>
 

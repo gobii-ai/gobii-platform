@@ -44,6 +44,16 @@ def _optional_urls(values) -> list[str]:
     return urls
 
 
+def build_homepage_entity_ids() -> dict[str, str]:
+    site_url = _get_site_url()
+    return {
+        "organization": f"{site_url}/#organization",
+        "website": f"{site_url}/#website",
+        "homepage": f"{site_url}/#homepage",
+        "software": f"{site_url}/#software",
+    }
+
+
 def build_homepage_structured_data(
     *,
     brand_name: str,
@@ -53,10 +63,11 @@ def build_homepage_structured_data(
     brand_name = str(brand_name or "").strip() or "Gobii"
     site_url = _get_site_url()
     home_url = f"{site_url}/"
-    organization_id = f"{site_url}/#organization"
-    website_id = f"{site_url}/#website"
-    homepage_id = f"{site_url}/#homepage"
-    software_id = f"{site_url}/#software"
+    entity_ids = build_homepage_entity_ids()
+    organization_id = entity_ids["organization"]
+    website_id = entity_ids["website"]
+    homepage_id = entity_ids["homepage"]
+    software_id = entity_ids["software"]
 
     organization = {
         "@type": "Organization",
