@@ -4916,9 +4916,12 @@ class SolutionView(TemplateView):
             'title': 'AI Sales Agent',
             'tagline': 'Supervised sales workflow automation.',
             'description': 'Use a Gobii AI sales agent to qualify, research, enrich, and prepare pipeline work for human review.',
-            'seo_title': 'AI Sales Agent: What It Can Do and When to Use One | Gobii',
-            'seo_description': 'Evaluate an AI sales agent for supervised prospecting, account research, lead enrichment, outreach prep, and human-reviewed pipeline handoffs.',
-            'date_modified': '2026-07-09',
+            'seo_title': 'AI Sales Agent for Prospecting & Account Research | Gobii',
+            'seo_description': (
+                'Find, qualify, and research prospects with a supervised AI sales agent. Review source-linked '
+                'leads, account briefs, and outreach prep before anything sends.'
+            ),
+            'date_modified': '2026-08-10',
             'social_image': 'images/solutions/sales-hero.jpg',
             'social_image_alt': 'Gobii AI sales agent for supervised prospecting and account research',
             'service_name': 'Gobii AI Sales Agent',
@@ -5160,6 +5163,11 @@ class SolutionView(TemplateView):
             'solution_spawn_requires_trial': solution_spawn_requires_trial,
             'solution_trial_days': solution_trial_days,
             'solution_related_link': related_link,
+            'solution_date_modified': (
+                datetime.strptime(data['date_modified'], '%Y-%m-%d').date()
+                if data.get('date_modified')
+                else None
+            ),
             'solution_crawlable_links_enabled': is_waffle_flag_active(
                 SOLUTION_CRAWLABLE_LINKS,
                 self.request,
