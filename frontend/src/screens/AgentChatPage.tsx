@@ -2706,8 +2706,12 @@ export function AgentChatPage({
     trackSignupPreviewActionBlocked('collaborate', location)
   }, [trackSignupPreviewActionBlocked])
 
-  const navigateShellPath = useCallback((nextPath: string, nextAgentId?: string | null) => {
-    const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`
+  const navigateShellPath = useCallback((
+    nextPath: string,
+    nextAgentId?: string | null,
+    nextSearch = window.location.search,
+  ) => {
+    const nextUrl = `${nextPath}${nextSearch}${window.location.hash}`
     setShellPathname(nextPath)
     if (typeof nextAgentId !== 'undefined' && nextAgentId !== activeAgentIdRef.current) {
       setSwitchingAgentId(null)
@@ -2727,7 +2731,11 @@ export function AgentChatPage({
       dispatch(immersiveShellActions.setSidebarMode('gallery'))
     }
     const nextPath = buildAgentChatShellPath(window.location.pathname, resolvedAgentId, subview)
-    navigateShellPath(nextPath, resolvedAgentId)
+    const nextSearchParams = new URLSearchParams(window.location.search)
+    nextSearchParams.delete('shell')
+    const nextSearchValue = nextSearchParams.toString()
+    const nextSearch = nextSearchValue ? `?${nextSearchValue}` : ''
+    navigateShellPath(nextPath, resolvedAgentId, nextSearch)
   }, [dispatch, navigateShellPath])
 
   const handleConfigureAgent = useCallback((agent: AgentRosterEntry) => {
