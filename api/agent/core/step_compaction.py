@@ -462,8 +462,8 @@ def llm_summarise_steps(
                 "Before returning, silently audit the draft: delete every superseded value and every resolved item with "
                 "no continuing consequence, including their identifiers; verify each retained directive's actor or "
                 "source, scope, and effective constraint; compare every opaque value character-for-character with the "
-                "input; preserve exact lifecycle states—attempted, accepted, sent, delivered, and confirmed are not "
-                "interchangeable; and ensure repeated mechanics are aggregated."
+                "input; preserve distinctions between lifecycle states without inferring outcomes; and ensure repeated "
+                "mechanics are aggregated."
             ),
         },
         {

@@ -114,12 +114,13 @@ class CompactionQualityFixtureTests(SimpleTestCase):
             ),
             (
                 campaign,
-                "; ".join(campaign.required_exact) + "; Conflict",
+                "; ".join(campaign.required_exact)
+                + "; 120 accepted sends; 42 approvals; 5 pending drafts; Conflict",
             ),
             (
                 multilingual,
                 "; ".join(multilingual.required_exact)
-                + "; 00:00, 09:00, 16:00, 18:00\u202fUTC",
+                + "; 0 OCR entries; 00:00, 09:00, 16:00, 18:00\u202fUTC",
             ),
             (
                 plan,
@@ -136,6 +137,29 @@ class CompactionQualityFixtureTests(SimpleTestCase):
         for case, summary in summaries:
             with self.subTest(case=case.slug):
                 self.assertTrue(check_compaction_summary(case, summary).passed)
+
+    def test_short_numeric_facts_require_their_labels(self):
+        campaign = COMMS_COMPACTION_CASES[4]
+        multilingual = COMMS_COMPACTION_CASES[5]
+
+        campaign_result = check_compaction_summary(
+            campaign,
+            "; ".join(campaign.required_exact) + "; CMP-52 has 120 sends and 42 approvals",
+        )
+        multilingual_result = check_compaction_summary(
+            multilingual,
+            "; ".join(multilingual.required_exact)
+            + "; next checks 00:00, 09:00, 16:00, and 18:00 UTC",
+        )
+
+        self.assertIn(
+            "Missing required normalized fact: pending drafts 5",
+            campaign_result.failures,
+        )
+        self.assertIn(
+            "Missing required normalized fact: OCR 0",
+            multilingual_result.failures,
+        )
 
     def test_opaque_values_remain_strictly_verbatim(self):
         case = STEP_COMPACTION_CASES[1]
@@ -402,6 +426,16 @@ class CompactionQualityProfileValidationTests(SimpleTestCase):
                 (
                     _profile("alpha", "summary-alpha", "judge-one"),
                     _profile("beta", "summary-beta", "judge-two"),
+                ),
+            )
+
+    def test_rejects_duplicate_candidate_endpoints(self):
+        with self.assertRaisesRegex(CommandError, "distinct summarization endpoint"):
+            validate_compaction_quality_profiles(
+                _selected_compaction_suite(),
+                (
+                    _profile("alpha", "summary-shared", "judge-fixed"),
+                    _profile("beta", "summary-shared", "judge-fixed"),
                 ),
             )
 

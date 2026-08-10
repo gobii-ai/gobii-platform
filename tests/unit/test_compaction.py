@@ -439,4 +439,5 @@ class CompactionTests(TestCase):
         self.assertIn("silently audit the draft", system_prompt)
         self.assertIn("delete every superseded value", system_prompt)
         self.assertIn("compare every opaque value character-for-character", system_prompt)
-        self.assertIn("sent, delivered, and confirmed are not interchangeable", system_prompt)
+        self.assertIn("preserve distinctions between lifecycle states", system_prompt)
+        self.assertIn("without inferring outcomes", system_prompt)

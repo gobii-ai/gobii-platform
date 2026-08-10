@@ -46,6 +46,7 @@ def validate_compaction_quality_profiles(suites, routing_profiles) -> None:
             "summarization and eval-judge endpoints."
         )
 
+    summarization_endpoint_ids: set[str] = set()
     judge_endpoint_ids: set[str] = set()
     for profile in routing_profiles:
         if not profile.summarization_endpoint_id:
@@ -61,8 +62,13 @@ def validate_compaction_quality_profiles(suites, routing_profiles) -> None:
                 f"Routing profile '{profile.name}' uses the same endpoint for summarization and judging. "
                 "Choose an independent fixed eval-judge endpoint."
             )
+        summarization_endpoint_ids.add(str(profile.summarization_endpoint_id))
         judge_endpoint_ids.add(str(profile.eval_judge_endpoint_id))
 
+    if len(summarization_endpoint_ids) != len(routing_profiles):
+        raise CommandError(
+            "Each routing profile in a compaction quality matrix must use a distinct summarization endpoint."
+        )
     if len(judge_endpoint_ids) != 1:
         raise CommandError(
             "All routing profiles in a compaction quality matrix must use the same fixed eval-judge endpoint."

@@ -114,10 +114,15 @@ def _contains_normalized_fact(summary: str, required: str) -> bool:
     if contains_in_order(required_tokens):
         return True
 
-    # Natural summaries commonly place a numeric value before its label
-    # ("4 stale records") even when the source uses key=value order ("stale=4").
-    if len(required_tokens) == 2 and sum(token.isdecimal() for token in required_tokens) == 1:
-        return contains_in_order(tuple(reversed(required_tokens)))
+    # Natural summaries commonly move a numeric value across its label
+    # ("5 pending drafts" versus "pending drafts: 5").
+    numeric_positions = [
+        index for index, token in enumerate(required_tokens) if token.isdecimal()
+    ]
+    if numeric_positions == [0]:
+        return contains_in_order(required_tokens[1:] + required_tokens[:1])
+    if numeric_positions == [len(required_tokens) - 1]:
+        return contains_in_order(required_tokens[-1:] + required_tokens[:-1])
 
     return False
 
@@ -295,13 +300,18 @@ COMMS_COMPACTION_CASES = (
                 CommsEvalEvent("inbound", "peer DM", "QA Agent", "Assignment ASN-991 is quarantined_no_send for identity_mismatch.", peer_dm=True),
             ),
         ),
-        required_exact=("CMP-52", "120", "42", "5", "BATCH-77", "ASN-991", "quarantined_no_send", "identity_mismatch"),
+        required_exact=("CMP-52", "BATCH-77", "ASN-991", "quarantined_no_send", "identity_mismatch"),
         forbidden_exact=("118 provider-accepted", "40 approvals", "7 pending", "BATCH-OLD"),
         semantic_requirements=(
             "Use current aggregate counts instead of narrating each completed send.",
             "Retain the unresolved conflict and quarantined assignment with their exact identifiers.",
         ),
-        required_normalized=("conflict",),
+        required_normalized=(
+            "accepted sends 120",
+            "approvals 42",
+            "pending drafts 5",
+            "conflict",
+        ),
     ),
     CompactionQualityCase(
         slug="compaction_comms_multilingual_operations",
@@ -324,14 +334,14 @@ COMMS_COMPACTION_CASES = (
                 ),
             ),
         ),
-        required_exact=("#EVAL-239", "Gmail", "0"),
+        required_exact=("#EVAL-239", "Gmail"),
         forbidden_exact=("wartet auf die Erneuerung", "Token-Problem offen"),
         semantic_requirements=(
             "State that the token and Gmail issues are resolved.",
             "Report zero pending OCR entries, labels, emails, and open tasks.",
             "Preserve all four daily check times without translating away their UTC meaning.",
         ),
-        required_normalized=("00:00", "09:00", "16:00", "18:00", "UTC"),
+        required_normalized=("OCR 0", "00:00", "09:00", "16:00", "18:00", "UTC"),
     ),
 )
 
