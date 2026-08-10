@@ -15,6 +15,7 @@ from pages.utils_markdown import _extract_slug_from_path, md_converter, _resolve
 BLOGS_ROOT = Path(settings.BASE_DIR, "proprietary", "content") / "blogs"
 STATIC_ROOT = Path(settings.BASE_DIR, "static")
 WORD_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9'\u2019-]*")
+RETIRED_BLOG_SLUGS = frozenset({"newsletter-2026-05-19-remote-mcp"})
 
 
 def _word_count(text: str) -> int:
@@ -239,6 +240,8 @@ def get_all_blog_posts():
             continue
 
         slug = _extract_slug_from_path(path, root=BLOGS_ROOT)
+        if slug in RETIRED_BLOG_SLUGS:
+            continue
         try:
             post = load_blog_post(slug)
         except FileNotFoundError:

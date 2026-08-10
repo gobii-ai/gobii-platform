@@ -54,7 +54,7 @@ The [Model Context Protocol](https://modelcontextprotocol.io/specification/2025-
 
 ## Connected MCP and Remote MCP Use Opposite Flows
 
-Connected MCP and Gobii Remote MCP are opposite flows. Use a connected server when a Gobii needs outside tools. Use [Gobii Remote MCP](/blog/newsletter-2026-05-19-remote-mcp/) when an outside AI client such as Claude Code, Codex, Hermes, or an internal MCP application needs to manage Gobii agents.
+Connected MCP and Gobii Remote MCP are opposite flows. Use a connected server when a Gobii needs outside tools. Use [Gobii Remote MCP for persistent agents](/remote-mcp/) when an outside AI client such as Claude Code, Codex, Hermes, or an internal MCP application needs to manage Gobii agents.
 
 <img src="/static/images/blog/newsletters/newsletter-2026-05-19-remote-mcp-flow.svg" alt="Diagram comparing a Gobii connecting outward to an MCP server with an external AI client connecting inward through Gobii Remote MCP" width="1200" height="675" loading="lazy" decoding="async" style="border-radius: 10px;">
 
@@ -184,4 +184,4 @@ Save the definition, start OAuth, authorize with the provider, and confirm the c
 
 ## Give Each Agent Only the Tools It Needs
 
-Connected MCP servers make custom systems available without turning every integration into a one-off agent implementation. A durable pattern is easy to audit: choose the correct direction, set the narrowest ownership scope, authenticate outside the prompt, assign deliberately, and test one observable capability before expanding access. Open **Advanced MCP Servers** in your Gobii console to configure a connection, or follow the [MCP server setup guide](https://docs.gobii.ai/using-gobii/mcp-servers) for current fields and troubleshooting. If an external AI client needs to operate Gobii instead, continue with the separate [Remote MCP guide](/blog/newsletter-2026-05-19-remote-mcp/).
+Connected MCP servers make custom systems available without turning every integration into a one-off agent implementation. A durable pattern is easy to audit: choose the correct direction, set the narrowest ownership scope, authenticate outside the prompt, assign deliberately, and test one observable capability before expanding access. Open **Advanced MCP Servers** in your Gobii console to configure a connection, or follow the [MCP server setup guide](https://docs.gobii.ai/using-gobii/mcp-servers) for current fields and troubleshooting. If an external AI client needs to operate Gobii instead, continue with the separate [Remote MCP product overview](/remote-mcp/).

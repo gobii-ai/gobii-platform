@@ -200,7 +200,7 @@ Gobii lists six ways to reach an agent: web chat, email, SMS/MMS, app channels s
     </tr>
     <tr>
       <td>Claude, Codex, or another AI client operates Gobii</td>
-      <td><a href="/blog/newsletter-2026-05-19-remote-mcp/">Remote MCP</a></td>
+      <td><a href="/remote-mcp/">Remote MCP for persistent agents</a></td>
       <td>Let an MCP client manage or message persistent agents</td>
     </tr>
     <tr>

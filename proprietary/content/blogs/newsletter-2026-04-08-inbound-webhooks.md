@@ -106,7 +106,7 @@ Five surfaces serve different jobs. Inbound webhooks send outside events to an e
     </tr>
     <tr>
       <td>Claude, Codex, or another AI client operates Gobii</td>
-      <td><a href="/blog/newsletter-2026-05-19-remote-mcp/">Remote MCP</a></td>
+      <td><a href="/remote-mcp/">Remote MCP for persistent agents</a></td>
       <td>Let an MCP-capable client manage or message agents</td>
     </tr>
     <tr>

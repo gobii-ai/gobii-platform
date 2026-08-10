@@ -123,7 +123,7 @@ Gobii exposes several integration surfaces because "connect my system to an agen
 | Create, schedule, message, inspect, or pause agents from software | **Agent API** | The API manages the persistent agent resource and its lifecycle. |
 | Let a Gobii participate in a Discord channel | **Discord integration** | The native bot and selected channel subscriptions make Discord an inbound and outbound collaboration surface. |
 
-For event-driven work, pair [inbound webhooks for reactive agents](/blog/newsletter-2026-04-08-inbound-webhooks/) with the current [Webhooks and Events documentation](https://docs.gobii.ai/developers/webhooks) to understand payload delivery, trigger direction, and safety controls. External AI clients need [Remote MCP access for Gobii agents](/blog/newsletter-2026-05-19-remote-mcp/). Discord has its own [channel integration guide](/blog/newsletter-2026-06-02-discord-integration/).
+For event-driven work, pair [inbound webhooks for reactive agents](/blog/newsletter-2026-04-08-inbound-webhooks/) with the current [Webhooks and Events documentation](https://docs.gobii.ai/developers/webhooks) to understand payload delivery, trigger direction, and safety controls. External AI clients need [Remote MCP access for persistent agents](/remote-mcp/). Discord has its own [channel integration guide](/blog/newsletter-2026-06-02-discord-integration/).
 
 Direction matters. A CRM integration calls tools; a webhook announces an event. The Agent API creates or manages the worker receiving that event, while Remote MCP gives another AI environment an authenticated route to it. One production workflow can combine all four surfaces. Give each one a single, legible job.
 

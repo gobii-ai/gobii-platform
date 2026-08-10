@@ -160,7 +160,7 @@ curl -H "X-Api-Key: $GOBII_API_KEY" \
 
 Send a message, then inspect the new events. Save the returned agent ID. When the role, access, files, and history should continue, reuse that stable worker instead of creating a new agent for each task.
 
-Through [Gobii Remote MCP](/blog/newsletter-2026-05-19-remote-mcp/), an AI development client can add messages to the same long-lived agent's unified timeline and read new events with a durable cursor instead of starting a separate chat for each tool call.
+Through [Gobii Remote MCP](/remote-mcp/), an AI development client can add messages to the same long-lived agent's unified timeline and read new events with a durable cursor instead of starting a separate chat for each tool call.
 
 ## A Practical Memory Reliability Test
 

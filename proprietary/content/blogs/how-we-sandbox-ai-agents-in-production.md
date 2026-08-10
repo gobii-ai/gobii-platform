@@ -246,7 +246,7 @@ Tool execution is bounded by timeouts and stdout/stderr caps to prevent resource
 
 User and organization MCP servers run inside the sandbox pod alongside sandboxed tools. Platform MCP servers remain in the trusted worker process. This separates untrusted extension behavior from the trusted core.
 
-That split matters more as agents connect through [Remote MCP access for Gobii agents](/blog/newsletter-2026-05-19-remote-mcp/) and [one-click integrations for Gobii AI agents](/blog/newsletter-2026-03-17-one-click-integrations-for-your-agents/).
+That split matters more as agents connect through [Remote MCP access for persistent Gobii agents](/remote-mcp/) and [one-click integrations for Gobii AI agents](/blog/newsletter-2026-03-17-one-click-integrations-for-your-agents/).
 
 ### 5. Filespace Sync: Deterministic and Conflict-Safe
 

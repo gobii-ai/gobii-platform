@@ -173,7 +173,7 @@ A strong fit has at least one of these needs:
 - A vendor ties an API credential to an approved IP or range.
 - A private service sits behind a firewall that cannot identify the Gobii another way.
 
-In contrast, skip it when the endpoint has a narrower path and needs no allowlist. [One-click agent integrations](/blog/newsletter-2026-03-17-one-click-integrations-for-your-agents/), [Remote MCP](/blog/newsletter-2026-05-19-remote-mcp/), the [Agent API](https://docs.gobii.ai/developers/developer-agents), and [inbound webhooks](/blog/newsletter-2026-04-08-inbound-webhooks/) each use their own access checks. A fixed IP does not prove who called those surfaces. It applies only to supported outbound traffic the Gobii sends after they start or manage work. Consult the live product reference for route coverage.
+In contrast, skip it when the endpoint has a narrower path and needs no allowlist. [One-click agent integrations](/blog/newsletter-2026-03-17-one-click-integrations-for-your-agents/), [Remote MCP for persistent agents](/remote-mcp/), the [Agent API](https://docs.gobii.ai/developers/developer-agents), and [inbound webhooks](/blog/newsletter-2026-04-08-inbound-webhooks/) each use their own access checks. A fixed IP does not prove who called those surfaces. It applies only to supported outbound traffic the Gobii sends after they start or manage work. Consult the live product reference for route coverage.
 
 ## How Do You Add and Assign a Dedicated IP?
 

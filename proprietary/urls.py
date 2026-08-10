@@ -55,5 +55,10 @@ urlpatterns = [
     # Blog URLs
     path("blog/", BlogIndexView.as_view(), name="blog_index"),
     path("blog/feed.xml", BlogFeed(), name="blog_feed"),
+    path(
+        "blog/newsletter-2026-05-19-remote-mcp/",
+        RedirectView.as_view(pattern_name="pages:remote_mcp", permanent=True),
+        name="remote_mcp_announcement_redirect",
+    ),
     path("blog/<slug:slug>/", BlogPostView.as_view(), name="blog_post"),
 ]
