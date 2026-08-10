@@ -817,12 +817,19 @@ export const ChatSidebar = memo(function ChatSidebar({
           ) : null}
 
           {showSettingsView ? (
-            <div className={`min-h-0 flex-1 overflow-y-auto${showDesktopSettingsView ? '' : ' hidden'}`}>
+            <div
+              className="min-h-0 flex-1 overflow-y-auto"
+              style={showDesktopSettingsView ? undefined : { display: 'none' }}
+            >
               {embeddedSettingsPanel}
             </div>
           ) : null}
           {!showSettingsView && showCustomGalleryShellPanel ? (
-            <div className={`agent-gallery-scroll${showDesktopGalleryShellPanel ? '' : ' hidden'}`} data-variant="sidebar">
+            <div
+              className="agent-gallery-scroll"
+              data-variant="sidebar"
+              style={showDesktopGalleryShellPanel ? undefined : { display: 'none' }}
+            >
               {galleryShellPanel}
             </div>
           ) : null}

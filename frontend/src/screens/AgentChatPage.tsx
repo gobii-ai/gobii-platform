@@ -1021,6 +1021,13 @@ export function AgentChatPage({
     setSwitchingAgentId,
     shellPathname,
   })
+  useEffect(() => {
+    if (shellSubview === 'chat') {
+      return
+    }
+    setMessageSearchState((current) => current.open ? { ...current, open: false } : current)
+    dispatch(immersiveShellActions.setSidebarMode('gallery'))
+  }, [dispatch, shellSubview])
   const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
   const [createOrganizationName, setCreateOrganizationName] = useState('')
   const [createOrganizationBusy, setCreateOrganizationBusy] = useState(false)
