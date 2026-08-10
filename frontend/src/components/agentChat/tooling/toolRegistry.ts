@@ -31,7 +31,7 @@ function compareEntryOrder(left: ToolEntryDisplay, right: ToolEntryDisplay): num
 
 function toTitleCase(value: string): string {
   return value
-    .split(/[\s_\-]+/)
+    .split(/[\s_-]+/)
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
@@ -105,6 +105,9 @@ function deriveMcpInfo(toolName: string | null | undefined, rawResult: unknown):
 
 function descriptorFor(toolName: string | null | undefined): ToolDescriptor {
   const normalized = (toolName ?? '').toLowerCase()
+  if (normalized.startsWith('mcp_computer_')) {
+    return TOOL_DESCRIPTORS.get('mcp_computer')!
+  }
   return TOOL_DESCRIPTORS.get(normalized) || TOOL_DESCRIPTORS.get('default')!
 }
 

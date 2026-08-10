@@ -5614,7 +5614,7 @@
 }
 .chat-sidebar-header[data-has-center='true'] {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     column-gap: 0.75rem;
 }
 .chat-sidebar-header[data-collapsed='true'] {
@@ -6313,11 +6313,13 @@
     position: relative;
     display: flex;
     align-items: center;
+    min-width: 0;
 }
 .chat-context-switcher__trigger {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
+    min-width: 0;
     max-width: 11rem;
     padding: 0.35rem 0.55rem;
     border-radius: 0.65rem;
@@ -6348,8 +6350,10 @@
 .chat-context-switcher__chevron {
     width: 0.95rem;
     height: 0.95rem;
+    flex-shrink: 0;
 }
 .chat-context-switcher__label {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

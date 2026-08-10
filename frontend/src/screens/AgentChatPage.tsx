@@ -1021,6 +1021,13 @@ export function AgentChatPage({
     setSwitchingAgentId,
     shellPathname,
   })
+  useEffect(() => {
+    if (shellSubview === 'chat') {
+      return
+    }
+    setMessageSearchState((current) => current.open ? { ...current, open: false } : current)
+    dispatch(immersiveShellActions.setSidebarMode('gallery'))
+  }, [dispatch, shellSubview])
   const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
   const [createOrganizationName, setCreateOrganizationName] = useState('')
   const [createOrganizationBusy, setCreateOrganizationBusy] = useState(false)
@@ -2699,8 +2706,12 @@ export function AgentChatPage({
     trackSignupPreviewActionBlocked('collaborate', location)
   }, [trackSignupPreviewActionBlocked])
 
-  const navigateShellPath = useCallback((nextPath: string, nextAgentId?: string | null) => {
-    const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`
+  const navigateShellPath = useCallback((
+    nextPath: string,
+    nextAgentId?: string | null,
+    nextSearch = window.location.search,
+  ) => {
+    const nextUrl = `${nextPath}${nextSearch}${window.location.hash}`
     setShellPathname(nextPath)
     if (typeof nextAgentId !== 'undefined' && nextAgentId !== activeAgentIdRef.current) {
       setSwitchingAgentId(null)
@@ -2715,9 +2726,16 @@ export function AgentChatPage({
     if (!resolvedAgentId) {
       return
     }
-    dispatch(immersiveShellActions.setSidebarMode('gallery'))
+    if (subview !== 'chat') {
+      setMessageSearchState((current) => current.open ? { ...current, open: false } : current)
+      dispatch(immersiveShellActions.setSidebarMode('gallery'))
+    }
     const nextPath = buildAgentChatShellPath(window.location.pathname, resolvedAgentId, subview)
-    navigateShellPath(nextPath, resolvedAgentId)
+    const nextSearchParams = new URLSearchParams(window.location.search)
+    nextSearchParams.delete('shell')
+    const nextSearchValue = nextSearchParams.toString()
+    const nextSearch = nextSearchValue ? `?${nextSearchValue}` : ''
+    navigateShellPath(nextPath, resolvedAgentId, nextSearch)
   }, [dispatch, navigateShellPath])
 
   const handleConfigureAgent = useCallback((agent: AgentRosterEntry) => {
@@ -3556,11 +3574,8 @@ export function AgentChatPage({
     viewerEmail,
   ])
   const handleSelectionSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
-    if (selectionPage !== 'agents' && mode !== 'gallery' && onSelectionPageChange) {
-      onSelectionPageChange('agents')
-    }
     dispatch(immersiveShellActions.setSidebarMode(mode))
-  }, [dispatch, onSelectionPageChange, selectionPage])
+  }, [dispatch])
   const selectionSidebarProps: SelectionSidebarProps = {
     agents: sidebarAgents,
     agentInvites: rosterQuery.data?.agentInvites ?? [],
@@ -4434,7 +4449,7 @@ export function AgentChatPage({
         </div>,
       )
     }
-    if (selectionPage !== 'agents') {
+    if (selectionPage !== 'agents' && selectionSidebarMode === 'gallery') {
       return renderSelectionLayout(
         selectionMainPanel ? (
           <div className="flex min-h-full w-full flex-1 md:hidden">
