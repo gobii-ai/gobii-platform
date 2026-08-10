@@ -260,7 +260,12 @@
   function inTri(pt,v1,v2,v3){ var d1=sgn(pt,v1,v2), d2=sgn(pt,v2,v3), d3=sgn(pt,v3,v1);
     return !(((d1<0)||(d2<0)||(d3<0)) && ((d1>0)||(d2>0)||(d3>0))); }
   trigger.addEventListener('mouseenter', function(){ clearTimeout(closeTimer); setOpen(true); });
-  trigger.addEventListener('click', function(e){ e.preventDefault(); setOpen(!open); });
+  trigger.addEventListener('click', function(e){
+    e.preventDefault();
+    // Pointer clicks follow mouseenter, so they keep the menu open. Native keyboard
+    // and assistive-technology activations use zero-detail clicks and toggle it.
+    setOpen(e.detail === 0 ? !open : true);
+  });
   dd.addEventListener('mouseleave', scheduleClose);
   panel.addEventListener('mouseenter', function(){ clearTimeout(closeTimer); });
   document.addEventListener('click', function(e){ if (open && !dd.contains(e.target)) setOpen(false); });

@@ -312,6 +312,12 @@ class BlogSeoTests(TestCase):
             "http://testserver/blog/best-ai-employees/",
         )
 
+        article_hrefs = [
+            link.get("href")
+            for link in soup.select_one(".prose").find_all("a")
+            if link.get("href")
+        ]
+        self.assertEqual(article_hrefs.count("/ai-employees/"), 1)
         rendered_hrefs = {
             link.get("href")
             for link in soup.find_all("a")
@@ -479,12 +485,13 @@ class BlogSeoTests(TestCase):
         )
         self.assertContains(response, "Gayle Oeschger")
 
-        article_hrefs = {
+        article_hrefs = [
             link.get("href")
             for link in soup.select_one(".prose").find_all("a")
             if link.get("href")
-        }
+        ]
         self.assertIn("/ai-employees/", article_hrefs)
+        self.assertEqual(article_hrefs.count("/ai-employees/"), 1)
         self.assertIn("/blog/best-ai-employees/", article_hrefs)
         self.assertIn("/blog/newsletter-2026-06-09-browser-intelligence/", article_hrefs)
 

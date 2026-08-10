@@ -159,6 +159,7 @@ from .public_template_metadata import (
 from .ai_employees import (
     AI_EMPLOYEES_CLUSTER_LINKS,
     AI_EMPLOYEES_FAQ_ITEMS,
+    AI_EMPLOYEES_LAST_MODIFIED_DATE,
     AI_EMPLOYEES_WORKFLOW_ITEMS,
     build_ai_employees_structured_data,
 )
@@ -4451,6 +4452,14 @@ class StaticViewSitemap(sitemaps.Sitemap):
 
     def location(self, item):
         return reverse(item)
+
+    def lastmod(self, item):
+        if item == "pages:ai_employees":
+            return datetime.strptime(
+                AI_EMPLOYEES_LAST_MODIFIED_DATE,
+                "%Y-%m-%d",
+            ).date()
+        return None
 
 
 class ComparisonsSitemap(sitemaps.Sitemap):

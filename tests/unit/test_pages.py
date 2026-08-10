@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 import json
@@ -144,6 +144,29 @@ class HomePageTests(TestCase):
             soup.find("script", src="https://unpkg.com/lucide@0.546.0")
         )
         self.assertIsNotNone(soup.select_one("svg.lucide-layout-grid[aria-hidden='true']"))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_home_page_initial_html_links_to_ai_employees(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        contextual_links = soup.find_all(
+            "a",
+            {
+                "href": reverse("pages:ai_employees"),
+                "data-analytics-cta-id": "home_k_ai_employees",
+            },
+        )
+        self.assertEqual(len(contextual_links), 1)
+        contextual_link = contextual_links[0]
+        self.assertEqual(
+            contextual_link.get_text(" ", strip=True),
+            "Learn how Gobii AI employees work →",
+        )
+        self.assertEqual(contextual_link["data-analytics-placement"], "definition")
+        self.assertIsNotNone(contextual_link.find_parent("section", id="what-is-gobii"))
+        self.assertIsNone(soup.select_one(".gk-hero [data-analytics-cta-id='home_k_ai_employees']"))
 
     @override_settings(
         PUBLIC_BRAND_NAME="Acme",
@@ -2660,6 +2683,21 @@ class SitemapTests(TestCase):
         self.assertNotIn("<loc>http://example.com/pretrained-workers/</loc>", content)
 
         sitemap = BeautifulSoup(content, "xml")
+        ai_employees_urls = [
+            url
+            for url in sitemap.find_all("url")
+            if url.loc
+            and url.loc.get_text(strip=True) == "http://example.com/ai-employees/"
+        ]
+        self.assertEqual(len(ai_employees_urls), 1)
+        self.assertEqual(
+            ai_employees_urls[0].lastmod.get_text(strip=True),
+            page_views.AI_EMPLOYEES_LAST_MODIFIED_DATE,
+        )
+        datetime.strptime(
+            ai_employees_urls[0].lastmod.get_text(strip=True),
+            "%Y-%m-%d",
+        )
         blog_lastmods = {
             url.loc.get_text(strip=True): url.lastmod.get_text(strip=True)
             for url in sitemap.find_all("url")
@@ -3021,6 +3059,16 @@ class AIEmployeesPageTests(TestCase):
             "supervision, review-ready outputs, and clean handoffs. See how it works.",
         )
         self.assertEqual(soup.find("link", rel="canonical")["href"], expected_url)
+        self.assertFalse(response.has_header("X-Robots-Tag"))
+        robots_directives = [
+            meta.get("content", "").lower()
+            for meta in soup.find_all("meta", attrs={"name": "robots"})
+        ]
+        self.assertFalse(any("noindex" in directive for directive in robots_directives))
+        self.assertEqual(len(soup.find_all("h1")), 1)
+        main_elements = soup.find_all("main")
+        self.assertEqual(len(main_elements), 1)
+        self.assertIn("gk-luxe", main_elements[0].get("class", []))
         self.assertEqual(soup.find("meta", property="og:url")["content"], expected_url)
         self.assertEqual(
             soup.find("meta", property="og:image")["content"],
@@ -3051,6 +3099,13 @@ class AIEmployeesPageTests(TestCase):
         self.assertIn("which teams should start with an ai employee?", page_text)
         self.assertNotIn("small business", page_text)
 
+        teammate_headings = [
+            heading.get_text(" ", strip=True)
+            for heading in soup.find_all("h3")
+            if "AI teammates" in heading.get_text(" ", strip=True)
+        ]
+        self.assertEqual(teammate_headings, ["AI teammates", "Gobii AI teammates"])
+
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
         GOBII_RELEASE_ENV="prod",
@@ -3073,9 +3128,17 @@ class AIEmployeesPageTests(TestCase):
             },
         )
         self.assertEqual(nodes["WebPage"]["url"], "https://gobii.ai/ai-employees/")
-        self.assertEqual(nodes["WebPage"]["dateModified"], "2026-07-10")
+        self.assertEqual(nodes["WebPage"]["dateModified"], "2026-08-10")
+        organization_id = "https://gobii.ai/#organization"
+        website_id = "https://gobii.ai/#website"
+        self.assertEqual(nodes["Organization"]["@id"], organization_id)
+        self.assertEqual(nodes["WebSite"]["@id"], website_id)
+        self.assertEqual(nodes["WebSite"]["publisher"], {"@id": organization_id})
+        self.assertEqual(nodes["WebPage"]["isPartOf"], {"@id": website_id})
+        self.assertEqual(nodes["WebPage"]["publisher"], {"@id": organization_id})
         self.assertEqual(nodes["WebPage"]["mainEntity"], {"@id": "https://gobii.ai/ai-employees#software"})
         self.assertEqual(nodes["SoftwareApplication"]["name"], "Gobii AI Teammates")
+        self.assertEqual(nodes["SoftwareApplication"]["publisher"], {"@id": organization_id})
         self.assertEqual(
             nodes["SoftwareApplication"]["offers"],
             {
@@ -3263,6 +3326,50 @@ class AIEmployeesPageTests(TestCase):
             "<loc>http://example.com/ai-employees/</loc>",
             community_response.content.decode(),
         )
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        SITE_ID=2,
+        ALLOWED_HOSTS=["gobii.ai"],
+    )
+    def test_ai_employees_sitemap_lastmod_is_stable(self):
+        Site.objects.update_or_create(
+            id=settings.SITE_ID,
+            defaults={"domain": "gobii.ai", "name": "Gobii"},
+        )
+        Site.objects.clear_cache()
+        first_response = self.client.get(
+            "/sitemap.xml",
+            secure=True,
+            HTTP_HOST="gobii.ai",
+        )
+        second_response = self.client.get(
+            "/sitemap.xml",
+            secure=True,
+            HTTP_HOST="gobii.ai",
+        )
+
+        first_sitemap = BeautifulSoup(first_response.content, "xml")
+        second_sitemap = BeautifulSoup(second_response.content, "xml")
+
+        def ai_employees_lastmod(sitemap):
+            matching_urls = [
+                url
+                for url in sitemap.find_all("url")
+                if url.loc
+                and url.loc.get_text(strip=True)
+                == "https://gobii.ai/ai-employees/"
+            ]
+            self.assertEqual(len(matching_urls), 1)
+            return matching_urls[0].lastmod.get_text(strip=True)
+
+        first_lastmod = ai_employees_lastmod(first_sitemap)
+        second_lastmod = ai_employees_lastmod(second_sitemap)
+        self.assertEqual(
+            first_lastmod,
+            page_views.AI_EMPLOYEES_LAST_MODIFIED_DATE,
+        )
+        self.assertEqual(second_lastmod, first_lastmod)
 
 
 @tag("batch_pages")
@@ -4178,6 +4285,12 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         )
         self.assertGreaterEqual(len(developer_links), 1)
         self.assertIsNotNone(soup.find("a", {"href": reverse("pages:library")}))
+        ai_employees_url = reverse("pages:ai_employees")
+        desktop_product_menu = soup.find(id="gk-dd-panel")
+        mobile_menu = soup.select_one(".gk-mobile-panel")
+        self.assertIsNone(desktop_product_menu.find("a", href=ai_employees_url))
+        self.assertIsNone(mobile_menu.find("a", href=ai_employees_url))
+        self.assertIsNone(soup.find("footer").find("a", href=ai_employees_url))
         page_text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
         page_text = page_text.replace(" ,", ",").replace(" .", ".")
         self.assertIn("Solutions", page_text)
