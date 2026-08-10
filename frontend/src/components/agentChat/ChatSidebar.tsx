@@ -140,8 +140,10 @@ export const ChatSidebar = memo(function ChatSidebar({
   const showSettingsView = showEmbeddedSettings && Boolean(embeddedSettingsPanel)
   const showGalleryShellSwitcher = Boolean(onGalleryShellPageChange)
   const showCustomGalleryShellPanel = galleryShellPage !== 'agents' && Boolean(galleryShellPanel)
-  const collapsed = desktopMode === 'collapsed' && !showSettingsView
-  const galleryMode = desktopMode === 'gallery' || showSettingsView
+  const collapsed = desktopMode === 'collapsed'
+  const galleryMode = desktopMode === 'gallery'
+  const showDesktopSettingsView = galleryMode && showSettingsView
+  const showDesktopGalleryShellPanel = galleryMode && !showSettingsView && showCustomGalleryShellPanel
   const favoriteAgentIdSet = useMemo(() => new Set(favoriteAgentIds), [favoriteAgentIds])
   const mutedAgentIdSet = useMemo(() => new Set(mutedAgentIds), [mutedAgentIds])
   const hasFavoritesInRoster = useMemo(
@@ -197,19 +199,12 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [isMobile, showCustomGalleryShellPanel, galleryShellPage])
 
   const handleStepLeft = useCallback(() => {
-    if (showSettingsView) {
-      onDesktopModeChange?.('list')
-      return
-    }
     onDesktopModeChange?.(getPreviousAgentChatSidebarMode(desktopMode))
-  }, [desktopMode, onDesktopModeChange, showSettingsView])
+  }, [desktopMode, onDesktopModeChange])
 
   const handleStepRight = useCallback(() => {
-    if (showSettingsView) {
-      return
-    }
     onDesktopModeChange?.(getNextAgentChatSidebarMode(desktopMode))
-  }, [desktopMode, onDesktopModeChange, showSettingsView])
+  }, [desktopMode, onDesktopModeChange])
 
   const openMessageSearch = useCallback(() => {
     if (isMobile) {
@@ -770,7 +765,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                 <PanelLeftClose className="h-4 w-4" />
               </button>
             ) : null}
-            {!messageSearchOpen && !galleryMode && !showSettingsView ? (
+            {!messageSearchOpen && !galleryMode ? (
               <button
                 type="button"
                 className="chat-sidebar-toggle"
@@ -784,12 +779,13 @@ export const ChatSidebar = memo(function ChatSidebar({
           </div>
         </div>
 
-        {messageSearchOpen ? messageSearchPanel : <div className="chat-sidebar-section">
-          {showSettingsView ? (
+        {messageSearchOpen ? messageSearchPanel : null}
+        <div className={messageSearchOpen ? 'hidden' : 'chat-sidebar-section'}>
+          {showDesktopSettingsView ? (
             <div className="chat-sidebar-section-header">
               <span className="chat-sidebar-section-title">{embeddedSettingsTitle}</span>
             </div>
-          ) : showCustomGalleryShellPanel ? null : (
+          ) : showDesktopGalleryShellPanel ? null : (
             <div className="chat-sidebar-section-header">
               <span className="chat-sidebar-section-title">Agents</span>
               {!collapsed && hasAgents && !loading ? (
@@ -798,7 +794,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           )}
 
-          {!collapsed && !showSettingsView && !showCustomGalleryShellPanel ? (
+          {!collapsed && !showDesktopSettingsView && !showDesktopGalleryShellPanel ? (
             <div
               className="chat-sidebar-controls"
               data-gallery={galleryMode ? 'true' : 'false'}
@@ -821,41 +817,43 @@ export const ChatSidebar = memo(function ChatSidebar({
           ) : null}
 
           {showSettingsView ? (
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className={`min-h-0 flex-1 overflow-y-auto${showDesktopSettingsView ? '' : ' hidden'}`}>
               {embeddedSettingsPanel}
             </div>
-          ) : showCustomGalleryShellPanel ? (
-            <div className="agent-gallery-scroll" data-variant="sidebar">
+          ) : null}
+          {!showSettingsView && showCustomGalleryShellPanel ? (
+            <div className={`agent-gallery-scroll${showDesktopGalleryShellPanel ? '' : ' hidden'}`} data-variant="sidebar">
               {galleryShellPanel}
             </div>
-          ) : galleryMode ? (
-            <ChatSidebarGallery
-              variant="sidebar"
-              agents={agents}
-              favoriteAgentIds={favoriteAgentIds}
-              activeAgentId={activeAgentId}
-              switchingAgentId={switchingAgentId}
-              hasAgents={hasAgents}
-              loading={loading}
-              errorMessage={errorMessage}
-              searchQuery=""
-              onSelectAgent={handleAgentSelect}
-              onConfigureAgent={onConfigureAgent}
-              onToggleAgentFavorite={onToggleAgentFavorite}
-              onCreateAgent={onCreateAgent ? handleCreateAgent : undefined}
-              createAgentButtonDisabled={createAgentButtonDisabled}
-              createAgentDisabled={createAgentDisabled}
-              createAgentDisabledReason={createAgentDisabledReason}
-              teamTemplateMenu={teamTemplateMenu}
-              scrollToAgentId={scrollToAgentId}
-              onScrolledToAgent={onScrolledToAgent}
-            />
-          ) : (
-            renderListContent('sidebar', collapsed)
-          )}
-        </div>}
+          ) : null}
+          {!showDesktopSettingsView && !showDesktopGalleryShellPanel ? (
+            galleryMode ? (
+              <ChatSidebarGallery
+                variant="sidebar"
+                agents={agents}
+                favoriteAgentIds={favoriteAgentIds}
+                activeAgentId={activeAgentId}
+                switchingAgentId={switchingAgentId}
+                hasAgents={hasAgents}
+                loading={loading}
+                errorMessage={errorMessage}
+                searchQuery=""
+                onSelectAgent={handleAgentSelect}
+                onConfigureAgent={onConfigureAgent}
+                onToggleAgentFavorite={onToggleAgentFavorite}
+                onCreateAgent={onCreateAgent ? handleCreateAgent : undefined}
+                createAgentButtonDisabled={createAgentButtonDisabled}
+                createAgentDisabled={createAgentDisabled}
+                createAgentDisabledReason={createAgentDisabledReason}
+                teamTemplateMenu={teamTemplateMenu}
+                scrollToAgentId={scrollToAgentId}
+                onScrolledToAgent={onScrolledToAgent}
+              />
+            ) : renderListContent('sidebar', collapsed)
+          ) : null}
+        </div>
 
-        {!messageSearchOpen && !showSettingsView && settings ? (
+        {!messageSearchOpen && !showDesktopSettingsView && settings ? (
           <SidebarSettingsMenu
             {...settings}
             variant="sidebar"

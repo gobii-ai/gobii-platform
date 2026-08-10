@@ -3559,11 +3559,8 @@ export function AgentChatPage({
     viewerEmail,
   ])
   const handleSelectionSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
-    if (selectionPage !== 'agents' && mode !== 'gallery' && onSelectionPageChange) {
-      onSelectionPageChange('agents')
-    }
     dispatch(immersiveShellActions.setSidebarMode(mode))
-  }, [dispatch, onSelectionPageChange, selectionPage])
+  }, [dispatch])
   const selectionSidebarProps: SelectionSidebarProps = {
     agents: sidebarAgents,
     agentInvites: rosterQuery.data?.agentInvites ?? [],

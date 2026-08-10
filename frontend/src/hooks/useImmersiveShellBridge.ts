@@ -67,16 +67,14 @@ export function useImmersiveShellBridge({
       return
     }
     if (selectionPage !== 'agents') {
-      if (selectionSidebarMode !== 'gallery') {
-        dispatch(immersiveShellActions.setSidebarMode('gallery'))
-      }
+      dispatch(immersiveShellActions.setSidebarMode('gallery'))
       return
     }
     const storedSelectionMode = readSelectionSidebarModePreference()
-    if (storedSelectionMode && storedSelectionMode !== selectionSidebarMode) {
+    if (storedSelectionMode) {
       dispatch(immersiveShellActions.setSidebarMode(storedSelectionMode))
     }
-  }, [agentId, dispatch, selectionPage, selectionSidebarMode])
+  }, [agentId, dispatch, selectionPage])
 
   useEffect(() => {
     if (typeof window === 'undefined') {

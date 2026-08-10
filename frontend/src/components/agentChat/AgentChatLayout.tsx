@@ -465,8 +465,6 @@ export function AgentChatLayout({
   const {
     galleryShellPage = 'agents',
     showEmbeddedSettings = false,
-    onGalleryShellPageChange,
-    onBackFromEmbeddedSettings,
   } = chatSidebarProps
   const effectiveGalleryShellPage = galleryShellPage ?? 'agents'
   const currentContext = sidebarSettingsConfig?.context ?? null
@@ -637,20 +635,8 @@ export function AgentChatLayout({
   }, [agentId, highPriorityBannerDismissible, highPriorityBannerId])
 
   const handleSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
-    if (showGalleryShellPanel && mode !== 'gallery') {
-      preEmbeddedSidebarModeRef.current = null
-      setSidebarMode(mode)
-      onGalleryShellPageChange?.('agents')
-      return
-    }
-    if (showEmbeddedSettings && mode !== 'gallery') {
-      preEmbeddedSidebarModeRef.current = null
-      setSidebarMode(mode)
-      onBackFromEmbeddedSettings?.()
-      return
-    }
     setSidebarMode(mode)
-  }, [onBackFromEmbeddedSettings, onGalleryShellPageChange, setSidebarMode, showEmbeddedSettings, showGalleryShellPanel])
+  }, [setSidebarMode])
 
   const handleSettingsOpen = useCallback(() => {
     setSettingsOpen(true)
