@@ -4533,8 +4533,27 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
 
         quickstart = soup.find("pre", id="agent-quickstart")
         self.assertIsNotNone(quickstart)
-        copy_button = soup.find("button", attrs={"data-copy-code-target": "agent-quickstart"})
+        request_tab = soup.find("button", id="agent-request-tab")
+        response_tab = soup.find("button", id="agent-response-tab")
+        tablist = request_tab.find_parent(attrs={"role": "tablist"})
+        self.assertTrue(tablist.has_attr("hidden"))
+        self.assertEqual(request_tab.get("role"), "tab")
+        self.assertEqual(request_tab.get("aria-selected"), "true")
+        self.assertEqual(request_tab.get("aria-controls"), "agent-request-panel")
+        self.assertEqual(response_tab.get("role"), "tab")
+        self.assertEqual(response_tab.get("aria-selected"), "false")
+        self.assertEqual(response_tab.get("aria-controls"), "agent-response-panel")
+        request_panel = soup.find("div", id="agent-request-panel")
+        response_panel = soup.find("div", id="agent-response-panel")
+        self.assertEqual(request_panel.get("role"), "tabpanel")
+        self.assertEqual(request_panel.get("aria-labelledby"), "agent-request-tab")
+        self.assertEqual(response_panel.get("role"), "tabpanel")
+        self.assertEqual(response_panel.get("aria-labelledby"), "agent-response-tab")
+        self.assertFalse(request_panel.has_attr("hidden"))
+        self.assertFalse(response_panel.has_attr("hidden"))
+        copy_button = soup.find("button", attrs={"data-active-code-copy": ""})
         self.assertIsNotNone(copy_button)
+        self.assertEqual(copy_button.get("data-copy-code-target"), "agent-quickstart")
         self.assertEqual(copy_button.get("aria-describedby"), "agent-copy-status")
         response_example = soup.find("pre", id="agent-quickstart-response")
         self.assertIsNotNone(response_example)
@@ -4549,25 +4568,13 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
     "created_at": "2026-08-09T22:02:50.916739Z"
 }""",
         )
-        response_bar = response_example.find_previous_sibling("div", class_="eng-codebar")
-        self.assertEqual(
-            response_bar.find(class_="eng-code-title").get_text(strip=True),
-            "Response excerpt",
-        )
         response_caption = response_example.find_next_sibling("p", class_="eng-code-caption")
         self.assertIn(
             "Additional response fields omitted for brevity.",
             response_caption.get_text(" ", strip=True),
         )
-        response_copy_button = soup.find(
-            "button",
-            attrs={"data-copy-code-target": "agent-quickstart-response"},
-        )
-        self.assertIsNotNone(response_copy_button)
-        self.assertEqual(
-            response_copy_button.get("aria-describedby"),
-            "agent-response-copy-status",
-        )
+        self.assertEqual(response_panel.get("data-code-copy-target"), "agent-quickstart-response")
+        self.assertEqual(response_panel.get("data-code-copy-status"), "agent-response-copy-status")
 
         hrefs = {link.get("href") for link in soup.find_all("a")}
         expected_links = {

@@ -32,14 +32,23 @@
   .eng-codebar { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px;
     padding: 9px 12px 9px 16px; border-bottom: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.04); }
   .eng-code-title { min-width: 0; color: #cbd5e1; font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  .eng-code-tabs { display: flex; min-width: 0; align-items: center; gap: 4px; padding: 3px; border-radius: 10px;
+    background: rgba(15,23,42,.5); }
+  .eng-code-tab { min-height: 36px; padding: 7px 11px; border: 1px solid transparent; border-radius: 8px;
+    background: transparent; color: #94a3b8; font: 600 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    cursor: pointer; }
+  .eng-code-tab:hover { color: #e2e8f0; }
+  .eng-code-tab[aria-selected="true"] { border-color: rgba(196,181,253,.34); background: rgba(139,92,246,.2); color: #fff; }
   .eng-copy-button { display: inline-flex; min-height: 44px; flex-shrink: 0; align-items: center; gap: 7px; padding: 7px 10px;
     border: 1px solid rgba(255,255,255,.14); border-radius: 9px; background: rgba(255,255,255,.06); color: #e2e8f0;
     font-size: 12px; font-weight: 650; cursor: pointer; }
   .eng-copy-button:hover { border-color: rgba(196,181,253,.7); background: rgba(139,92,246,.16); color: #fff; }
-  .eng-copy-button:focus-visible, .eng-card-link:focus-visible, .eng-resource-link:focus-visible,
+  .eng-code-tab:focus-visible, .eng-copy-button:focus-visible, .eng-card-link:focus-visible, .eng-resource-link:focus-visible,
   .eng-inline-link:focus-visible { outline: 3px solid #c4b5fd; outline-offset: 3px; }
   .eng-code pre { max-width: 100%; margin: 0; padding: 22px; overflow-x: auto; color: #e2e8f0;
     font: 12.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; tab-size: 2; }
+  .eng-code-tabs-ready .eng-code-panel { display: grid; min-height: 320px; grid-template-rows: minmax(0, 1fr) auto; }
+  .eng-code [hidden] { display: none; }
   .eng-code code { font: inherit; }
   .eng-code .comment { color: #94a3b8; }
   .eng-code .string { color: #6ee7b7; }
@@ -113,7 +122,7 @@
   }
   @media (min-width: 980px) {
     .eng-hero { padding-top: 76px; }
-    .eng-hero-grid { grid-template-columns: minmax(0, .92fr) minmax(480px, 1.08fr); gap: 48px; }
+    .eng-hero-grid { grid-template-columns: minmax(0, .92fr) minmax(480px, 1.08fr); gap: 48px; align-items: start; }
     .eng-flow { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   }
   @media (max-width: 639px) {
@@ -168,15 +177,20 @@
         </p>
       </div>
 
-      <div class="eng-code" aria-label="Agent API quickstart">
+      <div class="eng-code" aria-label="Agent API quickstart" data-code-tabs>
         <div class="eng-codebar">
-          <span class="eng-code-title">Quickstart · create_agent.sh</span>
-          <button type="button" class="eng-copy-button" data-copy-code-target="agent-quickstart" aria-describedby="agent-copy-status">
+          <span class="eng-code-title" data-code-tabs-fallback>Quickstart · create_agent.sh</span>
+          <div class="eng-code-tabs" role="tablist" aria-label="Quickstart examples" data-code-tablist hidden>
+            <button type="button" id="agent-request-tab" class="eng-code-tab" role="tab" aria-selected="true" aria-controls="agent-request-panel" tabindex="0">Request</button>
+            <button type="button" id="agent-response-tab" class="eng-code-tab" role="tab" aria-selected="false" aria-controls="agent-response-panel" tabindex="-1">Response excerpt</button>
+          </div>
+          <button type="button" class="eng-copy-button" data-active-code-copy data-copy-code-target="agent-quickstart" data-copy-code-label="Request" aria-describedby="agent-copy-status">
             {% lucide "copy" class="h-3.5 w-3.5" %}
             <span data-copy-label>Copy</span>
           </button>
         </div>
-        <pre id="agent-quickstart" tabindex="0"><code><span class="comment"># Create a persistent agent on Gobii Cloud</span>
+        <div id="agent-request-panel" class="eng-code-panel" role="tabpanel" aria-labelledby="agent-request-tab" data-code-panel data-code-copy-target="agent-quickstart" data-code-copy-label="Request" data-code-copy-status="agent-copy-status">
+          <pre id="agent-quickstart" tabindex="0"><code><span class="comment"># Create a persistent agent on Gobii Cloud</span>
 curl <span class="flag">-X</span> POST \
   <span class="flag">-H</span> <span class="string">"Content-Type: application/json"</span> \
   <span class="flag">-H</span> <span class="string">"X-Api-Key: $GOBII_API_KEY"</span> \
@@ -186,14 +200,15 @@ curl <span class="flag">-X</span> POST \
     "schedule": "@daily"
   }'</span> \
   https://gobii.ai/api/v1/agents/</code></pre>
-        <div class="eng-codebar">
-          <span class="eng-code-title">Response excerpt</span>
-          <button type="button" class="eng-copy-button" data-copy-code-target="agent-quickstart-response" aria-describedby="agent-response-copy-status">
-            {% lucide "copy" class="h-3.5 w-3.5" %}
-            <span data-copy-label>Copy</span>
-          </button>
+          <p class="eng-code-caption">
+            Verified against the current <a class="eng-inline-link" href="https://docs.gobii.ai/developers/developer-agents#create-an-agent">Agent API create example</a>.
+          </p>
         </div>
-        <pre id="agent-quickstart-response" tabindex="0"><code>{
+        <div id="agent-response-panel" class="eng-code-panel" role="tabpanel" aria-labelledby="agent-response-tab" data-code-panel data-code-copy-target="agent-quickstart-response" data-code-copy-label="Response excerpt" data-code-copy-status="agent-response-copy-status">
+          <div class="eng-codebar" data-code-tabs-fallback>
+            <span class="eng-code-title">Response excerpt</span>
+          </div>
+          <pre id="agent-quickstart-response" tabindex="0"><code>{
     "id": "b0bd82a5-ed5a-43f4-87f9-242585a2428f",
     "name": "Market Monitor",
     "schedule": "@daily",
@@ -201,11 +216,8 @@ curl <span class="flag">-X</span> POST \
     "life_state": "active",
     "created_at": "2026-08-09T22:02:50.916739Z"
 }</code></pre>
-        <p class="eng-code-caption">
-          Additional response fields omitted for brevity.
-          <br>
-          Verified against the current <a class="eng-inline-link" href="https://docs.gobii.ai/developers/developer-agents#create-an-agent">Agent API create example</a>.
-        </p>
+          <p class="eng-code-caption">Additional response fields omitted for brevity.</p>
+        </div>
         <span id="agent-copy-status" class="sr-only" aria-live="polite"></span>
         <span id="agent-response-copy-status" class="sr-only" aria-live="polite"></span>
       </div>
@@ -446,6 +458,62 @@ curl <span class="flag">-X</span> POST \
 {{ block.super }}
 <script>
   (function () {
+    document.querySelectorAll("[data-code-tabs]").forEach(function (tabs) {
+      var tablist = tabs.querySelector("[data-code-tablist]");
+      var tabButtons = Array.from(tabs.querySelectorAll('[role="tab"]'));
+      var panels = Array.from(tabs.querySelectorAll("[data-code-panel]"));
+      var copyButton = tabs.querySelector("[data-active-code-copy]");
+      if (!tablist || !tabButtons.length || !panels.length) return;
+
+      function activateTab(tab, moveFocus) {
+        var panelId = tab.getAttribute("aria-controls");
+        var activePanel = document.getElementById(panelId);
+
+        tabButtons.forEach(function (button) {
+          var selected = button === tab;
+          button.setAttribute("aria-selected", selected ? "true" : "false");
+          button.tabIndex = selected ? 0 : -1;
+        });
+        panels.forEach(function (panel) {
+          panel.hidden = panel !== activePanel;
+        });
+
+        if (copyButton && activePanel) {
+          copyButton.dataset.copyCodeTarget = activePanel.dataset.codeCopyTarget;
+          copyButton.dataset.copyCodeLabel = activePanel.dataset.codeCopyLabel;
+          copyButton.setAttribute("aria-describedby", activePanel.dataset.codeCopyStatus);
+          var copyLabel = copyButton.querySelector("[data-copy-label]");
+          if (copyLabel) copyLabel.textContent = "Copy";
+        }
+        if (moveFocus) tab.focus();
+      }
+
+      tabButtons.forEach(function (tab, index) {
+        tab.addEventListener("click", function () {
+          activateTab(tab, false);
+        });
+        tab.addEventListener("keydown", function (event) {
+          var nextIndex = null;
+          if (event.key === "ArrowRight") nextIndex = (index + 1) % tabButtons.length;
+          if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabButtons.length) % tabButtons.length;
+          if (event.key === "Home") nextIndex = 0;
+          if (event.key === "End") nextIndex = tabButtons.length - 1;
+          if (nextIndex === null) return;
+          event.preventDefault();
+          activateTab(tabButtons[nextIndex], true);
+        });
+      });
+
+      tabs.classList.add("eng-code-tabs-ready");
+      tablist.hidden = false;
+      tabs.querySelectorAll("[data-code-tabs-fallback]").forEach(function (fallback) {
+        fallback.hidden = true;
+      });
+      activateTab(tabButtons.find(function (tab) {
+        return tab.getAttribute("aria-selected") === "true";
+      }) || tabButtons[0], false);
+    });
+
     function fallbackCopy(text) {
       var textarea = document.createElement("textarea");
       textarea.value = text;
@@ -462,13 +530,14 @@ curl <span class="flag">-X</span> POST \
     }
 
     document.querySelectorAll("[data-copy-code-target]").forEach(function (button) {
-      var code = document.getElementById(button.dataset.copyCodeTarget);
       var label = button.querySelector("[data-copy-label]");
-      var status = document.getElementById(button.getAttribute("aria-describedby"));
       var resetTimer = null;
-      if (!code) return;
 
       button.addEventListener("click", async function () {
+        var code = document.getElementById(button.dataset.copyCodeTarget);
+        var status = document.getElementById(button.getAttribute("aria-describedby"));
+        var copyName = button.dataset.copyCodeLabel || "Quickstart";
+        if (!code) return;
         window.clearTimeout(resetTimer);
         try {
           if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
@@ -477,10 +546,10 @@ curl <span class="flag">-X</span> POST \
             throw new Error("Clipboard unavailable");
           }
           if (label) label.textContent = "Copied";
-          if (status) status.textContent = "Quickstart copied to clipboard.";
+          if (status) status.textContent = copyName + " copied to clipboard.";
         } catch (error) {
           if (label) label.textContent = "Copy failed";
-          if (status) status.textContent = "Quickstart could not be copied.";
+          if (status) status.textContent = copyName + " could not be copied.";
         }
         resetTimer = window.setTimeout(function () {
           if (label) label.textContent = "Copy";
