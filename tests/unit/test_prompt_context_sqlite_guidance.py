@@ -697,9 +697,7 @@ class PromptContextContactsGuidanceTests(TestCase):
         self.assertRegex(rendered, r"^\$\[link:L[0-9A-Z]{16}\]$")
 
     def test_runtime_config_note_does_not_direct_one_off_feedback_into_config(self):
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = prompt_context.build_prompt_context(self.agent, is_first_run=False)
 
         content = "\n".join(message["content"] for message in context)
@@ -720,9 +718,7 @@ class PromptContextContactsGuidanceTests(TestCase):
     def test_runtime_schedule_note_keeps_temporary_scope_from_changing_cadence(self):
         self.agent.schedule = "0 9 * * *"
         self.agent.save(update_fields=["schedule", "updated_at"])
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = prompt_context.build_prompt_context(self.agent, is_first_run=False)
 
         content = "\n".join(message["content"] for message in context)

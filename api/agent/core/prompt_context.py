@@ -9,7 +9,6 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from functools import partial
 from time import monotonic
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 from uuid import UUID
@@ -91,7 +90,7 @@ from ..structured_peer_payload import (
 )
 
 from .budget import AgentBudgetManager, get_current_context as get_budget_context
-from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
+from .history_compaction import enqueue_history_compaction
 from .llm_config import AgentLLMTier, LLMNotConfiguredError, REFERENCE_TOKENIZER_MODEL, apply_tier_credit_multiplier, get_agent_llm_tier, get_llm_config, get_llm_config_with_failover
 from . import internal_reasoning
 from .promptree import Prompt, hmt
@@ -101,7 +100,6 @@ from .prompt_run_cache import (
     MESSAGES_SNAPSHOT,
     PromptRunCache,
 )
-from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
@@ -1557,26 +1555,11 @@ def _render_prompt_context_once(
     routing_profile: Any = None,
     prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = None,
     system_directive_block: str = "",
-    skip_compaction: bool = False,
     run_cache: PromptRunCache | None = None,
     prompt_message_transform: Callable[[List[dict]], List[dict]] | None = None,
 ) -> PromptRenderResult:
     max_iterations = _resolve_max_iterations(max_iterations)
     span = trace.get_current_span()
-
-    safety_id = agent.user.id if agent.user else None
-
-    if not skip_compaction:
-        ensure_steps_compacted(
-            agent=agent,
-            summarise_fn=partial(llm_summarise_steps, agent=agent, routing_profile=routing_profile),
-            safety_identifier=safety_id,
-        )
-        ensure_comms_compacted(
-            agent=agent,
-            summarise_fn=partial(llm_summarise_comms, agent=agent, routing_profile=routing_profile),
-            safety_identifier=safety_id,
-        )
 
     model, prompt_allows_implied_send = _prompt_render_settings_from_failover_configs(
         prompt_failover_configs
@@ -2214,7 +2197,6 @@ def _stabilize_prompt_render(
         result = _render_prompt_context_once(
             agent,
             prompt_failover_configs=configs,
-            skip_compaction=preview or attempt > 0,
             **render_kwargs,
         )
         render_count += 1
@@ -2240,7 +2222,6 @@ def _stabilize_prompt_render(
         result = _render_prompt_context_once(
             agent,
             prompt_failover_configs=configs,
-            skip_compaction=True,
             **render_kwargs,
         )
         render_count += 1
@@ -2333,6 +2314,13 @@ def build_prompt_context(
         duration_seconds=monotonic() - started_at,
     )
     archive_id = _archive_prompt_render(agent, render_result)
+
+    budget_context = get_budget_context()
+    enqueue_history_compaction(
+        agent=agent,
+        routing_profile=routing_profile,
+        eval_run_id=getattr(budget_context, "eval_run_id", None),
+    )
 
     result = (render_result.messages, render_result.tokens_after, archive_id)
     if include_metadata:

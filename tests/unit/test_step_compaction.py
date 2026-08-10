@@ -6,7 +6,9 @@ from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from openai import OpenAIError
 
+from api.agent.core.compaction_exceptions import CompactionSummaryError
 from api.agent.core.internal_reasoning import build_internal_reasoning_description
 from api.agent.core.step_compaction import ensure_steps_compacted, llm_summarise_steps
 from api.models import (
@@ -92,12 +94,25 @@ class StepCompactionTests(TestCase):
             created_at=ts,
         )
 
+    @staticmethod
+    def _set_step_time(step, ts):
+        PersistentAgentStep.objects.filter(id=step.id).update(created_at=ts)
+        step.created_at = ts
+        return step
+
+    def _compact(self):
+        def summarize(previous, steps, safety_identifier):
+            lines = [f"--- Recent Steps ({len(steps)}) ---"]
+            lines.extend(f"• {step.to_summary_str()}" for step in steps)
+            if safety_identifier:
+                lines.append(f"Safety ID: {safety_identifier}")
+            return previous + ("\n" if previous else "") + "\n".join(lines)
+
+        ensure_steps_compacted(agent=self.agent, summarise_fn=summarize)
+
     @tag("batch_step_compaction")
     def test_compaction_triggered_when_over_limit(self):
         """When raw steps > limit, a new snapshot is created."""
-        # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
-        from api.agent.core.step_compaction import MAX_TOOL_RESULT_CHARS
-
         # Sanity-check: no snapshots at start
         self.assertEqual(PersistentAgentStepSnapshot.objects.count(), 0)
 
@@ -115,7 +130,7 @@ class StepCompactionTests(TestCase):
                 self._make_generic_step(ts, f"generic step {i}")
 
         # Run compaction
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
 
         # A snapshot should have been created
         self.assertEqual(PersistentAgentStepSnapshot.objects.count(), 1)
@@ -140,16 +155,13 @@ class StepCompactionTests(TestCase):
     @tag("batch_step_compaction")
     def test_no_compaction_when_at_or_below_limit(self):
         """No snapshot should be created when raw steps <= limit."""
-        # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
-        from api.agent.core.step_compaction import MAX_TOOL_RESULT_CHARS
-
         # Create exactly the limit number of steps
         for i in range(settings.PA_RAW_STEP_LIMIT):
             ts = self.agent.created_at + timedelta(seconds=i + 1)
             self._make_tool_call_step(ts, f"tool_{i}")
 
         # Run compaction
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
 
         # Still no snapshots expected
         self.assertEqual(PersistentAgentStepSnapshot.objects.count(), 0)
@@ -157,16 +169,13 @@ class StepCompactionTests(TestCase):
     @tag("batch_step_compaction")
     def test_incremental_compaction_with_existing_snapshot(self):
         """A second compaction should create a new snapshot linked to the previous one."""
-        # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
-        from api.agent.core.step_compaction import MAX_TOOL_RESULT_CHARS
-
         # ------------------- First batch ------------------- #
         first_batch = settings.PA_RAW_STEP_LIMIT + 1
         for i in range(first_batch):
             ts = self.agent.created_at + timedelta(seconds=i + 1)
             self._make_tool_call_step(ts, f"batch1_tool_{i}")
 
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
         self.assertEqual(PersistentAgentStepSnapshot.objects.count(), 1)
         first_snapshot = PersistentAgentStepSnapshot.objects.first()
         self.assertIsNotNone(first_snapshot)
@@ -178,7 +187,7 @@ class StepCompactionTests(TestCase):
             ts = self.agent.created_at + timedelta(seconds=start_sec + i)
             self._make_cron_trigger_step(ts, f"0 {i} * * *")
 
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
 
         # We should now have exactly two snapshots.
         self.assertEqual(PersistentAgentStepSnapshot.objects.count(), 2)
@@ -203,9 +212,6 @@ class StepCompactionTests(TestCase):
 
     def test_mixed_step_types_in_summary(self):
         """Test that different step types are correctly formatted in the summary."""
-        # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
-        from api.agent.core.step_compaction import MAX_TOOL_RESULT_CHARS
-
         # Create one more than limit with specific step types
         num_steps = settings.PA_RAW_STEP_LIMIT + 1
         base_time = self.agent.created_at
@@ -237,7 +243,7 @@ class StepCompactionTests(TestCase):
                 f"tool_{i}"
             )
 
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
 
         snapshot = PersistentAgentStepSnapshot.objects.first()
         self.assertIsNotNone(snapshot)
@@ -280,7 +286,7 @@ class StepCompactionTests(TestCase):
             "processed queue",
         )
 
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
 
         snapshot = PersistentAgentStepSnapshot.objects.first()
         self.assertIsNotNone(snapshot)
@@ -300,7 +306,7 @@ class StepCompactionTests(TestCase):
                 f"Visible step {idx}",
             )
 
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
 
         first_snapshot = PersistentAgentStepSnapshot.objects.order_by("-snapshot_until").first()
         self.assertIsNotNone(first_snapshot)
@@ -312,7 +318,7 @@ class StepCompactionTests(TestCase):
                 build_internal_reasoning_description(f"reasoning-only {idx}"),
             )
 
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
 
         latest_snapshot = PersistentAgentStepSnapshot.objects.order_by("-snapshot_until").first()
         self.assertIsNotNone(latest_snapshot)
@@ -320,9 +326,21 @@ class StepCompactionTests(TestCase):
         self.assertEqual(latest_snapshot.summary, first_snapshot.summary)
         self.assertGreater(latest_snapshot.snapshot_until, first_snapshot.snapshot_until)
 
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=0)
+    def test_initial_reasoning_only_history_does_not_create_empty_snapshot(self):
+        base_time = self.agent.created_at
+        for index in range(4):
+            self._make_generic_step(
+                base_time + timedelta(seconds=index + 1),
+                build_internal_reasoning_description(f"reasoning-only {index}"),
+            )
+
+        self._compact()
+
+        self.assertFalse(PersistentAgentStepSnapshot.objects.exists())
+
     def test_large_tool_result_truncation(self):
         """Test that large tool results are properly truncated."""
-        # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
         from api.agent.core.step_compaction import MAX_TOOL_RESULT_CHARS
 
         # Create a large result that exceeds MAX_TOOL_RESULT_CHARS
@@ -337,7 +355,7 @@ class StepCompactionTests(TestCase):
             else:
                 self._make_tool_call_step(ts, f"tool_{i}")
 
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
 
         snapshot = PersistentAgentStepSnapshot.objects.first()
         self.assertIsNotNone(snapshot)
@@ -347,9 +365,6 @@ class StepCompactionTests(TestCase):
 
     def test_custom_summarise_function(self):
         """Test that a custom summarise function is used when provided."""
-        # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
-        from api.agent.core.step_compaction import MAX_TOOL_RESULT_CHARS
-
         def custom_summarise(previous, steps, safety_identifier):
             return f"CUSTOM: {len(steps)} steps processed"
 
@@ -367,9 +382,6 @@ class StepCompactionTests(TestCase):
 
     def test_race_condition_detection(self):
         """Test that race conditions are properly detected and handled."""
-        # NB: RAW_STEP_LIMIT is evaluated at import time; instead we read from settings
-        from api.agent.core.step_compaction import MAX_TOOL_RESULT_CHARS
-
         # Create enough steps to trigger compaction
         for i in range(settings.PA_RAW_STEP_LIMIT + 1):
             ts = self.agent.created_at + timedelta(seconds=i + 1)
@@ -388,12 +400,160 @@ class StepCompactionTests(TestCase):
         )
 
         # Running compaction should detect the race and not create another snapshot
-        ensure_steps_compacted(agent=self.agent)
+        self._compact()
 
         # Should still only have the one snapshot we created manually
         self.assertEqual(PersistentAgentStepSnapshot.objects.count(), 1)
         snapshot = PersistentAgentStepSnapshot.objects.first()
         self.assertEqual(snapshot.summary, "Manual snapshot") 
+
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=0)
+    def test_pending_tool_call_stays_on_raw_side_of_snapshot(self):
+        base_time = self.agent.created_at
+        first = self._set_step_time(
+            self._make_generic_step(base_time, "stable one"),
+            base_time + timedelta(seconds=1),
+        )
+        second = self._set_step_time(
+            self._make_generic_step(base_time, "stable two"),
+            base_time + timedelta(seconds=2),
+        )
+        pending = self._set_step_time(
+            self._make_tool_call_step(base_time, "pending_tool"),
+            base_time + timedelta(seconds=3),
+        )
+        pending.tool_call.status = PersistentAgentToolCall.Status.PENDING
+        pending.tool_call.save(update_fields=["status"])
+        latest = self._set_step_time(
+            self._make_generic_step(base_time, "stable after pending"),
+            base_time + timedelta(seconds=4),
+        )
+
+        self._compact()
+
+        snapshot = PersistentAgentStepSnapshot.objects.get()
+        self.assertEqual(snapshot.snapshot_until, second.created_at)
+        self.assertEqual(
+            set(
+                PersistentAgentStep.objects.filter(
+                    created_at__gt=snapshot.snapshot_until
+                ).values_list("id", flat=True)
+            ),
+            {pending.id, latest.id},
+        )
+        self.assertIn("stable one", snapshot.summary)
+        self.assertIn("stable two", snapshot.summary)
+        self.assertNotIn("pending_tool", snapshot.summary)
+        self.assertEqual(first.agent_id, self.agent.id)
+
+        pending.tool_call.status = PersistentAgentToolCall.Status.COMPLETE
+        pending.tool_call.save(update_fields=["status"])
+        for second_offset in (5, 6):
+            added = self._make_generic_step(base_time, f"stable {second_offset}")
+            self._set_step_time(added, base_time + timedelta(seconds=second_offset))
+
+        self._compact()
+
+        finalized_snapshot = PersistentAgentStepSnapshot.objects.latest("snapshot_until")
+        self.assertGreater(finalized_snapshot.snapshot_until, pending.created_at)
+        self.assertIn("pending_tool", finalized_snapshot.summary)
+
+    @override_settings(PA_RAW_STEP_LIMIT=4, PA_STEP_COMPACTION_TAIL=2)
+    def test_cutoff_includes_every_step_with_the_same_timestamp(self):
+        base_time = self.agent.created_at
+        shared_time = base_time + timedelta(seconds=3)
+        timestamps = (
+            base_time + timedelta(seconds=1),
+            base_time + timedelta(seconds=2),
+            shared_time,
+            shared_time,
+            base_time + timedelta(seconds=4),
+        )
+        steps = []
+        for index, timestamp in enumerate(timestamps):
+            step = self._make_generic_step(base_time, f"step {index}")
+            steps.append(self._set_step_time(step, timestamp))
+        summarized_ids = []
+
+        def summarize(_previous, selected, _safety_identifier):
+            summarized_ids.extend(step.step_id for step in selected)
+            return "summary"
+
+        ensure_steps_compacted(agent=self.agent, summarise_fn=summarize)
+
+        snapshot = PersistentAgentStepSnapshot.objects.get()
+        self.assertEqual(snapshot.snapshot_until, shared_time)
+        self.assertCountEqual(
+            summarized_ids,
+            [str(step.id) for step in steps[:4]],
+        )
+        self.assertEqual(
+            list(
+                PersistentAgentStep.objects.filter(
+                    created_at__gt=snapshot.snapshot_until
+                ).values_list("description", flat=True)
+            ),
+            ["step 4"],
+        )
+
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=1)
+    def test_backdated_step_during_summary_aborts_snapshot(self):
+        base_time = self.agent.created_at
+        for index in range(4):
+            step = self._make_generic_step(base_time, f"original {index}")
+            self._set_step_time(step, base_time + timedelta(seconds=index + 1))
+
+        def summarize(_previous, selected, _safety_identifier):
+            inserted = self._make_generic_step(base_time, "arrived during summary")
+            self._set_step_time(inserted, selected[-1].created_at)
+            return "summary"
+
+        ensure_steps_compacted(agent=self.agent, summarise_fn=summarize)
+
+        self.assertFalse(PersistentAgentStepSnapshot.objects.exists())
+        self.assertEqual(PersistentAgentStep.objects.count(), 5)
+
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=1)
+    def test_step_arriving_after_cutoff_remains_raw(self):
+        base_time = self.agent.created_at
+        for index in range(4):
+            step = self._make_generic_step(base_time, f"original {index}")
+            self._set_step_time(step, base_time + timedelta(seconds=index + 1))
+
+        def summarize(_previous, selected, _safety_identifier):
+            inserted = self._make_generic_step(base_time, "arrived after cutoff")
+            self._set_step_time(
+                inserted,
+                selected[-1].created_at + timedelta(seconds=10),
+            )
+            return "summary"
+
+        ensure_steps_compacted(agent=self.agent, summarise_fn=summarize)
+
+        snapshot = PersistentAgentStepSnapshot.objects.get()
+        self.assertCountEqual(
+            list(
+                PersistentAgentStep.objects.filter(
+                    created_at__gt=snapshot.snapshot_until,
+                ).values_list("description", flat=True)
+            ),
+            ["original 3", "arrived after cutoff"],
+        )
+
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=1)
+    def test_empty_summary_does_not_advance_snapshot(self):
+        base_time = self.agent.created_at
+        for index in range(4):
+            step = self._make_generic_step(base_time, f"step {index}")
+            self._set_step_time(step, base_time + timedelta(seconds=index + 1))
+
+        with self.assertRaises(CompactionSummaryError):
+            ensure_steps_compacted(
+                agent=self.agent,
+                summarise_fn=lambda _previous, _steps, _safety_identifier: "",
+            )
+
+        self.assertFalse(PersistentAgentStepSnapshot.objects.exists())
 
     def test_llm_compaction_preserves_active_scoped_directives(self):
         response = SimpleNamespace(
@@ -419,3 +579,25 @@ class StepCompactionTests(TestCase):
         self.assertIn("actor or source, scope identifier, and effective constraint", system_prompt)
         self.assertIn("until explicitly superseded, expired, or reassigned", system_prompt)
         self.assertIn("no continuing consequence", system_prompt)
+
+    def test_llm_failure_raises_retryable_compaction_error(self):
+        with patch(
+            "api.agent.core.step_compaction.get_summarization_llm_config",
+            return_value=("openai", "openai/test", {}),
+        ), patch(
+            "api.agent.core.step_compaction.run_completion",
+            side_effect=OpenAIError("provider unavailable"),
+        ):
+            with self.assertRaises(CompactionSummaryError):
+                llm_summarise_steps("", [], agent=self.agent)
+
+    def test_unexpected_llm_error_is_not_marked_retryable(self):
+        with patch(
+            "api.agent.core.step_compaction.get_summarization_llm_config",
+            return_value=("openai", "openai/test", {}),
+        ), patch(
+            "api.agent.core.step_compaction.run_completion",
+            side_effect=RuntimeError("bug"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "bug"):
+                llm_summarise_steps("", [], agent=self.agent)

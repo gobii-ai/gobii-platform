@@ -1,13 +1,13 @@
 """On-demand compaction of persistent-agent communication history.
 
-Raw messages remain durable; summaries are created only while building prompts.
+Raw messages remain durable; callers decide whether compaction runs inline or in
+a background worker.
 """
-from __future__ import annotations
-
 from typing import Callable, List, Sequence, Optional
 
 from django.conf import settings
 from django.db import transaction
+from openai import OpenAIError
 
 from ...models import PersistentAgent, PersistentAgentMessage, PersistentAgentCommsSnapshot, PersistentAgentCompletion
 
@@ -15,8 +15,9 @@ import logging
 
 from opentelemetry import trace
 
-from .llm_config import get_summarization_llm_config
-from .llm_utils import run_completion
+from .compaction_exceptions import CompactionSummaryError
+from .llm_config import LLMNotConfiguredError, get_summarization_llm_config
+from .llm_utils import LiteLLMResponseError, run_completion
 from .token_usage import log_agent_completion, set_usage_span_attributes
 from ..structured_peer_payload import (
     StructuredPeerPayload,
@@ -25,32 +26,20 @@ from ..structured_peer_payload import (
 )
 from ..comms.source_metadata import get_message_source_metadata
 
-RAW_MSG_LIMIT: int = getattr(settings, "PA_RAW_MSG_LIMIT", 20)
-COMMS_COMPACTION_TAIL: int = max(0, getattr(settings, "PA_COMMS_COMPACTION_TAIL", 5))
 COMMS_COMPACTION_COMPONENT_CHAR_LIMIT = 4000
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "ensure_comms_compacted",
-    "RAW_MSG_LIMIT",
-    "COMMS_COMPACTION_TAIL",
-    "ensure_steps_compacted",
-    "llm_summarise_comms",
-]
 
 @tracer.start_as_current_span("COMPACT Comms History")
 def ensure_comms_compacted(
     *,
     agent: PersistentAgent,
-    summarise_fn: Callable[[str, Sequence[PersistentAgentMessage], str], str] | None = None,
+    summarise_fn: Callable[[str, Sequence[PersistentAgentMessage], str | None], str],
     safety_identifier: str | None = None,
 ) -> None:
     """Summarize old messages when the uncompacted history exceeds its limit."""
-    if summarise_fn is None:
-        summarise_fn = _default_summarise  # type: ignore[assignment]
-
     # ------------------------------ Phase 1 ------------------------------ #
     # Decide *whether* we need to compact while holding the lock.  This keeps
     # the critical section extremely small – just a couple of quick queries –
@@ -78,7 +67,7 @@ def ensure_comms_compacted(
             PersistentAgentMessage.objects
             .filter(owner_agent=agent_locked, timestamp__gt=lower_bound)
             .select_related("from_endpoint", "to_endpoint", "conversation", "peer_agent")
-            .order_by("timestamp")
+            .order_by("timestamp", "id")
         )
 
         # Materialise once; len(raw_messages) avoids an extra COUNT(*) query.
@@ -86,32 +75,38 @@ def ensure_comms_compacted(
 
         raw_count = len(raw_messages)
         span.set_attribute("compaction.raw_messages", raw_count)
-        span.set_attribute("compaction.raw_limit", RAW_MSG_LIMIT)
-
-        if raw_count <= RAW_MSG_LIMIT:
-            return  # Nothing to summarise yet.
 
         # Keep the most recent messages raw; compact everything earlier.
-        tail_count = min(COMMS_COMPACTION_TAIL, max(raw_count - 1, 0))
-        compacted_count = max(raw_count - tail_count, 0)
-        messages_to_compact = raw_messages[:compacted_count]
-        if not messages_to_compact:
+        raw_limit = settings.PA_RAW_MSG_LIMIT
+        tail_limit = max(0, settings.PA_COMMS_COMPACTION_TAIL)
+        span.set_attribute("compaction.raw_limit", raw_limit)
+        if raw_count <= raw_limit:
             return
 
-        previous_summary = last_snap.summary if last_snap else ""
+        tail_count = min(tail_limit, max(raw_count - 1, 0))
+        compacted_count = max(raw_count - tail_count, 0)
+        if compacted_count <= 0:
+            return
 
-        # Provide the value we will later use to detect race conditions.
-        snapshot_until = messages_to_compact[-1].timestamp
+        # A timestamp is the persisted cursor, so every record sharing the
+        # boundary timestamp must be summarized together.
+        snapshot_until = raw_messages[compacted_count - 1].timestamp
+        messages_to_compact = [
+            message for message in raw_messages
+            if message.timestamp <= snapshot_until
+        ]
+        captured_message_ids = frozenset(message.id for message in messages_to_compact)
+        previous_summary = last_snap.summary if last_snap else ""
 
     # ------------------------------ Phase 2 ------------------------------ #
     # Slow work happens *outside* the lock.
-    try:
-        with tracer.start_as_current_span("COMPACT Summarise") as summarise_span:
-            summarise_span.set_attribute("messages.count", len(raw_messages))
-            new_summary = summarise_fn(previous_summary, messages_to_compact, safety_identifier)
-    except Exception:  # pragma: no cover – downstream will handle retry logic
-        logger.exception("summarise_fn failed; skipping compaction for agent %s", agent.id)
-        return
+    with tracer.start_as_current_span("COMPACT Summarise") as summarise_span:
+        summarise_span.set_attribute("messages.count", len(messages_to_compact))
+        new_summary = summarise_fn(previous_summary, messages_to_compact, safety_identifier)
+    if not isinstance(new_summary, str) or not new_summary.strip():
+        raise CompactionSummaryError(
+            f"Communication summarization returned an empty summary for agent {agent.id}"
+        )
 
     # ------------------------------ Phase 3 ------------------------------ #
     # Re-acquire the lock briefly to write the new snapshot iff no-one beat us.
@@ -129,6 +124,18 @@ def ensure_comms_compacted(
         )
         if already_exists:
             span.set_attribute("compaction.skipped", True)
+            return
+
+        current_message_ids = frozenset(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=agent_locked,
+                timestamp__gt=lower_bound,
+                timestamp__lte=snapshot_until,
+            ).values_list("id", flat=True)
+        )
+        if current_message_ids != captured_message_ids:
+            span.set_attribute("compaction.skipped", True)
+            span.set_attribute("compaction.skip_reason", "captured_range_changed")
             return
 
         prev_snap: PersistentAgentCommsSnapshot | None = (
@@ -150,26 +157,6 @@ def ensure_comms_compacted(
 
         # Again: do **not** delete raw messages; long-term pruning is out of
         # scope and can be handled by a background retention policy.
-
-
-def _default_summarise(
-    previous: str,
-    messages: Sequence[PersistentAgentMessage],
-    safety_identifier: str | None = None,
-) -> str:
-    """Fallback summariser for testing and error cases.
-
-    Provides deterministic output for unit tests and serves as a fallback when
-    LLM summarisation fails. Simply concatenates the previous summary with a 
-    placeholder line indicating the number of messages processed.
-    """
-    return (
-        previous
-        + ("\n" if previous else "")
-        + f"[SUMMARY PLACEHOLDER for {len(messages)} messages]"
-        + ("\n")
-        + (f"[Called for {safety_identifier}]" if safety_identifier else "")
-    )
 
 
 def _format_structured_payload_for_compaction(payload: StructuredPeerPayload) -> str:
@@ -234,13 +221,14 @@ def llm_summarise_comms(
     *,
     agent: Optional[PersistentAgent] = None,
     routing_profile=None,
+    eval_run_id: str | None = None,
 ) -> str:
     """Summarise *previous* + *messages* via an LLM (LiteLLM).
 
     This is the primary summarisation function used in production. Unit-tests
-    can inject alternative functions for deterministic behavior. If the LLM call
-    fails we transparently fall back to the placeholder summariser so that the
-    compaction pipeline is still resilient.
+    can inject alternative functions for deterministic behavior. Failures raise
+    ``CompactionSummaryError`` so callers never advance a snapshot with a lossy
+    placeholder.
 
     Args:
         previous: Previous summary text to extend.
@@ -248,6 +236,7 @@ def llm_summarise_comms(
         safety_identifier: Optional safety identifier for API calls.
         agent: Optional agent instance for config lookup.
         routing_profile: Optional LLMRoutingProfile for eval routing.
+        eval_run_id: Optional eval run associated with completion accounting.
     """
 
     # Speaker and transport identity must survive compaction. Generic User /
@@ -304,24 +293,21 @@ def llm_summarise_comms(
                 params["safety_identifier"] = str(safety_identifier)
 
         response = run_completion(model=model, messages=prompt, params=params)
-        token_usage, usage = log_agent_completion(
-            agent,
-            completion_type=PersistentAgentCompletion.CompletionType.COMPACTION,
-            response=response,
-            model=model,
-            provider=provider,
-            pricing_model=params.get("pricing_model"),
-            prompt_messages=prompt,
-        )
+    except (LLMNotConfiguredError, OpenAIError, LiteLLMResponseError) as exc:
+        logger.exception("LiteLLM communication summarization failed")
+        raise CompactionSummaryError("LiteLLM communication summarization failed") from exc
 
-        set_usage_span_attributes(trace.get_current_span(), usage)
+    token_usage, usage = log_agent_completion(
+        agent,
+        completion_type=PersistentAgentCompletion.CompletionType.COMPACTION,
+        eval_run_id=eval_run_id,
+        response=response,
+        model=model,
+        provider=provider,
+        pricing_model=params.get("pricing_model"),
+        prompt_messages=prompt,
+    )
 
-        return response.choices[0].message.content.strip()
-    except Exception:
-        # Log and fall back to deterministic fallback so callers are not
-        # blocked by transient LLM/network issues.
-        logger.exception("LiteLLM summarisation failed – falling back to fallback summariser")
-        return _default_summarise(previous, messages)
+    set_usage_span_attributes(trace.get_current_span(), usage)
 
-# Re-export for convenience – avoids changing existing imports elsewhere
-from .step_compaction import ensure_steps_compacted  # noqa: E402, isort:skip 
+    return response.choices[0].message.content.strip()

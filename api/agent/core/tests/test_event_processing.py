@@ -1276,9 +1276,7 @@ class DailyLimitPromptContextTests(TestCase):
         )
 
     def _render_prompt_content(self, daily_state, *, task_credit_available=None):
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ), patch(
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), patch(
             "api.agent.core.prompt_context.get_llm_config_with_failover",
             return_value=[("endpoint", "openai/gpt-4o-mini", {})],
         ):
@@ -1430,9 +1428,7 @@ class ContactPromptTruncationTests(TestCase):
     def _render_prompt_content(self, db_path):
         token = set_sqlite_db_path(db_path)
         try:
-            with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-                "api.agent.core.prompt_context.ensure_comms_compacted"
-            ), patch(
+            with patch("api.agent.core.prompt_context.enqueue_history_compaction"), patch(
                 "api.agent.core.prompt_context.get_llm_config_with_failover",
                 return_value=[("endpoint", "openai/gpt-4o-mini", {})],
             ):
@@ -1591,9 +1587,7 @@ class ContinuationModePromptContextTests(TestCase):
         )
 
     def _render_system_prompt(self, *, is_first_run: bool) -> str:
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ), patch(
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), patch(
             "api.agent.core.prompt_context.get_llm_config_with_failover",
             return_value=[("endpoint", "openai/gpt-4o-mini", {})],
         ):

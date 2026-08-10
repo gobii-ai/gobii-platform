@@ -685,8 +685,7 @@ class PromptContextBuilderTests(TestCase):
         return config
 
     def _build_user_prompt_content(self) -> str:
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -783,8 +782,7 @@ class PromptContextBuilderTests(TestCase):
                 last_used_at=now + timedelta(hours=idx),
             )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
-             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), \
              patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.STANDARD):
             context, _, _ = build_prompt_context(self.agent)
 
@@ -844,8 +842,7 @@ class PromptContextBuilderTests(TestCase):
         config.save()
         invalidate_prompt_settings_cache()
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
-             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), \
              patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.STANDARD):
             context, _, _ = build_prompt_context(self.agent)
 
@@ -898,8 +895,7 @@ class PromptContextBuilderTests(TestCase):
             ).exists()
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
-             patch("api.agent.core.prompt_context.ensure_comms_compacted"):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -924,8 +920,7 @@ class PromptContextBuilderTests(TestCase):
             instructions="This should stay out of the prompt.",
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
-             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), \
              patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.STANDARD):
             context, _, _ = build_prompt_context(self.agent)
 
@@ -1114,8 +1109,7 @@ class PromptContextBuilderTests(TestCase):
             updated_by=self.user,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1135,8 +1129,7 @@ class PromptContextBuilderTests(TestCase):
         )
 
         with patch('api.agent.core.prompt_context._create_token_estimator', return_value=len), \
-             patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+             patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, fitted_token_count, _ = build_prompt_context(org_agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1156,8 +1149,7 @@ class PromptContextBuilderTests(TestCase):
             updated_by=self.user,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1176,8 +1168,7 @@ class PromptContextBuilderTests(TestCase):
             updated_by=org_agent.user,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1198,8 +1189,7 @@ class PromptContextBuilderTests(TestCase):
             updated_by=self.user,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1210,8 +1200,7 @@ class PromptContextBuilderTests(TestCase):
     def test_empty_or_missing_org_custom_instructions_adds_no_heading(self):
         org_agent, _, _, _, _ = self._build_org_prompt_agent("empty-custom-instructions-org")
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1224,8 +1213,7 @@ class PromptContextBuilderTests(TestCase):
             updated_by=self.user,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1235,8 +1223,7 @@ class PromptContextBuilderTests(TestCase):
     def test_org_manage_role_members_are_marked_config_authorized(self):
         org_agent, _, admin, solutions_partner, member = self._build_org_prompt_agent("config-auth-org")
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1308,8 +1295,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"MEMBERWEB{int(timezone.now().timestamp() * 1_000_000):017d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -1332,8 +1318,7 @@ class PromptContextBuilderTests(TestCase):
         )
         owner_address = message.from_endpoint.address
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((message for message in context if message["role"] == "user"), None)
@@ -1362,8 +1347,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"ADMINMAIL{int(timezone.now().timestamp() * 1_000_000):017d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -1389,8 +1373,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"MEMBERMAIL{int(timezone.now().timestamp() * 1_000_000):016d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -1439,8 +1422,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"DISCORD{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next(message for message in context if message["role"] == "user")
@@ -1468,8 +1450,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"UNLINKED{int(timezone.now().timestamp() * 1_000_000):018d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next(message for message in context if message["role"] == "user")
@@ -1537,8 +1518,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"TRUSTMAIL{int(timezone.now().timestamp() * 1_000_000):017d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -1560,8 +1540,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"TEST{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
         )
         # Build the prompt context
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         # Find the user message in the context
@@ -1593,8 +1572,7 @@ class PromptContextBuilderTests(TestCase):
         self.agent.last_interaction_at = None
         self.agent.save(update_fields=["last_interaction_at"])
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -1609,8 +1587,7 @@ class PromptContextBuilderTests(TestCase):
         )
         frozen_now = datetime(2026, 3, 10, 16, 0, 0, tzinfo=dt_timezone.utc)
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch('api.agent.core.prompt_context._get_prompt_now_utc', return_value=frozen_now):
             context, _, _ = build_prompt_context(self.agent)
 
@@ -1628,8 +1605,7 @@ class PromptContextBuilderTests(TestCase):
         )
         frozen_now = datetime(2026, 3, 10, 16, 0, 0, tzinfo=dt_timezone.utc)
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch('api.agent.core.prompt_context._get_prompt_now_utc', return_value=frozen_now):
             context, _, _ = build_prompt_context(self.agent)
 
@@ -1665,8 +1641,7 @@ class PromptContextBuilderTests(TestCase):
         PersistentAgentMessage.objects.filter(pk=message.pk).update(timestamp=target_time)
         message.refresh_from_db()
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -1689,8 +1664,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"FRESH{int(timezone.now().timestamp() * 1_000_000):021d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
@@ -1727,8 +1701,7 @@ class PromptContextBuilderTests(TestCase):
             ]
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent, is_first_run=True)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1777,8 +1750,7 @@ class PromptContextBuilderTests(TestCase):
                 self.agent.planning_state = planning_state
                 self.agent.save(update_fields=["planning_state", "updated_at"])
 
-                with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-                     patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+                with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
                     context, _, _ = build_prompt_context(self.agent, is_first_run=False)
 
                 system_message = next((m for m in context if m["role"] == "system"), None)
@@ -1821,8 +1793,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"WEBNAME{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -1861,8 +1832,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"WEBNOEMAIL{int(timezone.now().timestamp() * 1_000_000):016d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -1878,8 +1848,7 @@ class PromptContextBuilderTests(TestCase):
         self.user.first_name = "Will"
         self.user.save(update_fields=["first_name"])
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -1898,8 +1867,7 @@ class PromptContextBuilderTests(TestCase):
             is_org_member=True,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -1916,8 +1884,7 @@ class PromptContextBuilderTests(TestCase):
             is_org_member=False,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(org_agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -1942,8 +1909,7 @@ class PromptContextBuilderTests(TestCase):
         db_path = f"{sqlite_tmp.name}/state.db"
         token = set_sqlite_db_path(db_path)
         try:
-            with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
                 build_prompt_context(self.agent)
 
             conn = sqlite3.connect(db_path)
@@ -1999,8 +1965,7 @@ class PromptContextBuilderTests(TestCase):
         db_path = f"{sqlite_tmp.name}/state.db"
         token = set_sqlite_db_path(db_path)
         try:
-            with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
                 build_prompt_context(self.agent)
 
             conn = sqlite3.connect(db_path)
@@ -2049,8 +2014,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"ATTACH{int(timezone.now().timestamp() * 1_000_000):020d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2075,8 +2039,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"CLAIM{int(timezone.now().timestamp() * 1_000_000):021d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2092,8 +2055,7 @@ class PromptContextBuilderTests(TestCase):
         )
 
     def test_prompt_describes_sqlite_snapshots_without_banning_read_file(self):
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
@@ -2125,8 +2087,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"RCMID{int(timezone.now().timestamp() * 1_000_000):020d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2154,8 +2115,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"RCLEGACY{int(timezone.now().timestamp() * 1_000_000):018d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2184,8 +2144,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"HISTMID{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2218,8 +2177,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"HINBOUND{int(timezone.now().timestamp() * 1_000_000):018d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2250,8 +2208,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"HLEGACY{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2262,8 +2219,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn(f"<reply_to_message_id>{message.id}</reply_to_message_id>", content)
 
     def test_system_prompt_includes_attachment_preflight_guidance(self):
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -2286,8 +2242,7 @@ class PromptContextBuilderTests(TestCase):
             seq=f"INBOUND{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2339,8 +2294,7 @@ class PromptContextBuilderTests(TestCase):
         token = set_sqlite_db_path(db_path)
         try:
             with patch("api.agent.core.prompt_context.SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES", 12), \
-                 patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+                 patch('api.agent.core.prompt_context.enqueue_history_compaction'):
                 build_prompt_context(self.agent)
 
             conn = sqlite3.connect(db_path)
@@ -2404,8 +2358,7 @@ class PromptContextBuilderTests(TestCase):
         try:
             with patch("api.agent.core.prompt_context.SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS", 2), \
                  patch("api.agent.core.prompt_context.SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES", 1000), \
-                 patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+                 patch('api.agent.core.prompt_context.enqueue_history_compaction'):
                 build_prompt_context(self.agent)
 
             conn = sqlite3.connect(db_path)
@@ -2429,8 +2382,7 @@ class PromptContextBuilderTests(TestCase):
             sqlite_tmp.cleanup()
 
     def test_prompt_omits_implied_send_without_active_web_session(self):
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
@@ -2452,8 +2404,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("send_chat_message", tool_names)
 
     def test_prompt_keeps_unavailable_web_reply_on_same_channel(self):
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
@@ -2478,8 +2429,7 @@ class PromptContextBuilderTests(TestCase):
 
     def test_prompt_includes_implied_send_with_active_web_session(self):
         start_web_session(self.agent, self.user)
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
@@ -2489,8 +2439,7 @@ class PromptContextBuilderTests(TestCase):
 
     def test_prompt_omits_implied_send_when_primary_model_disables_it(self):
         start_web_session(self.agent, self.user)
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch(
                  'api.agent.core.prompt_context.get_llm_config_with_failover',
                  return_value=[('endpoint', 'openai/gpt-4o-mini', {'allow_implied_send': False})],
@@ -2513,8 +2462,7 @@ class PromptContextBuilderTests(TestCase):
 
     def test_prompt_omits_implied_send_when_any_failover_model_disables_it(self):
         start_web_session(self.agent, self.user)
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch(
                  'api.agent.core.prompt_context.get_llm_config_with_failover',
                  return_value=[
@@ -2571,8 +2519,7 @@ class PromptContextBuilderTests(TestCase):
                 }}),
                 status="complete",
             )
-            with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
                 context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
 
             self.assertIn("[SOURCE ARRAYS;", metadata["source_reconciliation_directive"])
@@ -2587,8 +2534,7 @@ class PromptContextBuilderTests(TestCase):
                 result=json.dumps({"status": "ok", "results": []}),
                 status="complete",
             )
-            with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
                 context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
 
             self.assertIn("[SOURCE ARRAYS;", metadata["source_reconciliation_directive"])
@@ -2609,8 +2555,7 @@ class PromptContextBuilderTests(TestCase):
                 result=json.dumps({"status": "ok", "results": []}),
                 status="complete",
             )
-            with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
                 context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
 
             self.assertIn("[SOURCE ARRAYS;", metadata["source_reconciliation_directive"])
@@ -2633,8 +2578,7 @@ class PromptContextBuilderTests(TestCase):
                 result=json.dumps({"status": "ok", "results": []}),
                 status="complete",
             )
-            with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
                 context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
 
             self.assertIsNone(metadata["source_reconciliation_directive"])
@@ -2670,9 +2614,7 @@ class PromptContextBuilderTests(TestCase):
         )
 
         def build_metadata():
-            with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-                "api.agent.core.prompt_context.ensure_comms_compacted"
-            ):
+            with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
                 return build_prompt_context(self.agent, include_metadata=True)[3]
 
         def record_sql(sql, *, result_status="ok", tool_status="complete"):
@@ -2809,9 +2751,7 @@ class PromptContextBuilderTests(TestCase):
             status="complete",
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next(message for message in context if message["role"] == "user")
@@ -2849,9 +2789,7 @@ class PromptContextBuilderTests(TestCase):
             status="complete",
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
 
         user_message = next(message for message in context if message["role"] == "user")
@@ -2888,8 +2826,7 @@ class PromptContextBuilderTests(TestCase):
             result=json.dumps({"status": "ok"}),
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2923,8 +2860,7 @@ class PromptContextBuilderTests(TestCase):
             result=json.dumps({"status": "sent"}),
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -2990,8 +2926,7 @@ class PromptContextBuilderTests(TestCase):
             return original_section_text(node, name, txt, **kwargs)
 
         with patch.object(promptree._Node, "section_text", new=capture_section_text), \
-             patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+             patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             build_prompt_context(self.agent)
 
         captured_by_name = {
@@ -3462,9 +3397,7 @@ class PromptContextBuilderTests(TestCase):
                 created_at=base_time + timedelta(seconds=idx)
             )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -3505,9 +3438,7 @@ class PromptContextBuilderTests(TestCase):
                 created_at=base_time + timedelta(seconds=idx)
             )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -3547,9 +3478,7 @@ class PromptContextBuilderTests(TestCase):
                 created_at=base_time + timedelta(seconds=idx)
             )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -3576,9 +3505,7 @@ class PromptContextBuilderTests(TestCase):
             ),
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -3622,9 +3549,7 @@ class PromptContextBuilderTests(TestCase):
             created_at=base_time
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -3687,9 +3612,7 @@ class PromptContextBuilderTests(TestCase):
                 created_at=base_time + timedelta(seconds=idx + 3)
             )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ):
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m["role"] == "user"), None)
@@ -3707,8 +3630,7 @@ class PromptContextBuilderTests(TestCase):
             url="https://mcp.example.com",
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         user_message = next((m for m in context if m['role'] == 'user'), None)
@@ -3726,8 +3648,7 @@ class PromptContextBuilderTests(TestCase):
             created_by=self.user,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
@@ -3751,8 +3672,7 @@ class PromptContextBuilderTests(TestCase):
         directive.refresh_from_db()
         self.assertIsNotNone(directive.delivered_at)
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             second_context, _, _ = build_prompt_context(self.agent)
 
         second_system = next((m for m in second_context if m['role'] == 'system'), None)
@@ -3786,8 +3706,7 @@ class PromptContextBuilderTests(TestCase):
             system_message=directive,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context(self.agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -3815,8 +3734,7 @@ class PromptContextBuilderTests(TestCase):
             created_by=self.user,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, _ = build_prompt_context_preview(self.agent)
 
         system_message = next((m for m in context if m["role"] == "system"), None)
@@ -3843,8 +3761,7 @@ class PromptContextBuilderTests(TestCase):
             created_by=self.user,
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, _, prompt_archive_id = build_prompt_context(self.agent)
 
         archive_dir = f"persistent_agents/{self.agent.id}/prompt_archives"
@@ -3897,8 +3814,7 @@ class PromptContextBuilderTests(TestCase):
         def focus(messages):
             return [messages[0], {"role": "user", "content": "focused charter patch request"}]
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'):
             context, fitted_tokens, prompt_archive_id, metadata = build_prompt_context(
                 self.agent,
                 include_metadata=True,
@@ -3941,8 +3857,7 @@ class PromptContextBuilderTests(TestCase):
             "cached_tokens": 0,
         }
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]):
             with patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)):
                 from api.agent.core import event_processing as ep
@@ -3981,8 +3896,7 @@ class PromptContextBuilderTests(TestCase):
             "provider": "mock-provider",
             "cached_tokens": 0,
         }
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
              patch('api.agent.core.event_processing._get_recent_preferred_config', return_value=("mock", "mock-model")) as mock_helper, \
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
@@ -4008,8 +3922,7 @@ class PromptContextBuilderTests(TestCase):
             "model": "mock-model",
             "provider": "mock-provider",
         }
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
              patch('api.agent.core.event_processing._get_recent_preferred_config', return_value=None) as mock_helper, \
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
@@ -4037,8 +3950,7 @@ class PromptContextBuilderTests(TestCase):
             "provider": "mock-provider",
         }
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)):
             from api.agent.core import event_processing as ep
@@ -4065,8 +3977,7 @@ class PromptContextBuilderTests(TestCase):
             "provider": "mock-provider",
         }
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)), \
              patch(
@@ -4115,8 +4026,7 @@ class PromptContextBuilderTests(TestCase):
             "cached_tokens": 0,
         }
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
              patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
              patch('api.agent.core.event_processing._completion_with_failover', side_effect=[(response_first, token_usage), (response_second, token_usage)]) as mock_completion, \
@@ -4166,8 +4076,7 @@ class PromptContextBuilderTests(TestCase):
             "cached_tokens": 0,
         }
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
-             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), \
              patch("api.agent.core.event_processing.build_prompt_context", return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
              patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})]), \
              patch("api.agent.core.event_processing._completion_with_failover", side_effect=[(first_response, token_usage), (final_response, token_usage)]) as mock_completion, \
@@ -4243,8 +4152,7 @@ class PromptContextBuilderTests(TestCase):
             "cached_tokens": 0,
         }
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+        with patch('api.agent.core.prompt_context.enqueue_history_compaction'), \
              patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
              patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
              patch('api.agent.core.event_processing._completion_with_failover', side_effect=[(response_first, token_usage), (response_second, token_usage)]) as mock_completion, \
@@ -7762,8 +7670,7 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             "cached_tokens": 0,
         }
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
-             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+        with patch("api.agent.core.prompt_context.enqueue_history_compaction"), \
              patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none"), \
              patch("api.agent.core.event_processing.build_prompt_context", return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
              patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})]), \
