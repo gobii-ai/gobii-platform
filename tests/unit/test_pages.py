@@ -2748,7 +2748,7 @@ class SitemapTests(TestCase):
                 "http://example.com/solutions/recruiting/candidate-sourcing/": "2026-06-07",
                 "http://example.com/solutions/sales/": "2026-06-05",
                 "http://example.com/solutions/sales/ai-sales-agent/": "2026-08-10",
-                "http://example.com/solutions/engineering/": "2026-07-14",
+                "http://example.com/solutions/engineering/": "2026-08-09",
             },
         )
 
