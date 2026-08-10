@@ -3124,7 +3124,7 @@ class AIEmployeesPageTests(TestCase):
             },
         )
         self.assertEqual(nodes["WebPage"]["url"], "https://gobii.ai/ai-employees/")
-        self.assertEqual(nodes["WebPage"]["dateModified"], "2026-07-10")
+        self.assertEqual(nodes["WebPage"]["dateModified"], "2026-08-10")
         organization_id = "https://gobii.ai/#organization"
         website_id = "https://gobii.ai/#website"
         self.assertEqual(nodes["Organization"]["@id"], organization_id)

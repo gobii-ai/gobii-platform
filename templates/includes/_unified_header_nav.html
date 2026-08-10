@@ -266,14 +266,9 @@
   trigger.addEventListener('mouseenter', function(){ clearTimeout(closeTimer); setOpen(true); });
   trigger.addEventListener('click', function(e){
     e.preventDefault();
-    // Pointer activation follows mouseenter on desktop and emulated touch devices.
-    // Keep that menu open; keyboard activation is handled explicitly below.
-    if (e.detail !== 0) setOpen(true);
-  });
-  trigger.addEventListener('keydown', function(e){
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    e.preventDefault();
-    setOpen(!open);
+    // Pointer clicks follow mouseenter, so they keep the menu open. Native keyboard
+    // and assistive-technology activations use zero-detail clicks and toggle it.
+    setOpen(e.detail === 0 ? !open : true);
   });
   dd.addEventListener('mouseleave', scheduleClose);
   panel.addEventListener('mouseenter', function(){ clearTimeout(closeTimer); });
