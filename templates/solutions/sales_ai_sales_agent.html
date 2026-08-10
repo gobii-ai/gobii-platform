@@ -31,7 +31,14 @@
   .saa-fact dd { margin: 8px 0 0; font-size: 14px; line-height: 1.6; color: #ece9f6; }
   /* section helpers */
   .saa-lede { color: #b7aed4; font-size: 15px; line-height: 1.65; margin-top: 12px; }
-  .saa-body { color: #a99cc9; font-size: 13.5px; line-height: 1.65; }
+  .saa-answer { display: grid; gap: 32px; align-items: start; }
+  @media (min-width: 900px) { .saa-answer { grid-template-columns: .95fr 1.05fr; gap: 56px; } }
+  .saa-answer h3 { margin: 0; color: #fff; font-size: 16px; font-weight: 600; }
+  .saa-glance { padding: 24px; }
+  .saa-checklist { display: grid; gap: 12px; list-style: none; margin: 16px 0 0; padding: 0; }
+  .saa-checklist li { position: relative; padding-left: 20px; color: #d5cdec; font-size: 13.5px; line-height: 1.6; }
+  .saa-checklist li::before { content: ''; position: absolute; top: .65em; left: 0; width: 7px; height: 7px;
+    border-radius: 999px; background: #a78bfa; box-shadow: 0 0 0 3px rgba(167,139,250,.14); }
   .saa-2col { display: grid; gap: 40px; margin-top: 26px; }
   @media (min-width: 1024px) { .saa-2col { grid-template-columns: .85fr 1.15fr; gap: 56px; } }
   .saa-grid2 { display: grid; gap: 12px; }
@@ -51,6 +58,30 @@
     font-weight: 600; color: #c4b5fd; text-decoration: none; }
   .saa-arrow-link:hover { color: #fff; }
   .saa-arrow-link i { color: #a78bfa; }
+  .saa-tablewrap { margin-top: 26px; overscroll-behavior-x: contain; scrollbar-width: thin;
+    scrollbar-color: rgba(167,139,250,.72) rgba(255,255,255,.06); }
+  .saa-tablewrap::-webkit-scrollbar { height: 8px; }
+  .saa-tablewrap::-webkit-scrollbar-track { background: rgba(255,255,255,.06); }
+  .saa-tablewrap::-webkit-scrollbar-thumb { background: rgba(167,139,250,.72); border-radius: 999px; }
+  .saa-tablewrap:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 4px; }
+  .saa-tablewrap table { min-width: 780px; }
+  .saa-tablewrap table.saa-comparison-table { min-width: 1580px; }
+  .saa-tablewrap caption { color: #b7aed4; font-size: 13px; line-height: 1.6; padding: 0 0 14px;
+    text-align: left; caption-side: top; }
+  .saa-tablewrap tbody th { min-width: 150px; padding: 12px 18px; color: #fff; font-size: 13px;
+    font-weight: 600; line-height: 1.55; text-align: left; vertical-align: top; border-top: 1px solid rgba(255,255,255,.07); }
+  .saa-tablewrap tbody td { min-width: 190px; line-height: 1.55; text-align: left !important; vertical-align: top; }
+  .saa-tablewrap thead th { line-height: 1.45; text-align: left !important; vertical-align: bottom; }
+  .saa-tablewrap tbody tr:nth-child(odd) th { background: rgba(255,255,255,.02); }
+  .saa-tablewrap thead th:first-child, .saa-tablewrap tbody th { position: sticky; left: 0; z-index: 1;
+    background: #100a20; box-shadow: 1px 0 0 rgba(255,255,255,.1); }
+  .saa-tablewrap thead th:first-child { z-index: 2; background: #241342; }
+  .saa-steps { display: grid; gap: 12px; margin-top: 28px; }
+  @media (min-width: 640px) { .saa-steps { grid-template-columns: 1fr 1fr; } }
+  .saa-steps .saa-cell { height: 100%; }
+  .saa-link-row { display: flex; flex-wrap: wrap; gap: 12px 22px; margin-top: 26px; align-items: center; }
+  .saa-link-row .saa-link-inline { font-size: 13.5px; }
+  .saa-update { color: #8b7fb8; font-size: 12px; line-height: 1.5; margin-top: 14px; }
   /* example output highlight card */
   .saa-example { padding: 26px; }
   .saa-example h3 { font-size: 17px; font-weight: 600; color: #fff; margin: 10px 0 0; }
@@ -58,12 +89,9 @@
   @media (min-width: 640px) { .saa-example dl { grid-template-columns: 1fr 1fr; } }
   .saa-example dt { font-size: 13px; font-weight: 600; color: #fff; }
   .saa-example dd { margin: 4px 0 0; font-size: 13px; line-height: 1.6; color: #a99cc9; }
-  .saa-example blockquote { margin: 18px 0 0; border-left: 2px solid rgba(196,181,253,.55); padding-left: 16px; }
-  .saa-example blockquote p { font-size: 13.5px; line-height: 1.65; color: #d5cdec; margin: 0; }
-  .saa-example blockquote footer { margin-top: 8px; font-size: 10.5px; font-weight: 600; letter-spacing: 1.4px;
-    text-transform: uppercase; color: #c4b5fd; }
+  .saa-example ul { margin: 8px 0 0; padding-left: 18px; color: #a99cc9; font-size: 13px; line-height: 1.65; }
   .saa-figure { margin-top: 28px; border-radius: 16px; overflow: hidden; border: 1px solid rgba(255,255,255,.14);
-    background: rgba(10,6,22,.5); box-shadow: 0 30px 80px rgba(5,2,18,.55), 0 0 60px rgba(168,85,247,.1); }
+    background: rgba(10,6,22,.5); box-shadow: 0 30px 80px rgba(5,2,18,.55); }
   .saa-figure img { width: 100%; display: block; object-fit: cover; }
   .saa-figure figcaption { padding: 12px 16px 14px; font-size: 12px; line-height: 1.55; color: #8b7fb8; }
   /* closer band */
@@ -87,10 +115,10 @@
 
       <p class="gk-eyebrow">Human-reviewed sales automation</p>
       <h1 class="gk-display">
-        AI sales agent for supervised pipeline work
+        AI Sales Agent for Reviewed Prospecting and Account Research
       </h1>
       <p class="gk-sub">
-        Use a Gobii AI sales agent to find prospects, research accounts, enrich lead data, and prepare outreach. Your team stays in control of targeting, messaging, and relationship decisions.
+        Find, qualify, and research prospects from approved sources. Gobii delivers source-linked lead batches, account briefs, and outreach prep for seller review before anything moves downstream.
       </p>
 
       <div class="saa-ctas">
@@ -101,7 +129,7 @@
           <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
           <button type="submit" class="gk-btn w-full sm:w-auto">
             {% if not user.is_authenticated or solution_spawn_requires_trial %}
-              {% cta_text "cta_sales_ai_agent_launch_btn_unauth" fallback="Start Free Trial" %}
+              {% cta_text "cta_sales_ai_agent_launch_btn_unauth" fallback="Try B2B Lead Research Free" %}
             {% else %}
               {% cta_text "cta_sales_ai_agent_launch_btn_auth" fallback="Deploy B2B Lead Research Employee" %}
             {% endif %}
@@ -113,8 +141,8 @@
             {% endif %}
           {% endif %}
         </form>
-        <a href="#sales-agent-workflows" class="gk-btn-quiet">
-          See workflows
+        <a href="#sample-output" class="gk-btn-quiet">
+          View a Sample Output
         </a>
       </div>
       <div class="saa-crawl">
@@ -136,6 +164,30 @@
         <dd>Seller review before outreach decisions</dd>
       </div>
     </dl>
+  </section>
+
+  <section class="gk-section">
+    <div class="saa-answer">
+      <div>
+        <p class="gk-eyebrow">Definition</p>
+        <h2 class="gk-h2" style="margin-top:10px">What is an AI sales agent?</h2>
+        <p class="saa-lede">
+          An AI sales agent performs multi-step sales work such as prospect research, qualification, enrichment, and outreach preparation. Gobii focuses on supervised execution: it gathers evidence and prepares review-ready outputs while sales teams retain control over targeting, messaging, and sending.
+        </p>
+        {% if solution_date_modified %}
+          <p class="saa-update">Last updated {{ solution_date_modified|date:"F j, Y" }}.</p>
+        {% endif %}
+      </div>
+      <div class="gk-card-edge saa-glance">
+        <h3>At a glance</h3>
+        <ul class="saa-checklist">
+          <li>Gobii is best for prospecting, qualification, and account research.</li>
+          <li>Gobii produces source-linked, review-ready deliverables.</li>
+          <li>Gobii works with approved sources, sheets, exports, and downstream tools.</li>
+          <li>Gobii does not autonomously call prospects or send outreach in this workflow.</li>
+        </ul>
+      </div>
+    </div>
   </section>
 
   <section id="sales-agent-workflows" class="gk-section scroll-mt-20">
@@ -183,28 +235,186 @@
         </p>
       </div>
 
-      <div class="saa-grid2">
-        <article class="gk-card-glass saa-cell">
-          <i data-lucide="database" class="h-5 w-5"></i>
-          <h3>CRM-native agents</h3>
-          <p>Best for record updates, activity summaries, and account scoring inside Salesforce, HubSpot, or another CRM. Gobii can prepare the research and fields before the handoff.</p>
-        </article>
-        <article class="gk-card-glass saa-cell">
-          <i data-lucide="megaphone" class="h-5 w-5"></i>
-          <h3>Outbound BDR agents</h3>
-          <p>Best for high-volume prospecting and sequencing. Gobii fits when you want review-ready lead research and message angles, not unreviewed auto-sending.</p>
-        </article>
-        <article class="gk-card-glass saa-cell">
-          <i data-lucide="phone-call" class="h-5 w-5"></i>
-          <h3>Voice and calling agents</h3>
-          <p>Best for phone qualification, call routing, or meeting booking. This Gobii workflow is not an autonomous caller or WhatsApp sender. It prepares briefs and handoff data for approved tools.</p>
-        </article>
-        <article class="gk-card-glass saa-cell">
-          <i data-lucide="workflow" class="h-5 w-5"></i>
-          <h3>Research workflow agents</h3>
-          <p>Best for browsing approved sources, enriching leads, filling sheets, triggering webhooks, and producing source-linked account briefs. B2B Lead Research starts here.</p>
-        </article>
+      <div class="gk-tablewrap saa-tablewrap" role="region" aria-label="AI sales agent category buying guide" tabindex="0">
+        <table>
+          <caption>Four common AI agent for sales categories, compared by job and operating model.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Agent category</th>
+              <th scope="col">Best for</th>
+              <th scope="col">Typical execution</th>
+              <th scope="col">How Gobii differs</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">CRM-native agents</th>
+              <td>Record updates, activity summaries, account scoring, and CRM assistance.</td>
+              <td>Works mainly inside Salesforce, HubSpot, or another system of record.</td>
+              <td>Gobii prepares source-linked research and review-ready fields before CRM or CSV handoff.</td>
+            </tr>
+            <tr>
+              <th scope="row">Autonomous or outbound SDR agents</th>
+              <td>High-volume prospecting, sequencing, and automated outreach.</td>
+              <td>An AI SDR may identify contacts, draft messages, and send through configured channels.</td>
+              <td>Gobii is an AI sales assistant for reviewed research and outreach prep, not unreviewed auto-sending.</td>
+            </tr>
+            <tr>
+              <th scope="row">Voice and calling agents</th>
+              <td>Phone qualification, call routing, meeting booking, or scripted follow-up.</td>
+              <td>Places or receives calls through a telephony system.</td>
+              <td>This Gobii workflow prepares call briefs and handoff data; it does not autonomously call prospects.</td>
+            </tr>
+            <tr>
+              <th scope="row">Research workflow agents</th>
+              <td>Prospecting, enrichment, account briefs, sheets, and source-linked deliverables.</td>
+              <td>A sales research agent completes adaptive, multi-step work across approved sources.</td>
+              <td>Gobii's B2B Lead Research workflow starts here and preserves seller review before consequential outreach decisions.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div style="max-width:48rem">
+      <p class="gk-eyebrow">Buyer comparison</p>
+      <h2 class="gk-h2" style="margin-top:10px">Compare sales research and outreach tools by the job they own</h2>
+      <p class="saa-lede">
+        No model is universally better. Gobii's distinction is repeatable prospecting and account-research work with seller review before consequential outreach decisions.
+      </p>
+    </div>
+    <div class="gk-tablewrap saa-tablewrap" role="region" aria-label="AI sales agent buyer comparison" tabindex="0">
+      <table class="saa-comparison-table">
+        <caption>Gobii compared with adjacent sales research, data, sequencing, and human-service options.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Dimension</th>
+            <th scope="col">Gobii supervised AI sales agent</th>
+            <th scope="col">Autonomous AI SDR</th>
+            <th scope="col">CRM-native agent</th>
+            <th scope="col">Enrichment database</th>
+            <th scope="col">Sales sequencing tool</th>
+            <th scope="col">Human researcher</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Primary job</th>
+            <td>Prepare reviewed prospect and account research.</td>
+            <td>Run outbound prospecting and outreach.</td>
+            <td>Assist with CRM records and workflows.</td>
+            <td>Supply company and contact data.</td>
+            <td>Schedule and manage outreach sequences.</td>
+            <td>Complete custom research and sales prep.</td>
+          </tr>
+          <tr>
+            <th scope="row">Source research</th>
+            <td>Searches approved sources for the brief.</td>
+            <td>Varies by vendor and connected data.</td>
+            <td>Usually centered on CRM and connected records.</td>
+            <td>Primarily searches its own dataset.</td>
+            <td>Limited; usually consumes imported records.</td>
+            <td>Can research sources selected in the brief.</td>
+          </tr>
+          <tr>
+            <th scope="row">Adaptive multi-step work</th>
+            <td>Yes, within instructions, sources, and review points.</td>
+            <td>Yes, commonly optimized around outbound execution.</td>
+            <td>Often, within supported CRM tasks.</td>
+            <td>Limited to search, filters, and enrichment operations.</td>
+            <td>Usually rules, timing, branching, and templates.</td>
+            <td>Yes, with judgment and manual follow-through.</td>
+          </tr>
+          <tr>
+            <th scope="row">Human approval</th>
+            <td>Seller review is central before outreach decisions.</td>
+            <td>Configurable; some products emphasize autonomy.</td>
+            <td>Configurable by workflow and CRM permissions.</td>
+            <td>A person selects and uses the returned data.</td>
+            <td>Optional approvals depend on setup.</td>
+            <td>The researcher or a separate reviewer checks the work.</td>
+          </tr>
+          <tr>
+            <th scope="row">Autonomous sending</th>
+            <td>No, not in this reviewed prospecting workflow.</td>
+            <td>Commonly a core capability.</td>
+            <td>Possible in some connected workflows.</td>
+            <td>No.</td>
+            <td>Yes, once a sequence is activated.</td>
+            <td>Only when sending is part of the assignment.</td>
+          </tr>
+          <tr>
+            <th scope="row">Evidence or source links</th>
+            <td>Source links and fit notes are part of the deliverable.</td>
+            <td>Varies by product and output.</td>
+            <td>Depends on the underlying CRM fields and integrations.</td>
+            <td>May show provider data, confidence, or provenance fields.</td>
+            <td>Not usually the primary output.</td>
+            <td>Can provide links and notes when required.</td>
+          </tr>
+          <tr>
+            <th scope="row">Typical handoff</th>
+            <td>Reviewed batch, brief, sheet, CSV, or webhook output.</td>
+            <td>Sequence activity, replies, meetings, or CRM updates.</td>
+            <td>Updated CRM records, scores, tasks, or summaries.</td>
+            <td>Enriched records, lists, or exported fields.</td>
+            <td>Sent messages, tasks, replies, and engagement data.</td>
+            <td>Spreadsheet, report, CRM update, or briefing document.</td>
+          </tr>
+          <tr>
+            <th scope="row">Best fit</th>
+            <td>Teams that want an AI prospecting agent with traceable, review-ready work.</td>
+            <td>Teams prioritizing outbound volume and automated execution.</td>
+            <td>Teams whose work and data already live in one CRM.</td>
+            <td>Teams that mainly need searchable contact or company data.</td>
+            <td>Teams with approved records and messaging ready to send.</td>
+            <td>High-context, one-off, sensitive, or highly ambiguous research.</td>
+          </tr>
+          <tr>
+            <th scope="row">Main limitation</th>
+            <td>Requires a clear brief and human review; contact data may still need verification.</td>
+            <td>Greater autonomy can increase control, quality, and compliance risk.</td>
+            <td>May be constrained by CRM data and supported actions.</td>
+            <td>Static data does not complete the surrounding research workflow.</td>
+            <td>Does not replace prospect research or data quality checks.</td>
+            <td>Can be slower to scale and harder to standardize across repeated runs.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div style="max-width:48rem">
+      <p class="gk-eyebrow">Evaluation checklist</p>
+      <h2 class="gk-h2" style="margin-top:10px">How to evaluate an AI sales agent</h2>
+      <p class="saa-lede">Evaluate the first reviewed output and the operating controls, not only a feature list or polished demo.</p>
+    </div>
+    <div class="gk-tablewrap saa-tablewrap" role="region" aria-label="AI sales agent evaluation checklist" tabindex="0">
+      <table>
+        <caption>Questions to use when testing an AI SDR, AI lead-generation agent, or account-research automation workflow.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Check</th>
+            <th scope="col">What to inspect</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Source freshness</th><td>Can you see when the underlying page or record was published, updated, or retrieved?</td></tr>
+          <tr><th scope="row">Evidence traceability</th><td>Does each material claim or fit note retain a source URL or record reference?</td></tr>
+          <tr><th scope="row">ICP controls and disqualifiers</th><td>Can the workflow enforce titles, segments, exclusions, negative examples, and must-have criteria?</td></tr>
+          <tr><th scope="row">Permission scope</th><td>Can access stay limited to the sources, files, contacts, tools, and actions the workflow needs?</td></tr>
+          <tr><th scope="row">Human approval points</th><td>Can a seller review targeting, evidence, contact data, messaging, and the handoff before outreach?</td></tr>
+          <tr><th scope="row">Contact-data verification</th><td>Does the workflow distinguish discovered data from data that has been independently verified?</td></tr>
+          <tr><th scope="row">CRM and CSV handoff</th><td>Can approved output move downstream with stable fields, source links, reviewer status, and notes intact?</td></tr>
+          <tr><th scope="row">Failure and escalation behavior</th><td>Does the agent flag blocked sources, missing evidence, ambiguity, and tasks that require a person?</td></tr>
+          <tr><th scope="row">Usage or pricing model</th><td>Is cost tied to seats, records, tasks, messages, or execution, and can the team cap early usage?</td></tr>
+          <tr><th scope="row">Time to first reviewed output</th><td>How much setup is required before a seller can inspect a real batch for a narrow brief?</td></tr>
+          <tr><th scope="row">Reviewer feedback</th><td>Can accepted and rejected examples refine sources, criteria, disqualifiers, and output format?</td></tr>
+        </tbody>
+      </table>
     </div>
   </section>
 
@@ -277,13 +487,13 @@
     </div>
   </section>
 
-  <section class="gk-section">
+  <section id="sample-output" class="gk-section scroll-mt-20">
     <div class="saa-2col">
       <div>
-        <p class="gk-eyebrow">Start with B2B Lead Research</p>
-        <h2 class="gk-h2" style="margin-top:10px">Deploy a focused AI agent before building a broad sales program</h2>
+        <p class="gk-eyebrow">Anonymized workflow proof</p>
+        <h2 class="gk-h2" style="margin-top:10px">Example: 10 Role-Matched Marketing Prospects</h2>
         <p class="saa-lede">
-          B2B Lead Research is the closest Gobii starting point for this page. It is an always-on prospecting employee that searches approved sources, checks leads against your ICP, and prepares review-ready batches.
+          This compact case note shows how B2B Lead Research turns a focused brief into a source-linked batch for seller review without publishing live contact or account details.
         </p>
         <div class="saa-ctas" style="margin-top:26px">
           <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_lead_hunter" data-analytics-placement="lead_hunter" data-analytics-intent="spawn_agent">
@@ -292,12 +502,12 @@
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
             <button type="submit" class="gk-btn gk-btn-sm w-full sm:w-auto">
-              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy B2B Lead Research Employee{% endif %}
+              {% if not user.is_authenticated or solution_spawn_requires_trial %}Try B2B Lead Research Free{% else %}Deploy B2B Lead Research Employee{% endif %}
               <i data-lucide="arrow-right" class="h-4 w-4"></i>
             </button>
           </form>
           <a href="{% url 'pages:public_template_detail' category_slug='sales' template_slug='b2b-lead-research-agent' %}" class="gk-btn-quiet">
-            View template
+            View the Research Template
           </a>
         </div>
         <figure class="saa-figure">
@@ -310,7 +520,7 @@
             >
             <img
               src="{% static 'images/solutions/lead-hunter-output-example-960.png' %}"
-              alt="Fully anonymized Leroy output example showing source-linked sales leads in a review table"
+              alt="Anonymized AI sales agent output showing a source-linked, role-matched prospect batch for seller review"
               width="960"
               height="674"
               loading="lazy"
@@ -318,65 +528,120 @@
             >
           </picture>
           <figcaption>
-            Fully anonymized Leroy output example. Will asked for 10 marketing decision makers in a focused regional segment; the agent prepared a review-ready batch.
+            Anonymized B2B lead-research output showing the structure of a reviewed prospect batch; names and live contact details are not published.
           </figcaption>
         </figure>
       </div>
 
-      <div class="saa-grid2">
-        <div class="gk-card-edge saa-example" style="grid-column:1/-1">
-          <span class="saa-kicker">Example output</span>
-          <h3>B2B lead research output example</h3>
-          <p class="saa-body" style="margin-top:10px">A reviewed batch can show the shape of the work without publishing live contact or account details.</p>
-          <dl>
-            <div>
-              <dt>Prompt</dt>
-              <dd>Find 10 marketing decision makers in a focused regional segment</dd>
-            </div>
-            <div>
-              <dt>Output</dt>
-              <dd>Role-matched prospects with source evidence and review status</dd>
-            </div>
-            <div>
-              <dt>Source check</dt>
-              <dd>Compare profile context against available contact data</dd>
-            </div>
-            <div>
-              <dt>Handoff</dt>
-              <dd>Deduping, email or phone verification, and segment-deepening options</dd>
-            </div>
-          </dl>
-          <p style="margin:18px 0 0;font-size:13.5px;font-weight:550;line-height:1.6;color:#c4b5fd">
-            Anonymized example shown here: 10 role-matched prospects sourced for review.
-          </p>
-          <p class="saa-body" style="margin-top:12px">
-            Workflow proof: in a recent run for Will, Leroy compared two lead sources, found overlapping accounts, flagged where contact data was stronger, and suggested next steps to find more leads, verify email addresses, export a CSV, or deepen into a narrower segment.
-          </p>
-          <blockquote>
-            <p>"It's amazing... I think its a lot better than Manus genuinely."</p>
-            <footer>Gobii user feedback</footer>
-          </blockquote>
-        </div>
-        <div class="gk-card-glass saa-cell">
-          <span class="saa-kicker">Step 1</span>
-          <h3>Define the ICP</h3>
-          <p>Give the agent industries, titles, geography, company size, tech stack, buying signals, exclusions, and examples of good leads.</p>
-        </div>
-        <div class="gk-card-glass saa-cell">
-          <span class="saa-kicker">Step 2</span>
-          <h3>Choose sources</h3>
-          <p>Limit the workflow to approved websites, sheets, company lists, databases, CRM exports, or webhook-fed inputs.</p>
-        </div>
-        <div class="gk-card-glass saa-cell">
-          <span class="saa-kicker">Step 3</span>
-          <h3>Set review rules</h3>
-          <p>Decide who reviews lead quality, what fields matter, and which outputs are allowed to move downstream.</p>
-        </div>
-        <div class="gk-card-glass saa-cell">
-          <span class="saa-kicker">Step 4</span>
-          <h3>Tune the workflow</h3>
-          <p>Use seller feedback to narrow sources, update disqualifiers, change cadence, and improve the handoff format.</p>
-        </div>
+      <div class="gk-card-edge saa-example">
+        <span class="saa-kicker">Compact case note</span>
+        <h3>Reviewed prospecting workflow and output</h3>
+        <dl>
+          <div>
+            <dt>Brief</dt>
+            <dd>Find 10 marketing decision makers in a focused regional segment</dd>
+          </div>
+          <div>
+            <dt>Process</dt>
+            <dd>
+              <ul>
+                <li>Search approved sources</li>
+                <li>Compare two lead sources</li>
+                <li>Identify overlapping accounts</li>
+                <li>Flag where contact information appears stronger</li>
+                <li>Record source evidence and review status</li>
+              </ul>
+            </dd>
+          </div>
+          <div>
+            <dt>Output</dt>
+            <dd>
+              <ul>
+                <li>Role-matched prospects</li>
+                <li>Source URLs</li>
+                <li>Fit notes</li>
+                <li>Available enrichment fields</li>
+                <li>Reviewer status</li>
+                <li>Suggested verification and export steps</li>
+              </ul>
+            </dd>
+          </div>
+          <div>
+            <dt>Handoff</dt>
+            <dd>The reviewer can deduplicate records, verify email or phone data, export a CSV, or narrow the segment for another run.</dd>
+          </div>
+          <div style="grid-column:1/-1">
+            <dt>Limitation</dt>
+            <dd>This anonymized example demonstrates the workflow and output structure. It is not a guarantee of lead volume, data completeness, or conversion performance.</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section id="first-run" class="gk-section scroll-mt-20">
+    <div style="max-width:48rem">
+      <p class="gk-eyebrow">First reviewed batch</p>
+      <h2 class="gk-h2" style="margin-top:10px">What happens on your first run?</h2>
+      <p class="saa-lede">Start with one narrow segment and a deliverable your seller can inspect. Use that review to refine the next run.</p>
+    </div>
+    <div class="saa-steps">
+      <article class="gk-card-edge saa-cell">
+        <span class="saa-kicker">Step 1</span>
+        <h3>Define the brief</h3>
+        <p>Specify industries, titles, geography, company size, signals, exclusions, and examples of good leads.</p>
+      </article>
+      <article class="gk-card-edge saa-cell">
+        <span class="saa-kicker">Step 2</span>
+        <h3>Choose sources</h3>
+        <p>Select approved websites, company lists, documents, sheets, CRM exports, or webhook-provided inputs.</p>
+      </article>
+      <article class="gk-card-edge saa-cell">
+        <span class="saa-kicker">Step 3</span>
+        <h3>Review the batch</h3>
+        <p>Inspect source links, fit notes, enrichment fields, disqualifiers, and suggested outreach angles.</p>
+      </article>
+      <article class="gk-card-edge saa-cell">
+        <span class="saa-kicker">Step 4</span>
+        <h3>Decide the handoff</h3>
+        <p>Approve, reject, revise, export, verify contact data, or narrow the next run.</p>
+      </article>
+    </div>
+    <div class="saa-link-row">
+      <form method="post" action="{% url 'pages:public_template_hire' 'sales' 'b2b-lead-research-agent' %}" class="w-full sm:w-auto" data-analytics-cta-id="sales_ai_agent_first_run" data-analytics-placement="first_run" data-analytics-intent="spawn_agent">
+        {% csrf_token %}
+        <input type="hidden" name="source_page" value="sales_ai_agent_first_run" />
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+        <button type="submit" class="gk-btn gk-btn-sm w-full sm:w-auto">
+          {% if not user.is_authenticated or solution_spawn_requires_trial %}Try B2B Lead Research Free{% else %}Deploy B2B Lead Research Employee{% endif %}
+        </button>
+      </form>
+      <a href="{% url 'pages:public_template_detail' category_slug='sales' template_slug='b2b-lead-research-agent' %}" class="saa-link-inline">View the B2B Lead Research template</a>
+      <a href="{% url 'proprietary:pricing' %}" class="saa-link-inline">Review pricing</a>
+      <a href="#sample-output" class="saa-link-inline">View the sample output</a>
+    </div>
+  </section>
+
+  <section class="gk-section">
+    <div class="saa-answer">
+      <div>
+        <p class="gk-eyebrow">Workflow controls and handoffs</p>
+        <h2 class="gk-h2" style="margin-top:10px">Review the operating details before you deploy</h2>
+        <p class="saa-lede">Gobii's documentation explains approval points, scoped app access, selected-file access for Google Sheets, and webhook-triggered handoffs.</p>
+        {% if solution_date_modified %}
+          <p class="saa-update">Page materially reviewed and updated {{ solution_date_modified|date:"F j, Y" }}.</p>
+        {% endif %}
+      </div>
+      <div class="gk-card-glass saa-glance">
+        <h3>Verified Gobii resources</h3>
+        <ul class="saa-checklist">
+          <li><a href="https://docs.gobii.ai/using-gobii/approvals-and-requests" class="saa-link-inline">Approvals and requests</a> explains where a Gobii pauses for a person.</li>
+          <li><a href="https://docs.gobii.ai/using-gobii/connect-apps" class="saa-link-inline">Connect Apps</a> explains app setup and permission scope.</li>
+          <li><a href="https://docs.gobii.ai/using-gobii/google-sheets" class="saa-link-inline">Google Sheets</a> explains selected-file access and spreadsheet handoff.</li>
+          <li><a href="https://docs.gobii.ai/using-gobii/inbound-webhooks" class="saa-link-inline">Inbound Webhooks</a> explains event-driven inputs.</li>
+          <li><a href="{% url 'proprietary:pricing' %}" class="saa-link-inline">Gobii pricing</a> explains plans, included usage, and trial terms.</li>
+        </ul>
       </div>
     </div>
   </section>
@@ -424,12 +689,12 @@
           <input type="hidden" name="trial_onboarding" value="1" />
           <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
           <button type="submit" class="gk-btn w-full sm:w-auto">
-            {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Deploy B2B Lead Research Employee{% endif %}
+            {% if not user.is_authenticated or solution_spawn_requires_trial %}Try B2B Lead Research Free{% else %}Deploy B2B Lead Research Employee{% endif %}
             <i data-lucide="arrow-right" class="h-4 w-4"></i>
           </button>
         </form>
-        <a href="{% url 'pages:solution' slug='sales' %}" class="gk-btn-quiet">
-          Explore sales solution
+        <a href="#sample-output" class="gk-btn-quiet">
+          View a Sample Output
         </a>
       </div>
     </div>

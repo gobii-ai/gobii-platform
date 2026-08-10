@@ -2718,7 +2718,7 @@ class SitemapTests(TestCase):
                 "http://example.com/solutions/recruiting/": "2026-06-04",
                 "http://example.com/solutions/recruiting/candidate-sourcing/": "2026-06-07",
                 "http://example.com/solutions/sales/": "2026-06-05",
-                "http://example.com/solutions/sales/ai-sales-agent/": "2026-07-09",
+                "http://example.com/solutions/sales/ai-sales-agent/": "2026-08-10",
                 "http://example.com/solutions/engineering/": "2026-07-14",
             },
         )
@@ -2812,8 +2812,8 @@ class SitemapTests(TestCase):
             (
                 "/solutions/sales/ai-sales-agent/",
                 (
-                    "Start with B2B Lead Research",
-                    "B2B Lead Research AI Employee",
+                    "Try B2B Lead Research Free",
+                    "View the B2B Lead Research template",
                 ),
                 ("Lead Hunter",),
             ),
@@ -2865,11 +2865,21 @@ class SitemapTests(TestCase):
 
         self.assertEqual(
             soup.title.string,
-            "AI Sales Agent: What It Can Do and When to Use One | Gobii",
+            "AI Sales Agent for Prospecting & Account Research | Gobii",
         )
         self.assertEqual(
             soup.find("meta", attrs={"name": "description"})["content"],
-            "Evaluate an AI sales agent for supervised prospecting, account research, lead enrichment, outreach prep, and human-reviewed pipeline handoffs.",
+            "Find, qualify, and research prospects with a supervised AI sales agent. Review source-linked leads, account briefs, and outreach prep before anything sends.",
+        )
+        self.assertLessEqual(len(soup.title.string), 60)
+        self.assertGreaterEqual(len(soup.title.string), 50)
+        self.assertLessEqual(
+            len(soup.find("meta", attrs={"name": "description"})["content"]),
+            160,
+        )
+        self.assertGreaterEqual(
+            len(soup.find("meta", attrs={"name": "description"})["content"]),
+            120,
         )
         expected_public_url = "https://gobii.ai/solutions/sales/ai-sales-agent/"
         self.assertEqual(
@@ -2880,9 +2890,19 @@ class SitemapTests(TestCase):
             soup.find("meta", property="og:url")["content"],
             expected_public_url,
         )
-        self.assertContains(response, "AI sales agent for supervised pipeline work")
+        headings = soup.find_all("h1")
+        self.assertEqual(len(headings), 1)
+        self.assertEqual(
+            headings[0].get_text(" ", strip=True),
+            "AI Sales Agent for Reviewed Prospecting and Account Research",
+        )
+        self.assertContains(response, "What is an AI sales agent?")
+        self.assertContains(response, "An AI sales agent performs multi-step sales work")
+        self.assertContains(response, "Gobii produces source-linked, review-ready deliverables.")
+        self.assertContains(response, "Gobii does not autonomously call prospects or send outreach")
         self.assertContains(response, "AI sales employee")
-        self.assertContains(response, "Start with B2B Lead Research")
+        self.assertContains(response, "Try B2B Lead Research Free")
+        self.assertContains(response, "View a Sample Output")
         self.assertContains(
             response,
             f'href="{reverse("pages:ai_employees")}"',
@@ -2891,18 +2911,30 @@ class SitemapTests(TestCase):
         self.assertContains(response, "Which type of AI sales agent should you buy?")
         self.assertContains(response, "CRM-native agents")
         self.assertContains(response, "Voice and calling agents")
-        self.assertContains(response, "B2B lead research output example")
+        self.assertContains(response, "Compare sales research and outreach tools by the job they own")
+        self.assertContains(response, "Gobii supervised AI sales agent")
+        self.assertContains(response, "Autonomous AI SDR")
+        self.assertContains(response, "Enrichment database")
+        self.assertContains(response, "Human researcher")
+        self.assertContains(response, "How to evaluate an AI sales agent")
+        self.assertContains(response, "Time to first reviewed output")
+        self.assertContains(response, "What happens on your first run?")
+        self.assertContains(response, "Example: 10 Role-Matched Marketing Prospects")
         self.assertContains(response, "Google Sheets")
         self.assertContains(response, "webhooks")
         self.assertNotContains(response, "When not to use one")
         self.assertNotContains(response, "Do not use an AI sales agent")
-        self.assertContains(response, "Fully anonymized Leroy output")
-        self.assertContains(response, "Anonymized example shown here: 10 role-matched prospects")
-        self.assertContains(response, "Will asked for 10 marketing decision makers")
-        self.assertContains(response, "in a recent run for Will, Leroy")
-        self.assertContains(response, "verify email addresses")
+        self.assertContains(response, "Find 10 marketing decision makers in a focused regional segment")
+        self.assertContains(response, "Compare two lead sources")
+        self.assertContains(response, "verify email or phone data")
         self.assertContains(response, "export a CSV")
-        self.assertContains(response, "I think its a lot better than Manus genuinely")
+        self.assertContains(
+            response,
+            "It is not a guarantee of lead volume, data completeness, or conversion performance.",
+        )
+        self.assertNotContains(response, "Leroy")
+        self.assertNotContains(response, "Will asked")
+        self.assertNotContains(response, "better than Manus")
         self.assertNotContains(response, "Kramer Beverage")
         self.assertNotContains(response, "Shore Point")
         self.assertNotContains(response, "Stateside Brands")
@@ -2911,7 +2943,12 @@ class SitemapTests(TestCase):
         self.assertIsNone(soup.find("img", {"src": static("images/solutions/sales-hero-1280.jpg")}))
         proof_image = soup.find(
             "img",
-            {"alt": "Fully anonymized Leroy output example showing source-linked sales leads in a review table"},
+            {
+                "alt": (
+                    "Anonymized AI sales agent output showing a source-linked, "
+                    "role-matched prospect batch for seller review"
+                )
+            },
         )
         self.assertIsNotNone(proof_image)
         self.assertIn(
@@ -2926,6 +2963,36 @@ class SitemapTests(TestCase):
         )
         self.assertNotIn("localhost", page_html)
         self.assertNotIn("http://testserver", page_html)
+        table_regions = soup.find_all("div", {"role": "region", "tabindex": "0"})
+        self.assertEqual(len(table_regions), 3)
+        for table_region in table_regions:
+            with self.subTest(label=table_region.get("aria-label")):
+                self.assertTrue(table_region.get("aria-label"))
+                table = table_region.find("table")
+                self.assertIsNotNone(table)
+                self.assertIsNotNone(table.find("caption"))
+                self.assertTrue(table.find_all("th", {"scope": "col"}))
+                self.assertTrue(table.find_all("th", {"scope": "row"}))
+        sample_output = soup.find(id="sample-output")
+        self.assertIsNotNone(sample_output)
+        self.assertEqual(sample_output.name, "section")
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {
+                    "href": reverse(
+                        "pages:public_template_detail",
+                        kwargs={
+                            "category_slug": "sales",
+                            "template_slug": "b2b-lead-research-agent",
+                        },
+                    )
+                },
+            )
+        )
+        self.assertIsNotNone(soup.find("a", href="#sample-output"))
+        self.assertIsNotNone(soup.find("a", href="https://docs.gobii.ai/using-gobii/approvals-and-requests"))
+        self.assertIsNotNone(soup.find("a", href="https://docs.gobii.ai/using-gobii/connect-apps"))
         hero_source = soup.find("input", {"name": "source_page", "value": "sales_ai_agent_hero"})
         self.assertIsNotNone(hero_source)
         hero_form = hero_source.find_parent("form")
@@ -2964,7 +3031,7 @@ class SitemapTests(TestCase):
                 "url": "https://gobii.ai/pricing/",
             },
         )
-        self.assertEqual(structured_data["dateModified"], "2026-07-09")
+        self.assertEqual(structured_data["dateModified"], "2026-08-10")
         self.assertNotIn("FAQPage", json_ld_by_type)
 
         pricing_links = soup.find_all("a", href=reverse("proprietary:pricing"))
@@ -4007,6 +4074,25 @@ class ComparisonPageTests(TestCase):
         self.assertIsNotNone(main.find("a", {"href": "https://www.lindy.ai/security"}))
         self.assertIsNotNone(main.find("a", {"href": "https://gobii.ai/pricing/"}))
         self.assertIsNone(main.find("a", {"href": "https://github.com/gobii-ai"}))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_relevant_comparison_pages_link_to_ai_sales_agent_guide(self):
+        expected_href = reverse("pages:solution_sales_ai_sales_agent")
+        cases = (
+            (self.lindy_comparison_slug, "Supervised AI prospecting"),
+            (self.zapier_agents_comparison_slug, "AI agent for sales research"),
+            (self.n8n_comparison_slug, "Reviewed prospecting workflow"),
+        )
+
+        for slug, anchor_text in cases:
+            with self.subTest(slug=slug):
+                response = self.client.get(
+                    reverse("proprietary:comparison_detail", kwargs={"slug": slug})
+                )
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                link = soup.find("a", href=expected_href, string=anchor_text)
+                self.assertIsNotNone(link)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_footer_includes_comparisons_hub_link_in_proprietary_mode(self):

@@ -65,6 +65,8 @@
     .cmpd-band .cmpd-prose p { color: #c4b5fd; margin: 0; }
     .cmpd-band .cmpd-prose p + p { margin-top: 14px; }
     .cmpd-checks { list-style: none; padding: 0; color: #d5cdec; font-size: 13.5px; line-height: 1.6; }
+    .cmpd-checks a { color: #c4b5fd; text-decoration: underline; text-underline-offset: 3px; }
+    .cmpd-checks a:hover { color: #fff; }
     .cmpd-check-ic { color: #34d399; flex-shrink: 0; }
     .cmpd-aside { padding: 26px; }
     .cmpd-aside h2 { font-size: 16px; font-weight: 600; color: #fff; margin: 0; }
@@ -339,7 +341,7 @@
       <div>
         <p class="gk-eyebrow">Common Gobii workloads</p>
         <ul class="cmpd-checks mt-6 grid gap-3 sm:grid-cols-2">
-          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Lead research and enrichment</span></li>
+          <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span><a href="{% url 'pages:solution_sales_ai_sales_agent' %}">Supervised AI prospecting</a> and enrichment</span></li>
           <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Competitor and pricing monitoring</span></li>
           <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Recruiting and candidate sourcing</span></li>
           <li class="flex gap-3"><i aria-hidden="true" data-lucide="check-circle-2" class="mt-0.5 size-5 cmpd-check-ic"></i><span>Vendor and supplier checks</span></li>
