@@ -3062,6 +3062,9 @@ class AIEmployeesPageTests(TestCase):
         ]
         self.assertFalse(any("noindex" in directive for directive in robots_directives))
         self.assertEqual(len(soup.find_all("h1")), 1)
+        main_elements = soup.find_all("main")
+        self.assertEqual(len(main_elements), 1)
+        self.assertIn("gk-luxe", main_elements[0].get("class", []))
         self.assertEqual(soup.find("meta", property="og:url")["content"], expected_url)
         self.assertEqual(
             soup.find("meta", property="og:image")["content"],
@@ -3092,6 +3095,13 @@ class AIEmployeesPageTests(TestCase):
         self.assertIn("which teams should start with an ai employee?", page_text)
         self.assertNotIn("small business", page_text)
 
+        teammate_headings = [
+            heading.get_text(" ", strip=True)
+            for heading in soup.find_all("h3")
+            if "AI teammates" in heading.get_text(" ", strip=True)
+        ]
+        self.assertEqual(teammate_headings, ["AI teammates", "Gobii AI teammates"])
+
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
         GOBII_RELEASE_ENV="prod",
@@ -3115,8 +3125,16 @@ class AIEmployeesPageTests(TestCase):
         )
         self.assertEqual(nodes["WebPage"]["url"], "https://gobii.ai/ai-employees/")
         self.assertEqual(nodes["WebPage"]["dateModified"], "2026-07-10")
+        organization_id = "https://gobii.ai/#organization"
+        website_id = "https://gobii.ai/#website"
+        self.assertEqual(nodes["Organization"]["@id"], organization_id)
+        self.assertEqual(nodes["WebSite"]["@id"], website_id)
+        self.assertEqual(nodes["WebSite"]["publisher"], {"@id": organization_id})
+        self.assertEqual(nodes["WebPage"]["isPartOf"], {"@id": website_id})
+        self.assertEqual(nodes["WebPage"]["publisher"], {"@id": organization_id})
         self.assertEqual(nodes["WebPage"]["mainEntity"], {"@id": "https://gobii.ai/ai-employees#software"})
         self.assertEqual(nodes["SoftwareApplication"]["name"], "Gobii AI Teammates")
+        self.assertEqual(nodes["SoftwareApplication"]["publisher"], {"@id": organization_id})
         self.assertEqual(
             nodes["SoftwareApplication"]["offers"],
             {

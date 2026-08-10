@@ -181,8 +181,8 @@ def build_ai_employees_structured_data(
     live_cluster_links,
     starting_price,
 ):
-    organization_id = f"{home_url.rstrip('/')}#organization"
-    website_id = f"{home_url.rstrip('/')}#website"
+    organization_id = f"{home_url.rstrip('/')}/#organization"
+    website_id = f"{home_url.rstrip('/')}/#website"
     webpage_id = f"{canonical_url.rstrip('/')}#webpage"
     software_id = f"{canonical_url.rstrip('/')}#software"
     faq_id = f"{canonical_url.rstrip('/')}#faq"
