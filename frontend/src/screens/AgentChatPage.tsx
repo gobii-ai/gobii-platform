@@ -2715,6 +2715,9 @@ export function AgentChatPage({
     if (!resolvedAgentId) {
       return
     }
+    if (subview !== 'chat') {
+      setMessageSearchState((current) => current.open ? { ...current, open: false } : current)
+    }
     dispatch(immersiveShellActions.setSidebarMode('gallery'))
     const nextPath = buildAgentChatShellPath(window.location.pathname, resolvedAgentId, subview)
     navigateShellPath(nextPath, resolvedAgentId)
