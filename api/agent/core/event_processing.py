@@ -6407,6 +6407,7 @@ def process_agent_events(
     inbound_message_id: str | None = None,
     prefer_low_latency: bool | None = None,
     max_loop_iterations: int | None = None,
+    max_runtime_seconds: int | None = None,
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
     worker_pid: Optional[int] = None,
@@ -6642,6 +6643,7 @@ def process_agent_events(
                 heartbeat=heartbeat,
                 prefer_low_latency=prefer_low_latency,
                 max_loop_iterations=max_loop_iterations,
+                max_runtime_seconds=max_runtime_seconds,
                 max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
                 max_iterations_followup_queue=max_iterations_followup_queue,
             )
@@ -6796,6 +6798,7 @@ def _process_agent_events_locked(
     heartbeat: Optional[_ProcessingHeartbeat] = None,
     prefer_low_latency: bool | None = None,
     max_loop_iterations: int | None = None,
+    max_runtime_seconds: int | None = None,
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
 ) -> Optional[PersistentAgent]:
@@ -7107,6 +7110,7 @@ def _process_agent_events_locked(
             heartbeat=heartbeat,
             prefer_low_latency=prefer_low_latency,
             max_loop_iterations=max_loop_iterations,
+            max_runtime_seconds=max_runtime_seconds,
             max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
             max_iterations_followup_queue=max_iterations_followup_queue,
         )
@@ -7154,6 +7158,7 @@ def _run_agent_loop(
     heartbeat: Optional[_ProcessingHeartbeat] = None,
     prefer_low_latency: bool | None = None,
     max_loop_iterations: int | None = None,
+    max_runtime_seconds: int | None = None,
     max_iterations_followup_delay_seconds: int | None = None,
     max_iterations_followup_queue: str | None = None,
 ) -> dict:
@@ -7174,7 +7179,9 @@ def _run_agent_loop(
     # Clear agent variables from any previous processing cycle
     clear_variables()
     clear_runtime_tier_override(agent)
-    max_runtime_seconds = int(getattr(settings, "AGENT_EVENT_PROCESSING_MAX_RUNTIME_SECONDS", 0))
+    if max_runtime_seconds is None:
+        max_runtime_seconds = settings.AGENT_EVENT_PROCESSING_MAX_RUNTIME_SECONDS
+    max_runtime_seconds = int(max_runtime_seconds)
     run_started_at = time.monotonic()
     if heartbeat:
         heartbeat.touch("loop_start")
@@ -7224,6 +7231,7 @@ def _run_agent_loop(
     effective_max_loop_iterations = _coerce_loop_iteration_limit(max_loop_iterations)
     span.set_attribute("MAX_AGENT_LOOP_ITERATIONS", MAX_AGENT_LOOP_ITERATIONS)
     span.set_attribute("agent.loop.max_iterations", effective_max_loop_iterations)
+    span.set_attribute("agent.loop.max_runtime_seconds", max_runtime_seconds)
 
     # Determine remaining steps from the shared budget (if any)
     budget_ctx = get_budget_context()
@@ -7348,22 +7356,22 @@ def _run_agent_loop(
             ):
                 return cumulative_token_usage
             if max_runtime_seconds and _runtime_exceeded(run_started_at, max_runtime_seconds):
+                elapsed_runtime_seconds = time.monotonic() - run_started_at
                 logger.warning(
-                    "Agent %s loop aborted after %d seconds (max=%d).",
+                    "Agent %s reached runtime limit after %.3f seconds (max=%d).",
                     agent.id,
-                    int(time.monotonic() - run_started_at),
+                    elapsed_runtime_seconds,
                     max_runtime_seconds,
                 )
                 span.add_event("Agent loop aborted - runtime limit")
+                span.set_attribute("agent.loop.elapsed_runtime_seconds", elapsed_runtime_seconds)
+                span.set_attribute("agent.loop.termination_reason", "runtime_limit")
                 if heartbeat:
                     heartbeat.touch("runtime_limit")
                 try:
                     PersistentAgentStep.objects.create(
                         agent=agent,
-                        description=(
-                            "Processing halted: runtime limit reached. "
-                            "Will resume on the next trigger."
-                        ),
+                        description="Processing paused: runtime limit reached. Will resume shortly.",
                     )
                 except DatabaseError:
                     logger.debug(
@@ -7371,14 +7379,35 @@ def _run_agent_loop(
                         agent.id,
                         exc_info=True,
                     )
-                pending_settings = get_pending_drain_settings(settings)
+                delay_seconds = max(0, int(max_iterations_followup_delay_seconds or 0))
+                if max_iterations_followup_delay_seconds is None:
+                    delay_seconds = get_pending_drain_settings(settings).pending_drain_delay_seconds
+                try:
+                    budget_exhausted = budget_ctx is not None and (
+                        AgentBudgetManager.get_steps_used(agent_id=budget_ctx.agent_id)
+                        >= budget_ctx.max_steps
+                    )
+                    if budget_exhausted:
+                        AgentBudgetManager.close_cycle(
+                            agent_id=budget_ctx.agent_id,
+                            budget_id=budget_ctx.budget_id,
+                        )
+                except RedisError:
+                    budget_exhausted = False
+                    logger.warning(
+                        "Agent %s budget cleanup failed at runtime limit",
+                        agent.id,
+                        exc_info=True,
+                    )
                 _schedule_agent_follow_up(
                     agent_id=agent.id,
-                    delay_seconds=pending_settings.pending_drain_delay_seconds,
+                    delay_seconds=delay_seconds,
                     span=span,
                     reason="Runtime limit",
+                    queue=max_iterations_followup_queue,
                 )
-                _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                if not budget_exhausted:
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
             with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
                 iter_span = trace.get_current_span()
@@ -8547,6 +8576,8 @@ def _run_agent_loop(
         else:
             logger.warning("Agent %s reached max iterations.", agent.id)
             span.add_event("Agent loop aborted - max iterations")
+            span.set_attribute("agent.loop.elapsed_runtime_seconds", time.monotonic() - run_started_at)
+            span.set_attribute("agent.loop.termination_reason", "max_iterations")
             if heartbeat:
                 heartbeat.touch("max_iterations")
             try:

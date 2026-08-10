@@ -224,6 +224,7 @@ def process_agent_events_task(
     prefer_low_latency: bool | None = None,
     _queued_at_ts: float | int | str | None = None,
     _queued_queue: str | None = None,
+    max_runtime_seconds: int | None = None,
 ) -> None:  # noqa: D401, ANN001
     """Celery task that triggers event processing for one persistent agent."""
     from api.evals.execution import set_current_eval_routing_profile
@@ -248,6 +249,8 @@ def process_agent_events_task(
     if task_queue == AGENT_INTERACTIVE_PROCESSING_QUEUE:
         if max_loop_iterations is None:
             max_loop_iterations = settings.AGENT_INTERACTIVE_MAX_LOOP_ITERATIONS
+        if max_runtime_seconds is None:
+            max_runtime_seconds = settings.AGENT_INTERACTIVE_MAX_RUNTIME_SECONDS
         if max_iterations_followup_delay_seconds is None:
             max_iterations_followup_delay_seconds = (
                 settings.AGENT_INTERACTIVE_MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS
@@ -359,6 +362,7 @@ def process_agent_events_task(
             inbound_message_id=inbound_message_id,
             prefer_low_latency=prefer_low_latency,
             max_loop_iterations=max_loop_iterations,
+            max_runtime_seconds=max_runtime_seconds,
             max_iterations_followup_delay_seconds=max_iterations_followup_delay_seconds,
             max_iterations_followup_queue=max_iterations_followup_queue,
             worker_pid=current_worker_pid,

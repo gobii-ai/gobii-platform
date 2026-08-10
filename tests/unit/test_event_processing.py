@@ -5687,6 +5687,12 @@ class EventProcessingRuntimeGuardTests(TestCase):
         message.refresh_from_db()
         return message
 
+    def test_runtime_expires_at_exact_boundary(self):
+        from api.agent.core.event_processing import _runtime_exceeded
+
+        with patch("api.agent.core.event_processing.time.monotonic", return_value=400.0):
+            self.assertTrue(_runtime_exceeded(100.0, 300))
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_tool_call_runtime_rejects_tier_blacklisted_static_tool(self):
         tier = get_intelligence_tier("standard")
@@ -5751,6 +5757,51 @@ class EventProcessingRuntimeGuardTests(TestCase):
         mock_apply_async.assert_called_once_with(
             args=[str(self.agent.id)],
             countdown=10,
+        )
+        self.assertEqual(usage.get("total_tokens"), 0)
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing._runtime_exceeded", return_value=True)
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing.get_redis_client")
+    def test_explicit_runtime_limit_uses_interactive_followup_controls(
+        self,
+        mock_get_redis,
+        _mock_tools,
+        mock_build_context,
+        mock_runtime,
+        mock_get_pending_settings,
+        mock_apply_async,
+    ):
+        class _FakeRedis:
+            def get(self, _key):
+                return None
+
+            def exists(self, _key):
+                return 0
+
+        mock_get_redis.return_value = _FakeRedis()
+
+        usage = _run_agent_loop(
+            self.agent,
+            is_first_run=False,
+            max_loop_iterations=10,
+            max_runtime_seconds=300,
+            max_iterations_followup_delay_seconds=0,
+            max_iterations_followup_queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+        )
+
+        self.assertFalse(mock_build_context.called)
+        mock_runtime.assert_called_once()
+        self.assertEqual(mock_runtime.call_args.args[1], 300)
+        mock_get_pending_settings.assert_not_called()
+        mock_apply_async.assert_called_once_with(
+            args=[str(self.agent.id)],
+            countdown=0,
+            queue=AGENT_DEFAULT_PROCESSING_QUEUE,
         )
         self.assertEqual(usage.get("total_tokens"), 0)
 
@@ -7637,13 +7688,25 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
         *,
         followup_delay_seconds: int | None,
         followup_queue: str | None,
+        will_continue_work: bool = True,
+        tool_name: str = "sqlite_batch",
+        max_loop_iterations: int = 1,
+        max_runtime_seconds: int | None = 300,
     ) -> None:
-        enable_tools(self.agent, ["sqlite_batch"])
+        if tool_name == "sqlite_batch":
+            enable_tools(self.agent, [tool_name])
 
         tool_call = MagicMock()
         tool_call.function = MagicMock()
-        tool_call.function.name = "sqlite_batch"
-        tool_call.function.arguments = '{"sql": "SELECT 1", "will_continue_work": true}'
+        tool_call.function.name = tool_name
+        tool_call.function.arguments = (
+            "{}"
+            if tool_name == "sleep_until_next_trigger"
+            else json.dumps({
+                "sql": "SELECT 1",
+                "will_continue_work": will_continue_work,
+            })
+        )
 
         response_message = MagicMock()
         response_message.tool_calls = [tool_call]
@@ -7680,7 +7743,8 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             _run_agent_loop(
                 self.agent,
                 is_first_run=False,
-                max_loop_iterations=1,
+                max_loop_iterations=max_loop_iterations,
+                max_runtime_seconds=max_runtime_seconds,
                 max_iterations_followup_delay_seconds=followup_delay_seconds,
                 max_iterations_followup_queue=followup_queue,
             )
@@ -7798,6 +7862,59 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             agent_id=budget_ctx.agent_id,
         )
         self.assertEqual(active_budget_id, budget_ctx.budget_id)
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
+    @patch("api.agent.core.event_processing._runtime_exceeded", return_value=True)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    def test_runtime_limit_preserves_active_budget_for_standard_queue_followup(
+        self,
+        _mock_tools,
+        mock_runtime,
+        mock_apply_async,
+    ):
+        budget_ctx = self._start_budget_cycle(max_steps=2)
+        mock_apply_async.side_effect = lambda *_args, **_kwargs: set_processing_queued_flag(self.agent.id)
+
+        _run_agent_loop(
+            self.agent,
+            is_first_run=False,
+            max_loop_iterations=10,
+            max_runtime_seconds=300,
+            max_iterations_followup_delay_seconds=0,
+            max_iterations_followup_queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+        )
+
+        mock_runtime.assert_called_once()
+        mock_apply_async.assert_called_once_with(
+            args=[str(self.agent.id)],
+            countdown=0,
+            queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+        )
+        self.assertEqual(
+            AgentBudgetManager.get_cycle_status(agent_id=budget_ctx.agent_id),
+            "active",
+        )
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
+    @patch("api.agent.core.event_processing._runtime_exceeded", return_value=False)
+    def test_natural_completion_does_not_queue_runtime_followup(
+        self,
+        mock_runtime,
+        mock_apply_async,
+    ):
+        with patch.object(PersistentAgentStep.objects, "create", return_value=MagicMock()):
+            self._run_single_iteration_to_cap(
+                followup_delay_seconds=0,
+                followup_queue=AGENT_DEFAULT_PROCESSING_QUEUE,
+                tool_name="sleep_until_next_trigger",
+                max_loop_iterations=10,
+                max_runtime_seconds=300,
+            )
+
+        mock_runtime.assert_called_once()
+        mock_apply_async.assert_not_called()
 
     @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
