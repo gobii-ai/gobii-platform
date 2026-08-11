@@ -82,6 +82,8 @@ def agent_enabled_personal_server_ids(agent: PersistentAgent) -> List[str]:
 def _assignable_agents_queryset(server: MCPServerConfig):
     """Return queryset of agents eligible for assignment to the given server."""
 
+    if server.managed_integration_key:
+        return PersistentAgent.objects.none()
     if server.scope == MCPServerConfig.Scope.USER:
         if not server.user_id:
             return PersistentAgent.objects.none()
@@ -161,6 +163,8 @@ def set_server_assignments(server: MCPServerConfig, desired_agent_ids: IterableT
         raise ValueError("Computer-managed MCP servers cannot be assigned manually.")
     if server.scope == MCPServerConfig.Scope.PLATFORM:
         raise ValueError("Platform-scoped servers cannot be assigned manually.")
+    if server.managed_integration_key:
+        raise ValueError("Managed MCP integrations are inherited by every agent in their workspace.")
 
     desired_set = {str(agent_id) for agent_id in desired_agent_ids}
     assignable_qs = _assignable_agents_queryset(server)
@@ -234,19 +238,36 @@ def agent_accessible_server_configs(
     """Collect all MCP server configs accessible to the agent."""
 
     assigned_ids = set(agent_enabled_server_ids(agent))
+    from api.services.managed_mcp_integrations import managed_mcp_provider_keys_for_agent
+
+    managed_keys = managed_mcp_provider_keys_for_agent(agent)
     access_filter = Q(scope=MCPServerConfig.Scope.PLATFORM)
-    if agent.organization_id and assigned_ids:
+    if agent.organization_id:
         access_filter |= Q(
             scope=MCPServerConfig.Scope.ORGANIZATION,
             organization_id=agent.organization_id,
             id__in=assigned_ids,
         )
-    if agent.user_id and assigned_ids:
+        if managed_keys:
+            access_filter |= Q(
+                scope=MCPServerConfig.Scope.ORGANIZATION,
+                organization_id=agent.organization_id,
+                managed_integration_key__in=managed_keys,
+            )
+    if agent.user_id:
         access_filter |= Q(
             scope=MCPServerConfig.Scope.USER,
             user_id=agent.user_id,
             id__in=assigned_ids,
+            managed_integration_key="",
         )
+    if agent.user_id and not agent.organization_id:
+        if managed_keys:
+            access_filter |= Q(
+                scope=MCPServerConfig.Scope.USER,
+                user_id=agent.user_id,
+                managed_integration_key__in=managed_keys,
+            )
 
     queryset = MCPServerConfig.objects.filter(access_filter, is_active=True)
     if allowed_config_ids is not None and allowed_server_names is not None:
@@ -284,6 +305,9 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
 
     overview: List[Dict[str, Any]] = []
     assigned_ids = set(agent_enabled_server_ids(agent))
+    from api.services.managed_mcp_integrations import managed_mcp_provider_keys_for_agent
+
+    managed_keys = managed_mcp_provider_keys_for_agent(agent)
     organization_configs = (
         list(organization_server_configs(agent.organization_id))
         if agent.organization_id
@@ -303,12 +327,15 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
             organization_configs,
             sandbox_available=sandbox_available,
         ):
+            if cfg.managed_integration_key and cfg.managed_integration_key not in managed_keys:
+                continue
             server_id = str(cfg.id)
+            managed = bool(cfg.managed_integration_key)
             overview.append(
                 _serialize_config(
                     cfg,
-                    inherited=False,
-                    assigned=server_id in assigned_ids,
+                    inherited=managed,
+                    assigned=managed or server_id in assigned_ids,
                 )
             )
 
@@ -322,12 +349,17 @@ def agent_server_overview(agent: PersistentAgent) -> List[Dict[str, Any]]:
         personal_configs,
         sandbox_available=sandbox_available,
     ):
+        if agent.organization_id and cfg.managed_integration_key:
+            continue
+        if cfg.managed_integration_key and cfg.managed_integration_key not in managed_keys:
+            continue
         server_id = str(cfg.id)
+        managed = bool(cfg.managed_integration_key)
         overview.append(
             _serialize_config(
                 cfg,
-                inherited=False,
-                assigned=server_id in assigned_ids,
+                inherited=managed,
+                assigned=managed or server_id in assigned_ids,
             )
         )
 
@@ -354,6 +386,7 @@ def update_agent_personal_servers(
             scope=MCPServerConfig.Scope.USER,
             user=agent.user,
             is_active=True,
+            managed_integration_key="",
             id__in=desired_set,
         ).exclude(transport=MCPServerConfig.Transport.COMPUTER_RELAY)
     )
@@ -504,6 +537,7 @@ def update_agent_org_servers(
             scope=MCPServerConfig.Scope.ORGANIZATION,
             organization_id=agent.organization_id,
             is_active=True,
+            managed_integration_key="",
             id__in=desired_set,
         ).exclude(transport=MCPServerConfig.Transport.COMPUTER_RELAY)
     )
@@ -569,6 +603,7 @@ def _serialize_config(cfg: MCPServerConfig, *, inherited: bool, assigned: bool) 
         'inherited': inherited,
         'assigned': assigned,
         'is_active': cfg.is_active,
+        'managed_integration_key': cfg.managed_integration_key,
         'organization_id': str(cfg.organization_id) if cfg.organization_id else None,
         'user_id': str(cfg.user_id) if cfg.user_id else None,
     }

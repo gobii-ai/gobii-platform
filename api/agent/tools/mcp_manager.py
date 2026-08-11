@@ -745,6 +745,22 @@ class MCPToolManager:
             return False
         return self._sandbox_mcp_enabled(agent)
 
+    @staticmethod
+    def _managed_runtime_accessible_to_agent(
+        runtime: Optional[MCPServerRuntime],
+        agent: Optional[PersistentAgent],
+    ) -> bool:
+        if runtime is None or not runtime.metadata.get("managed_oauth"):
+            return True
+        if agent is None:
+            return False
+        return bool(
+            agent_accessible_server_configs(
+                agent,
+                allowed_config_ids={runtime.config_id},
+            )
+        )
+
     def _should_route_runtime_via_sandbox(
         self,
         runtime: Optional[MCPServerRuntime],
@@ -1215,9 +1231,12 @@ class MCPToolManager:
     ) -> tuple[MCPServerRuntime, Optional[Dict[str, Any]]]:
         if server.auth_method != MCPServerConfig.AuthMethod.OAUTH2:
             return server, None
-        if server.oauth_access_token and (
-            server.oauth_expires_at is None
-            or server.oauth_expires_at > timezone.now() + OAUTH_REFRESH_SAFETY_MARGIN
+        if (
+            server.oauth_access_token
+            and (
+                server.oauth_expires_at is None
+                or server.oauth_expires_at > timezone.now() + OAUTH_REFRESH_SAFETY_MARGIN
+            )
         ):
             return server, None
 
@@ -1226,6 +1245,7 @@ class MCPToolManager:
         if result.status != MCPOAuthStatus.USABLE or credential is None:
             if (
                 result.status == MCPOAuthStatus.TEMPORARILY_UNAVAILABLE
+                and not server.metadata.get("managed_oauth")
                 and server.oauth_access_token
                 and server.oauth_expires_at is not None
                 and server.oauth_expires_at > timezone.now()
@@ -1237,11 +1257,19 @@ class MCPToolManager:
                 return server, None
             message = result.message or "This MCP integration is unavailable."
             if result.status == MCPOAuthStatus.RECONNECT_REQUIRED:
-                return server, {
+                action_required = {
                     "status": "action_required",
                     "result": message,
                     "message": message,
                 }
+                if server.metadata.get("managed_oauth"):
+                    connect_url = f"{str(settings.PUBLIC_SITE_URL or '').rstrip('/')}/app/integrations"
+                    action_required.update(
+                        result=f"{message} Reconnect it at {connect_url}.",
+                        message=f"{message} Reconnect it at {connect_url}.",
+                        connect_url=connect_url,
+                    )
+                return server, action_required
             return server, {
                 "status": "error",
                 "message": message,
@@ -2303,9 +2331,13 @@ class MCPToolManager:
         )
         if cached and cached_matches_row:
             cached_runtime = self._server_cache.get(cached.config_id)
-            if cached_runtime and self._sandbox_required_runtime_available(
-                cached_runtime,
-                agent=agent,
+            if (
+                cached_runtime
+                and self._sandbox_required_runtime_available(
+                    cached_runtime,
+                    agent=agent,
+                )
+                and self._managed_runtime_accessible_to_agent(cached_runtime, agent)
             ):
                 return cached
 
@@ -2372,6 +2404,7 @@ class MCPToolManager:
                     or runtime.name.lower() in allowed_server_names
                 )
                 and self._sandbox_required_runtime_available(runtime, agent=agent)
+                and self._managed_runtime_accessible_to_agent(runtime, agent)
             ]
             if tool_name.startswith("mcp_"):
                 parts = tool_name.split("_", 2)

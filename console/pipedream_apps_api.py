@@ -14,8 +14,8 @@ from api.services.pipedream_agent_apps import (
 from api.services.pipedream_apps import (
     PipedreamCatalogError,
     PipedreamCatalogService,
-    filter_deprecated_pipedream_apps_without_agent,
     get_owner_apps_state,
+    get_pipedream_app_visibility_for_owner,
     serialize_owner_apps_state,
     set_owner_selected_app_slugs,
 )
@@ -192,13 +192,17 @@ class PipedreamAppSearchAPIView(ApiLoginRequiredMixin, View):
         error = _pipedream_disabled_response()
         if error:
             return error
-        _resolve_mcp_owner(request)
+        _owner_scope, _owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
         query = str(request.GET.get("q") or "").strip()
         if not query:
             return JsonResponse({"results": []})
         catalog = PipedreamCatalogService()
         try:
-            apps = filter_deprecated_pipedream_apps_without_agent(catalog.search_apps(query))
+            visibility = get_pipedream_app_visibility_for_owner(
+                owner_user=owner_user,
+                owner_org=owner_org,
+            )
+            apps = visibility.filter_apps(catalog.search_apps(query))
             results = [app.to_dict() for app in apps]
         except PipedreamCatalogError as exc:
             return JsonResponse({"error": str(exc)}, status=502)

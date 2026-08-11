@@ -12,13 +12,13 @@ from api.agent.tools.secure_api_request import (
 from api.meta_ads_setup import META_ADS_SETUP_INSTRUCTIONS, META_ADS_SETUP_STEPS, META_ADS_TROUBLESHOOTING_TIPS
 
 from .image_generation import IMAGE_GENERATION_PROMPT_INSTRUCTIONS, IMAGE_GENERATION_SYSTEM_SKILL_KEY
+from .keys import HUBSPOT_NATIVE_SYSTEM_SKILL_KEY
 from .native_api_cookbooks import render_native_api_cookbook
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
 
 
 GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
 APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
-HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
 WEBHOOKS_SYSTEM_SKILL_KEY = "webhooks"
 CODE_WORK_SYSTEM_SKILL_KEY = "code_work"
@@ -290,6 +290,39 @@ def _apollo_native_prompt_instructions(agent) -> str:
 
 
 def _hubspot_native_prompt_instructions(agent) -> str:
+    from api.services.managed_mcp_integrations import (
+        ManagedMCPConnectionMode,
+        resolve_managed_mcp_connection_mode,
+    )
+
+    owner_org = getattr(agent, "organization", None) if getattr(agent, "organization_id", None) else None
+    owner_user = None if owner_org is not None else getattr(agent, "user", None)
+    if (
+        resolve_managed_mcp_connection_mode("hubspot", owner_user, owner_org)
+        == ManagedMCPConnectionMode.MANAGED_MCP
+    ):
+        connection_gate = _native_connection_gate(
+            agent,
+            "hubspot",
+            "HubSpot",
+            "connect HubSpot",
+        )
+        if connection_gate:
+            return connection_gate
+        return (
+            "Use HubSpot's connected remote MCP tools for HubSpot work. Find the smallest relevant tool set with "
+            "`search_tools`; do not use `http_request`, Pipedream HubSpot tools, browser automation, web search, "
+            "or manually supplied private-app tokens for HubSpot.\n"
+            "Before the first substantive HubSpot operation in a task, use `get_user_details` to verify the "
+            "connected account, available objects and tools, and whether HubSpot requires reauthorization. If it "
+            "reports `REQUIRES_REAUTHORIZATION`, stop HubSpot calls and ask the user to reconnect at the integrations "
+            "page. Tool availability is dynamic and depends on the connected user's HubSpot seat, account products, "
+            "permissions, and the tools authorized during the current connection.\n"
+            "Keep reads bounded with explicit object types, properties, filters, limits, and pagination. For creates, "
+            "updates, deletes, merges, bulk changes, association changes, lifecycle-stage changes, or other "
+            "side-effecting operations, summarize the exact records, properties, filters, and side effects before "
+            "proceeding unless the user has already clearly approved that operation."
+        )
     connection_gate = _native_connection_gate(
         agent,
         "hubspot",
@@ -748,14 +781,15 @@ RECRUITMENT_SOURCING_SYSTEM_SKILL = SystemSkillDefinition(
 HUBSPOT_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=HUBSPOT_NATIVE_SYSTEM_SKILL_KEY,
     name="HubSpot",
-    search_summary="Use connected HubSpot REST APIs for contacts, companies, deals, owners, properties, and CRM workflows.",
+    search_summary="Use connected HubSpot tools for contacts, companies, deals, owners, properties, and CRM workflows.",
     tool_names=("http_request",),
+    managed_mcp_provider_keys=("hubspot",),
     enables=(
         "search HubSpot contacts, companies, and deals",
         "read and update HubSpot CRM records",
         "create HubSpot contacts, companies, and deals after clear user intent",
         "inspect HubSpot owners, properties, and associations",
-        "use native HubSpot OAuth with scoped CRM access",
+        "use workspace-managed HubSpot OAuth with dynamically authorized CRM access",
     ),
     use_when=(
         "the user asks to use HubSpot",

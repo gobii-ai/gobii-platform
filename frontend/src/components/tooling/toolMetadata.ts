@@ -1780,6 +1780,14 @@ export type FriendlyToolInfo = {
 }
 
 export function getFriendlyToolInfo(rawName: string): FriendlyToolInfo {
+  if (rawName.toLowerCase().startsWith('mcp_hubspot_')) {
+    return {
+      label: toFriendlyToolName(rawName),
+      icon: Network,
+      iconBgClass: 'bg-orange-100',
+      iconColorClass: 'text-orange-700',
+    }
+  }
   if (rawName.toLowerCase().startsWith('custom_')) {
     return {
       label: toFriendlyToolName(rawName),

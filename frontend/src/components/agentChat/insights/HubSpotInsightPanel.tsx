@@ -25,8 +25,8 @@ export function HubSpotInsightPanel({ agentId = null, nativeIntegrationsUrl = nu
       notConfiguredMessage="HubSpot is not configured."
       connectedTitle="HubSpot connected"
       disconnectedTitle="Connect HubSpot"
-      connectedText="This agent can use HubSpot REST APIs for contacts, companies, deals, owners, properties, and CRM workflows."
-      disconnectedText="Connect HubSpot so this agent can use HubSpot REST APIs for CRM records and workflows."
+      connectedText="This agent can use HubSpot for the CRM objects and workflows available to your connected account."
+      disconnectedText="Connect HubSpot so this agent can use your available CRM records and workflows."
     />
   )
 }

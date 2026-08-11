@@ -108,6 +108,21 @@ function descriptorFor(toolName: string | null | undefined): ToolDescriptor {
   if (normalized.startsWith('mcp_computer_')) {
     return TOOL_DESCRIPTORS.get('mcp_computer')!
   }
+  if (normalized.startsWith('mcp_hubspot_')) {
+    const fallback = TOOL_DESCRIPTORS.get('default')!
+    return {
+      ...fallback,
+      name: 'hubspot_mcp',
+      label: 'HubSpot MCP',
+      icon: Wrench,
+      iconBgClass: 'bg-orange-100',
+      iconColorClass: 'text-orange-700',
+      detailComponent: resolveDetailComponent('mcpTool'),
+      derive: () => ({
+        iconSrc: '/static/images/integrations/native/hubspot.svg',
+      }),
+    }
+  }
   return TOOL_DESCRIPTORS.get(normalized) || TOOL_DESCRIPTORS.get('default')!
 }
 

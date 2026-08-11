@@ -78,6 +78,39 @@ _GENERIC_BATCH_WORK_SCHEMA = {
     "additionalProperties": True,
 }
 
+_HUBSPOT_USER_DETAILS_SCHEMA = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+_HUBSPOT_SEARCH_CRM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "objectType": {"type": "string"},
+        "filterGroups": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+        "properties": {"type": "array", "items": {"type": "string"}},
+        "sorts": {"type": "array", "items": {"type": "string"}},
+        "limit": {"type": "integer"},
+        "after": {"type": "string"},
+    },
+    "required": ["objectType"],
+    "additionalProperties": True,
+}
+
+_HUBSPOT_MANAGE_CRM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "objectType": {"type": "string"},
+        "operation": {"type": "string"},
+        "objectId": {"type": "string"},
+        "properties": {"type": "object", "additionalProperties": True},
+        "inputs": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+    },
+    "required": ["objectType", "operation"],
+    "additionalProperties": True,
+}
+
 _WEB_SEARCH_SCHEMA = {
     "type": "object",
     "properties": {
@@ -199,6 +232,21 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "apollo_io-people-enrichment": {
         "description": "Enrich a person profile from Apollo.io using email or identity details.",
         "parameters": _APOLLO_PEOPLE_ENRICHMENT_SCHEMA,
+    },
+    "mcp_hubspot_get_user_details": {
+        "description": (
+            "Return the connected HubSpot user, account, available CRM objects and tools, and reauthorization status. "
+            "Call this before the first substantive HubSpot operation in a task."
+        ),
+        "parameters": _HUBSPOT_USER_DETAILS_SCHEMA,
+    },
+    "mcp_hubspot_search_crm_objects": {
+        "description": "Search HubSpot CRM objects with explicit filters, properties, limits, sorting, and pagination.",
+        "parameters": _HUBSPOT_SEARCH_CRM_SCHEMA,
+    },
+    "mcp_hubspot_manage_crm_objects": {
+        "description": "Create or update supported HubSpot CRM records and activities.",
+        "parameters": _HUBSPOT_MANAGE_CRM_SCHEMA,
     },
     "mcp_brightdata_search_engine": {
         "description": "Search deterministic eval web snippets; returned .example.test URLs are valid source URLs.",

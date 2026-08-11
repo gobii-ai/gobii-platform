@@ -5,6 +5,7 @@ export type NativeIntegrationProviderDTO = {
   display_name: string
   description: string
   auth_type: string
+  connection_kind?: 'native_api' | 'managed_mcp'
   icon: string
   api_hosts: string[]
   scopes: string[]
@@ -83,6 +84,7 @@ export type NativeIntegrationProvider = {
   displayName: string
   description: string
   authType: string
+  connectionKind?: 'native_api' | 'managed_mcp'
   icon: string
   apiHosts: string[]
   scopes: string[]
@@ -161,6 +163,7 @@ export const mapNativeIntegrationProvider = (provider: NativeIntegrationProvider
   displayName: provider.display_name,
   description: provider.description ?? '',
   authType: provider.auth_type,
+  connectionKind: provider.connection_kind === 'managed_mcp' ? 'managed_mcp' : 'native_api',
   icon: provider.icon,
   apiHosts: Array.isArray(provider.api_hosts) ? provider.api_hosts.map((host) => String(host)) : [],
   scopes: Array.isArray(provider.scopes) ? provider.scopes.map((scope) => String(scope)) : [],
