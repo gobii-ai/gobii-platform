@@ -180,6 +180,20 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
         )
 
     @tag("batch_agent_chat")
+    def test_enqueue_interactive_process_agent_events_supports_countdown(self):
+        agent_id = "44444444-4444-4444-4444-444444444444"
+
+        with patch("api.agent.tasks.process_events.process_agent_events_task.apply_async") as mock_apply_async:
+            enqueue_interactive_process_agent_events(agent_id, countdown=5)
+
+        mock_apply_async.assert_called_once_with(
+            args=[agent_id],
+            kwargs={},
+            queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+            countdown=5,
+        )
+
+    @tag("batch_agent_chat")
     def test_enqueue_interactive_process_agent_events_omits_empty_generation(self):
         agent_id = "44444444-4444-4444-4444-444444444444"
 
@@ -207,21 +221,31 @@ class ProcessAgentEventsTaskTests(SimpleTestCase):
              patch("api.models.PersistentAgent.objects.select_related") as mock_select_related, \
              patch("api.agent.tasks.process_events.process_agent_events") as mock_process:
             mock_select_related.return_value.filter.return_value.first.return_value = None
-            process_agent_events_task.push_request(
-                delivery_info={"routing_key": AGENT_INTERACTIVE_PROCESSING_QUEUE},
-                id="interactive-task",
-            )
-            try:
-                process_agent_events_task.run(agent_id, prefer_low_latency=True)
-            finally:
-                process_agent_events_task.pop_request()
+            for task_id, explicit_preference in (
+                ("interactive-default-task", None),
+                ("interactive-explicit-task", False),
+            ):
+                process_agent_events_task.push_request(
+                    delivery_info={"routing_key": AGENT_INTERACTIVE_PROCESSING_QUEUE},
+                    id=task_id,
+                )
+                try:
+                    process_agent_events_task.run(
+                        agent_id,
+                        prefer_low_latency=explicit_preference,
+                    )
+                finally:
+                    process_agent_events_task.pop_request()
 
-        call_kwargs = mock_process.call_args.kwargs
+        default_call_kwargs = mock_process.call_args_list[0].kwargs
+        explicit_call_kwargs = mock_process.call_args_list[1].kwargs
+        call_kwargs = default_call_kwargs
         self.assertEqual(call_kwargs["max_loop_iterations"], 10)
         self.assertEqual(call_kwargs["max_runtime_seconds"], 300)
         self.assertEqual(call_kwargs["max_iterations_followup_delay_seconds"], 0)
         self.assertEqual(call_kwargs["max_iterations_followup_queue"], AGENT_DEFAULT_PROCESSING_QUEUE)
-        self.assertIs(call_kwargs["prefer_low_latency"], True)
+        self.assertIs(default_call_kwargs["prefer_low_latency"], True)
+        self.assertIs(explicit_call_kwargs["prefer_low_latency"], False)
         self.assertEqual(call_kwargs["processing_queue"], AGENT_INTERACTIVE_PROCESSING_QUEUE)
 
     @tag("batch_agent_chat")

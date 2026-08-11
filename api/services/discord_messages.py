@@ -246,16 +246,16 @@ def process_agent_events_after_discord_debounce(
     inbound_message_id: str | None = None,
     countdown: int = 0,
 ) -> None:
-    from api.agent.tasks import process_agent_events_task
+    from api.agent.tasks import enqueue_interactive_process_agent_events
 
     inbound_generation = get_human_inbound_generation(agent_id)
-    kwargs = {"inbound_generation": inbound_generation} if inbound_generation else {}
-    if inbound_message_id:
-        kwargs["inbound_message_id"] = inbound_message_id
-    if countdown > 0:
-        process_agent_events_task.apply_async(args=[agent_id], kwargs=kwargs, countdown=countdown)
-    else:
-        process_agent_events_task.delay(agent_id, **kwargs)
+    enqueue_interactive_process_agent_events(
+        agent_id,
+        inbound_generation=inbound_generation or None,
+        inbound_message_id=inbound_message_id,
+        prefer_low_latency=True,
+        countdown=countdown,
+    )
 
 
 def schedule_discord_inbound_processing(
@@ -300,7 +300,11 @@ def schedule_discord_inbound_processing(
             "Failed scheduling Discord inbound debounce for agent %s; falling back to delayed processing.",
             normalized_agent_id,
         )
-        process_agent_events_after_discord_debounce(normalized_agent_id, countdown=debounce_seconds)
+        process_agent_events_after_discord_debounce(
+            normalized_agent_id,
+            inbound_message_id=inbound_message_id,
+            countdown=debounce_seconds,
+        )
         return {
             "debounced": False,
             "debounce_seconds": debounce_seconds,

@@ -99,7 +99,7 @@ class _ProcessingDispatch:
                 ),
             })
 
-            is_interactive = self.channel == CommsChannel.WEB
+            is_interactive = self.channel in {CommsChannel.WEB, CommsChannel.SMS}
             if self.has_attachments and self.message_id:
                 self._dispatch_attachment_import()
 
@@ -115,10 +115,15 @@ class _ProcessingDispatch:
             from api.agent.tasks import enqueue_interactive_process_agent_events, process_agent_events_task
 
             if is_interactive:
+                interactive_kwargs = {
+                    "inbound_generation": inbound_generation,
+                    "inbound_message_id": self.message_id,
+                }
+                if self.channel == CommsChannel.SMS:
+                    interactive_kwargs["prefer_low_latency"] = True
                 enqueue_interactive_process_agent_events(
                     str(self.owner_id),
-                    inbound_generation=inbound_generation,
-                    inbound_message_id=self.message_id,
+                    **interactive_kwargs,
                 )
             else:
                 kwargs = (
