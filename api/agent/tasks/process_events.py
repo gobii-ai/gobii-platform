@@ -166,6 +166,7 @@ def enqueue_interactive_process_agent_events(
     inbound_message_id: str | None = None,
     eval_run_id: str | None = None,
     prefer_low_latency: bool | None = None,
+    countdown: int = 0,
 ) -> None:
     """Queue interactive agent processing on the low-latency queue."""
     kwargs: dict[str, Any] = {}
@@ -177,10 +178,13 @@ def enqueue_interactive_process_agent_events(
         kwargs["eval_run_id"] = eval_run_id
     if prefer_low_latency is not None:
         kwargs["prefer_low_latency"] = prefer_low_latency
+    options: dict[str, Any] = {"queue": AGENT_INTERACTIVE_PROCESSING_QUEUE}
+    if countdown > 0:
+        options["countdown"] = countdown
     process_agent_events_task.apply_async(
         args=[str(persistent_agent_id)],
         kwargs=kwargs,
-        queue=AGENT_INTERACTIVE_PROCESSING_QUEUE,
+        **options,
     )
 
 
@@ -247,6 +251,8 @@ def process_agent_events_task(
     if queue_latency_seconds is not None:
         span.set_attribute("celery.queue_latency_seconds", queue_latency_seconds)
     if task_queue == AGENT_INTERACTIVE_PROCESSING_QUEUE:
+        if prefer_low_latency is None:
+            prefer_low_latency = True
         if max_loop_iterations is None:
             max_loop_iterations = settings.AGENT_INTERACTIVE_MAX_LOOP_ITERATIONS
         if max_runtime_seconds is None:

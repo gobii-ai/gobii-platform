@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
@@ -432,10 +432,10 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
 
     @tag("batch_sms")
     @override_settings(PUBLIC_SITE_URL="https://example.com")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     def test_daily_limit_sms_queues_processing_without_sending_notice(
         self,
-        mock_delay,
+        mock_enqueue,
     ):
         self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
@@ -454,7 +454,17 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
             with self.captureOnCommitCallbacks(execute=True):
                 ingest_inbound_message(CommsChannel.SMS, parsed)
 
-        mock_delay.assert_called_once()
+        message = PersistentAgentMessage.objects.get(
+            owner_agent=self.agent,
+            is_outbound=False,
+            body="Ping",
+        )
+        mock_enqueue.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=ANY,
+            inbound_message_id=str(message.id),
+            prefer_low_latency=True,
+        )
         self.assertFalse(
             PersistentAgentMessage.objects.filter(
                 owner_agent=self.agent,
@@ -463,12 +473,12 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
         )
 
     @tag("batch_sms")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     @patch("api.agent.comms.outbound_delivery.deliver_agent_sms")
     def test_paused_agent_sms_sends_sender_only_reply_and_skips_processing(
         self,
         mock_deliver_sms,
-        mock_delay,
+        mock_enqueue,
     ):
         self._pause_owner(EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY)
         parsed = ParsedMessage(
@@ -484,7 +494,7 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
 
         ingest_inbound_message(CommsChannel.SMS, parsed)
 
-        mock_delay.assert_not_called()
+        mock_enqueue.assert_not_called()
         self.assertEqual(get_human_inbound_generation(self.agent.id), generation_before)
         mock_deliver_sms.assert_called_once()
         outbound_msg = mock_deliver_sms.call_args.args[0]
@@ -494,12 +504,12 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
         self.assertIn("billing needs attention", outbound_msg.body.lower())
 
     @tag("batch_sms")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     @patch("api.agent.comms.outbound_delivery.deliver_agent_sms")
     def test_paused_agent_sms_does_not_reply_to_non_whitelisted_sender(
         self,
         mock_deliver_sms,
-        mock_delay,
+        mock_enqueue,
     ):
         self._pause_owner(EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY)
         parsed = ParsedMessage(
@@ -514,17 +524,17 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
 
         ingest_inbound_message(CommsChannel.SMS, parsed)
 
-        mock_delay.assert_not_called()
+        mock_enqueue.assert_not_called()
         mock_deliver_sms.assert_not_called()
 
     @tag("batch_sms")
     @override_settings(PUBLIC_SITE_URL="https://example.com")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     @patch("api.agent.comms.outbound_delivery.deliver_agent_sms")
     def test_inactive_agent_sms_sends_friendly_notice_once(
         self,
         mock_deliver_sms,
-        mock_delay,
+        mock_enqueue,
     ):
         self.agent.is_active = False
         self.agent.save(update_fields=["is_active"])
@@ -544,7 +554,7 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
             ingest_inbound_message(CommsChannel.SMS, parsed)
 
         self.assertEqual(info.processing_blocked_reason, "agent_inactive")
-        mock_delay.assert_not_called()
+        mock_enqueue.assert_not_called()
         mock_deliver_sms.assert_called_once()
         notice = mock_deliver_sms.call_args.args[0]
         self.assertIn("paused", notice.body.lower())

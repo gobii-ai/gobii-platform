@@ -4,6 +4,7 @@ import json
 import time
 from unittest.mock import ANY, MagicMock, patch
 
+import redis
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -224,7 +225,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.get_max_file_size", return_value=None)
     @patch("api.agent.comms.message_service.requests.get")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     def test_webhook_accepts_discord_message_event(
         self,
         mock_delay,
@@ -277,12 +278,14 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             str(self.agent.id),
             inbound_generation=ANY,
             inbound_message_id=str(message.id),
+            prefer_low_latency=True,
+            countdown=0,
         )
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.get_max_file_size", return_value=None)
     @patch("api.agent.comms.message_service.requests.get")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     def test_webhook_accepts_attachment_only_discord_message_event(
         self,
         mock_delay,
@@ -350,11 +353,13 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             str(self.agent.id),
             inbound_generation=ANY,
             inbound_message_id=str(message.id),
+            prefer_low_latency=True,
+            countdown=0,
         )
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.requests.get")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     def test_webhook_records_id_only_discord_attachments_without_download(self, mock_delay, mock_get):
         body = json.dumps(
             {
@@ -389,11 +394,13 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             str(self.agent.id),
             inbound_generation=ANY,
             inbound_message_id=str(message.id),
+            prefer_low_latency=True,
+            countdown=0,
         )
 
     @tag("batch_agent_webhooks")
     @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
     @patch("api.services.discord_messages.get_redis_client")
     def test_webhook_debounces_discord_message_processing_when_enabled(
@@ -463,9 +470,66 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(deadline_values, ["120.000000"])
 
     @tag("batch_agent_webhooks")
+    @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=5, CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
+    @patch("api.services.discord_messages.get_redis_client")
+    def test_discord_inbound_debounce_redis_failure_uses_delayed_interactive_processing(
+        self,
+        mock_get_redis_client,
+        mock_enqueue,
+    ):
+        redis_client = MagicMock()
+        redis_client.pipeline.side_effect = redis.exceptions.RedisError("unavailable")
+        mock_get_redis_client.return_value = redis_client
+
+        result = schedule_discord_inbound_processing(
+            str(self.agent.id),
+            inbound_message_id="discord-message-id",
+        )
+
+        self.assertTrue(result["fallback"])
+        mock_enqueue.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=ANY,
+            inbound_message_id="discord-message-id",
+            prefer_low_latency=True,
+            countdown=5,
+        )
+
+    @tag("batch_agent_webhooks")
+    @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=5, CELERY_TASK_ALWAYS_EAGER=True)
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
+    @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
+    @patch("api.services.discord_messages.get_redis_client")
+    def test_discord_inbound_debounce_eager_mode_processes_interactively(
+        self,
+        mock_get_redis_client,
+        mock_debounce_apply_async,
+        mock_enqueue,
+    ):
+        fake_redis = FakeRedis()
+        mock_get_redis_client.return_value = fake_redis
+
+        result = schedule_discord_inbound_processing(
+            str(self.agent.id),
+            inbound_message_id="discord-message-id",
+        )
+
+        self.assertTrue(result["eager"])
+        mock_debounce_apply_async.assert_not_called()
+        mock_enqueue.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=ANY,
+            inbound_message_id="discord-message-id",
+            prefer_low_latency=True,
+            countdown=0,
+        )
+        self.assertEqual(fake_redis.values, {})
+
+    @tag("batch_agent_webhooks")
     @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.services.discord_messages.send_discord_typing_indicator")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
     @patch("api.services.discord_messages.get_redis_client")
     def test_discord_inbound_debounce_sends_and_refreshes_typing_indicator(
@@ -494,10 +558,13 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
 
         mock_typing.assert_called_once_with("12345")
         mock_debounce_apply_async.assert_not_called()
-        mock_process_delay.assert_called_once()
-        queued_args, queued_kwargs = mock_process_delay.call_args
-        self.assertEqual(queued_args, (str(self.agent.id),))
-        self.assertGreater(queued_kwargs["inbound_generation"], 0)
+        mock_process_delay.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=ANY,
+            inbound_message_id=None,
+            prefer_low_latency=True,
+            countdown=0,
+        )
         self.assertEqual(fake_redis.values, {})
 
     @tag("batch_agent_webhooks")
@@ -513,7 +580,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
 
     @tag("batch_agent_webhooks")
     @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
     @patch("api.services.discord_messages.get_redis_client")
     def test_discord_inbound_debounce_task_requeues_until_quiet(
@@ -537,7 +604,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
 
     @tag("batch_agent_webhooks")
     @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
     @patch("api.services.discord_messages.get_redis_client")
     def test_discord_inbound_debounce_task_wakes_agent_after_quiet_period(
@@ -557,14 +624,17 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             process_discord_inbound_debounce(str(self.agent.id))
 
         mock_debounce_apply_async.assert_not_called()
-        mock_process_delay.assert_called_once()
-        queued_args, queued_kwargs = mock_process_delay.call_args
-        self.assertEqual(queued_args, (str(self.agent.id),))
-        self.assertGreater(queued_kwargs["inbound_generation"], 0)
+        mock_process_delay.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=ANY,
+            inbound_message_id=None,
+            prefer_low_latency=True,
+            countdown=0,
+        )
         self.assertEqual(fake_redis.values, {})
 
     @tag("batch_agent_webhooks")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     def test_webhook_accepts_flat_pipedream_discord_payload_author(self, mock_delay):
         body = json.dumps(
             {
@@ -599,10 +669,12 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             str(self.agent.id),
             inbound_generation=ANY,
             inbound_message_id=str(message.id),
+            prefer_low_latency=True,
+            countdown=0,
         )
 
     @tag("batch_agent_webhooks")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     def test_discord_conversations_are_scoped_per_agent_channel_subscription(self, mock_delay):
         second_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Second PD Browser")
         second_agent = PersistentAgent.objects.create(
@@ -673,7 +745,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
     @tag("batch_agent_webhooks")
     @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15)
     @patch("api.services.pipedream_trigger_subscriptions.schedule_discord_inbound_processing")
-    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.enqueue_interactive_process_agent_events")
     def test_webhook_self_echo_updates_outbound_message_without_reprocessing(self, mock_delay, mock_schedule_debounce):
         from_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
