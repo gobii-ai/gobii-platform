@@ -298,7 +298,7 @@ class HomePageTests(TestCase):
             [
                 {
                     "@type": "ContactPoint",
-                    "contactType": "sales",
+                    "contactType": "general inquiries",
                     "email": "hello@gobii.ai",
                 },
                 {
@@ -324,11 +324,9 @@ class HomePageTests(TestCase):
         self.assertEqual(
             webpage_schema["significantLink"],
             [
-                "https://gobii.ai/teams/",
-                "https://gobii.ai/solutions/",
+                "https://gobii.ai/solutions/recruiting/",
+                "https://gobii.ai/solutions/recruiting/ai-candidate-sourcing/",
                 "https://gobii.ai/pricing/",
-                "https://gobii.ai/library/",
-                "https://gobii.ai/comparisons/",
             ],
         )
 
@@ -381,11 +379,9 @@ class HomePageTests(TestCase):
         self.assertEqual(
             webpage_schema["significantLink"],
             [
-                f"{expected_site_url}/teams/",
-                f"{expected_site_url}/solutions/",
+                f"{expected_site_url}/solutions/recruiting/",
+                f"{expected_site_url}/solutions/recruiting/ai-candidate-sourcing/",
                 f"{expected_site_url}/pricing/",
-                f"{expected_site_url}/library/",
-                f"{expected_site_url}/comparisons/",
             ],
         )
 
@@ -1505,6 +1501,8 @@ class HomePageTests(TestCase):
             "/solutions/sales/",
             "sales-pipeline-whisperer",
             "b2b-lead-research-agent",
+            '"contactType": "sales"',
+            "web research",
             "HubSpot",
             "Apollo",
         ):

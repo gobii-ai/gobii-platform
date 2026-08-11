@@ -3,18 +3,18 @@ from django.templatetags.static import static
 
 HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 HOMEPAGE_SOFTWARE_DESCRIPTION_TEMPLATE = (
-    "{brand_name} is an AI agent platform that gives businesses always-on virtual employees "
-    "capable of browser automation, web research, data collection, and workflow execution."
+    "{brand_name} provides always-on recruiting agents that source, screen, and enrich "
+    "qualified candidates, then deliver source-linked shortlists to your hiring tools."
 )
 HOMEPAGE_SOFTWARE_DESCRIPTION = HOMEPAGE_SOFTWARE_DESCRIPTION_TEMPLATE.format(brand_name="Gobii")
 HOMEPAGE_SOFTWARE_FEATURES = [
-    "Virtual employees, not chatbots",
-    "Every agent has its own computer",
-    "A built-in database for every agent",
-    "Real output, not just answers",
-    "Plugs into your existing stack",
-    "Humans and agents, working together",
-    "Secure. Self-hostable. Compliance-ready.",
+    "Recruiting agents, ready to hire",
+    "Candidate sourcing across the live web",
+    "Screening against your criteria",
+    "Profile enrichment with source links",
+    "Delivery to your ATS, inbox, or sheets",
+    "Recurring recruiting schedules",
+    "Secure, persistent candidate workflows",
 ]
 
 
@@ -86,7 +86,7 @@ def build_homepage_structured_data(
         contact_points.append(
             {
                 "@type": "ContactPoint",
-                "contactType": "sales",
+                "contactType": "general inquiries",
                 "email": contact_email,
             }
         )
@@ -120,11 +120,9 @@ def build_homepage_structured_data(
         "mainEntity": {"@id": software_id},
         "publisher": {"@id": organization_id},
         "significantLink": [
-            f"{site_url}/teams/",
-            f"{site_url}/solutions/",
+            f"{site_url}/solutions/recruiting/",
+            f"{site_url}/solutions/recruiting/ai-candidate-sourcing/",
             f"{site_url}/pricing/",
-            f"{site_url}/library/",
-            f"{site_url}/comparisons/",
         ],
     }
     software = {
