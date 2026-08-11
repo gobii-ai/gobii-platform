@@ -2748,7 +2748,7 @@ class SitemapTests(TestCase):
                 "http://example.com/solutions/recruiting/candidate-sourcing/": "2026-06-07",
                 "http://example.com/solutions/sales/": "2026-06-05",
                 "http://example.com/solutions/sales/ai-sales-agent/": "2026-08-10",
-                "http://example.com/solutions/engineering/": "2026-07-14",
+                "http://example.com/solutions/engineering/": "2026-08-09",
             },
         )
 
@@ -4466,20 +4466,28 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
                 response = self.client.get(retired_path)
                 self.assertEqual(response.status_code, 404)
 
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        GOBII_RELEASE_ENV="prod",
+        PUBLIC_SITE_URL="https://gobii.ai",
+    )
     def test_api_solution_search_copy_is_consistent(self):
         response = self.client.get("/solutions/engineering/")
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
         page_text = soup.get_text(" ", strip=True)
-        expected_title = "AI Agent API for Always-On AI Employees | Gobii"
+        expected_title = "AI Agent API for Persistent, Always-On Agents | Gobii"
         expected_description = (
-            "Deploy and manage always-on AI employees with Gobii's Agent API. Create agents, "
-            "schedule work, connect tools, inspect activity, or self-host the platform."
+            "Build persistent agents with Gobii's Agent API. Schedule or trigger work, "
+            "connect tools and files, inspect timelines, and deploy in Gobii Cloud or self-hosted."
         )
 
         self.assertEqual(soup.title.get_text(strip=True), expected_title)
+        self.assertEqual(
+            soup.find("link", rel="canonical")["href"],
+            "https://gobii.ai/solutions/engineering/",
+        )
         self.assertEqual(
             soup.find("meta", attrs={"name": "description"})["content"],
             expected_description,
@@ -4495,21 +4503,101 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             page_schema["mainEntity"]["category"],
             "AI agent deployment and lifecycle management",
         )
+        self.assertEqual(len(soup.find_all("h1")), 1)
         self.assertEqual(
             soup.find("h1").get_text(" ", strip=True),
-            "Deploy and manage always-on AI employees",
+            "Build persistent AI agents with one API",
         )
-        self.assertIn("One API for the full employee lifecycle", page_text)
-        self.assertIn("What teams deploy with the Agent API", page_text)
-        self.assertIn("API resources", page_text)
+        self.assertIn("One agent resource across the lifecycle", page_text)
+        self.assertIn("What teams build with the Agent API", page_text)
+        self.assertIn("Controls for agents running real work", page_text)
+        self.assertIn("Use Gobii Cloud or run the platform yourself", page_text)
+        self.assertIn("Deploy your first persistent agent", page_text)
         self.assertIn("https://gobii.ai/api/v1/agents/", page_text)
-        self.assertIn('"X-Api-Key"', page_text)
+        self.assertIn("X-Api-Key: $GOBII_API_KEY", page_text)
         self.assertIn('"charter"', page_text)
+        self.assertGreater(page_text.lower().count("agent"), page_text.lower().count("ai employee"))
+
+        primary_ctas = [
+            button
+            for button in soup.find_all("button", type="submit")
+            if button.get_text(" ", strip=True) == "Get an API key"
+        ]
+        self.assertEqual(len(primary_ctas), 2)
+        secondary_ctas = [
+            link
+            for link in soup.find_all("a")
+            if link.get_text(" ", strip=True) == "Read the API docs"
+        ]
+        self.assertEqual(len(secondary_ctas), 2)
+
+        quickstart = soup.find("pre", id="agent-quickstart")
+        self.assertIsNotNone(quickstart)
+        request_tab = soup.find("button", id="agent-request-tab")
+        response_tab = soup.find("button", id="agent-response-tab")
+        tablist = request_tab.find_parent(attrs={"role": "tablist"})
+        self.assertTrue(tablist.has_attr("hidden"))
+        self.assertEqual(request_tab.get("role"), "tab")
+        self.assertEqual(request_tab.get("aria-selected"), "true")
+        self.assertEqual(request_tab.get("aria-controls"), "agent-request-panel")
+        self.assertEqual(response_tab.get("role"), "tab")
+        self.assertEqual(response_tab.get("aria-selected"), "false")
+        self.assertEqual(response_tab.get("aria-controls"), "agent-response-panel")
+        request_panel = soup.find("div", id="agent-request-panel")
+        response_panel = soup.find("div", id="agent-response-panel")
+        self.assertEqual(request_panel.get("role"), "tabpanel")
+        self.assertEqual(request_panel.get("aria-labelledby"), "agent-request-tab")
+        self.assertEqual(response_panel.get("role"), "tabpanel")
+        self.assertEqual(response_panel.get("aria-labelledby"), "agent-response-tab")
+        self.assertFalse(request_panel.has_attr("hidden"))
+        self.assertFalse(response_panel.has_attr("hidden"))
+        copy_button = soup.find("button", attrs={"data-active-code-copy": ""})
+        self.assertIsNotNone(copy_button)
+        self.assertEqual(copy_button.get("data-copy-code-target"), "agent-quickstart")
+        self.assertEqual(copy_button.get("aria-describedby"), "agent-copy-status")
+        response_example = soup.find("pre", id="agent-quickstart-response")
+        self.assertIsNotNone(response_example)
+        self.assertEqual(
+            response_example.get_text(),
+            """{
+    "id": "b0bd82a5-ed5a-43f4-87f9-242585a2428f",
+    "name": "Market Monitor",
+    "schedule": "@daily",
+    "is_active": true,
+    "life_state": "active",
+    "created_at": "2026-08-09T22:02:50.916739Z"
+}""",
+        )
+        response_caption = response_example.find_next_sibling("p", class_="eng-code-caption")
+        self.assertIn(
+            "Additional response fields omitted for brevity.",
+            response_caption.get_text(" ", strip=True),
+        )
+        self.assertEqual(response_panel.get("data-code-copy-target"), "agent-quickstart-response")
+        self.assertEqual(response_panel.get("data-code-copy-status"), "agent-response-copy-status")
+
+        hrefs = {link.get("href") for link in soup.find_all("a")}
+        expected_links = {
+            "https://docs.gobii.ai/developers/developer-agents",
+            "https://docs.gobii.ai/developers/developer-basics",
+            "https://docs.gobii.ai/api-reference/agents-api",
+            "https://docs.gobii.ai/developers/mcp-server",
+            "https://docs.gobii.ai/developers/webhooks",
+            "https://docs.gobii.ai/developers/structured-data",
+            "https://docs.gobii.ai/developers/developer-tasks",
+            "https://docs.gobii.ai/self-hosted/overview",
+            "https://github.com/gobii-ai/gobii-platform",
+            reverse("proprietary:pricing"),
+        }
+        self.assertTrue(expected_links.issubset(hrefs))
+        self.assertNotIn("/remote-mcp/", response.content.decode("utf-8"))
+        self.assertFalse(soup.select("[data-lucide]"))
+        self.assertIsNone(soup.find("script", src="https://unpkg.com/lucide@0.546.0"))
         self.assertNotIn("https://api.gobii.ai/v1/persistent-agents/", page_text)
         self.assertNotIn('"Authorization"', page_text)
         self.assertNotIn('"system_prompt"', page_text)
-        self.assertNotIn("What developers build", page_text)
-        self.assertNotIn("Developer resources", page_text)
+        self.assertNotIn("24/7", page_text)
+        self.assertNotIn("Free tier available", page_text)
 
 
 @tag("batch_pages")
