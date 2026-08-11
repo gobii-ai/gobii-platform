@@ -6377,16 +6377,28 @@ class HumanInboundGenerationTests(TestCase):
                 before = get_human_inbound_generation(self.agent.id)
                 expected = before + 1
 
-                with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
+                with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay, patch(
+                    "api.agent.tasks.enqueue_interactive_process_agent_events"
+                ) as mock_enqueue:
                     with self.captureOnCommitCallbacks(execute=True):
                         info = self._ingest(channel, sender, recipient)
 
                 self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
-                mock_delay.assert_called_once_with(
-                    str(self.agent.id),
-                    inbound_generation=expected,
-                    inbound_message_id=str(info.message.id),
-                )
+                if channel == CommsChannel.SMS:
+                    mock_delay.assert_not_called()
+                    mock_enqueue.assert_called_once_with(
+                        str(self.agent.id),
+                        inbound_generation=expected,
+                        inbound_message_id=str(info.message.id),
+                        prefer_low_latency=True,
+                    )
+                else:
+                    mock_enqueue.assert_not_called()
+                    mock_delay.assert_called_once_with(
+                        str(self.agent.id),
+                        inbound_generation=expected,
+                        inbound_message_id=str(info.message.id),
+                    )
 
     def test_web_human_input_panel_response_bumps_generation_and_queues_with_generation(self):
         conversation = PersistentAgentConversation.objects.create(
