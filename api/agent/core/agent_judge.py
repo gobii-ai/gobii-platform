@@ -49,6 +49,7 @@ JUDGE_RUN_CACHE_TTL_SECONDS = 60 * 60 * 12
 JUDGE_MIN_STEP_GAP = 10
 JUDGE_RUN_COOLDOWN_SECONDS = 60 * 45
 JUDGE_DAILY_RUN_LIMIT = 6
+BURN_RATE_TIER_STEP_DOWN_REASON = "burn_rate_tier_step_down"
 REPORT_TOOL_NAME = "report_judge_suggestion"
 NO_ACTION = "no_action"
 JUDGE_FAILED_TOOL_TRIGGER_IGNORED_TOOL_NAMES = frozenset({"send_chat_message"})
@@ -144,6 +145,18 @@ def maybe_run_agent_judge(
         )
         if trigger is None:
             return
+        if (
+            BURN_RATE_TIER_STEP_DOWN_REASON in trigger.reasons
+            and not _claim_burn_rate_judge_daily_slot(agent)
+        ):
+            trigger = build_judge_trigger(
+                agent,
+                tools=tools,
+                extra_trigger_reasons=extra_trigger_reasons,
+                trigger_context=trigger_context,
+            )
+            if trigger is None:
+                return
         _run_judge(agent, trigger, routing_profile=routing_profile)
     except Exception:
         # The judge is advisory. A failure here must never interrupt agent work.
@@ -290,6 +303,8 @@ def build_judge_trigger(
         _trigger_reasons(recent_messages, recent_tool_calls),
         extra_trigger_reasons or [],
     )
+    if BURN_RATE_TIER_STEP_DOWN_REASON in reasons and _has_burn_rate_judge_daily_slot(agent):
+        reasons.remove(BURN_RATE_TIER_STEP_DOWN_REASON)
     if not reasons:
         return None
 
@@ -1431,6 +1446,34 @@ def _hash_payload(payload: dict[str, Any]) -> str:
 
 def _judge_run_cache_key(agent: PersistentAgent, evidence_hash: str) -> str:
     return f"agent-judge:run:{agent.id}:{evidence_hash}"
+
+
+def _burn_rate_judge_daily_cache_key(agent: PersistentAgent, now=None) -> str:
+    current_time = now or timezone.now()
+    return f"agent-judge:burn-rate:{agent.id}:{current_time.date().isoformat()}"
+
+
+def _burn_rate_judge_daily_cache_timeout(now=None) -> int:
+    current_time = now or timezone.now()
+    next_day = (current_time + timedelta(days=1)).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    return max(1, int((next_day - current_time).total_seconds()))
+
+
+def _has_burn_rate_judge_daily_slot(agent: PersistentAgent) -> bool:
+    return bool(cache.get(_burn_rate_judge_daily_cache_key(agent)))
+
+
+def _claim_burn_rate_judge_daily_slot(agent: PersistentAgent) -> bool:
+    return cache.add(
+        _burn_rate_judge_daily_cache_key(agent),
+        True,
+        timeout=_burn_rate_judge_daily_cache_timeout(),
+    )
 
 
 def approve_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None:

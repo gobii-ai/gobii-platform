@@ -4,16 +4,19 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.db import DatabaseError
 from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.agent.core.agent_judge import (
+    BURN_RATE_TIER_STEP_DOWN_REASON,
     JUDGE_DAILY_RUN_LIMIT,
     JudgePromptLimits,
     NO_ACTION,
     REPORT_TOOL_NAME,
     _build_judge_messages,
+    _burn_rate_judge_daily_cache_key,
     _judge_tool_definition,
     _judge_prompt_limits,
     approve_judge_suggestion,
@@ -293,6 +296,94 @@ class AgentJudgeTests(TestCase):
 
         self.assertIsNotNone(trigger)
         self.assertEqual(trigger.reasons, ["burn_rate_throttled"])
+
+    def test_burn_rate_trigger_runs_judge_once_per_utc_day(self):
+        self._add_steps(1)
+        response = _judge_response(
+            {
+                "suggestion_type": NO_ACTION,
+                "message": "No action needed.",
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ), patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response,
+        ) as run_mock, patch("api.agent.core.agent_judge.JUDGE_RUN_COOLDOWN_SECONDS", 0):
+            maybe_run_agent_judge(
+                self.agent,
+                tools=[],
+                extra_trigger_reasons=[BURN_RATE_TIER_STEP_DOWN_REASON],
+            )
+            self._add_steps(10)
+            maybe_run_agent_judge(
+                self.agent,
+                tools=[],
+                extra_trigger_reasons=[BURN_RATE_TIER_STEP_DOWN_REASON],
+            )
+
+        run_mock.assert_called_once()
+
+    def test_burn_rate_cap_preserves_independent_automatic_trigger(self):
+        self._add_steps(1)
+        response = _judge_response(
+            {
+                "suggestion_type": NO_ACTION,
+                "message": "No action needed.",
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ), patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response,
+        ) as run_mock, patch(
+            "api.agent.core.agent_judge.Analytics.track_event",
+        ) as analytics_mock, patch("api.agent.core.agent_judge.JUDGE_RUN_COOLDOWN_SECONDS", 0):
+            maybe_run_agent_judge(
+                self.agent,
+                tools=[],
+                extra_trigger_reasons=[BURN_RATE_TIER_STEP_DOWN_REASON],
+            )
+            self._add_steps(10)
+            self._add_message(1, body="This is still broken.")
+            maybe_run_agent_judge(
+                self.agent,
+                tools=[],
+                extra_trigger_reasons=[BURN_RATE_TIER_STEP_DOWN_REASON],
+            )
+
+        self.assertEqual(run_mock.call_count, 2)
+        triggered_properties = [
+            call.kwargs["properties"]
+            for call in analytics_mock.call_args_list
+            if call.kwargs["event"] == AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_TRIGGERED
+        ]
+        self.assertEqual(triggered_properties[1]["trigger_reasons"], ["negative_user_language"])
+
+    def test_burn_rate_cap_resets_with_the_utc_date(self):
+        self._add_steps(1)
+        current_time = timezone.now()
+        today_key = _burn_rate_judge_daily_cache_key(self.agent, current_time)
+        cache.set(today_key, True, timeout=60)
+
+        with patch(
+            "api.agent.core.agent_judge.timezone.now",
+            return_value=current_time + timedelta(days=1),
+        ):
+            trigger = build_judge_trigger(
+                self.agent,
+                tools=[],
+                extra_trigger_reasons=[BURN_RATE_TIER_STEP_DOWN_REASON],
+            )
+
+        self.assertIsNotNone(trigger)
+        self.assertIn(BURN_RATE_TIER_STEP_DOWN_REASON, trigger.reasons)
 
     def test_custom_tool_failure_trigger_context_reaches_judge_prompt(self):
         self._add_steps(1)
