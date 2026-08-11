@@ -62,6 +62,9 @@ User = get_user_model()
 class ManagedHubSpotMCPTests(TestCase):
     def setUp(self):
         os.environ.setdefault("GOBII_ENCRYPTION_KEY", "test-key-for-managed-mcp")
+        discovery_patcher = patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
+        discovery_patcher.start()
+        self.addCleanup(discovery_patcher.stop)
         hubspot_flag, _created = Flag.objects.update_or_create(
             name="hubspot_mcp",
             defaults={
