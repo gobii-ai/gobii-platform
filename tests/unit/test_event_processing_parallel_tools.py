@@ -297,12 +297,12 @@ class TestParallelToolCallsExecution(TestCase):
             isolated_mcp=False,
             current_sqlite_db_path=None,
             resolved_entry=None,
-            pipedream_google_sheets_blocked=False,
+            deprecated_provider_integration=None,
         ):
             nonlocal active, max_active
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
-            self.assertFalse(pipedream_google_sheets_blocked)
+            self.assertIsNone(deprecated_provider_integration)
             with lock:
                 active += 1
                 max_active = max(max_active, active)
@@ -361,9 +361,9 @@ class TestParallelToolCallsExecution(TestCase):
             isolated_mcp=False,
             current_sqlite_db_path=None,
             resolved_entry=None,
-            pipedream_google_sheets_blocked=False,
+            deprecated_provider_integration=None,
         ):
-            self.assertFalse(pipedream_google_sheets_blocked)
+            self.assertIsNone(deprecated_provider_integration)
             observed_states.append(statuses_by_tool())
             return {"status": "ok", "auto_sleep_ok": True}
 
@@ -972,12 +972,12 @@ class TestParallelToolCallsExecution(TestCase):
             isolated_mcp=False,
             current_sqlite_db_path=None,
             resolved_entry=None,
-            pipedream_google_sheets_blocked=False,
+            deprecated_provider_integration=None,
         ):
             nonlocal active, max_active, active_sources, max_active_sources
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
-            self.assertFalse(pipedream_google_sheets_blocked)
+            self.assertIsNone(deprecated_provider_integration)
             with lock:
                 active += 1
                 max_active = max(max_active, active)
@@ -1021,12 +1021,12 @@ class TestParallelToolCallsExecution(TestCase):
             isolated_mcp=False,
             current_sqlite_db_path=None,
             resolved_entry=None,
-            pipedream_google_sheets_blocked=False,
+            deprecated_provider_integration=None,
         ):
             nonlocal active, max_active, started
             self.assertTrue(isolated_mcp)
             self.assertIsNone(current_sqlite_db_path)
-            self.assertFalse(pipedream_google_sheets_blocked)
+            self.assertIsNone(deprecated_provider_integration)
             with lock:
                 started += 1
                 worker_number = started
@@ -1231,13 +1231,13 @@ class TestParallelToolCallsExecution(TestCase):
             isolated_mcp=False,
             current_sqlite_db_path=None,
             resolved_entry=None,
-            pipedream_google_sheets_blocked=False,
+            deprecated_provider_integration=None,
         ):
             from api.agent.tools.sqlite_state import get_sqlite_db_path
 
             self.assertTrue(isolated_mcp)
             self.assertEqual(current_sqlite_db_path, "/tmp/parallel-safe.sqlite")
-            self.assertFalse(pipedream_google_sheets_blocked)
+            self.assertIsNone(deprecated_provider_integration)
             captured_paths.append(get_sqlite_db_path())
             set_agent_variable("/shared", tool_name)
             return {"status": "ok", "auto_sleep_ok": True}

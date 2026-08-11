@@ -15,7 +15,7 @@ from api.agent.core.event_processing import (
     _resolve_tool_for_execution,
 )
 from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
-from api.agent.system_skills.service import prepare_google_sheets_native_handoff
+from api.agent.system_skills.service import prepare_native_integration_handoff
 from api.agent.tools.mcp_manager import MCPToolInfo, MCPToolManager
 from api.agent.tools.sqlite_skills import format_recent_skills_for_prompt
 from api.agent.tools.tool_runtime import execute_runtime_tool_call
@@ -33,6 +33,7 @@ from api.models import (
     PersistentAgentSystemSkillState,
     PersistentAgentToolCall,
 )
+from api.services.deprecated_provider_guard import DEPRECATED_PIPEDREAM_INTEGRATIONS
 from constants.feature_flags import PIPEDREAM_GOOGLE_SHEETS_GUARD
 from util.analytics import AnalyticsEvent, AnalyticsSource
 
@@ -504,14 +505,20 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             ],
         ), patch.object(manager, "_backfill_enabled_tool_metadata"):
             before_handoff = manager.get_enabled_tools_definitions(self.agent_a)
-            handoff_status = prepare_google_sheets_native_handoff(self.agent_a)
+            handoff_status = prepare_native_integration_handoff(
+                self.agent_a,
+                GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+            )
             after_handoff = manager.get_enabled_tools_definitions(self.agent_a)
             PersistentAgentEnabledTool.objects.filter(
                 agent=self.agent_a,
                 tool_full_name="http_request",
             ).delete()
             after_native_tool_eviction = manager.get_enabled_tools_definitions(self.agent_a)
-            prepare_google_sheets_native_handoff(self.agent_a)
+            prepare_native_integration_handoff(
+                self.agent_a,
+                GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+            )
             with patch(
                 "api.services.tool_blacklist.is_tool_blacklisted_for_agent",
                 return_value=True,
@@ -619,6 +626,68 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         resolve.assert_not_called()
         executor.assert_not_called()
 
+    def test_unresolved_stale_sheets_name_returns_native_handoff_error(self):
+        with patch(
+            "api.agent.tools.tool_runtime._refresh_agent_tools",
+            return_value=[],
+        ), patch(
+            "api.agent.tools.tool_manager.execute_mcp_tool",
+        ) as executor:
+            result, _updated_tools = execute_runtime_tool_call(
+                self.agent_a,
+                tool_name="google_sheets-stale-action",
+                exec_params={},
+                resolved_entry=None,
+            )
+
+        self.assertEqual(result["error_code"], "deprecated_provider_blocked")
+        self.assertEqual(result["integration"], "google_sheets")
+        self.assertNotIn("not available", result["message"])
+        executor.assert_not_called()
+
+    def test_stale_sheets_name_absent_from_latest_roster_reaches_guard(self):
+        tool_call = {
+            "id": "call-stale-sheets",
+            "function": {
+                "name": "google_sheets-stale-action",
+                "arguments": "{}",
+            },
+        }
+
+        with patch(
+            "api.agent.core.event_processing.resolve_tool_entry",
+            return_value=None,
+        ), patch(
+            "api.agent.core.event_processing._enforce_tool_rate_limit"
+        ) as rate_limit, patch(
+            "api.agent.core.event_processing._ensure_credit_for_tool"
+        ) as credit_gate:
+            prepared_batch = _prepare_tool_batch(
+                self.agent_a,
+                tool_calls=[tool_call],
+                allowed_tool_names={"send_chat_message"},
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={"available": None, "daily_state": {}},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(len(prepared_batch.prepared_calls), 1)
+        prepared = prepared_batch.prepared_calls[0]
+        self.assertEqual(
+            prepared.deprecated_provider_integration.key,
+            "google_sheets",
+        )
+        self.assertIsNone(prepared.resolved_entry)
+        rate_limit.assert_not_called()
+        credit_gate.assert_not_called()
+
     def test_nested_direct_runtime_tool_skips_catalog_resolution(self):
         with patch(
             "api.agent.core.event_processing._enforce_tool_rate_limit",
@@ -647,7 +716,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             exec_params={"to_address": "test@example.com", "body": "hello"},
             isolated_mcp=False,
             resolved_entry=None,
-            pipedream_google_sheets_blocked=False,
+            deprecated_provider_integration=None,
         )
 
     def test_nested_guard_decision_is_stable_for_execution_and_billing(self):
@@ -655,7 +724,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
         self._enable(self.agent_a, entry)
 
         with patch(
-            "api.services.deprecated_provider_guard.pipedream_google_sheets_guard_enabled",
+            "api.services.deprecated_provider_guard.is_waffle_switch_active",
             side_effect=[True, AssertionError("guard decision was evaluated twice")],
         ) as guard_enabled, patch(
             "api.agent.core.event_processing._enforce_tool_rate_limit",
@@ -677,7 +746,10 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             )
 
         self.assertEqual(result["error_code"], "deprecated_provider_blocked")
-        guard_enabled.assert_called_once_with()
+        guard_enabled.assert_called_once_with(
+            PIPEDREAM_GOOGLE_SHEETS_GUARD,
+            default=False,
+        )
         rate_limit.assert_not_called()
         credit_gate.assert_not_called()
         executor.assert_not_called()
@@ -689,7 +761,13 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             app_slug="google_sheets",
         )
         self._enable(self.agent_a, entry)
-        self.assertEqual(prepare_google_sheets_native_handoff(self.agent_a), "ready")
+        self.assertEqual(
+            prepare_native_integration_handoff(
+                self.agent_a,
+                GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+            ),
+            "ready",
+        )
         manager = MCPToolManager()
 
         with patch.object(
@@ -765,7 +843,7 @@ class PipedreamGoogleSheetsExecutionGuardTests(TestCase):
             parallel_safe=False,
             parallel_ineligible_reason="test",
             resolved_entry=entry,
-            pipedream_google_sheets_blocked=True,
+            deprecated_provider_integration=DEPRECATED_PIPEDREAM_INTEGRATIONS["google_sheets"],
         )
         outcome = _ToolExecutionOutcome(
             prepared=prepared,

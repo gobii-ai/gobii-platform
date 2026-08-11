@@ -355,6 +355,7 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
         with transaction.atomic():
             secret = save_native_integration_credentials(provider, owner_user, owner_org, credentials)
             disable_overlapping_pipedream_tools_for_native_integration(provider.key, owner_user, owner_org)
+            trigger_agents_for_native_integration_change(provider.key, owner_user, owner_org)
 
         return JsonResponse(
             {

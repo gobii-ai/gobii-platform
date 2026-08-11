@@ -315,6 +315,7 @@ class AnalyticsEvent(StrEnum):
     # Pipedream Events
     PIPEDREAM_JIT_CONNECT_REDIRECT = 'Pipedream JIT Connect Redirect'
     PIPEDREAM_GOOGLE_SHEETS_EXECUTION_BLOCKED = 'Pipedream Google Sheets Execution Blocked'
+    PIPEDREAM_APOLLO_EXECUTION_BLOCKED = 'Pipedream Apollo Execution Blocked'
 
     # Email Events
     EMAIL_OPENED = 'Email Opened'

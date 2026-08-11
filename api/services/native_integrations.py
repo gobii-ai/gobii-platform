@@ -10,10 +10,11 @@ import httpx
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from api.models import GlobalSecret, MCPServerConfig, PersistentAgent, PersistentAgentEnabledTool
+from api.models import GlobalSecret, MCPServerConfig, PersistentAgent
 from api.services.pipedream_apps import disable_pipedream_apps_for_owner
 from api.services.persistent_agent_secrets import resolve_global_secret_owner_for_agent
 
@@ -621,6 +622,9 @@ NATIVE_INTEGRATION_PIPEDREAM_APP_SLUGS = {
 NATIVE_INTEGRATION_AGENT_WAKE_TOOL_NAMES = {
     META_ADS_PROVIDER.key: ("meta_ads",),
 }
+NATIVE_INTEGRATION_AGENT_WAKE_SYSTEM_SKILL_KEYS = {
+    APOLLO_PROVIDER.key: ("apollo_native",),
+}
 
 
 def list_native_integration_providers() -> list[NativeIntegrationProvider]:
@@ -719,19 +723,27 @@ def disable_overlapping_pipedream_tools_for_native_integration(
 def trigger_agents_for_native_integration_change(provider_key: str, owner_user, owner_org) -> int:
     provider = get_native_integration_provider(provider_key)
     tool_names = NATIVE_INTEGRATION_AGENT_WAKE_TOOL_NAMES.get(provider.key, ())
-    if not tool_names:
+    skill_keys = NATIVE_INTEGRATION_AGENT_WAKE_SYSTEM_SKILL_KEYS.get(provider.key, ())
+    if not tool_names and not skill_keys:
         return 0
 
-    enabled_qs = PersistentAgentEnabledTool.objects.filter(tool_full_name__in=tool_names)
+    wake_filter = Q()
+    if tool_names:
+        wake_filter |= Q(enabled_tools__tool_full_name__in=tool_names)
+    if skill_keys:
+        wake_filter |= Q(
+            system_skill_states__skill_key__in=skill_keys,
+            system_skill_states__is_enabled=True,
+        )
+
+    agents = PersistentAgent.objects.filter(wake_filter, is_deleted=False, is_active=True)
     if owner_org is not None:
-        enabled_qs = enabled_qs.filter(agent__organization=owner_org)
+        agents = agents.filter(organization=owner_org)
     else:
-        enabled_qs = enabled_qs.filter(agent__user=owner_user, agent__organization__isnull=True)
+        agents = agents.filter(user=owner_user, organization__isnull=True)
 
     agent_ids = list(
-        enabled_qs.filter(agent__is_deleted=False, agent__is_active=True)
-        .values_list("agent_id", flat=True)
-        .distinct()
+        agents.values_list("id", flat=True).distinct()
     )
     if not agent_ids:
         return 0

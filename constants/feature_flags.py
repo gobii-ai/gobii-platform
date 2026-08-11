@@ -17,6 +17,9 @@ AGENT_CRON_THROTTLE = "agent_cron_throttle"
 # Emergency rollback for the universal legacy Google Sheets execution guard.
 PIPEDREAM_GOOGLE_SHEETS_GUARD = "pipedream_google_sheets_guard"
 
+# Emergency rollback for the universal legacy Apollo execution guard.
+PIPEDREAM_APOLLO_GUARD = "pipedream_apollo_guard"
+
 # Route /support form submissions to Intercom-style email intake.
 SUPPORT_INTERCOM = "support_intercom"
 
