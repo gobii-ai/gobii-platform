@@ -5242,6 +5242,7 @@ def _get_unified_history_prompt(
                     "result",
                     "tool_name",
                     "tool_params",
+                    "status",
                     "step__created_at",
                     "step__completion_id",
                 )

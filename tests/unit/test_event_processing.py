@@ -2929,6 +2929,56 @@ class PromptContextBuilderTests(TestCase):
         )
         self.assertNotIn(f"<parent_result_id>{parent_tool_call.pk}</parent_result_id>", content)
 
+    def test_backfilled_parent_tool_call_uses_persisted_success_status(self):
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(sqlite_tmp.cleanup)
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+        self.addCleanup(reset_sqlite_db_path, token)
+
+        parent_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="successful parent compute call",
+        )
+        parent_tool_call = PersistentAgentToolCall.objects.create(
+            step=parent_step,
+            tool_name="python_exec",
+            tool_params={"code": "load_accounts()"},
+            result=json.dumps({
+                "status": "success",
+                "rows": [{"account_id": "acct-1"}],
+            }),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+        child_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="child delivery call",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=child_step,
+            parent_tool_call=parent_tool_call,
+            tool_name="send_email",
+            tool_params={"to": "person@example.com"},
+            result=json.dumps({"status": "sent"}),
+            status=PersistentAgentToolCall.Status.COMPLETE,
+        )
+
+        with (
+            patch(
+                "api.agent.core.prompt_context._get_recent_prompt_history_steps",
+                return_value=[child_step],
+            ),
+            patch("api.agent.core.prompt_context.enqueue_history_compaction"),
+        ):
+            build_prompt_context(self.agent)
+
+        with sqlite3.connect(db_path) as conn:
+            parent_batch = conn.execute(
+                "SELECT result_id, is_current_batch FROM __tool_results "
+                "WHERE tool_name = 'python_exec'"
+            ).fetchone()
+        self.assertEqual(parent_batch, (str(parent_step.id)[:6], 1))
+
     def test_tool_result_lookup_components_are_non_shrinkable_in_promptree(self):
         from api.agent.core import promptree
 

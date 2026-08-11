@@ -812,6 +812,10 @@ class ToolResultSchemaTests(SimpleTestCase):
             1,
         )
         self.assertIn("do not import from memory or previews alone", combined_meta)
+        for index, record in enumerate(records):
+            preview = info[record.step_id].preview_text or ""
+            self.assertIn(f"# Interview {index}", preview)
+            self.assertIn(f"Company: Example {index}", preview)
 
     def test_http_prose_siblings_get_one_bound_row_work_set(self):
         records = [

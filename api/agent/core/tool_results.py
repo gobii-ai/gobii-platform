@@ -516,7 +516,10 @@ def prepare_tool_results_for_prompt(
         is_current_source_batch = (
             current_source_batch_id is not None
             and record.succeeded
-            and source_batch_id == current_source_batch_id
+            and (
+                record.source_batch_id is None
+                or source_batch_id == current_source_batch_id
+            )
         )
 
         context_hint = None
