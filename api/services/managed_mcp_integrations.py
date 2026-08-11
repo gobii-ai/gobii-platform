@@ -18,6 +18,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
+from api.agent.system_skills.keys import HUBSPOT_NATIVE_SYSTEM_SKILL_KEY
 from api.models import (
     MCPServerConfig,
     MCPServerOAuthCredential,
@@ -69,7 +70,7 @@ HUBSPOT_MCP_PROVIDER = ManagedOAuthMCPProvider(
     scopes=(),
     icon="hubspot",
     waffle_flag=HUBSPOT_MCP_WAFFLE_FLAG,
-    system_skill_key="hubspot_native",
+    system_skill_key=HUBSPOT_NATIVE_SYSTEM_SKILL_KEY,
     client_credentials_resolver=_hubspot_mcp_client_credentials,
     pipedream_app_slugs=("hubspot",),
 )
@@ -210,14 +211,22 @@ def managed_mcp_provider_keys_for_agent(agent) -> set[str]:
     }
 
 
-def managed_mcp_suppressed_pipedream_app_slugs() -> set[str]:
-    """Return Pipedream apps replaced by a workspace-managed integration."""
+def managed_mcp_suppressed_pipedream_app_slugs(owner_user, owner_org) -> set[str]:
+    """Return Pipedream apps replaced by a native integration for this owner."""
 
-    return {
-        app_slug
-        for provider in MANAGED_OAUTH_MCP_PROVIDERS.values()
-        for app_slug in provider.pipedream_app_slugs
-    }
+    from api.services.native_integrations import get_native_integration_secret
+
+    suppressed: set[str] = set()
+    for provider in MANAGED_OAUTH_MCP_PROVIDERS.values():
+        rollout_enabled = managed_mcp_provider_enabled(provider.key, owner_user, owner_org)
+        has_legacy_connection = get_native_integration_secret(
+            provider.key,
+            owner_user,
+            owner_org,
+        ) is not None
+        if rollout_enabled or has_legacy_connection:
+            suppressed.update(provider.pipedream_app_slugs)
+    return suppressed
 
 
 def managed_mcp_config_queryset(provider_key: str, owner_user, owner_org):

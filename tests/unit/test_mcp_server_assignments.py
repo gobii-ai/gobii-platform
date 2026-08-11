@@ -90,6 +90,32 @@ class MCPServerAssignmentTests(TestCase):
         self.assertIn(str(personal_server.id), overview_ids)
         mock_sandbox_compute_enabled_for_agent.assert_called_once_with(self.org_agent)
 
+    @patch("api.services.mcp_servers.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_org_agent_can_use_assigned_personal_non_managed_server(
+        self,
+        _mock_sandbox_compute_enabled_for_agent,
+    ):
+        personal_server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="personal-assigned",
+            display_name="Personal Assigned",
+            command="/bin/true",
+        )
+        PersistentAgentMCPServer.objects.create(
+            agent=self.org_agent,
+            server_config=personal_server,
+        )
+
+        accessible = mcp_servers.agent_accessible_server_configs(self.org_agent)
+        overview = {
+            item["id"]: item
+            for item in mcp_servers.agent_server_overview(self.org_agent)
+        }
+
+        self.assertIn(personal_server, accessible)
+        self.assertTrue(overview[str(personal_server.id)]["assigned"])
+
     @patch("api.services.mcp_servers.sandbox_compute_enabled_for_agent", return_value=False)
     def test_org_stdio_assignment_requires_agent_sandbox(
         self,

@@ -254,12 +254,14 @@ def agent_accessible_server_configs(
                 organization_id=agent.organization_id,
                 managed_integration_key__in=managed_keys,
             )
-    if agent.user_id and not agent.organization_id:
+    if agent.user_id:
         access_filter |= Q(
             scope=MCPServerConfig.Scope.USER,
             user_id=agent.user_id,
             id__in=assigned_ids,
+            managed_integration_key="",
         )
+    if agent.user_id and not agent.organization_id:
         if managed_keys:
             access_filter |= Q(
                 scope=MCPServerConfig.Scope.USER,

@@ -12,13 +12,13 @@ from api.agent.tools.secure_api_request import (
 from api.meta_ads_setup import META_ADS_SETUP_INSTRUCTIONS, META_ADS_SETUP_STEPS, META_ADS_TROUBLESHOOTING_TIPS
 
 from .image_generation import IMAGE_GENERATION_PROMPT_INSTRUCTIONS, IMAGE_GENERATION_SYSTEM_SKILL_KEY
+from .keys import HUBSPOT_NATIVE_SYSTEM_SKILL_KEY
 from .native_api_cookbooks import render_native_api_cookbook
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
 
 
 GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
 APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
-HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 DISCORD_NATIVE_SYSTEM_SKILL_KEY = "discord_native"
 WEBHOOKS_SYSTEM_SKILL_KEY = "webhooks"
 CODE_WORK_SYSTEM_SKILL_KEY = "code_work"

@@ -1232,8 +1232,7 @@ class MCPToolManager:
         if server.auth_method != MCPServerConfig.AuthMethod.OAUTH2:
             return server, None
         if (
-            not server.metadata.get("managed_oauth")
-            and server.oauth_access_token
+            server.oauth_access_token
             and (
                 server.oauth_expires_at is None
                 or server.oauth_expires_at > timezone.now() + OAUTH_REFRESH_SAFETY_MARGIN

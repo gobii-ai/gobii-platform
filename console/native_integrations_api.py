@@ -389,7 +389,7 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
             return _permission_denied_response(exc)
 
         managed_session = managed_mcp_oauth_session_exists(provider.key, state, request.user)
-        if managed_mcp_provider_enabled(provider.key, owner_user, owner_org) or managed_session:
+        if managed_session:
             try:
                 result = complete_managed_mcp_oauth(
                     provider.key,

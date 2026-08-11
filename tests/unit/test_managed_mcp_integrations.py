@@ -48,7 +48,9 @@ from api.services.native_integrations import (
 )
 from api.services.pipedream_apps import (
     get_effective_pipedream_app_slugs_for_agent,
+    get_owner_apps_state,
     is_pipedream_tool_visible_to_agent,
+    serialize_owner_apps_state,
 )
 
 
@@ -221,6 +223,51 @@ class ManagedHubSpotMCPTests(TestCase):
         self.assertFalse(
             is_pipedream_tool_visible_to_agent(self.agent, "hubspot-search-contacts"),
         )
+
+    def test_pipedream_hubspot_remains_available_outside_rollout_without_native_connection(self):
+        PipedreamAppSelection.objects.create(
+            user=self.user,
+            selected_app_slugs=["hubspot", "slack"],
+        )
+
+        with override_flag("hubspot_mcp", active=False):
+            effective_apps = get_effective_pipedream_app_slugs_for_agent(self.agent)
+            hubspot_visible = is_pipedream_tool_visible_to_agent(
+                self.agent,
+                "hubspot-search-contacts",
+            )
+
+        self.assertIn("hubspot", effective_apps)
+        self.assertIn("slack", effective_apps)
+        self.assertTrue(hubspot_visible)
+
+    def test_owner_app_serialization_hides_rollout_suppressed_hubspot(self):
+        PipedreamAppSelection.objects.create(
+            user=self.user,
+            selected_app_slugs=["hubspot", "slack"],
+        )
+        catalog = MagicMock()
+        catalog.get_apps.side_effect = lambda slugs: [
+            MagicMock(to_dict=lambda slug=slug: {
+                "slug": slug,
+                "name": slug.title(),
+                "description": "",
+                "icon_url": "",
+            })
+            for slug in slugs
+        ]
+
+        state = get_owner_apps_state(
+            MCPServerConfig.Scope.USER,
+            self.user.username,
+            owner_user=self.user,
+        )
+        payload = serialize_owner_apps_state(state, catalog=catalog)
+
+        self.assertEqual([app["slug"] for app in payload["selected_apps"]], ["slack"])
+        effective_slugs = [app["slug"] for app in payload["effective_apps"]]
+        self.assertNotIn("hubspot", effective_slugs)
+        self.assertIn("slack", effective_slugs)
 
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
     def test_staff_connect_start_creates_hidden_managed_config_and_server_side_pkce(self, _mock_discovery):
@@ -400,6 +447,44 @@ class ManagedHubSpotMCPTests(TestCase):
         )
         self.assertEqual(replay_response.status_code, 400)
         self.assertEqual(mock_post.call_count, 1)
+
+    @patch("console.native_integrations_api.request_oauth_token")
+    def test_legacy_callback_remains_legacy_if_rollout_turns_on_mid_flow(self, mock_request_token):
+        with override_flag("hubspot_mcp", active=False):
+            start_response = self._start()
+        self.assertEqual(start_response.status_code, 201, start_response.content)
+        state = start_response.json()["state"]
+        self.assertFalse(MCPServerOAuthSession.objects.filter(state=state).exists())
+        mock_request_token.return_value = {
+            "access_token": "legacy-access",
+            "refresh_token": "legacy-refresh",
+            "token_type": "Bearer",
+            "scope": HUBSPOT_PROVIDER.scope_string,
+            "expires_in": 3600,
+        }
+
+        with override_flag("hubspot_mcp", active=True):
+            callback = self.client.post(
+                reverse("console-native-integration-callback", args=["hubspot"]),
+                data=json.dumps({"authorization_code": "legacy-code", "state": state}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(callback.status_code, 200, callback.content)
+        self.assertTrue(callback.json()["connected"])
+        self.assertIn("secret_id", callback.json())
+        self.assertFalse(
+            MCPServerConfig.objects.filter(
+                user=self.user,
+                managed_integration_key="hubspot",
+            ).exists()
+        )
+        self.assertTrue(
+            GlobalSecret.objects.filter(
+                user=self.user,
+                key=HUBSPOT_PROVIDER.secret_key,
+            ).exists()
+        )
 
     @patch("api.agent.tools.mcp_manager.get_mcp_manager")
     @patch("api.services.managed_mcp_integrations.httpx.post")
@@ -883,21 +968,38 @@ class ManagedHubSpotMCPTests(TestCase):
         manager._tools_cache["managed-rollout-test"] = [cached_tool]
 
         with override_flag("hubspot_mcp", active=False):
-            _prepared, auth_error = manager._ensure_runtime_oauth(runtime)
             resolved_tool = manager.prepare_tool_for_agent(self.agent, tool_name)
 
-        self.assertEqual(auth_error["status"], "error")
-        self.assertFalse(auth_error["retryable"])
         self.assertIsNone(resolved_tool)
 
         unavailable = MCPOAuthResult(MCPOAuthStatus.TEMPORARILY_UNAVAILABLE, None)
+        expired_runtime = replace(
+            runtime,
+            oauth_expires_at=timezone.now() - timedelta(minutes=1),
+        )
         with patch(
             "api.agent.tools.mcp_manager.ensure_mcp_oauth_credential",
             return_value=unavailable,
         ):
-            _prepared, validation_error = manager._ensure_runtime_oauth(runtime)
+            _prepared, validation_error = manager._ensure_runtime_oauth(expired_runtime)
         self.assertEqual(validation_error["status"], "error")
         self.assertTrue(validation_error["retryable"])
+
+    def test_fresh_managed_runtime_token_skips_database_oauth_validation(self):
+        config = self._create_managed_credential()
+        credential = config.oauth_credential
+        credential.access_token = "fresh-managed-token"
+        credential.expires_at = timezone.now() + timedelta(hours=1)
+        credential.save()
+        manager = MCPToolManager()
+        runtime = manager._build_runtime_from_config(config)
+
+        with patch("api.agent.tools.mcp_manager.ensure_mcp_oauth_credential") as mock_ensure:
+            prepared, auth_error = manager._ensure_runtime_oauth(runtime)
+
+        self.assertIs(prepared, runtime)
+        self.assertIsNone(auth_error)
+        mock_ensure.assert_not_called()
 
     def test_disabling_rollout_restores_existing_legacy_rest_auth(self):
         self._create_legacy_secret()
