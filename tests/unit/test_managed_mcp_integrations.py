@@ -27,12 +27,15 @@ from api.models import (
     PersistentAgent,
     PersistentAgentEnabledTool,
     PersistentAgentSystemSkillState,
+    PipedreamAppSelection,
 )
 from api.services.managed_mcp_integrations import (
     HUBSPOT_MCP_PROVIDER,
     MANAGED_OAUTH_MCP_PROVIDERS,
+    ManagedMCPConnectionMode,
     complete_managed_mcp_oauth,
     managed_mcp_provider_enabled,
+    resolve_managed_mcp_connection_mode,
     start_managed_mcp_oauth,
     trigger_agents_for_managed_mcp_change,
 )
@@ -42,6 +45,10 @@ from api.services.native_integrations import (
     HUBSPOT_PROVIDER,
     NativeIntegrationAuthError,
     apply_native_integration_auth,
+)
+from api.services.pipedream_apps import (
+    get_effective_pipedream_app_slugs_for_agent,
+    is_pipedream_tool_visible_to_agent,
 )
 
 
@@ -109,6 +116,110 @@ class ManagedHubSpotMCPTests(TestCase):
     def _start(self):
         return self.client.post(
             reverse("console-native-integration-connect", args=["hubspot"]),
+        )
+
+    def _create_legacy_secret(self, access_token="legacy-rest-token"):
+        secret = GlobalSecret(
+            user=self.user,
+            name="Legacy HubSpot",
+            secret_type=GlobalSecret.SecretType.INTEGRATION,
+            domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
+            key=HUBSPOT_PROVIDER.secret_key,
+        )
+        secret.set_value(json.dumps({"access_token": access_token}))
+        secret.save()
+        return secret
+
+    def _create_managed_credential(self, *, is_active=False):
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="hubspot",
+            display_name="HubSpot",
+            url=HUBSPOT_MCP_PROVIDER.server_url,
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            managed_integration_key="hubspot",
+            is_active=is_active,
+        )
+        MCPServerOAuthCredential.objects.create(
+            server_config=config,
+            user=self.user,
+        )
+        return config
+
+    def test_connection_mode_resolver_matrix(self):
+        cases = (
+            (False, False, False, ManagedMCPConnectionMode.LEGACY_REST),
+            (False, True, False, ManagedMCPConnectionMode.LEGACY_REST),
+            (False, False, True, ManagedMCPConnectionMode.LEGACY_REST),
+            (False, True, True, ManagedMCPConnectionMode.LEGACY_REST),
+            (True, False, False, ManagedMCPConnectionMode.MANAGED_MCP),
+            (True, True, False, ManagedMCPConnectionMode.LEGACY_REST),
+            (True, False, True, ManagedMCPConnectionMode.MANAGED_MCP),
+            (True, True, True, ManagedMCPConnectionMode.MANAGED_MCP),
+        )
+
+        for rollout_enabled, has_legacy, has_managed, expected in cases:
+            with self.subTest(
+                rollout_enabled=rollout_enabled,
+                has_legacy=has_legacy,
+                has_managed=has_managed,
+            ):
+                GlobalSecret.objects.filter(user=self.user, key=HUBSPOT_PROVIDER.secret_key).delete()
+                MCPServerConfig.objects.filter(user=self.user, managed_integration_key="hubspot").delete()
+                if has_legacy:
+                    self._create_legacy_secret()
+                if has_managed:
+                    self._create_managed_credential()
+
+                with override_flag("hubspot_mcp", active=rollout_enabled):
+                    mode = resolve_managed_mcp_connection_mode("hubspot", self.user, None)
+
+                self.assertEqual(mode, expected)
+
+        GlobalSecret.objects.filter(user=self.user, key=HUBSPOT_PROVIDER.secret_key).delete()
+        MCPServerConfig.objects.filter(user=self.user, managed_integration_key="hubspot").delete()
+        self._create_legacy_secret()
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="hubspot",
+            display_name="HubSpot",
+            url=HUBSPOT_MCP_PROVIDER.server_url,
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            managed_integration_key="hubspot",
+            is_active=True,
+        )
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.MANAGED_MCP,
+        )
+        self.assertTrue(config.is_active)
+
+    def test_pipedream_hubspot_tools_are_suppressed_in_both_modes(self):
+        self._create_legacy_secret()
+        PipedreamAppSelection.objects.create(
+            user=self.user,
+            selected_app_slugs=["hubspot", "slack"],
+        )
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.LEGACY_REST,
+        )
+        effective_apps = get_effective_pipedream_app_slugs_for_agent(self.agent)
+        self.assertNotIn("hubspot", effective_apps)
+        self.assertIn("slack", effective_apps)
+        self.assertFalse(
+            is_pipedream_tool_visible_to_agent(self.agent, "hubspot-search-contacts"),
+        )
+
+        self._create_managed_credential()
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.MANAGED_MCP,
+        )
+        self.assertFalse(
+            is_pipedream_tool_visible_to_agent(self.agent, "hubspot-search-contacts"),
         )
 
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
@@ -340,7 +451,104 @@ class ManagedHubSpotMCPTests(TestCase):
 
     @patch("api.agent.tools.mcp_manager.get_mcp_manager")
     @patch("api.services.managed_mcp_integrations.httpx.post")
-    def test_disconnect_clears_mcp_state_but_preserves_legacy_rest_credential(self, mock_post, mock_manager):
+    def test_legacy_rest_stays_authoritative_until_managed_callback_succeeds(
+        self,
+        mock_post,
+        _mock_manager,
+    ):
+        legacy_secret = self._create_legacy_secret()
+
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.LEGACY_REST,
+        )
+        before = next(
+            item
+            for item in self.client.get(reverse("console-native-integration-list")).json()["providers"]
+            if item["provider_key"] == "hubspot"
+        )
+        self.assertTrue(before["connected"])
+        self.assertEqual(before["connection_kind"], "native_api")
+
+        start_response = self._start()
+        self.assertEqual(start_response.status_code, 201, start_response.content)
+        state = start_response.json()["state"]
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.LEGACY_REST,
+        )
+        legacy_headers = apply_native_integration_auth(
+            self.agent,
+            "https://api.hubapi.com/crm/v3/objects/contacts",
+            {},
+        )
+        self.assertEqual(legacy_headers["Authorization"], "Bearer legacy-rest-token")
+
+        mock_post.return_value = self._token_response()
+        callback = self.client.post(
+            reverse("console-native-integration-callback", args=["hubspot"]),
+            data=json.dumps({"authorization_code": "upgrade-code", "state": state}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(callback.status_code, 200, callback.content)
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.MANAGED_MCP,
+        )
+        self.assertTrue(GlobalSecret.objects.filter(id=legacy_secret.id).exists())
+        with self.assertRaises(NativeIntegrationAuthError) as raised:
+            apply_native_integration_auth(
+                self.agent,
+                "https://api.hubapi.com/crm/v3/objects/contacts",
+                {"Authorization": "Bearer manually-supplied-token"},
+            )
+        self.assertEqual(raised.exception.code, "managed_mcp_required")
+
+    @patch("api.services.managed_mcp_integrations.httpx.post")
+    def test_failed_managed_upgrade_leaves_legacy_rest_authoritative(self, mock_post):
+        legacy_secret = self._create_legacy_secret()
+        state = self._start().json()["state"]
+        mock_post.return_value = MagicMock(status_code=503, text="temporarily unavailable")
+
+        callback = self.client.post(
+            reverse("console-native-integration-callback", args=["hubspot"]),
+            data=json.dumps({"authorization_code": "failed-code", "state": state}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(callback.status_code, 503, callback.content)
+        self.assertTrue(GlobalSecret.objects.filter(id=legacy_secret.id).exists())
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.LEGACY_REST,
+        )
+        headers = apply_native_integration_auth(
+            self.agent,
+            "https://api.hubapi.com/crm/v3/objects/contacts",
+            {},
+        )
+        self.assertEqual(headers["Authorization"], "Bearer legacy-rest-token")
+
+    def test_disconnecting_legacy_makes_the_next_connection_managed_mcp(self):
+        legacy_secret = self._create_legacy_secret()
+
+        response = self.client.post(reverse("console-native-integration-revoke", args=["hubspot"]))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["connection_kind"], "native_api")
+        self.assertFalse(GlobalSecret.objects.filter(id=legacy_secret.id).exists())
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.MANAGED_MCP,
+        )
+        restart = self._start()
+        self.assertEqual(restart.status_code, 201, restart.content)
+        self.assertTrue(restart.json()["authorization_url"].startswith(HUBSPOT_MCP_PROVIDER.authorization_endpoint))
+
+    @patch("api.agent.tools.mcp_manager.get_mcp_manager")
+    @patch("api.services.managed_mcp_integrations.httpx.post")
+    def test_disconnect_clears_mcp_and_retained_legacy_credentials(self, mock_post, mock_manager):
         mock_post.return_value = self._token_response()
         state = self._start().json()["state"]
         self.client.post(
@@ -356,15 +564,7 @@ class ManagedHubSpotMCPTests(TestCase):
             tool_name="get_user_details",
             server_config=config,
         )
-        legacy_secret = GlobalSecret(
-            user=self.user,
-            name="Legacy HubSpot",
-            secret_type=GlobalSecret.SecretType.INTEGRATION,
-            domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
-            key=HUBSPOT_PROVIDER.secret_key,
-        )
-        legacy_secret.set_value(json.dumps({"access_token": "legacy-token"}))
-        legacy_secret.save()
+        legacy_secret = self._create_legacy_secret("legacy-token")
         mock_manager.reset_mock()
 
         response = self.client.post(reverse("console-native-integration-revoke", args=["hubspot"]))
@@ -375,7 +575,8 @@ class ManagedHubSpotMCPTests(TestCase):
         self.assertFalse(config.is_active)
         self.assertFalse(MCPServerOAuthCredential.objects.filter(server_config=config).exists())
         self.assertFalse(PersistentAgentEnabledTool.objects.filter(server_config=config).exists())
-        self.assertTrue(GlobalSecret.objects.filter(id=legacy_secret.id).exists())
+        self.assertFalse(GlobalSecret.objects.filter(id=legacy_secret.id).exists())
+        self.assertEqual(response.json()["connection_kind"], "managed_mcp")
         mock_manager.return_value.remove_server.assert_called_once_with(str(config.id))
 
     @patch("api.agent.tools.mcp_manager.get_mcp_manager")
@@ -491,6 +692,7 @@ class ManagedHubSpotMCPTests(TestCase):
     @patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery")
     def test_managed_mode_blocks_rest_auth_and_renders_mcp_skill_guidance(self, _mock_discovery):
         self.assertTrue(managed_mcp_provider_enabled("hubspot", self.user, None))
+        self._create_legacy_secret()
         config = MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.USER,
             user=self.user,
@@ -510,14 +712,66 @@ class ManagedHubSpotMCPTests(TestCase):
             apply_native_integration_auth(
                 self.agent,
                 "https://api.hubapi.com/crm/v3/objects/contacts",
-                {},
+                {"Authorization": "Bearer manually-supplied-token"},
             )
         self.assertEqual(raised.exception.code, "managed_mcp_required")
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.MANAGED_MCP,
+        )
+        self.assertIn(config, agent_accessible_server_configs(self.agent))
 
         instructions = _hubspot_native_prompt_instructions(self.agent)
         self.assertIn("remote MCP tools", instructions)
         self.assertIn("get_user_details", instructions)
         self.assertIn("do not use `http_request`", instructions)
+
+    def test_legacy_mode_uses_rest_guidance_and_hides_pending_managed_server(self):
+        self._create_legacy_secret()
+        pending_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="hubspot",
+            display_name="HubSpot",
+            url=HUBSPOT_MCP_PROVIDER.server_url,
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            managed_integration_key="hubspot",
+            metadata={"managed_oauth": True, "provider_key": "hubspot"},
+            is_active=False,
+        )
+
+        instructions = _hubspot_native_prompt_instructions(self.agent)
+        accessible_ids = {str(config.id) for config in agent_accessible_server_configs(self.agent)}
+        tool_name = "mcp_hubspot_get_user_details"
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name=tool_name,
+            tool_server="hubspot",
+            tool_name="get_user_details",
+            server_config=pending_config,
+        )
+        manager = MCPToolManager()
+        runtime = manager._build_runtime_from_config(pending_config)
+        manager._server_cache[str(pending_config.id)] = runtime
+        manager._tools_cache["legacy-mode-stale-cache"] = [
+            MCPToolInfo(
+                config_id=str(pending_config.id),
+                full_name=tool_name,
+                server_name="hubspot",
+                tool_name="get_user_details",
+                description="Return HubSpot account details.",
+                parameters={"type": "object", "properties": {}},
+            )
+        ]
+
+        self.assertIn("Use `http_request` for HubSpot REST API calls", instructions)
+        self.assertNotIn("remote MCP tools", instructions)
+        self.assertNotIn(str(pending_config.id), accessible_ids)
+        self.assertIsNone(manager.prepare_tool_for_agent(self.agent, tool_name))
+        self.assertEqual(
+            resolve_managed_mcp_connection_mode("hubspot", self.user, None),
+            ManagedMCPConnectionMode.LEGACY_REST,
+        )
 
     def test_hubspot_reauthorization_error_becomes_action_required(self):
         normalized = MCPErrorNormalizerRegistry.default().normalize(
@@ -646,20 +900,14 @@ class ManagedHubSpotMCPTests(TestCase):
         self.assertTrue(validation_error["retryable"])
 
     def test_disabling_rollout_restores_existing_legacy_rest_auth(self):
-        legacy_secret = GlobalSecret(
-            user=self.user,
-            name="Legacy HubSpot",
-            secret_type=GlobalSecret.SecretType.INTEGRATION,
-            domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
-            key=HUBSPOT_PROVIDER.secret_key,
-        )
-        legacy_secret.set_value(json.dumps({"access_token": "legacy-rest-token"}))
-        legacy_secret.save()
+        self._create_legacy_secret()
         with override_flag("hubspot_mcp", active=False):
+            mode = resolve_managed_mcp_connection_mode("hubspot", self.user, None)
             headers = apply_native_integration_auth(
                 self.agent,
                 "https://api.hubapi.com/crm/v3/objects/contacts",
                 {},
             )
 
+        self.assertEqual(mode, ManagedMCPConnectionMode.LEGACY_REST)
         self.assertEqual(headers["Authorization"], "Bearer legacy-rest-token")

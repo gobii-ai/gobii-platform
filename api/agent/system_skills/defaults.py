@@ -290,11 +290,17 @@ def _apollo_native_prompt_instructions(agent) -> str:
 
 
 def _hubspot_native_prompt_instructions(agent) -> str:
-    from api.services.managed_mcp_integrations import managed_mcp_provider_enabled
+    from api.services.managed_mcp_integrations import (
+        ManagedMCPConnectionMode,
+        resolve_managed_mcp_connection_mode,
+    )
 
     owner_org = getattr(agent, "organization", None) if getattr(agent, "organization_id", None) else None
     owner_user = None if owner_org is not None else getattr(agent, "user", None)
-    if managed_mcp_provider_enabled("hubspot", owner_user, owner_org):
+    if (
+        resolve_managed_mcp_connection_mode("hubspot", owner_user, owner_org)
+        == ManagedMCPConnectionMode.MANAGED_MCP
+    ):
         connection_gate = _native_connection_gate(
             agent,
             "hubspot",

@@ -291,12 +291,18 @@ def ensure_mcp_oauth_credential(config_id: str) -> MCPOAuthResult:
     if config is None:
         return MCPOAuthResult(MCPOAuthStatus.CONFIGURATION_ERROR, None)
     if config.managed_integration_key:
-        from api.services.managed_mcp_integrations import managed_mcp_provider_enabled
+        from api.services.managed_mcp_integrations import (
+            ManagedMCPConnectionMode,
+            resolve_managed_mcp_connection_mode,
+        )
 
-        if not managed_mcp_provider_enabled(
-            config.managed_integration_key,
-            config.user,
-            config.organization,
+        if (
+            resolve_managed_mcp_connection_mode(
+                config.managed_integration_key,
+                config.user,
+                config.organization,
+            )
+            != ManagedMCPConnectionMode.MANAGED_MCP
         ):
             return MCPOAuthResult(MCPOAuthStatus.CONFIGURATION_ERROR, None)
 

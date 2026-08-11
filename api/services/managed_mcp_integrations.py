@@ -6,6 +6,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Callable
 from urllib.parse import urlencode
 
@@ -96,6 +97,11 @@ class ManagedMCPTokenRequestError(ValueError):
         self.status_code = status_code
         self.response_body = response_body
         self.detail = detail
+
+
+class ManagedMCPConnectionMode(str, Enum):
+    LEGACY_REST = "legacy_rest"
+    MANAGED_MCP = "managed_mcp"
 
 
 def get_managed_mcp_provider(provider_key: str) -> ManagedOAuthMCPProvider:
@@ -199,7 +205,18 @@ def managed_mcp_provider_keys_for_agent(agent) -> set[str]:
     return {
         provider.key
         for provider in MANAGED_OAUTH_MCP_PROVIDERS.values()
-        if managed_mcp_provider_enabled(provider.key, owner_user, owner_org)
+        if resolve_managed_mcp_connection_mode(provider.key, owner_user, owner_org)
+        == ManagedMCPConnectionMode.MANAGED_MCP
+    }
+
+
+def managed_mcp_suppressed_pipedream_app_slugs() -> set[str]:
+    """Return Pipedream apps replaced by a workspace-managed integration."""
+
+    return {
+        app_slug
+        for provider in MANAGED_OAUTH_MCP_PROVIDERS.values()
+        for app_slug in provider.pipedream_app_slugs
     }
 
 
@@ -229,6 +246,34 @@ def get_managed_mcp_config(
     return queryset.select_related("oauth_credential").first()
 
 
+def resolve_managed_mcp_connection_mode(
+    provider_key: str,
+    owner_user,
+    owner_org,
+) -> ManagedMCPConnectionMode:
+    """Choose one HubSpot transport for the workspace before tools are exposed."""
+
+    if not managed_mcp_provider_enabled(provider_key, owner_user, owner_org):
+        return ManagedMCPConnectionMode.LEGACY_REST
+
+    config = get_managed_mcp_config(provider_key, owner_user, owner_org)
+    if config is not None:
+        has_managed_credential = MCPServerOAuthCredential.objects.filter(
+            server_config=config,
+        ).exists()
+        if config.is_active or has_managed_credential:
+            return ManagedMCPConnectionMode.MANAGED_MCP
+
+    # Keep installed REST users grandfathered until MCP authorization succeeds.
+    # The local import avoids making native_integrations and this module import each
+    # other while they are being initialized.
+    from api.services.native_integrations import get_native_integration_secret
+
+    if get_native_integration_secret(provider_key, owner_user, owner_org) is not None:
+        return ManagedMCPConnectionMode.LEGACY_REST
+    return ManagedMCPConnectionMode.MANAGED_MCP
+
+
 def managed_mcp_connection_summary(provider_key: str, owner_user, owner_org) -> dict[str, Any]:
     provider = get_managed_mcp_provider(provider_key)
     config = get_managed_mcp_config(provider.key, owner_user, owner_org, active_only=True)
@@ -249,7 +294,10 @@ def managed_mcp_connection_summary(provider_key: str, owner_user, owner_org) -> 
 
 
 def managed_mcp_is_connected(provider_key: str, owner_user, owner_org) -> bool:
-    if not managed_mcp_provider_enabled(provider_key, owner_user, owner_org):
+    if (
+        resolve_managed_mcp_connection_mode(provider_key, owner_user, owner_org)
+        != ManagedMCPConnectionMode.MANAGED_MCP
+    ):
         return False
     return bool(managed_mcp_connection_summary(provider_key, owner_user, owner_org)["connected"])
 

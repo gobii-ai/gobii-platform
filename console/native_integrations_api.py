@@ -40,6 +40,7 @@ from api.services.native_integrations import (
 )
 from api.services.native_integration_events import normalize_native_integration_event_files, record_native_integration_agent_event, resolve_native_integration_event_agent
 from api.services.managed_mcp_integrations import (
+    ManagedMCPConnectionMode,
     ManagedMCPConfigurationError,
     ManagedMCPTokenRequestError,
     complete_managed_mcp_oauth,
@@ -49,6 +50,7 @@ from api.services.managed_mcp_integrations import (
     managed_mcp_connection_summary,
     managed_mcp_oauth_session_exists,
     managed_mcp_provider_enabled,
+    resolve_managed_mcp_connection_mode,
     start_managed_mcp_oauth,
     trigger_agents_for_managed_mcp_change,
 )
@@ -84,7 +86,10 @@ def _owner_id(owner_user, owner_org) -> str:
 
 
 def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
-    if managed_mcp_provider_enabled(provider.key, owner_user, owner_org):
+    if (
+        resolve_managed_mcp_connection_mode(provider.key, owner_user, owner_org)
+        == ManagedMCPConnectionMode.MANAGED_MCP
+    ):
         managed_provider = get_managed_mcp_provider(provider.key)
         summary = managed_mcp_connection_summary(provider.key, owner_user, owner_org)
         credential = summary["credential"]
@@ -507,14 +512,26 @@ class NativeIntegrationRevokeAPIView(LoginRequiredMixin, View):
             _, owner_user, owner_org = _resolve_native_integration_owner(request)
         except PermissionDenied as exc:
             return _permission_denied_response(exc)
-        if managed_mcp_provider_enabled(provider.key, owner_user, owner_org):
-            revoked = disconnect_managed_mcp(provider.key, owner_user, owner_org)
-            return JsonResponse({"revoked": revoked, "connection_kind": "managed_mcp"})
+
+        connection_mode = resolve_managed_mcp_connection_mode(
+            provider.key,
+            owner_user,
+            owner_org,
+        )
         managed_revoked = False
         if get_managed_mcp_config(provider.key, owner_user, owner_org) is not None:
             managed_revoked = disconnect_managed_mcp(provider.key, owner_user, owner_org)
         deleted = delete_native_integration_credentials(provider.key, owner_user, owner_org)
-        return JsonResponse({"revoked": bool(managed_revoked or deleted)})
+        return JsonResponse(
+            {
+                "revoked": bool(managed_revoked or deleted),
+                "connection_kind": (
+                    "managed_mcp"
+                    if connection_mode == ManagedMCPConnectionMode.MANAGED_MCP
+                    else "native_api"
+                ),
+            }
+        )
 
 
 class NativeIntegrationPickerTokenAPIView(LoginRequiredMixin, View):

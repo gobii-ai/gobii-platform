@@ -10,6 +10,7 @@ from api.evals.scenarios.hubspot_managed_mcp import (
     HUBSPOT_MANAGED_MCP_CASES,
     HUBSPOT_MANAGED_MCP_SCENARIO_SLUGS,
     HUBSPOT_MANAGED_MCP_SUITE_SLUG,
+    HUBSPOT_MCP_FORBIDS_LEGACY_PATHS,
     HUBSPOT_MCP_MISSING_CONNECTION,
     HUBSPOT_MCP_REAUTHORIZATION,
     HUBSPOT_USER_DETAILS_TOOL,
@@ -46,6 +47,16 @@ class HubSpotManagedMCPScenarioTests(SimpleTestCase):
 
         self.assertEqual(case.expected_hubspot_tools, (HUBSPOT_USER_DETAILS_TOOL,))
         self.assertIn("REQUIRES_REAUTHORIZATION", str(case.mock_config[HUBSPOT_USER_DETAILS_TOOL]))
+
+    def test_legacy_guardrail_case_seeds_both_connection_methods(self):
+        case = next(
+            case
+            for case in HUBSPOT_MANAGED_MCP_CASES
+            if case.slug == HUBSPOT_MCP_FORBIDS_LEGACY_PATHS
+        )
+
+        self.assertTrue(case.seed_legacy_connection)
+        self.assertIn("legacy_guardrail", case.tags)
 
     def test_missing_connection_case_has_no_remote_tool_fixture(self):
         case = next(case for case in HUBSPOT_MANAGED_MCP_CASES if case.slug == HUBSPOT_MCP_MISSING_CONNECTION)

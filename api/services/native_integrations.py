@@ -1015,11 +1015,15 @@ def format_native_integration_permission_prompt(
 ) -> str:
     provider = get_native_integration_provider(provider_key)
     from api.services.managed_mcp_integrations import (
+        ManagedMCPConnectionMode,
         managed_mcp_connection_summary,
-        managed_mcp_provider_enabled,
+        resolve_managed_mcp_connection_mode,
     )
 
-    if managed_mcp_provider_enabled(provider.key, owner_user, owner_org):
+    if (
+        resolve_managed_mcp_connection_mode(provider.key, owner_user, owner_org)
+        == ManagedMCPConnectionMode.MANAGED_MCP
+    ):
         summary = managed_mcp_connection_summary(provider.key, owner_user, owner_org)
         if not summary["connected"]:
             return "\n".join(
@@ -1083,11 +1087,15 @@ def native_integration_is_connected(
 ) -> bool:
     provider = get_native_integration_provider(provider_key)
     from api.services.managed_mcp_integrations import (
+        ManagedMCPConnectionMode,
         managed_mcp_is_connected,
-        managed_mcp_provider_enabled,
+        resolve_managed_mcp_connection_mode,
     )
 
-    if managed_mcp_provider_enabled(provider.key, owner_user, owner_org):
+    if (
+        resolve_managed_mcp_connection_mode(provider.key, owner_user, owner_org)
+        == ManagedMCPConnectionMode.MANAGED_MCP
+    ):
         return managed_mcp_is_connected(provider.key, owner_user, owner_org)
     secret = get_native_integration_secret(provider.key, owner_user, owner_org)
     if secret is None:
@@ -1606,9 +1614,15 @@ def apply_native_integration_auth(
 
     owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
     if provider.key == HUBSPOT_PROVIDER.key:
-        from api.services.managed_mcp_integrations import managed_mcp_provider_enabled
+        from api.services.managed_mcp_integrations import (
+            ManagedMCPConnectionMode,
+            resolve_managed_mcp_connection_mode,
+        )
 
-        if managed_mcp_provider_enabled(provider.key, owner_user, owner_org):
+        if (
+            resolve_managed_mcp_connection_mode(provider.key, owner_user, owner_org)
+            == ManagedMCPConnectionMode.MANAGED_MCP
+        ):
             raise NativeIntegrationAuthError(
                 "managed_mcp_required: HubSpot REST authentication is disabled for this workspace. "
                 "Use the connected HubSpot MCP tools through `search_tools`.",

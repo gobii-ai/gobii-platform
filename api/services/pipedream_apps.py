@@ -62,6 +62,7 @@ class PipedreamOwnerAppsState:
 class PipedreamAppVisibility:
     deprecated_app_slugs: frozenset[str]
     connected_app_slugs: frozenset[str] = frozenset()
+    suppressed_app_slugs: frozenset[str] = frozenset()
 
     def is_app_deprecated(self, app_slug: object) -> bool:
         normalized = normalize_app_slug(app_slug)
@@ -71,6 +72,8 @@ class PipedreamAppVisibility:
         normalized = normalize_app_slug(app_slug)
         if not normalized:
             return allow_unknown
+        if normalized in self.suppressed_app_slugs:
+            return False
         return normalized not in self.deprecated_app_slugs or normalized in self.connected_app_slugs
 
     def is_tool_visible(self, tool_name: object) -> bool:
@@ -343,9 +346,15 @@ def get_pipedream_app_visibility_for_agent(
     *,
     connected_app_slugs: set[str] | None = None,
 ) -> PipedreamAppVisibility:
+    from api.services.managed_mcp_integrations import managed_mcp_suppressed_pipedream_app_slugs
+
     deprecated = frozenset(get_deprecated_pipedream_app_slugs())
+    suppressed = frozenset(managed_mcp_suppressed_pipedream_app_slugs())
     if not deprecated:
-        return PipedreamAppVisibility(deprecated_app_slugs=deprecated)
+        return PipedreamAppVisibility(
+            deprecated_app_slugs=deprecated,
+            suppressed_app_slugs=suppressed,
+        )
     connected = (
         connected_app_slugs
         if connected_app_slugs is not None
@@ -354,6 +363,7 @@ def get_pipedream_app_visibility_for_agent(
     return PipedreamAppVisibility(
         deprecated_app_slugs=deprecated,
         connected_app_slugs=frozenset(connected),
+        suppressed_app_slugs=suppressed,
     )
 
 
@@ -419,13 +429,19 @@ def get_effective_pipedream_app_slugs_for_agent(agent: PersistentAgent) -> list[
             agent.organization.name if agent.organization else "",
             owner_org=agent.organization,
         )
-        return state.effective_app_slugs
-    state = get_owner_apps_state(
-        MCPServerConfig.Scope.USER,
-        agent.user.get_full_name() or agent.user.username if agent.user else "",
-        owner_user=agent.user,
-    )
-    return state.effective_app_slugs
+        effective_app_slugs = state.effective_app_slugs
+    else:
+        state = get_owner_apps_state(
+            MCPServerConfig.Scope.USER,
+            agent.user.get_full_name() or agent.user.username if agent.user else "",
+            owner_user=agent.user,
+        )
+        effective_app_slugs = state.effective_app_slugs
+
+    from api.services.managed_mcp_integrations import managed_mcp_suppressed_pipedream_app_slugs
+
+    suppressed = managed_mcp_suppressed_pipedream_app_slugs()
+    return [app_slug for app_slug in effective_app_slugs if app_slug not in suppressed]
 
 
 def owner_agents_queryset(owner_scope: str, owner_user=None, owner_org=None) -> QuerySet[PersistentAgent]:

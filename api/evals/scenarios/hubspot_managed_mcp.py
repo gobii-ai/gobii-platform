@@ -15,11 +15,19 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.native_http import response_contains_term, tool_calls_for_run
 from api.models import (
     EvalRunTask,
+    MCPServerConfig,
+    MCPServerOAuthCredential,
     PersistentAgent,
     PersistentAgentEnabledTool,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
+)
+from api.services.managed_mcp_integrations import HUBSPOT_MCP_PROVIDER
+from api.services.native_integrations import (
+    HUBSPOT_PROVIDER,
+    resolve_global_secret_owner_for_agent,
+    save_native_integration_credentials,
 )
 
 
@@ -51,6 +59,7 @@ class HubSpotManagedMCPCase:
     expected_hubspot_tools: tuple[str, ...]
     response_term_groups: tuple[tuple[str, ...], ...]
     tags: tuple[str, ...] = field(default_factory=tuple)
+    seed_legacy_connection: bool = False
 
 
 USER_DETAILS_RESULT = {
@@ -178,6 +187,7 @@ HUBSPOT_MANAGED_MCP_CASES = (
         expected_hubspot_tools=(HUBSPOT_USER_DETAILS_TOOL, HUBSPOT_SEARCH_CRM_TOOL),
         response_term_groups=(("CipherLake",), ("Austin",)),
         tags=("legacy_guardrail",),
+        seed_legacy_connection=True,
     ),
 )
 
@@ -265,11 +275,51 @@ class HubSpotManagedMCPScenario(EvalScenario, ScenarioExecutionTools):
                 tool_full_name=tool_name,
             ).update(tool_server=EVAL_SYNTHETIC_TOOL_SERVER, tool_name=tool_name)
 
+    @staticmethod
+    def _seed_mixed_credentials(agent: PersistentAgent) -> None:
+        owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
+        save_native_integration_credentials(
+            HUBSPOT_PROVIDER,
+            owner_user,
+            owner_org,
+            {
+                "provider_key": HUBSPOT_PROVIDER.key,
+                "auth_type": "oauth2",
+                "access_token": "eval-legacy-hubspot-access-token",
+            },
+        )
+        scope = (
+            MCPServerConfig.Scope.ORGANIZATION
+            if owner_org is not None
+            else MCPServerConfig.Scope.USER
+        )
+        config = MCPServerConfig.objects.create(
+            scope=scope,
+            organization=owner_org,
+            user=owner_user,
+            name=HUBSPOT_MCP_PROVIDER.key,
+            display_name=HUBSPOT_MCP_PROVIDER.display_name,
+            url=HUBSPOT_MCP_PROVIDER.server_url,
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            managed_integration_key=HUBSPOT_MCP_PROVIDER.key,
+            metadata={"managed_oauth": True, "provider_key": HUBSPOT_MCP_PROVIDER.key},
+            is_active=False,
+        )
+        MCPServerOAuthCredential.objects.create(
+            server_config=config,
+            organization=owner_org,
+            user=owner_user,
+            metadata={"managed_integration_key": HUBSPOT_MCP_PROVIDER.key},
+        )
+        MCPServerConfig.objects.filter(pk=config.pk).update(is_active=True)
+
     def _prepare_agent(self, agent_id: str) -> PersistentAgent:
         PersistentAgent.objects.filter(id=agent_id).update(planning_state=PersistentAgent.PlanningState.SKIPPED)
         self._seed_prior_processing_run(agent_id)
-        agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
+        agent = PersistentAgent.objects.select_related("user", "organization").get(id=agent_id)
         self._enable_managed_feature(agent)
+        if self._case().seed_legacy_connection:
+            self._seed_mixed_credentials(agent)
         result = enable_system_skills(agent, [HUBSPOT_NATIVE_SYSTEM_SKILL_KEY])
         if result.get("invalid"):
             raise ValueError(f"Could not enable HubSpot system skill: {result}")
