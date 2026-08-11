@@ -8,7 +8,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from ..tools.context_hints import URL_FIELD_PRIORITY, extract_context_hint, hint_from_unstructured_text
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
-from ..tools.tool_manager import SQLITE_TOOL_NAME
+from ..tools.tool_manager import PYTHON_EXEC_TOOL_NAME, RUN_COMMAND_TOOL_NAME, SQLITE_TOOL_NAME
 from .link_references import is_source_bearing_tool
 from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict, _get_json_type, _safe_json_path
 
@@ -46,6 +46,7 @@ MAX_TOOL_RESULT_BYTES = 5_000_000
 MAX_TOP_KEYS = 20
 
 EXCLUDED_TOOL_NAMES = {SQLITE_TOOL_NAME, "sqlite_query"}
+COMPUTE_SOURCE_TOOL_NAMES = frozenset({PYTHON_EXEC_TOOL_NAME, RUN_COMMAND_TOOL_NAME})
 SPAWN_WEB_TASK_RESULT_TOOL_NAME = "spawn_web_task_result"
 
 SCHEMA_ELIGIBLE_TOOL_PREFIXES = ("http_request", "mcp_")
@@ -174,6 +175,7 @@ class ToolCallResultRecord:
     source_url: Optional[str] = None
     will_continue_work: Optional[bool] = None
     source_bearing: Optional[bool] = None
+    succeeded: bool = True
 
 
 @dataclass(frozen=True)
@@ -188,6 +190,10 @@ class ToolResultPromptInfo:
 
 def _record_is_source_bearing(record: ToolCallResultRecord) -> bool:
     return is_source_bearing_tool(record.tool_name) and record.source_bearing is not False
+
+
+def _record_is_batch_eligible(record: ToolCallResultRecord) -> bool:
+    return _record_is_source_bearing(record) or record.tool_name in COMPUTE_SOURCE_TOOL_NAMES
 
 
 def entity_name_stem(value: str) -> str:
@@ -451,7 +457,7 @@ def prepare_tool_results_for_prompt(
     source_records = [
         record
         for record in records
-        if _record_is_source_bearing(record)
+        if _record_is_batch_eligible(record) and record.succeeded
     ]
     current_source_record = (
         max(source_records, key=lambda record: record.created_at)
@@ -471,6 +477,7 @@ def prepare_tool_results_for_prompt(
         if (
             not record.result_text
             or not _record_is_source_bearing(record)
+            or not record.succeeded
             or (
                 record.source_batch_id is not None
                 and record.tool_name == current_source_tool_name
@@ -507,8 +514,9 @@ def prepare_tool_results_for_prompt(
         recency_position = recency_positions.get(record.step_id)
         is_fresh_tool_call = record.step_id in fresh_step_ids
         is_current_source_batch = (
-            record.source_batch_id is None
-            or source_batch_id == current_source_batch_id
+            current_source_batch_id is not None
+            and record.succeeded
+            and source_batch_id == current_source_batch_id
         )
 
         context_hint = None
@@ -743,7 +751,7 @@ def prepare_tool_results_for_prompt(
             allow_fallback_query_hints=not is_scrape_markdown and not is_historical_same_tool_source,
             include_result_id=not hide_literal_result_id and not is_historical_same_tool_source,
         )
-        terminal_directive = _terminal_result_directive(result_text)
+        terminal_directive = _terminal_result_directive(result_text, record.tool_name)
         if terminal_directive:
             meta_text += f"\n{terminal_directive}"
         if record.tool_name == "sqlite_batch" and sqlite_result_has_query_result(result_text):
@@ -1367,7 +1375,9 @@ def sqlite_result_has_query_result(result_text: str) -> bool:
     )
 
 
-def _terminal_result_directive(result_text: str) -> str:
+def _terminal_result_directive(result_text: str, tool_name: str) -> str:
+    if tool_name in COMPUTE_SOURCE_TOOL_NAMES:
+        return ""
     try:
         payload = json.loads(result_text)
     except (json.JSONDecodeError, TypeError):

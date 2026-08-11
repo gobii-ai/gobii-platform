@@ -21,6 +21,46 @@ from api.models import (
 
 @tag("batch_promptree")
 class PromptContextSqliteGuidanceTests(SimpleTestCase):
+    def test_tool_result_success_requires_completed_call_and_successful_payload(self):
+        successful_payloads = (
+            '{"status": "ok"}',
+            '{"status": "success"}',
+            '{"status": "complete"}',
+            '{"status": "completed"}',
+            '{"legacy": true}',
+            "legacy plain text",
+        )
+        for payload in successful_payloads:
+            with self.subTest(payload=payload):
+                self.assertTrue(
+                    prompt_context._tool_result_completed_successfully(
+                        "complete",
+                        payload,
+                    )
+                )
+
+        unsuccessful_payloads = (
+            '{"status": "error"}',
+            '{"status": "failed"}',
+            '{"status": "blocked"}',
+            '{"status": "action_required"}',
+        )
+        for payload in unsuccessful_payloads:
+            with self.subTest(payload=payload):
+                self.assertFalse(
+                    prompt_context._tool_result_completed_successfully(
+                        "complete",
+                        payload,
+                    )
+                )
+
+        self.assertFalse(
+            prompt_context._tool_result_completed_successfully(
+                "error",
+                '{"status": "ok"}',
+            )
+        )
+
     def test_successful_terminal_sqlite_result_suppresses_immediate_model_guidance(self):
         started_at = datetime(2026, 8, 3, 1, 0, tzinfo=timezone.utc)
         inbound = SimpleNamespace(timestamp=started_at)

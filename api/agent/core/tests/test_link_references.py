@@ -745,6 +745,30 @@ class LinkReferenceTests(TestCase):
         self.assertIn("do not call this tool again", prompt_info.meta)
         self.assertIn('"retryable":false', prompt_info.preview_text)
 
+    def test_non_retryable_compute_error_omits_terminal_result_contract(self):
+        for tool_name in ("run_command", "python_exec"):
+            with self.subTest(tool_name=tool_name):
+                record = ToolCallResultRecord(
+                    step_id=f"{tool_name}-failure",
+                    tool_name=tool_name,
+                    created_at=datetime.now(timezone.utc),
+                    result_text=json.dumps({
+                        "status": "error",
+                        "message": "The submitted code failed.",
+                        "retryable": False,
+                    }),
+                    succeeded=False,
+                )
+
+                prompt_info = prepare_tool_results_for_prompt(
+                    [record],
+                    recency_positions={record.step_id: 0},
+                    fresh_tool_call_step_ids={record.step_id},
+                )[record.step_id]
+
+                self.assertNotIn("TERMINAL RESULT (`retryable=false`)", prompt_info.meta)
+                self.assertNotIn("do not call this tool again", prompt_info.meta)
+
     def test_source_result_preview_pairs_raw_url_with_reference_without_mutating_result(self):
         url = "https://profiles.example.test/avery?view=full#bio"
         raw_result = f'{{"results":[{{"name":"Avery Chen","profile_url":"{url}"}}]}}'
