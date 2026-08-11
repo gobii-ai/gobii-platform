@@ -4423,32 +4423,29 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             self.assertNotRegex(page_text, r"(?i)\b(?:worker|coworker)s?\b")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_header_restores_solution_and_developer_navigation(self):
+    def test_home_header_limits_product_navigation_to_recruiting(self):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
-        self.assertIsNotNone(soup.find("a", {"href": reverse("pages:solutions")}))
-        self.assertIsNotNone(
-            soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": "recruiting"})})
-        )
-        developer_links = soup.find_all(
-            "a",
-            {"href": reverse("pages:solution", kwargs={"slug": "engineering"})},
-        )
-        self.assertGreaterEqual(len(developer_links), 1)
-        self.assertIsNotNone(soup.find("a", {"href": reverse("pages:library")}))
         ai_employees_url = reverse("pages:ai_employees")
         desktop_product_menu = soup.find(id="gk-dd-panel")
         mobile_menu = soup.select_one(".gk-mobile-panel")
-        self.assertIsNone(desktop_product_menu.find("a", href=ai_employees_url))
-        self.assertIsNone(mobile_menu.find("a", href=ai_employees_url))
+        recruiting_url = reverse("pages:solution", kwargs={"slug": "recruiting"})
+        self.assertIsNotNone(desktop_product_menu.find("a", href=recruiting_url))
+        self.assertIsNotNone(mobile_menu.find("a", href=recruiting_url))
+        for hidden_url in (
+            ai_employees_url,
+            reverse("pages:solutions"),
+            reverse("pages:solution", kwargs={"slug": "sales"}),
+            reverse("pages:solution", kwargs={"slug": "engineering"}),
+            reverse("pages:library"),
+        ):
+            self.assertIsNone(desktop_product_menu.find("a", href=hidden_url))
+            self.assertIsNone(mobile_menu.find("a", href=hidden_url))
         self.assertIsNone(soup.find("footer").find("a", href=ai_employees_url))
         page_text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
         page_text = page_text.replace(" ,", ",").replace(" .", ".")
-        self.assertIn("Solutions", page_text)
-        self.assertIn("Agents", page_text)
-        self.assertIn("API", page_text)
         h1_text = re.sub(r"\s+", " ", soup.find("h1").get_text(" ", strip=True))
         h1_text = h1_text.replace(" ,", ",").replace(" .", ".")
         self.assertEqual(
@@ -4456,7 +4453,7 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             "20 qualified candidates, delivered to your ATS every week.",
         )
         self.assertIn(
-            "Hire a Gobii that already knows the job.",
+            "Hire a recruiting agent that already knows the job.",
             page_text,
         )
         for retired_slug in ("health-care", "defense"):
