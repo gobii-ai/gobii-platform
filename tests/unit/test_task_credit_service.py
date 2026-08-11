@@ -234,6 +234,56 @@ class TaskCreditServiceCheckAndConsumeCreditForOwnerTests(TestCase):
         self.assertIn("no remaining task credits", result["error_message"].lower())
         self.assertIsNone(result["credit"])
 
+    @patch("tasks.services.logger.warning")
+    @patch("tasks.services.monotonic", side_effect=[0.0, 0.6])
+    def test_org_consumption_preserves_fifo_and_logs_slow_lock(
+        self,
+        _mock_monotonic,
+        mock_warning,
+    ):
+        owner = User.objects.create(username="org_owner_slow_lock")
+        org = Organization.objects.create(
+            name="Slow Lock Org",
+            slug="slow-lock-org",
+            created_by=owner,
+        )
+        now = timezone.now()
+        first_credit = TaskCredit.objects.create(
+            organization=org,
+            credits=Decimal("10.000"),
+            credits_used=Decimal("0.000"),
+            granted_date=now - timedelta(days=1),
+            expiration_date=now + timedelta(days=10),
+            grant_type=GrantTypeChoices.COMPENSATION,
+        )
+        later_credit = TaskCredit.objects.create(
+            organization=org,
+            credits=Decimal("10.000"),
+            credits_used=Decimal("0.000"),
+            granted_date=now - timedelta(days=1),
+            expiration_date=now + timedelta(days=20),
+            grant_type=GrantTypeChoices.COMPENSATION,
+        )
+
+        consumed = TaskCreditService.consume_credit_for_owner(
+            org,
+            amount=Decimal("1.000"),
+        )
+
+        self.assertEqual(consumed.id, first_credit.id)
+        first_credit.refresh_from_db()
+        later_credit.refresh_from_db()
+        self.assertEqual(first_credit.credits_used, Decimal("1.000"))
+        self.assertEqual(later_credit.credits_used, Decimal("0.000"))
+        mock_warning.assert_called_once_with(
+            "Slow organization task-credit lock owner_type=%s owner_id=%s "
+            "credit_id=%s duration_ms=%s",
+            "organization",
+            org.id,
+            str(first_credit.id),
+            600,
+        )
+
     def test_org_additional_tasks_blocked_without_paid_seats(self):
         owner = User.objects.create(username="org_owner5")
         org = Organization.objects.create(name="Org5", slug="org5", created_by=owner)

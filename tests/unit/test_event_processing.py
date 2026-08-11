@@ -38,6 +38,7 @@ from api.agent.core.event_processing import (
     _prepare_tool_batch,
     build_prompt_context,
     _get_completed_process_run_count,
+    _record_process_run_start,
     _FinalizedToolBatch,
     _PreparedToolBatch,
     _PreparedToolExecution,
@@ -4397,6 +4398,52 @@ class AgentRunSequenceHelperTests(TestCase):
         )
 
         self.assertEqual(_get_completed_process_run_count(self.agent), 1)
+
+    def test_initialized_run_count_uses_persisted_value(self):
+        self.agent.process_run_count = 7
+
+        with self.assertNumQueries(0):
+            self.assertEqual(_get_completed_process_run_count(self.agent), 7)
+
+    def test_record_process_run_start_lazily_initializes_and_increments(self):
+        prior_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Process events",
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=prior_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
+
+        processing_step, is_first_run, run_sequence_number = _record_process_run_start(self.agent)
+
+        self.assertFalse(is_first_run)
+        self.assertEqual(run_sequence_number, 2)
+        self.assertEqual(processing_step.description, "Process events")
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.process_run_count, 2)
+
+        _, _, next_run_sequence_number = _record_process_run_start(self.agent)
+        self.assertEqual(next_run_sequence_number, 3)
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.process_run_count, 3)
+
+    def test_record_process_run_start_rolls_back_counter_and_step(self):
+        with patch(
+            "api.agent.core.event_processing.PersistentAgentSystemStep.objects.create",
+            side_effect=DatabaseError("system step write failed"),
+        ):
+            with self.assertRaises(DatabaseError):
+                _record_process_run_start(self.agent)
+
+        self.agent.refresh_from_db()
+        self.assertIsNone(self.agent.process_run_count)
+        self.assertFalse(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description="Process events",
+            ).exists()
+        )
 
 @tag("batch_event_processing")
 class CronTriggerTaskTests(TestCase):

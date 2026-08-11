@@ -5496,11 +5496,37 @@ def _get_completed_process_run_count(agent: Optional[PersistentAgent]) -> int:
     if agent is None:
         return 0
 
+    if agent.process_run_count is not None:
+        return agent.process_run_count
+
     return PersistentAgentSystemStep.objects.filter(
         step__agent=agent,
         code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
         step__description="Process events",
     ).count()
+
+
+def _record_process_run_start(
+    agent: PersistentAgent,
+) -> tuple[PersistentAgentStep, bool, int]:
+    """Record one PROCESS_EVENTS run and advance its durable sequence atomically."""
+    with transaction.atomic():
+        locked_agent = PersistentAgent.objects.select_for_update().get(pk=agent.pk)
+        prior_run_count = _get_completed_process_run_count(locked_agent)
+        run_sequence_number = prior_run_count + 1
+        processing_step = PersistentAgentStep.objects.create(
+            agent=locked_agent,
+            description="Process events",
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=processing_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
+        locked_agent.process_run_count = run_sequence_number
+        locked_agent.save(update_fields=["process_run_count"])
+
+    agent.process_run_count = run_sequence_number
+    return processing_step, prior_run_count == 0, run_sequence_number
 
 
 def _create_agent_system_step_once(
@@ -6249,8 +6275,7 @@ def _ensure_credit_for_tool(
         return False
 
     try:
-        with transaction.atomic():
-            consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
+        consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
         consumed_credit = consumed.get("credit") if consumed else None
     except Exception as e:
         log_credit_failure(
@@ -7044,25 +7069,11 @@ def _process_agent_events_locked(
         span.set_attribute('credit_check.error', str(e))
         return agent
 
-    with tracer.start_as_current_span("Agent Bootstrap Run Count"):
-        prior_run_count = _get_completed_process_run_count(agent)
-
-    # Determine whether this is the first processing run before recording the system step
-    is_first_run = prior_run_count == 0
-    run_sequence_number = prior_run_count + 1
-
     try:
         publish_agent_event(str(agent.id), AgentEventType.PROCESSING_STARTED)
 
-        with transaction.atomic():
-            processing_step = PersistentAgentStep.objects.create(
-                agent=agent,
-                description="Process events",
-            )
-            sys_step = PersistentAgentSystemStep.objects.create(
-                step=processing_step,
-                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-            )
+        with tracer.start_as_current_span("Agent Bootstrap Run Count"):
+            processing_step, is_first_run, run_sequence_number = _record_process_run_start(agent)
         if heartbeat:
             heartbeat.update_run_id(str(processing_step.id))
 

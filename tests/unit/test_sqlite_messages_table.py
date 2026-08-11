@@ -143,6 +143,283 @@ class SqliteMessagesTableTests(SimpleTestCase):
         finally:
             conn.close()
 
+    def test_store_messages_for_prompt_does_not_rewrite_unchanged_rows(self):
+        record = MessageSQLiteRecord(
+            message_id="msg-stable",
+            seq="S1",
+            timestamp="2026-01-01T00:00:00+00:00",
+            channel="web",
+            is_outbound=False,
+            from_address="web://user/1",
+            to_address="web://agent/1",
+            conversation_id="conv-1",
+            conversation_address="web://user/1",
+            is_peer_dm=False,
+            peer_agent_id=None,
+            subject="",
+            body="unchanged",
+            attachment_paths=[],
+            rejected_attachments=[],
+            latest_status="queued",
+            latest_sent_at=None,
+            latest_delivered_at=None,
+            latest_error_code=None,
+            latest_error_message=None,
+            is_hidden_in_chat=False,
+        )
+        store_messages_for_prompt([record])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE message_change_audit (operation TEXT NOT NULL);
+                CREATE TRIGGER audit_message_insert AFTER INSERT ON __messages
+                BEGIN INSERT INTO message_change_audit VALUES ('insert'); END;
+                CREATE TRIGGER audit_message_update AFTER UPDATE ON __messages
+                BEGIN INSERT INTO message_change_audit VALUES ('update'); END;
+                CREATE TRIGGER audit_message_delete AFTER DELETE ON __messages
+                BEGIN INSERT INTO message_change_audit VALUES ('delete'); END;
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        store_messages_for_prompt([record])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM message_change_audit").fetchone()[0],
+                0,
+            )
+        finally:
+            conn.close()
+
+    def test_store_messages_for_prompt_updates_changed_row_and_deletes_absent_row(self):
+        first = MessageSQLiteRecord(
+            message_id="msg-change",
+            seq="S1",
+            timestamp="2026-01-01T00:00:00+00:00",
+            channel="web",
+            is_outbound=True,
+            from_address="web://agent/1",
+            to_address="web://user/1",
+            conversation_id="conv-1",
+            conversation_address="web://user/1",
+            is_peer_dm=False,
+            peer_agent_id=None,
+            subject="",
+            body="before",
+            attachment_paths=[],
+            rejected_attachments=[],
+            latest_status="sent",
+            latest_sent_at=None,
+            latest_delivered_at=None,
+            latest_error_code=None,
+            latest_error_message=None,
+            is_hidden_in_chat=False,
+        )
+        removed = MessageSQLiteRecord(
+            **{
+                **first.__dict__,
+                "message_id": "msg-remove",
+                "seq": "S2",
+            }
+        )
+        changed = MessageSQLiteRecord(
+            **{
+                **first.__dict__,
+                "body": "after",
+                "latest_status": "delivered",
+            }
+        )
+        store_messages_for_prompt([first, removed])
+
+        store_messages_for_prompt([changed])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                conn.execute(
+                    'SELECT body, latest_status FROM "__messages" WHERE message_id=?',
+                    ("msg-change",),
+                ).fetchone(),
+                ("after", "delivered"),
+            )
+            self.assertIsNone(
+                conn.execute(
+                    'SELECT 1 FROM "__messages" WHERE message_id=?',
+                    ("msg-remove",),
+                ).fetchone()
+            )
+        finally:
+            conn.close()
+
+    def test_store_messages_for_prompt_rebuilds_incompatible_table(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute('CREATE TABLE "__messages" (message_id TEXT PRIMARY KEY)')
+            conn.execute('INSERT INTO "__messages" VALUES (?)', ("legacy",))
+            conn.commit()
+        finally:
+            conn.close()
+
+        record = MessageSQLiteRecord(
+            message_id="msg-current",
+            seq="S1",
+            timestamp="2026-01-01T00:00:00+00:00",
+            channel="web",
+            is_outbound=False,
+            from_address="web://user/1",
+            to_address="web://agent/1",
+            conversation_id=None,
+            conversation_address="",
+            is_peer_dm=False,
+            peer_agent_id=None,
+            subject="",
+            body="current",
+            attachment_paths=[],
+            rejected_attachments=[],
+            latest_status="queued",
+            latest_sent_at=None,
+            latest_delivered_at=None,
+            latest_error_code=None,
+            latest_error_message=None,
+            is_hidden_in_chat=False,
+        )
+        store_messages_for_prompt([record])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            columns = {
+                row[1]
+                for row in conn.execute('PRAGMA table_info("__messages")').fetchall()
+            }
+            self.assertIn("structured_payload_json", columns)
+            self.assertEqual(
+                conn.execute('SELECT message_id FROM "__messages"').fetchall(),
+                [("msg-current",)],
+            )
+        finally:
+            conn.close()
+
+    def test_store_messages_for_prompt_rebuilds_table_without_message_id_primary_key(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE "__messages" (
+                    message_id TEXT,
+                    seq TEXT,
+                    timestamp TEXT,
+                    channel TEXT,
+                    is_outbound INTEGER,
+                    direction TEXT,
+                    from_address TEXT,
+                    to_address TEXT,
+                    conversation_id TEXT,
+                    conversation_address TEXT,
+                    is_peer_dm INTEGER,
+                    peer_agent_id TEXT,
+                    subject TEXT,
+                    body TEXT,
+                    body_bytes INTEGER,
+                    body_is_truncated INTEGER,
+                    body_truncated_bytes INTEGER,
+                    attachment_paths_json TEXT,
+                    attachment_count INTEGER,
+                    rejected_attachments_json TEXT,
+                    latest_status TEXT,
+                    latest_sent_at TEXT,
+                    latest_delivered_at TEXT,
+                    latest_error_code TEXT,
+                    latest_error_message TEXT,
+                    is_hidden_in_chat INTEGER,
+                    structured_payload_json TEXT
+                )
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        record = MessageSQLiteRecord(
+            message_id="msg-current",
+            seq="S1",
+            timestamp="2026-01-01T00:00:00+00:00",
+            channel="web",
+            is_outbound=False,
+            from_address="web://user/1",
+            to_address="web://agent/1",
+            conversation_id=None,
+            conversation_address="web://user/1",
+            is_peer_dm=False,
+            peer_agent_id=None,
+            subject="",
+            body="current",
+            attachment_paths=[],
+            rejected_attachments=[],
+            latest_status="",
+            latest_sent_at=None,
+            latest_delivered_at=None,
+            latest_error_code=None,
+            latest_error_message=None,
+            is_hidden_in_chat=False,
+        )
+
+        store_messages_for_prompt([record])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            table_info = conn.execute('PRAGMA table_info("__messages")').fetchall()
+            message_id_info = next(row for row in table_info if row[1] == "message_id")
+            self.assertEqual(message_id_info[5], 1)
+            self.assertEqual(
+                conn.execute('SELECT message_id FROM "__messages"').fetchone()[0],
+                "msg-current",
+            )
+        finally:
+            conn.close()
+
+    def test_store_messages_for_prompt_empty_snapshot_clears_table(self):
+        record = MessageSQLiteRecord(
+            message_id="msg-clear",
+            seq="S1",
+            timestamp="2026-01-01T00:00:00+00:00",
+            channel="web",
+            is_outbound=False,
+            from_address="web://user/1",
+            to_address="web://agent/1",
+            conversation_id=None,
+            conversation_address="",
+            is_peer_dm=False,
+            peer_agent_id=None,
+            subject="",
+            body="clear me",
+            attachment_paths=[],
+            rejected_attachments=[],
+            latest_status="queued",
+            latest_sent_at=None,
+            latest_delivered_at=None,
+            latest_error_code=None,
+            latest_error_message=None,
+            is_hidden_in_chat=False,
+        )
+        store_messages_for_prompt([record])
+
+        store_messages_for_prompt([])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                conn.execute('SELECT COUNT(*) FROM "__messages"').fetchone()[0],
+                0,
+            )
+        finally:
+            conn.close()
+
     def test_store_messages_for_prompt_uses_null_for_optional_fields_and_full_body(self):
         record = MessageSQLiteRecord(
             message_id="msg-trunc",

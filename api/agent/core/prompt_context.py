@@ -4841,21 +4841,30 @@ def _build_message_sqlite_record(
     )
 
 
+@tracer.start_as_current_span("Prompt Messages PostgreSQL Snapshot")
 def _build_sqlite_messages_snapshot_records(
     agent: PersistentAgent,
     *,
     max_total_body_bytes: Optional[int] = None,
 ) -> List[MessageSQLiteRecord]:
+    span = trace.get_current_span()
     records: List[MessageSQLiteRecord] = []
     if max_total_body_bytes is None:
         max_total_body_bytes = SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES
     if max_total_body_bytes <= 0:
+        span.set_attributes({
+            "prompt.messages.postgresql.scanned": 0,
+            "prompt.messages.postgresql.selected": 0,
+            "prompt.messages.postgresql.attachments": 0,
+            "prompt.messages.postgresql.body_bytes": 0,
+        })
         return records
 
     selected_messages: List[
         Tuple[PersistentAgentMessage, str, str, str, Dict[str, Any], Optional[str]]
     ] = []
     total_body_bytes = 0
+    scanned_messages = 0
     messages_qs = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint", "conversation", "peer_agent")
@@ -4863,6 +4872,7 @@ def _build_sqlite_messages_snapshot_records(
     )[:SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS]
 
     for message in messages_qs.iterator(chunk_size=200):
+        scanned_messages += 1
         if not message.from_endpoint:
             continue
 
@@ -4887,6 +4897,12 @@ def _build_sqlite_messages_snapshot_records(
         total_body_bytes += message_content_bytes
 
     if not selected_messages:
+        span.set_attributes({
+            "prompt.messages.postgresql.scanned": scanned_messages,
+            "prompt.messages.postgresql.selected": 0,
+            "prompt.messages.postgresql.attachments": 0,
+            "prompt.messages.postgresql.body_bytes": total_body_bytes,
+        })
         return records
 
     selected_ids = [message.id for message, _, _, _, _, _ in selected_messages]
@@ -4897,7 +4913,9 @@ def _build_sqlite_messages_snapshot_records(
         .select_related("filespace_node")
         .order_by("id")
     )
+    attachment_count = 0
     for attachment in attachments_qs.iterator(chunk_size=500):
+        attachment_count += 1
         message_id = str(attachment.message_id)
         node = getattr(attachment, "filespace_node", None)
         path = getattr(node, "path", None) if node else None
@@ -4933,6 +4951,12 @@ def _build_sqlite_messages_snapshot_records(
             )
         )
 
+    span.set_attributes({
+        "prompt.messages.postgresql.scanned": scanned_messages,
+        "prompt.messages.postgresql.selected": len(records),
+        "prompt.messages.postgresql.attachments": attachment_count,
+        "prompt.messages.postgresql.body_bytes": total_body_bytes,
+    })
     return records
 
 

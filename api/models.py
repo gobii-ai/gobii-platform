@@ -6652,6 +6652,12 @@ class PersistentAgent(models.Model):
         default=timezone.now,
         help_text="Timestamp of the last user interaction (reply, edit, etc.)."
     )
+    process_run_count = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text="Number of recorded PROCESS_EVENTS runs; null until lazily initialized for legacy agents.",
+    )
     schedule_snapshot = models.CharField(
         max_length=128,
         null=True,
