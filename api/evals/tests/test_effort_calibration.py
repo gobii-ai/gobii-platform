@@ -12,7 +12,7 @@ from django.utils import timezone
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.scenarios import sqlite_tool_results as sqlite_evals
-from api.agent.core.event_processing import _get_completed_process_run_count, _resolve_eval_mock_result
+from api.agent.core.event_processing import _get_process_run_state, _resolve_eval_mock_result
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context_preview
 from api.agent.core.tool_results import _build_prompt_preview
 from api.agent.tools.create_chart import get_create_chart_tool
@@ -2062,7 +2062,7 @@ class EffortCalibrationHarnessTests(TestCase):
 
         EffortTrivialAnswerStopsScenario()._ready_agent(str(agent.id))
 
-        self.assertEqual(_get_completed_process_run_count(agent), 1)
+        self.assertEqual(_get_process_run_state(agent), (False, True))
 
     def test_send_chat_rejects_schema_placeholder_body(self):
         User = get_user_model()

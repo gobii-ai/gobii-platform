@@ -295,7 +295,7 @@ class TestEventProcessingLLMSelection(TestCase):
             llm_provider="preferred",
         )
 
-        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
+        preferred = _get_recent_preferred_config(self.agent, is_second_run=False)
         self.assertEqual(preferred, ("preferred", "model-preferred"))
 
     def test_get_recent_preferred_config_requires_both_fields(self):
@@ -305,7 +305,7 @@ class TestEventProcessingLLMSelection(TestCase):
             llm_provider="preferred",
         )
 
-        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
+        preferred = _get_recent_preferred_config(self.agent, is_second_run=False)
         self.assertIsNone(preferred)
 
     def test_get_recent_preferred_config_ignores_stale_completion(self):
@@ -319,7 +319,7 @@ class TestEventProcessingLLMSelection(TestCase):
             created_at=timezone.now() - timedelta(hours=2),
         )
 
-        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
+        preferred = _get_recent_preferred_config(self.agent, is_second_run=False)
         self.assertIsNone(preferred)
 
     def test_get_recent_preferred_config_skips_on_second_run(self):
@@ -330,7 +330,7 @@ class TestEventProcessingLLMSelection(TestCase):
             llm_provider="preferred",
         )
 
-        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=2)
+        preferred = _get_recent_preferred_config(self.agent, is_second_run=True)
         self.assertIsNone(preferred)
 
     @patch('api.agent.core.event_processing.settings.MAX_PREFERRED_PROVIDER_STREAK', 3)
@@ -343,7 +343,7 @@ class TestEventProcessingLLMSelection(TestCase):
                 llm_provider="preferred",
             )
 
-        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
+        preferred = _get_recent_preferred_config(self.agent, is_second_run=False)
         self.assertIsNone(preferred)
 
     @patch('api.agent.core.event_processing.settings.MAX_PREFERRED_PROVIDER_STREAK', 0)
@@ -355,7 +355,7 @@ class TestEventProcessingLLMSelection(TestCase):
             llm_provider="preferred",
         )
 
-        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
+        preferred = _get_recent_preferred_config(self.agent, is_second_run=False)
         self.assertIsNone(preferred)
 
     @patch('api.agent.core.event_processing.settings.MAX_PREFERRED_PROVIDER_STREAK', 3)
@@ -368,5 +368,5 @@ class TestEventProcessingLLMSelection(TestCase):
                 llm_provider="preferred",
             )
 
-        preferred = _get_recent_preferred_config(self.agent, run_sequence_number=3)
+        preferred = _get_recent_preferred_config(self.agent, is_second_run=False)
         self.assertEqual(preferred, ("preferred", "model-preferred"))

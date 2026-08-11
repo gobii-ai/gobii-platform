@@ -37,7 +37,7 @@ from api.agent.core.event_processing import (
     _persist_tool_call_step,
     _prepare_tool_batch,
     build_prompt_context,
-    _get_completed_process_run_count,
+    _get_process_run_state,
     _record_process_run_start,
     _FinalizedToolBatch,
     _PreparedToolBatch,
@@ -4006,9 +4006,9 @@ class PromptContextBuilderTests(TestCase):
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
             from api.agent.core import event_processing as ep
             with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
-                _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=3)
+                _run_agent_loop(self.agent, is_first_run=False, is_second_run=False)
 
-        mock_helper.assert_called_once_with(agent=self.agent, run_sequence_number=3)
+        mock_helper.assert_called_once_with(agent=self.agent, is_second_run=False)
         call_kwargs = mock_completion.call_args.kwargs
         self.assertEqual(call_kwargs["preferred_config"], ("mock", "mock-model"))
 
@@ -4032,9 +4032,9 @@ class PromptContextBuilderTests(TestCase):
              patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)) as mock_completion:
             from api.agent.core import event_processing as ep
             with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
-                _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=2)
+                _run_agent_loop(self.agent, is_first_run=False, is_second_run=True)
 
-        mock_helper.assert_called_once_with(agent=self.agent, run_sequence_number=2)
+        mock_helper.assert_called_once_with(agent=self.agent, is_second_run=True)
         call_kwargs = mock_completion.call_args.kwargs
         self.assertIsNone(call_kwargs["preferred_config"])
 
@@ -4358,7 +4358,7 @@ class PromptContextBuilderTests(TestCase):
 
 
 @tag("batch_event_processing")
-class AgentRunSequenceHelperTests(TestCase):
+class AgentRunStateHelperTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
             username="sequence_tester@example.com",
@@ -4373,7 +4373,7 @@ class AgentRunSequenceHelperTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
 
-    def test_completed_run_count_ignores_non_processing_steps(self):
+    def test_run_state_ignores_non_processing_steps(self):
         """Helper should ignore credit gate PROCESS_EVENTS system steps."""
         skipped_step = PersistentAgentStep.objects.create(
             agent=self.agent,
@@ -4385,7 +4385,7 @@ class AgentRunSequenceHelperTests(TestCase):
             notes="credit_insufficient",
         )
 
-        self.assertEqual(_get_completed_process_run_count(self.agent), 0)
+        self.assertEqual(_get_process_run_state(self.agent), (True, False))
 
         run_step = PersistentAgentStep.objects.create(
             agent=self.agent,
@@ -4397,15 +4397,9 @@ class AgentRunSequenceHelperTests(TestCase):
             notes="simplified",
         )
 
-        self.assertEqual(_get_completed_process_run_count(self.agent), 1)
+        self.assertEqual(_get_process_run_state(self.agent), (False, True))
 
-    def test_initialized_run_count_uses_persisted_value(self):
-        self.agent.process_run_count = 7
-
-        with self.assertNumQueries(0):
-            self.assertEqual(_get_completed_process_run_count(self.agent), 7)
-
-    def test_record_process_run_start_lazily_initializes_and_increments(self):
+    def test_record_process_run_start_detects_second_then_established_run(self):
         prior_step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description="Process events",
@@ -4415,20 +4409,44 @@ class AgentRunSequenceHelperTests(TestCase):
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
         )
 
-        processing_step, is_first_run, run_sequence_number = _record_process_run_start(self.agent)
+        processing_step, system_step, is_first_run, is_second_run = _record_process_run_start(self.agent)
 
         self.assertFalse(is_first_run)
-        self.assertEqual(run_sequence_number, 2)
+        self.assertTrue(is_second_run)
         self.assertEqual(processing_step.description, "Process events")
-        self.agent.refresh_from_db()
-        self.assertEqual(self.agent.process_run_count, 2)
+        self.assertEqual(system_step.step_id, processing_step.id)
 
-        _, _, next_run_sequence_number = _record_process_run_start(self.agent)
-        self.assertEqual(next_run_sequence_number, 3)
-        self.agent.refresh_from_db()
-        self.assertEqual(self.agent.process_run_count, 3)
+        _, _, next_is_first_run, next_is_second_run = _record_process_run_start(self.agent)
+        self.assertFalse(next_is_first_run)
+        self.assertFalse(next_is_second_run)
 
-    def test_record_process_run_start_rolls_back_counter_and_step(self):
+    def test_record_process_run_start_detects_first_run(self):
+        processing_step, system_step, is_first_run, is_second_run = _record_process_run_start(self.agent)
+
+        self.assertTrue(is_first_run)
+        self.assertFalse(is_second_run)
+        self.assertEqual(processing_step.description, "Process events")
+        self.assertEqual(system_step.step_id, processing_step.id)
+
+    def test_run_state_query_is_capped_at_two_rows(self):
+        for _ in range(5):
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Process events",
+            )
+            PersistentAgentSystemStep.objects.create(
+                step=step,
+                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            )
+
+        with self.assertNumQueries(1) as context:
+            self.assertEqual(_get_process_run_state(self.agent), (False, False))
+
+        sql = context.captured_queries[0]["sql"].upper()
+        self.assertIn("LIMIT 2", sql)
+        self.assertNotIn("COUNT(", sql)
+
+    def test_record_process_run_start_rolls_back_step(self):
         with patch(
             "api.agent.core.event_processing.PersistentAgentSystemStep.objects.create",
             side_effect=DatabaseError("system step write failed"),
@@ -4436,8 +4454,6 @@ class AgentRunSequenceHelperTests(TestCase):
             with self.assertRaises(DatabaseError):
                 _record_process_run_start(self.agent)
 
-        self.agent.refresh_from_db()
-        self.assertIsNone(self.agent.process_run_count)
         self.assertFalse(
             PersistentAgentStep.objects.filter(
                 agent=self.agent,
@@ -7016,13 +7032,14 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         from api.agent.core import event_processing as ep
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), self.assertRaises(RuntimeError):
-            _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=4)
+            _run_agent_loop(self.agent, is_first_run=False, is_second_run=False)
 
         error = PersistentAgentError.objects.get(agent=self.agent)
         self.assertEqual(error.category, PersistentAgentError.Category.PROMPT_CONSTRUCTION)
         self.assertEqual(error.exception_class, "RuntimeError")
         self.assertEqual(error.context["iteration"], 1)
-        self.assertEqual(error.context["run_sequence_number"], 4)
+        self.assertFalse(error.context["is_first_run"])
+        self.assertFalse(error.context["is_second_run"])
 
     def test_tool_persistence_failure_records_error(self):
         with patch(

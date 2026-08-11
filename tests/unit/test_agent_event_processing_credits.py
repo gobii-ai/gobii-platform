@@ -1344,7 +1344,6 @@ class PersistentAgentToolCreditTests(TestCase):
                 self.agent,
                 is_first_run=True,
                 credit_snapshot=None,
-                run_sequence_number=1,
             )
 
         self.assertEqual(usage["total_tokens"], 0)
@@ -1435,7 +1434,6 @@ class PersistentAgentToolCreditTests(TestCase):
                 self.agent,
                 is_first_run=True,
                 credit_snapshot=None,
-                run_sequence_number=1,
             )
 
         self.assertEqual(usage["total_tokens"], 0)
@@ -1859,7 +1857,6 @@ class PersistentAgentToolCreditTests(TestCase):
                 self.agent,
                 is_first_run=False,
                 credit_snapshot=None,
-                run_sequence_number=1,
             )
 
         self.assertEqual(usage["total_tokens"], 0)
