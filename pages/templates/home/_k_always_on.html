@@ -281,9 +281,9 @@
       if (!hub || !cards.length) return;
 
       function motionReduced() {
-        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return true;
         var perf = window.GobiiHomePerf;
-        return false; /* phones animate too; genuine prefers-reduced-motion handled above */
+        if (perf && typeof perf.shouldReduceHomepageMotion === 'function' && perf.shouldReduceHomepageMotion()) return true;
+        return Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
       }
 
       /* restart .gkw-row arrivals inside `el`, staggered */

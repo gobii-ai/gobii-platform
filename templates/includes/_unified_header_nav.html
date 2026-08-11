@@ -52,6 +52,7 @@
             background: rgba(18,12,32,.97); border: 1px solid rgba(255,255,255,.12); border-radius: 16px;
             padding: 10px; box-shadow: 0 24px 60px rgba(0,0,0,.6); max-height: calc(100vh - 96px);
             overflow-y: auto; }
+  .gk-mobile-panel[hidden] { display: none; }
   .gk-mobile-panel a, .gk-mobile-panel button.gk-mm-link { display: block; width: 100%; text-align: left;
             color: rgba(255,255,255,.85); text-decoration: none; font-size: 14.5px; padding: 12px 14px;
             border-radius: 10px; background: none; border: 0; font-family: inherit; cursor: pointer; }
@@ -228,10 +229,10 @@
           </div>
         </div>
       {% endif %}
-      <button type="button" class="gk-burger"
-              x-data="{}"
-              @click="$dispatch('toggle-mobile-nav')"
-              aria-label="Toggle navigation">☰</button>
+      <button type="button" class="gk-burger" id="gk-mobile-nav-toggle"
+              aria-label="Toggle navigation"
+              aria-controls="gk-mobile-nav-panel"
+              aria-expanded="false">☰</button>
     </nav>
   </div>
 </header>
@@ -274,27 +275,8 @@
 </script>
 
 <!-- Mobile Navigation Panel -->
-<div x-data="{ showMobileNav: false }"
-     @toggle-mobile-nav.window="showMobileNav = !showMobileNav"
-     @keydown.escape.window="showMobileNav = false"
-     @pagehide.window="showMobileNav = false"
-     @htmx:before-history-save.window="showMobileNav = false"
-     @htmx:before-request.window="showMobileNav = false"
-     @pageshow.window="if (event.persisted) { showMobileNav = false }"
-     @visibilitychange.window="if (document.visibilityState === 'hidden') { showMobileNav = false }"
-     @freeze.window="showMobileNav = false"
-     @close-mobile-nav.window="showMobileNav = false"
-     class="relative z-50">
-  <div x-show="showMobileNav"
-       x-transition:enter="ease-out duration-200"
-       x-transition:enter-start="opacity-0 -translate-y-2"
-       x-transition:enter-end="opacity-100 translate-y-0"
-       x-transition:leave="ease-in duration-150"
-       x-transition:leave-start="opacity-100 translate-y-0"
-       x-transition:leave-end="opacity-0 -translate-y-2"
-       @click.outside="showMobileNav = false"
-       class="gk-mobile-panel"
-       x-cloak>
+<div class="relative z-50">
+  <div class="gk-mobile-panel" id="gk-mobile-nav-panel" hidden>
     {% if settings.GOBII_PROPRIETARY_MODE %}
       <a href="{% url 'pages:library' %}">Agent library</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='recruiting' %}">Recruiting</a>
@@ -326,3 +308,34 @@
     {% endif %}
   </div>
 </div>
+
+<script>
+(function(){
+  var toggle = document.getElementById('gk-mobile-nav-toggle');
+  var panel = document.getElementById('gk-mobile-nav-panel');
+  if (!toggle || !panel) return;
+
+  function isOpen(){ return !panel.hidden; }
+  function setOpen(open){
+    panel.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  function close(){ setOpen(false); }
+
+  toggle.addEventListener('click', function(){ setOpen(!isOpen()); });
+  panel.addEventListener('click', function(event){
+    if (event.target instanceof Element && event.target.closest('a, button')) close();
+  });
+  document.addEventListener('click', function(event){
+    if (isOpen() && !panel.contains(event.target) && !toggle.contains(event.target)) close();
+  });
+  document.addEventListener('keydown', function(event){
+    if (event.key === 'Escape' && isOpen()) {
+      close();
+      toggle.focus();
+    }
+  });
+  document.addEventListener('close-mobile-nav', close);
+  window.addEventListener('pageshow', function(event){ if (event.persisted) close(); });
+})();
+</script>

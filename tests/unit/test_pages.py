@@ -709,6 +709,35 @@ class HomePageTests(TestCase):
         self.assertIn("initScrollAnimations();", content)
         self.assertIn("@media (pointer: coarse), (max-width: 767px)", content)
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_modern_homepage_story_sections_use_perf_motion_reduction(self):
+        with override_switch("homepage_perf_motion_reduction", active=True):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["home_use_k"])
+        content = response.content.decode("utf-8")
+        self.assertGreaterEqual(content.count("perf.shouldReduceHomepageMotion()"), 3)
+        self.assertIn("vessel.classList.add('gk-pf-motion')", content)
+        self.assertIn("root.classList.add('gk-ao-static')", content)
+
+    def test_home_page_mobile_navigation_uses_native_controller(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        toggle = soup.find(id="gk-mobile-nav-toggle")
+        panel = soup.find(id="gk-mobile-nav-panel")
+        self.assertIsNotNone(toggle)
+        self.assertIsNotNone(panel)
+        self.assertEqual(toggle.get("aria-controls"), "gk-mobile-nav-panel")
+        self.assertEqual(toggle.get("aria-expanded"), "false")
+        self.assertTrue(panel.has_attr("hidden"))
+
+        content = response.content.decode("utf-8")
+        self.assertNotIn("toggle-mobile-nav", content)
+        self.assertIn("document.addEventListener('close-mobile-nav', close)", content)
+
     def test_home_page_omits_perf_motion_reduction_when_switch_is_off(self):
         with override_switch("homepage_perf_motion_reduction", active=False):
             response = self.client.get("/")
