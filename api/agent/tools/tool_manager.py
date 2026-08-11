@@ -21,7 +21,10 @@ from util.text_sanitizer import decode_unicode_escapes
 
 from api.agent.eval_agents import is_eval_agent
 from api.services.agent_sqlite_coordination import AgentSQLiteBusy, agent_sqlite_busy_result
-from api.services.deprecated_provider_guard import deprecated_pipedream_blocked_error
+from api.services.deprecated_provider_guard import (
+    DeprecatedPipedreamIntegration,
+    deprecated_pipedream_blocked_error,
+)
 
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
 from ...services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, sandbox_compute_enabled_for_agent, track_sandbox_unavailable
@@ -1489,7 +1492,7 @@ def execute_enabled_tool(
     isolated_mcp: bool = False,
     current_sqlite_db_path: Optional[str] = None,
     resolved_entry: Optional[ToolCatalogEntry] = None,
-    deprecated_provider_integration: Optional[str] = None,
+    deprecated_provider_integration: Optional[DeprecatedPipedreamIntegration] = None,
 ) -> Dict[str, Any]:
     """Execute an enabled tool, routing to the appropriate provider."""
     entry = resolved_entry or resolve_tool_entry(agent, tool_name)

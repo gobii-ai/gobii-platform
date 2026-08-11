@@ -6,8 +6,8 @@ from typing import Any, Dict, Optional
 from api.agent.comms.human_input_requests import attach_originating_step_from_result, track_human_input_request_created
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
 from api.services.deprecated_provider_guard import (
-    get_blocked_deprecated_pipedream_integration,
     is_deprecated_provider_blocked_result,
+    match_deprecated_pipedream_integration,
 )
 
 from .runtime_execution_context import tool_execution_context
@@ -73,7 +73,7 @@ def execute_tracked_runtime_tool_call(
         if runtime_tool_requires_catalog_entry(tool_name, isolated_mcp=isolated_mcp)
         else None
     )
-    blocked_integration = get_blocked_deprecated_pipedream_integration(
+    blocked_integration = match_deprecated_pipedream_integration(
         tool_name,
         exec_params,
         entry=resolved_entry,

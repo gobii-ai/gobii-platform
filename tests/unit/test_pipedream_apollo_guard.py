@@ -20,6 +20,11 @@ from api.models import (
     PersistentAgentSystemSkillState,
     PersistentAgentToolCall,
 )
+from api.services.native_integrations import (
+    APOLLO_PROVIDER,
+    native_integration_is_connected,
+    save_native_integration_credentials,
+)
 from constants.feature_flags import PIPEDREAM_APOLLO_GUARD
 from util.analytics import AnalyticsEvent, AnalyticsSource
 
@@ -71,15 +76,6 @@ class PipedreamApolloExecutionGuardTests(TestCase):
             mcp_info=tool_info,
         )
 
-    @staticmethod
-    def _enable(agent: PersistentAgent, entry: ToolCatalogEntry) -> None:
-        PersistentAgentEnabledTool.objects.create(
-            agent=agent,
-            tool_full_name=entry.full_name,
-            tool_server=entry.tool_server,
-            tool_name=entry.tool_name,
-        )
-
     def test_apollo_prefixes_metadata_and_generic_components_are_blocked(self):
         cases = (
             (self._mcp_entry("apollo_io-search-people"), {}),
@@ -119,6 +115,19 @@ class PipedreamApolloExecutionGuardTests(TestCase):
 
     def test_ready_handoff_enables_native_apollo_and_emits_analytics(self):
         entry = self._mcp_entry("apollo_io-search-people")
+        save_native_integration_credentials(
+            APOLLO_PROVIDER,
+            self.agent.user,
+            None,
+            {"provider_key": APOLLO_PROVIDER.key, "access_token": "apollo-access-token"},
+        )
+        self.assertTrue(
+            native_integration_is_connected(
+                APOLLO_PROVIDER.key,
+                self.agent.user,
+                None,
+            )
+        )
 
         with patch(
             "api.services.deprecated_provider_guard.Analytics.track_event"
@@ -276,7 +285,7 @@ class PipedreamApolloExecutionGuardTests(TestCase):
 
         self.assertEqual(len(prepared_batch.prepared_calls), 1)
         prepared = prepared_batch.prepared_calls[0]
-        self.assertEqual(prepared.deprecated_provider_integration, "apollo")
+        self.assertEqual(prepared.deprecated_provider_integration.key, "apollo")
         self.assertIsNone(prepared.resolved_entry)
         rate_limit.assert_not_called()
         credit_gate.assert_not_called()

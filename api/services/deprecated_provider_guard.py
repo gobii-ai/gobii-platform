@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -15,11 +16,9 @@ from api.services.pipedream_apps import (
     normalize_app_slug,
     pipedream_app_slug_for_tool_call,
 )
-from api.services.pipedream_feature_flags import (
-    pipedream_apollo_guard_enabled,
-    pipedream_google_sheets_guard_enabled,
-)
+from constants.feature_flags import PIPEDREAM_APOLLO_GUARD, PIPEDREAM_GOOGLE_SHEETS_GUARD
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.waffle_flags import is_waffle_switch_active
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +34,9 @@ class DeprecatedPipedreamIntegration:
     display_name: str
     pipedream_app_slugs: frozenset[str]
     native_skill_key: str
-    replacement: str
+    switch_name: str
     setup_url: str
+    ready_message: str
     analytics_event: AnalyticsEvent
 
 
@@ -46,8 +46,13 @@ DEPRECATED_PIPEDREAM_INTEGRATIONS = {
         display_name="Google Sheets",
         pipedream_app_slugs=frozenset({"google_sheets"}),
         native_skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
-        replacement="google_sheets_native",
+        switch_name=PIPEDREAM_GOOGLE_SHEETS_GUARD,
         setup_url="/app/integrations",
+        ready_message=(
+            "Google Sheets through Pipedream is disabled. The native Google Sheets skill is enabled; continue "
+            "with it now. If Google Drive is disconnected, tell the requester to open /app/integrations, "
+            "connect Google Drive, and select the spreadsheets to use. Do not retry Pipedream."
+        ),
         analytics_event=AnalyticsEvent.PIPEDREAM_GOOGLE_SHEETS_EXECUTION_BLOCKED,
     ),
     APOLLO_INTEGRATION: DeprecatedPipedreamIntegration(
@@ -55,19 +60,20 @@ DEPRECATED_PIPEDREAM_INTEGRATIONS = {
         display_name="Apollo",
         pipedream_app_slugs=frozenset({"apollo_io", "apollo_io_oauth"}),
         native_skill_key=APOLLO_NATIVE_SYSTEM_SKILL_KEY,
-        replacement="apollo_native",
+        switch_name=PIPEDREAM_APOLLO_GUARD,
         setup_url="/app/integrations?provider=apollo",
+        ready_message=(
+            "Apollo through Pipedream is disabled. The native Apollo skill is enabled; continue with it now "
+            "using http_request. If Apollo is disconnected, tell the requester to open "
+            "/app/integrations?provider=apollo and connect Apollo. Do not retry Pipedream."
+        ),
         analytics_event=AnalyticsEvent.PIPEDREAM_APOLLO_EXECUTION_BLOCKED,
     ),
 }
 
 
-def _guard_enabled(integration_key: str) -> bool:
-    if integration_key == GOOGLE_SHEETS_INTEGRATION:
-        return pipedream_google_sheets_guard_enabled()
-    if integration_key == APOLLO_INTEGRATION:
-        return pipedream_apollo_guard_enabled()
-    return False
+def _guard_enabled(integration: DeprecatedPipedreamIntegration) -> bool:
+    return is_waffle_switch_active(integration.switch_name, default=False)
 
 
 def _provider_app_slug(entry: Any, params: Any) -> str:
@@ -85,19 +91,25 @@ def _provider_app_slug(entry: Any, params: Any) -> str:
     return pipedream_app_slug_for_tool_call(tool_name, params)
 
 
-def _integration_for_app_slug(app_slug: str) -> Optional[str]:
+def _integration_for_app_slug(app_slug: str) -> Optional[DeprecatedPipedreamIntegration]:
     normalized_slug = normalize_app_slug(app_slug)
     for integration in DEPRECATED_PIPEDREAM_INTEGRATIONS.values():
         if normalized_slug in integration.pipedream_app_slugs:
-            return integration.key
+            return integration
     return None
 
 
-def _integration_for_tool_name(tool_name: str, params: Any) -> Optional[str]:
+def _integration_for_tool_name(
+    tool_name: str,
+    params: Any,
+) -> Optional[DeprecatedPipedreamIntegration]:
     return _integration_for_app_slug(pipedream_app_slug_for_tool_call(tool_name, params))
 
 
-def _integration_for_entry(entry: Any, params: Any) -> Optional[str]:
+def _integration_for_entry(
+    entry: Any,
+    params: Any,
+) -> Optional[DeprecatedPipedreamIntegration]:
     if (
         entry.provider != "mcp"
         or str(entry.tool_server).strip().casefold() != PIPEDREAM_PROVIDER
@@ -106,21 +118,18 @@ def _integration_for_entry(entry: Any, params: Any) -> Optional[str]:
     return _integration_for_app_slug(_provider_app_slug(entry, params))
 
 
-def get_blocked_deprecated_pipedream_integration(
+def match_deprecated_pipedream_integration(
     tool_name: str,
     params: Any,
     *,
     entry: Any = None,
-) -> Optional[str]:
-    integration_key = (
+) -> Optional[DeprecatedPipedreamIntegration]:
+    integration = (
         _integration_for_entry(entry, params)
         if entry is not None
         else _integration_for_tool_name(tool_name, params)
     )
-    if not integration_key:
-        return None
-    integration = DEPRECATED_PIPEDREAM_INTEGRATIONS[integration_key]
-    return integration_key if _guard_enabled(integration_key) else None
+    return integration if integration is not None and _guard_enabled(integration) else None
 
 
 def _resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Any:
@@ -141,18 +150,7 @@ def _blocked_error(
     )
 
     if handoff_status == NATIVE_INTEGRATION_HANDOFF_READY:
-        if integration.key == GOOGLE_SHEETS_INTEGRATION:
-            message = (
-                "Google Sheets through Pipedream is disabled. The native Google Sheets skill is enabled; continue "
-                "with it now. If Google Drive is disconnected, tell the requester to open /app/integrations, "
-                "connect Google Drive, and select the spreadsheets to use. Do not retry Pipedream."
-            )
-        else:
-            message = (
-                "Apollo through Pipedream is disabled. The native Apollo skill is enabled; continue with it now "
-                "using http_request. If Apollo is disconnected, tell the requester to open "
-                "/app/integrations?provider=apollo and connect Apollo. Do not retry Pipedream."
-            )
+        message = integration.ready_message
         next_action = f"continue_with_native_{integration.key}"
     elif handoff_status == NATIVE_INTEGRATION_HANDOFF_EXPLICITLY_DISABLED:
         message = (
@@ -177,7 +175,7 @@ def _blocked_error(
         "message": message,
         "provider": PIPEDREAM_PROVIDER,
         "integration": integration.key,
-        "replacement": integration.replacement,
+        "replacement": integration.native_skill_key,
         "handoff_status": handoff_status,
         "next_action": next_action,
         "setup_url": integration.setup_url,
@@ -197,15 +195,11 @@ def filter_deprecated_provider_blocked_tool(
     agent: PersistentAgent,
     tool_definitions: Optional[list[dict]],
     blocked_tool_name: str,
-    blocked_integration: str = GOOGLE_SHEETS_INTEGRATION,
+    blocked_integration: DeprecatedPipedreamIntegration,
 ) -> Optional[list[dict]]:
     """Keep deprecated provider actions out of the same-turn roster refresh."""
     if tool_definitions is None:
         return None
-
-    integration = DEPRECATED_PIPEDREAM_INTEGRATIONS.get(blocked_integration)
-    if integration is None:
-        return tool_definitions
 
     tool_names = {
         definition["function"]["name"]
@@ -226,7 +220,7 @@ def filter_deprecated_provider_blocked_tool(
     candidates = pipedream_tool_names | {
         tool_name
         for tool_name in tool_names
-        if _integration_for_tool_name(tool_name, {}) == integration.key
+        if _integration_for_tool_name(tool_name, {}) == blocked_integration
     }
     blocked_tool_names = {blocked_tool_name}
     for tool_name in candidates - blocked_tool_names:
@@ -236,7 +230,7 @@ def filter_deprecated_provider_blocked_tool(
             if entry is not None
             else _integration_for_tool_name(tool_name, {})
         )
-        if detected_integration == integration.key:
+        if detected_integration == blocked_integration:
             blocked_tool_names.add(tool_name)
 
     return [
@@ -248,6 +242,31 @@ def filter_deprecated_provider_blocked_tool(
             and definition["function"].get("name") in blocked_tool_names
         )
     ]
+
+
+def refresh_tools_after_deprecated_provider_handoff(
+    agent: PersistentAgent,
+    result: Any,
+    blocked_tool_name: str,
+    blocked_integration: Optional[DeprecatedPipedreamIntegration],
+    refresh_tools: Callable[[PersistentAgent], Optional[list[dict]]],
+) -> Optional[list[dict]]:
+    if not (is_deprecated_provider_blocked_result(result) and blocked_integration):
+        return None
+    try:
+        return filter_deprecated_provider_blocked_tool(
+            agent,
+            refresh_tools(agent),
+            blocked_tool_name,
+            blocked_integration,
+        )
+    except Exception:
+        # The actionable block remains valid if this best-effort roster refresh fails.
+        logger.exception(
+            "Agent %s: native integration handoff tool refresh failed; preserving the blocked result.",
+            agent.id,
+        )
+        return None
 
 
 def _invocation_log_context() -> tuple[str, str, str]:
@@ -294,7 +313,7 @@ def _track_blocked_execution(
             "provider": PIPEDREAM_PROVIDER,
             "app_slug": app_slug,
             "integration": integration.key,
-            "replacement": integration.replacement,
+            "replacement": integration.native_skill_key,
             "invocation_scope": invocation_scope,
             "handoff_status": handoff_status,
             "error_code": DEPRECATED_PROVIDER_BLOCKED,
@@ -324,23 +343,19 @@ def deprecated_pipedream_blocked_error(
     params: Any,
     *,
     entry: Any = None,
-    blocked_integration: Optional[str] = None,
+    blocked_integration: Optional[DeprecatedPipedreamIntegration] = None,
 ) -> Optional[dict[str, Any]]:
     detected_integration = (
         _integration_for_entry(entry, params)
         if entry is not None
         else _integration_for_tool_name(tool_name, params)
     )
-    integration_key = blocked_integration or detected_integration
-    if not integration_key or detected_integration != integration_key:
-        return None
-
-    integration = DEPRECATED_PIPEDREAM_INTEGRATIONS.get(integration_key)
-    if integration is None:
+    integration = blocked_integration or detected_integration
+    if integration is None or detected_integration != integration:
         return None
     # Callers that classify before billing pass the decision through so a
     # mid-call switch change cannot make execution and credit handling differ.
-    if blocked_integration is None and not _guard_enabled(integration_key):
+    if blocked_integration is None and not _guard_enabled(integration):
         return None
 
     from api.agent.system_skills.service import (
@@ -391,36 +406,3 @@ def deprecated_pipedream_blocked_error(
         handoff_status=handoff_status,
     )
     return _blocked_error(integration, handoff_status)
-
-
-def pipedream_google_sheets_blocked_error(
-    agent: PersistentAgent,
-    entry: Any,
-    params: Any,
-    *,
-    blocked_call: Optional[bool] = None,
-) -> Optional[dict[str, Any]]:
-    if blocked_call is False:
-        return None
-    return deprecated_pipedream_blocked_error(
-        agent,
-        entry.full_name,
-        params,
-        entry=entry,
-        blocked_integration=GOOGLE_SHEETS_INTEGRATION if blocked_call else None,
-    )
-
-
-def is_pipedream_google_sheets_blocked_call(entry: Any, params: Any) -> bool:
-    return (
-        get_blocked_deprecated_pipedream_integration(
-            entry.full_name,
-            params,
-            entry=entry,
-        )
-        == GOOGLE_SHEETS_INTEGRATION
-    )
-
-
-def is_pipedream_google_sheets_call(entry: Any, params: Any) -> bool:
-    return _integration_for_entry(entry, params) == GOOGLE_SHEETS_INTEGRATION

@@ -86,9 +86,10 @@ from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
 from api.services.deprecated_provider_guard import (
-    filter_deprecated_provider_blocked_tool,
-    get_blocked_deprecated_pipedream_integration,
+    DeprecatedPipedreamIntegration,
     is_deprecated_provider_blocked_result,
+    match_deprecated_pipedream_integration,
+    refresh_tools_after_deprecated_provider_handoff,
 )
 from . import internal_reasoning
 from .daily_limit_mode import (
@@ -2437,7 +2438,7 @@ class _PreparedToolExecution:
     parallel_safe: bool
     parallel_ineligible_reason: Optional[str]
     resolved_entry: Optional[ToolCatalogEntry] = None
-    deprecated_provider_integration: Optional[str] = None
+    deprecated_provider_integration: Optional[DeprecatedPipedreamIntegration] = None
     display_metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -3572,34 +3573,6 @@ _REFRESHING_TOOL_EXECUTORS: Dict[str, _ToolExecutorResolver] = {
 }
 
 
-def _refresh_tools_after_deprecated_provider_handoff(
-    agent: PersistentAgent,
-    result: Any,
-    blocked_tool_name: str,
-    blocked_integration: Optional[str],
-) -> Optional[List[dict]]:
-    if not (
-        is_deprecated_provider_blocked_result(result)
-        and blocked_integration
-    ):
-        return None
-    try:
-        return filter_deprecated_provider_blocked_tool(
-            agent,
-            get_agent_tools(agent),
-            blocked_tool_name,
-            blocked_integration,
-        )
-    except Exception:
-        # Tool refresh is secondary to returning the trusted block and its
-        # recovery instructions; the next prompt build can retry the refresh.
-        logger.exception(
-            "Agent %s: native integration handoff tool refresh failed; preserving the blocked result.",
-            agent.id,
-        )
-        return None
-
-
 def _execute_tool_call_runtime(
     agent: PersistentAgent,
     *,
@@ -3609,7 +3582,7 @@ def _execute_tool_call_runtime(
     eval_run_id: Optional[str],
     parallel_safe: bool = False,
     resolved_entry: Optional[ToolCatalogEntry] = None,
-    deprecated_provider_integration: Optional[str] = None,
+    deprecated_provider_integration: Optional[DeprecatedPipedreamIntegration] = None,
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
     try:
@@ -3622,7 +3595,7 @@ def _execute_tool_call_runtime(
         return tool_blacklist_error(tool_name), updated_tools
     blocked_integration = deprecated_provider_integration
     if blocked_integration is None:
-        blocked_integration = get_blocked_deprecated_pipedream_integration(
+        blocked_integration = match_deprecated_pipedream_integration(
             tool_name,
             exec_params,
             entry=resolved_entry,
@@ -3635,47 +3608,32 @@ def _execute_tool_call_runtime(
             eval_run_id,
         )
         return mock_result, updated_tools
-    if parallel_safe:
-        result = execute_enabled_tool(
-            agent,
-            tool_name,
-            exec_params,
-            isolated_mcp=True,
-            current_sqlite_db_path=get_sqlite_db_path(),
-            resolved_entry=resolved_entry,
-            deprecated_provider_integration=blocked_integration,
-        )
-        updated_tools = _refresh_tools_after_deprecated_provider_handoff(
-            agent,
-            result,
-            tool_name,
-            blocked_integration,
-        )
-        return result, updated_tools
-    resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
-    if resolve_executor:
-        return resolve_executor()(agent, exec_params), updated_tools
-    resolve_refreshing_executor = _REFRESHING_TOOL_EXECUTORS.get(tool_name)
-    if resolve_refreshing_executor:
-        result = resolve_refreshing_executor()(agent, exec_params)
-        updated_tools = get_agent_tools(agent)
-        return result, updated_tools
+    if not parallel_safe:
+        resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
+        if resolve_executor:
+            return resolve_executor()(agent, exec_params), updated_tools
+        resolve_refreshing_executor = _REFRESHING_TOOL_EXECUTORS.get(tool_name)
+        if resolve_refreshing_executor:
+            return resolve_refreshing_executor()(agent, exec_params), get_agent_tools(agent)
     result = execute_enabled_tool(
         agent,
         tool_name,
         exec_params,
+        isolated_mcp=parallel_safe,
         current_sqlite_db_path=get_sqlite_db_path(),
         resolved_entry=resolved_entry,
         deprecated_provider_integration=blocked_integration,
     )
-    updated_tools = _refresh_tools_after_deprecated_provider_handoff(
+    updated_tools = refresh_tools_after_deprecated_provider_handoff(
         agent,
         result,
         tool_name,
         blocked_integration,
+        get_agent_tools,
     )
     if (
-        tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
+        not parallel_safe
+        and tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
         and isinstance(result, dict)
         and result.get("status") in {"ok", "unlinked"}
     ):
@@ -3976,14 +3934,14 @@ def _prepare_tool_batch(
                 # correction; preflight only needs valid parameters to detect
                 # generic Pipedream component calls before roster rejection.
                 pass
-            preflight_blocked_integration = get_blocked_deprecated_pipedream_integration(
+            preflight_blocked_integration = match_deprecated_pipedream_integration(
                 tool_name,
                 preflight_params,
             )
             if preflight_blocked_integration:
                 preflight_entry = resolve_tool_entry(agent, tool_name)
                 if preflight_entry is not None:
-                    preflight_blocked_integration = get_blocked_deprecated_pipedream_integration(
+                    preflight_blocked_integration = match_deprecated_pipedream_integration(
                         tool_name,
                         preflight_params,
                         entry=preflight_entry,
@@ -4014,19 +3972,12 @@ def _prepare_tool_batch(
                 and not is_credit_message_only_allowed_tool(tool_name)
             )
             if credit_message_only_restricted and not preflight_blocked_integration:
-                try:
-                    _, preflight_params = _parse_tool_call_params(
-                        _get_tool_call_arguments(call)
-                    )
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    preflight_params = None
-                if isinstance(preflight_params, dict):
-                    preflight_entry = resolve_tool_entry(agent, tool_name)
-                    preflight_blocked_integration = get_blocked_deprecated_pipedream_integration(
-                        tool_name,
-                        preflight_params,
-                        entry=preflight_entry,
-                    )
+                preflight_entry = resolve_tool_entry(agent, tool_name)
+                preflight_blocked_integration = match_deprecated_pipedream_integration(
+                    tool_name,
+                    preflight_params,
+                    entry=preflight_entry,
+                )
 
             if credit_message_only_restricted and not preflight_blocked_integration:
                 try:
@@ -4279,7 +4230,7 @@ def _prepare_tool_batch(
                 exec_params = dict(exec_params)
                 exec_params["_has_user_facing_message"] = has_user_facing_message
 
-            blocked_integration = get_blocked_deprecated_pipedream_integration(
+            blocked_integration = match_deprecated_pipedream_integration(
                 tool_name,
                 exec_params,
                 entry=resolved_entry,

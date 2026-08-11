@@ -11,7 +11,6 @@ from api.services.pipedream_apps import enable_pipedream_apps_for_agent
 from .registry import SystemSkillDefinition, equivalent_system_skill_keys, get_system_skill_definition, normalize_system_skill_key
 from .defaults import (
     DEFAULT_SYSTEM_SKILL_DEFINITIONS,
-    GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
     WEBHOOKS_SYSTEM_SKILL_KEY,
 )
 
@@ -19,10 +18,6 @@ from .defaults import (
 NATIVE_INTEGRATION_HANDOFF_READY = "ready"
 NATIVE_INTEGRATION_HANDOFF_EXPLICITLY_DISABLED = "explicitly_disabled"
 NATIVE_INTEGRATION_HANDOFF_UNAVAILABLE = "unavailable"
-
-GOOGLE_SHEETS_HANDOFF_READY = NATIVE_INTEGRATION_HANDOFF_READY
-GOOGLE_SHEETS_HANDOFF_EXPLICITLY_DISABLED = NATIVE_INTEGRATION_HANDOFF_EXPLICITLY_DISABLED
-GOOGLE_SHEETS_HANDOFF_UNAVAILABLE = NATIVE_INTEGRATION_HANDOFF_UNAVAILABLE
 
 
 def default_enabled_system_skill_keys() -> tuple[str, ...]:
@@ -122,12 +117,6 @@ def prepare_native_integration_handoff(agent: PersistentAgent, skill_key: str) -
     if not updated:
         return NATIVE_INTEGRATION_HANDOFF_EXPLICITLY_DISABLED
     return NATIVE_INTEGRATION_HANDOFF_READY
-
-
-def prepare_google_sheets_native_handoff(agent: PersistentAgent) -> str:
-    return prepare_native_integration_handoff(agent, GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY)
-
-
 def _system_skill_keys_for_tool(tool_name: str) -> list[str]:
     normalized_tool = str(tool_name or "").strip()
     if not normalized_tool:
