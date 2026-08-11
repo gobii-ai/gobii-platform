@@ -87,8 +87,8 @@ from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
 from api.services.deprecated_provider_guard import (
     filter_deprecated_provider_blocked_tool,
+    get_blocked_deprecated_pipedream_integration,
     is_deprecated_provider_blocked_result,
-    is_pipedream_google_sheets_blocked_call,
 )
 from . import internal_reasoning
 from .daily_limit_mode import (
@@ -2437,7 +2437,7 @@ class _PreparedToolExecution:
     parallel_safe: bool
     parallel_ineligible_reason: Optional[str]
     resolved_entry: Optional[ToolCatalogEntry] = None
-    pipedream_google_sheets_blocked: bool = False
+    deprecated_provider_integration: Optional[str] = None
     display_metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -3576,13 +3576,11 @@ def _refresh_tools_after_deprecated_provider_handoff(
     agent: PersistentAgent,
     result: Any,
     blocked_tool_name: str,
-    resolved_entry: Optional[ToolCatalogEntry],
-    blocked_provider_call: bool,
+    blocked_integration: Optional[str],
 ) -> Optional[List[dict]]:
     if not (
         is_deprecated_provider_blocked_result(result)
-        and resolved_entry is not None
-        and blocked_provider_call
+        and blocked_integration
     ):
         return None
     try:
@@ -3590,12 +3588,13 @@ def _refresh_tools_after_deprecated_provider_handoff(
             agent,
             get_agent_tools(agent),
             blocked_tool_name,
+            blocked_integration,
         )
     except Exception:
         # Tool refresh is secondary to returning the trusted block and its
         # recovery instructions; the next prompt build can retry the refresh.
         logger.exception(
-            "Agent %s: native Sheets handoff tool refresh failed; preserving the blocked result.",
+            "Agent %s: native integration handoff tool refresh failed; preserving the blocked result.",
             agent.id,
         )
         return None
@@ -3610,7 +3609,7 @@ def _execute_tool_call_runtime(
     eval_run_id: Optional[str],
     parallel_safe: bool = False,
     resolved_entry: Optional[ToolCatalogEntry] = None,
-    pipedream_google_sheets_blocked: Optional[bool] = None,
+    deprecated_provider_integration: Optional[str] = None,
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
     try:
@@ -3621,13 +3620,14 @@ def _execute_tool_call_runtime(
     mock_result = _resolve_eval_mock_result(mock_config, tool_name, exec_params)
     if is_tool_blacklisted_for_agent(agent, tool_name):
         return tool_blacklist_error(tool_name), updated_tools
-    blocked_provider_call = pipedream_google_sheets_blocked
-    if blocked_provider_call is None and resolved_entry is not None:
-        blocked_provider_call = is_pipedream_google_sheets_blocked_call(
-            resolved_entry,
+    blocked_integration = deprecated_provider_integration
+    if blocked_integration is None:
+        blocked_integration = get_blocked_deprecated_pipedream_integration(
+            tool_name,
             exec_params,
+            entry=resolved_entry,
         )
-    if mock_result is not None and not blocked_provider_call:
+    if mock_result is not None and not blocked_integration:
         logger.info(
             "Agent %s: using mock for %s (eval_run_id=%s)",
             agent.id,
@@ -3643,14 +3643,13 @@ def _execute_tool_call_runtime(
             isolated_mcp=True,
             current_sqlite_db_path=get_sqlite_db_path(),
             resolved_entry=resolved_entry,
-            pipedream_google_sheets_blocked=blocked_provider_call,
+            deprecated_provider_integration=blocked_integration,
         )
         updated_tools = _refresh_tools_after_deprecated_provider_handoff(
             agent,
             result,
             tool_name,
-            resolved_entry,
-            bool(blocked_provider_call),
+            blocked_integration,
         )
         return result, updated_tools
     resolve_executor = _DIRECT_TOOL_EXECUTORS.get(tool_name)
@@ -3667,14 +3666,13 @@ def _execute_tool_call_runtime(
         exec_params,
         current_sqlite_db_path=get_sqlite_db_path(),
         resolved_entry=resolved_entry,
-        pipedream_google_sheets_blocked=blocked_provider_call,
+        deprecated_provider_integration=blocked_integration,
     )
     updated_tools = _refresh_tools_after_deprecated_provider_handoff(
         agent,
         result,
         tool_name,
-        resolved_entry,
-        bool(blocked_provider_call),
+        blocked_integration,
     )
     if (
         tool_name in {"meta_gobii_link_agents", "meta_gobii_unlink_agents"}
@@ -3776,7 +3774,7 @@ def _execute_prepared_tool_call(
                 eval_run_id=eval_run_id,
                 parallel_safe=parallel_safe,
                 resolved_entry=prepared.resolved_entry,
-                pipedream_google_sheets_blocked=prepared.pipedream_google_sheets_blocked,
+                deprecated_provider_integration=prepared.deprecated_provider_integration,
             )
             if _tool_result_is_success(result) and not parallel_safe:
                 refresh_skills_for_tool(agent, prepared.tool_name)
@@ -3966,7 +3964,30 @@ def _prepare_tool_batch(
             logger.info("Agent %s preparing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
             preflight_entry: Optional[ToolCatalogEntry] = None
-            preflight_blocked_provider_call = False
+            preflight_params: dict[str, Any] = {}
+            try:
+                _, parsed_preflight_params = _parse_tool_call_params(
+                    _get_tool_call_arguments(call)
+                )
+                if isinstance(parsed_preflight_params, dict):
+                    preflight_params = parsed_preflight_params
+            except (TypeError, ValueError, json.JSONDecodeError):
+                # The normal argument-validation path below emits the model
+                # correction; preflight only needs valid parameters to detect
+                # generic Pipedream component calls before roster rejection.
+                pass
+            preflight_blocked_integration = get_blocked_deprecated_pipedream_integration(
+                tool_name,
+                preflight_params,
+            )
+            if preflight_blocked_integration:
+                preflight_entry = resolve_tool_entry(agent, tool_name)
+                if preflight_entry is not None:
+                    preflight_blocked_integration = get_blocked_deprecated_pipedream_integration(
+                        tool_name,
+                        preflight_params,
+                        entry=preflight_entry,
+                    )
             daily_state = None
             if isinstance(credit_snapshot, dict):
                 daily_state = credit_snapshot.get("daily_state")
@@ -3992,7 +4013,7 @@ def _prepare_tool_batch(
                 is_credit_message_only_mode(daily_state, task_credit_available)
                 and not is_credit_message_only_allowed_tool(tool_name)
             )
-            if credit_message_only_restricted:
+            if credit_message_only_restricted and not preflight_blocked_integration:
                 try:
                     _, preflight_params = _parse_tool_call_params(
                         _get_tool_call_arguments(call)
@@ -4001,15 +4022,13 @@ def _prepare_tool_batch(
                     preflight_params = None
                 if isinstance(preflight_params, dict):
                     preflight_entry = resolve_tool_entry(agent, tool_name)
-                    preflight_blocked_provider_call = bool(
-                        preflight_entry
-                        and is_pipedream_google_sheets_blocked_call(
-                            preflight_entry,
-                            preflight_params,
-                        )
+                    preflight_blocked_integration = get_blocked_deprecated_pipedream_integration(
+                        tool_name,
+                        preflight_params,
+                        entry=preflight_entry,
                     )
 
-            if credit_message_only_restricted and not preflight_blocked_provider_call:
+            if credit_message_only_restricted and not preflight_blocked_integration:
                 try:
                     step_kwargs = {
                         "agent": agent,
@@ -4034,7 +4053,11 @@ def _prepare_tool_batch(
                 followup_required = True
                 continue
 
-            if allowed_tool_names is not None and tool_name not in allowed_tool_names:
+            if (
+                allowed_tool_names is not None
+                and tool_name not in allowed_tool_names
+                and not preflight_blocked_integration
+            ):
                 if not unavailable_notice_recorded:
                     _record_policy_step(
                         agent,
@@ -4256,16 +4279,10 @@ def _prepare_tool_batch(
                 exec_params = dict(exec_params)
                 exec_params["_has_user_facing_message"] = has_user_facing_message
 
-            blocked_provider_call = (
-                preflight_blocked_provider_call
-                if preflight_entry is not None
-                else bool(
-                    resolved_entry
-                    and is_pipedream_google_sheets_blocked_call(
-                        resolved_entry,
-                        exec_params,
-                    )
-                )
+            blocked_integration = get_blocked_deprecated_pipedream_integration(
+                tool_name,
+                exec_params,
+                entry=resolved_entry,
             )
 
             if tool_name == "http_request":
@@ -4293,7 +4310,7 @@ def _prepare_tool_batch(
 
             parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
 
-            if not blocked_provider_call and not _enforce_tool_rate_limit(
+            if not blocked_integration and not _enforce_tool_rate_limit(
                 agent,
                 tool_name,
                 span=tool_span,
@@ -4306,7 +4323,7 @@ def _prepare_tool_batch(
 
             credit_info = (
                 {"cost": None, "credit": None}
-                if blocked_provider_call
+                if blocked_integration
                 else _ensure_credit_for_tool(
                     agent,
                     tool_name,
@@ -4348,7 +4365,7 @@ def _prepare_tool_batch(
                     parallel_safe=parallel_ineligible_reason is None,
                     parallel_ineligible_reason=parallel_ineligible_reason,
                     resolved_entry=resolved_entry,
-                    pipedream_google_sheets_blocked=blocked_provider_call,
+                    deprecated_provider_integration=blocked_integration,
                 )
             )
 
@@ -4729,7 +4746,7 @@ def _finalize_tool_batch(
         if is_error_status:
             trusted_deprecated_provider_block = bool(
                 is_deprecated_provider_blocked_result(result)
-                and prepared.pipedream_google_sheets_blocked
+                and prepared.deprecated_provider_integration
             )
             _refund_tool_credit_on_error_if_configured(
                 agent=agent,

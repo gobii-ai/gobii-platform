@@ -4,8 +4,8 @@ from typing import Any, Dict, Optional, cast
 from api.models import PersistentAgent
 from api.services.deprecated_provider_guard import (
     filter_deprecated_provider_blocked_tool,
+    get_blocked_deprecated_pipedream_integration,
     is_deprecated_provider_blocked_result,
-    is_pipedream_google_sheets_blocked_call,
 )
 from api.services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 
@@ -66,13 +66,11 @@ def _refresh_agent_tools_after_deprecated_provider_handoff(
     agent: PersistentAgent,
     result: Any,
     blocked_tool_name: str,
-    resolved_entry: Optional[ToolCatalogEntry],
-    blocked_provider_call: bool,
+    blocked_integration: Optional[str],
 ) -> Optional[list[dict]]:
     if not (
         is_deprecated_provider_blocked_result(result)
-        and resolved_entry is not None
-        and blocked_provider_call
+        and blocked_integration
     ):
         return None
     try:
@@ -80,12 +78,13 @@ def _refresh_agent_tools_after_deprecated_provider_handoff(
             agent,
             _refresh_agent_tools(agent),
             blocked_tool_name,
+            blocked_integration,
         )
     except Exception:
         # Preserve the actionable block if this best-effort roster refresh
         # fails; the next prompt build can retry it from persisted state.
         logger.exception(
-            "Agent %s: nested native Sheets handoff tool refresh failed; preserving the blocked result.",
+            "Agent %s: nested native integration handoff tool refresh failed; preserving the blocked result.",
             agent.id,
         )
         return None
@@ -98,7 +97,7 @@ def execute_runtime_tool_call(
     exec_params: Dict[str, Any],
     isolated_mcp: bool = False,
     resolved_entry: Optional[ToolCatalogEntry] | object = _RESOLVED_ENTRY_UNSET,
-    pipedream_google_sheets_blocked: Optional[bool] = None,
+    deprecated_provider_integration: Optional[str] = None,
 ) -> tuple[Any, Optional[list[dict]]]:
     updated_tools: Optional[list[dict]] = None
 
@@ -111,27 +110,26 @@ def execute_runtime_tool_call(
             if resolved_entry is _RESOLVED_ENTRY_UNSET
             else cast(Optional[ToolCatalogEntry], resolved_entry)
         )
-        if entry is None:
-            return {"status": "error", "message": f"Tool '{tool_name}' is not available"}, updated_tools
-        blocked_provider_call = (
-            is_pipedream_google_sheets_blocked_call(entry, exec_params)
-            if pipedream_google_sheets_blocked is None
-            else pipedream_google_sheets_blocked
+        blocked_integration = deprecated_provider_integration or get_blocked_deprecated_pipedream_integration(
+            tool_name,
+            exec_params,
+            entry=entry,
         )
+        if entry is None and not blocked_integration:
+            return {"status": "error", "message": f"Tool '{tool_name}' is not available"}, updated_tools
         result = execute_enabled_tool(
             agent,
             tool_name,
             exec_params,
             isolated_mcp=True,
             resolved_entry=entry,
-            pipedream_google_sheets_blocked=blocked_provider_call,
+            deprecated_provider_integration=blocked_integration,
         )
         updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(
             agent,
             result,
             tool_name,
-            entry,
-            blocked_provider_call,
+            blocked_integration,
         )
         return result, updated_tools
     if tool_name == "spawn_web_task":
@@ -176,25 +174,24 @@ def execute_runtime_tool_call(
         if resolved_entry is _RESOLVED_ENTRY_UNSET
         else cast(Optional[ToolCatalogEntry], resolved_entry)
     )
-    if entry is None:
-        return {"status": "error", "message": f"Tool '{tool_name}' is not available"}, updated_tools
-    blocked_provider_call = (
-        is_pipedream_google_sheets_blocked_call(entry, exec_params)
-        if pipedream_google_sheets_blocked is None
-        else pipedream_google_sheets_blocked
+    blocked_integration = deprecated_provider_integration or get_blocked_deprecated_pipedream_integration(
+        tool_name,
+        exec_params,
+        entry=entry,
     )
+    if entry is None and not blocked_integration:
+        return {"status": "error", "message": f"Tool '{tool_name}' is not available"}, updated_tools
     result = execute_enabled_tool(
         agent,
         tool_name,
         exec_params,
         resolved_entry=entry,
-        pipedream_google_sheets_blocked=blocked_provider_call,
+        deprecated_provider_integration=blocked_integration,
     )
     updated_tools = _refresh_agent_tools_after_deprecated_provider_handoff(
         agent,
         result,
         tool_name,
-        entry,
-        blocked_provider_call,
+        blocked_integration,
     )
     return result, updated_tools

@@ -6,8 +6,8 @@ from typing import Any, Dict, Optional
 from api.agent.comms.human_input_requests import attach_originating_step_from_result, track_human_input_request_created
 from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentToolCall
 from api.services.deprecated_provider_guard import (
+    get_blocked_deprecated_pipedream_integration,
     is_deprecated_provider_blocked_result,
-    is_pipedream_google_sheets_blocked_call,
 )
 
 from .runtime_execution_context import tool_execution_context
@@ -73,12 +73,13 @@ def execute_tracked_runtime_tool_call(
         if runtime_tool_requires_catalog_entry(tool_name, isolated_mcp=isolated_mcp)
         else None
     )
-    blocked_provider_call = bool(
-        resolved_entry
-        and is_pipedream_google_sheets_blocked_call(resolved_entry, exec_params)
+    blocked_integration = get_blocked_deprecated_pipedream_integration(
+        tool_name,
+        exec_params,
+        entry=resolved_entry,
     )
 
-    if not blocked_provider_call and not _enforce_tool_rate_limit(
+    if not blocked_integration and not _enforce_tool_rate_limit(
         agent,
         tool_name,
         attach_completion=attach_completion,
@@ -91,7 +92,7 @@ def execute_tracked_runtime_tool_call(
 
     credit_info = (
         {"cost": None, "credit": None}
-        if blocked_provider_call
+        if blocked_integration
         else _ensure_credit_for_tool(agent, tool_name)
     )
     if not credit_info:
@@ -133,7 +134,7 @@ def execute_tracked_runtime_tool_call(
                 exec_params=exec_params,
                 isolated_mcp=isolated_mcp,
                 resolved_entry=resolved_entry,
-                pipedream_google_sheets_blocked=blocked_provider_call,
+                deprecated_provider_integration=blocked_integration,
             )
         duration_ms = int(round((time.monotonic() - started_at) * 1000))
     except Exception as exc:
@@ -187,7 +188,7 @@ def execute_tracked_runtime_tool_call(
         attach_originating_step_from_result(step, result)
         track_human_input_request_created(step, result)
 
-    if blocked_provider_call and is_deprecated_provider_blocked_result(result):
+    if blocked_integration and is_deprecated_provider_blocked_result(result):
         _refund_tool_credit_on_error_if_configured(
             agent=agent,
             tool_name=tool_name,
