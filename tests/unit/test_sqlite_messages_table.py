@@ -2,10 +2,12 @@ import json
 import os
 import sqlite3
 import tempfile
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
 from api.agent.core.message_results import MessageSQLiteRecord, store_messages_for_prompt
+from api.agent.tools.sqlite_guardrails import open_guarded_sqlite_connection
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 
 
@@ -169,29 +171,85 @@ class SqliteMessagesTableTests(SimpleTestCase):
         )
         store_messages_for_prompt([record])
 
+        statements = []
+
+        def open_traced_connection(db_path):
+            conn = open_guarded_sqlite_connection(db_path)
+            conn.set_trace_callback(statements.append)
+            return conn
+
+        with patch(
+            "api.agent.core.message_results.open_guarded_sqlite_connection",
+            side_effect=open_traced_connection,
+        ):
+            store_messages_for_prompt([record])
+
+        normalized_statements = [statement.lstrip().upper() for statement in statements]
+        self.assertFalse(
+            any(
+                statement.startswith(("INSERT ", "UPDATE ", "DELETE "))
+                for statement in normalized_statements
+            )
+        )
+
+    def test_store_messages_for_prompt_removes_persisted_table_triggers(self):
+        original = MessageSQLiteRecord(
+            message_id="msg-triggered",
+            seq="S1",
+            timestamp="2026-01-01T00:00:00+00:00",
+            channel="web",
+            is_outbound=False,
+            from_address="web://user/1",
+            to_address="web://agent/1",
+            conversation_id=None,
+            conversation_address="web://user/1",
+            is_peer_dm=False,
+            peer_agent_id=None,
+            subject="",
+            body="before",
+            attachment_paths=[],
+            rejected_attachments=[],
+            latest_status="queued",
+            latest_sent_at=None,
+            latest_delivered_at=None,
+            latest_error_code=None,
+            latest_error_message=None,
+            is_hidden_in_chat=False,
+        )
+        store_messages_for_prompt([original])
+
         conn = sqlite3.connect(self.db_path)
         try:
-            conn.executescript(
+            conn.execute(
                 """
-                CREATE TABLE message_change_audit (operation TEXT NOT NULL);
-                CREATE TRIGGER audit_message_insert AFTER INSERT ON __messages
-                BEGIN INSERT INTO message_change_audit VALUES ('insert'); END;
-                CREATE TRIGGER audit_message_update AFTER UPDATE ON __messages
-                BEGIN INSERT INTO message_change_audit VALUES ('update'); END;
-                CREATE TRIGGER audit_message_delete AFTER DELETE ON __messages
-                BEGIN INSERT INTO message_change_audit VALUES ('delete'); END;
+                CREATE TRIGGER block_message_updates
+                BEFORE UPDATE ON __messages
+                BEGIN
+                    SELECT RAISE(ABORT, 'blocked by persisted trigger');
+                END
                 """
             )
             conn.commit()
         finally:
             conn.close()
 
-        store_messages_for_prompt([record])
+        changed = MessageSQLiteRecord(**{**original.__dict__, "body": "after"})
+        store_messages_for_prompt([changed])
 
         conn = sqlite3.connect(self.db_path)
         try:
             self.assertEqual(
-                conn.execute("SELECT COUNT(*) FROM message_change_audit").fetchone()[0],
+                conn.execute(
+                    'SELECT body FROM "__messages" WHERE message_id = ?',
+                    (original.message_id,),
+                ).fetchone(),
+                ("after",),
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM sqlite_master "
+                    "WHERE type = 'trigger' AND tbl_name = '__messages'"
+                ).fetchone()[0],
                 0,
             )
         finally:

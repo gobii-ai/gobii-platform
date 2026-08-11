@@ -118,6 +118,7 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
     try:
         conn = open_guarded_sqlite_connection(db_path)
         rebuilt = _ensure_messages_table(conn)
+        removed_trigger_count = _drop_messages_table_triggers(conn)
         selected_columns = ", ".join(f'"{column}"' for column in MESSAGE_COLUMNS)
         existing_rows = {
             row[0]: row
@@ -166,6 +167,7 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
             "prompt.messages.sqlite.updated": len(rows_to_write) - inserted_count,
             "prompt.messages.sqlite.deleted": len(deleted_ids),
             "prompt.messages.sqlite.rebuilt": rebuilt,
+            "prompt.messages.sqlite.triggers_removed": removed_trigger_count,
         })
     except Exception:
         logger.exception("Failed to store messages in SQLite.")
@@ -228,3 +230,17 @@ def _ensure_messages_table(conn) -> bool:
         """
     )
     return True
+
+
+def _drop_messages_table_triggers(conn) -> int:
+    trigger_names = [
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?",
+            (MESSAGES_TABLE,),
+        ).fetchall()
+    ]
+    for trigger_name in trigger_names:
+        quoted_name = trigger_name.replace('"', '""')
+        conn.execute(f'DROP TRIGGER "{quoted_name}"')
+    return len(trigger_names)

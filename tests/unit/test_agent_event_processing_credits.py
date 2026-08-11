@@ -204,6 +204,7 @@ class PersistentAgentCreditGateTests(TestCase):
 
         notes = list(sys_steps.values_list("notes", flat=True))
         self.assertIn("credit_insufficient", notes)
+        self.assertIn("simplified", notes)
 
         self.assertTrue(
             self.agent.steps.filter(description="Process events").exists(),
