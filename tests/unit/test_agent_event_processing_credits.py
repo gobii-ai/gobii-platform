@@ -204,6 +204,7 @@ class PersistentAgentCreditGateTests(TestCase):
 
         notes = list(sys_steps.values_list("notes", flat=True))
         self.assertIn("credit_insufficient", notes)
+        self.assertIn("simplified", notes)
 
         self.assertTrue(
             self.agent.steps.filter(description="Process events").exists(),
@@ -1344,7 +1345,6 @@ class PersistentAgentToolCreditTests(TestCase):
                 self.agent,
                 is_first_run=True,
                 credit_snapshot=None,
-                run_sequence_number=1,
             )
 
         self.assertEqual(usage["total_tokens"], 0)
@@ -1435,7 +1435,6 @@ class PersistentAgentToolCreditTests(TestCase):
                 self.agent,
                 is_first_run=True,
                 credit_snapshot=None,
-                run_sequence_number=1,
             )
 
         self.assertEqual(usage["total_tokens"], 0)
@@ -1859,7 +1858,6 @@ class PersistentAgentToolCreditTests(TestCase):
                 self.agent,
                 is_first_run=False,
                 credit_snapshot=None,
-                run_sequence_number=1,
             )
 
         self.assertEqual(usage["total_tokens"], 0)

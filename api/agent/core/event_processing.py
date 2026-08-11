@@ -5491,16 +5491,37 @@ def _prepare_multimodal_read_file_completion_request(
     return request_history, request_failover_configs, multimodal_attached
 
 
-def _get_completed_process_run_count(agent: Optional[PersistentAgent]) -> int:
-    """Return how many PROCESS_EVENTS loops completed for the agent."""
-    if agent is None:
-        return 0
+def _get_process_run_state(agent: PersistentAgent) -> tuple[bool, bool]:
+    """Return first/second-run state without scanning the agent's full history."""
+    prior_run_ids = list(
+        PersistentAgentSystemStep.objects.filter(
+            step__agent=agent,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            step__description="Process events",
+        )
+        .order_by()
+        .values_list("step_id", flat=True)[:2]
+    )
+    return len(prior_run_ids) == 0, len(prior_run_ids) == 1
 
-    return PersistentAgentSystemStep.objects.filter(
-        step__agent=agent,
-        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-        step__description="Process events",
-    ).count()
+
+def _record_process_run_start(
+    agent: PersistentAgent,
+) -> tuple[PersistentAgentStep, PersistentAgentSystemStep, bool, bool]:
+    """Record one PROCESS_EVENTS run and derive its lifecycle state atomically."""
+    with transaction.atomic():
+        locked_agent = PersistentAgent.objects.select_for_update().get(pk=agent.pk)
+        is_first_run, is_second_run = _get_process_run_state(locked_agent)
+        processing_step = PersistentAgentStep.objects.create(
+            agent=locked_agent,
+            description="Process events",
+        )
+        system_step = PersistentAgentSystemStep.objects.create(
+            step=processing_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
+
+    return processing_step, system_step, is_first_run, is_second_run
 
 
 def _create_agent_system_step_once(
@@ -5531,7 +5552,7 @@ def _create_agent_system_step_once(
 
 def _get_recent_preferred_config(
     agent: PersistentAgent,
-    run_sequence_number: int,
+    is_second_run: bool,
 ) -> Optional[Tuple[str, str]]:
     """
     Return the (provider, model) from the most recent completion if fresh enough.
@@ -5539,7 +5560,7 @@ def _get_recent_preferred_config(
     if agent is None:
         return None
 
-    if run_sequence_number == 2:
+    if is_second_run:
         # Skip preferred provider on second run to avoid immediate repetition
         return None
 
@@ -6249,8 +6270,7 @@ def _ensure_credit_for_tool(
         return False
 
     try:
-        with transaction.atomic():
-            consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
+        consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
         consumed_credit = consumed.get("credit") if consumed else None
     except Exception as e:
         log_credit_failure(
@@ -7044,48 +7064,34 @@ def _process_agent_events_locked(
         span.set_attribute('credit_check.error', str(e))
         return agent
 
-    with tracer.start_as_current_span("Agent Bootstrap Run Count"):
-        prior_run_count = _get_completed_process_run_count(agent)
-
-    # Determine whether this is the first processing run before recording the system step
-    is_first_run = prior_run_count == 0
-    run_sequence_number = prior_run_count + 1
-
     try:
         publish_agent_event(str(agent.id), AgentEventType.PROCESSING_STARTED)
 
-        with transaction.atomic():
-            processing_step = PersistentAgentStep.objects.create(
-                agent=agent,
-                description="Process events",
-            )
-            sys_step = PersistentAgentSystemStep.objects.create(
-                step=processing_step,
-                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-            )
+        with tracer.start_as_current_span("Agent Bootstrap Run State"):
+            processing_step, sys_step, is_first_run, is_second_run = _record_process_run_start(agent)
         if heartbeat:
             heartbeat.update_run_id(str(processing_step.id))
 
         logger.info(
-            "Processing agent %s (is_first_run=%s, run_sequence_number=%s)",
+            "Processing agent %s (is_first_run=%s, is_second_run=%s)",
             agent.id,
             is_first_run,
-            run_sequence_number,
+            is_second_run,
         )
         span.set_attribute('processing_step.id', str(processing_step.id))
         span.set_attribute('processing.is_first_run', is_first_run)
-        span.set_attribute('processing.run_sequence_number', run_sequence_number)
+        span.set_attribute('processing.is_second_run', is_second_run)
 
         _maybe_enqueue_sandbox_warmup_for_recent_tool_history(agent, span)
 
         _run_agent_loop(
             agent,
             is_first_run=is_first_run,
+            is_second_run=is_second_run,
             inbound_generation=inbound_generation,
             inbound_message_id=inbound_message_id,
             process_started_at=processing_step.created_at,
             credit_snapshot=credit_snapshot,
-            run_sequence_number=run_sequence_number,
             lock_extender=lock_extender,
             heartbeat=heartbeat,
             prefer_low_latency=prefer_low_latency,
@@ -7129,11 +7135,11 @@ def _run_agent_loop(
     agent: PersistentAgent,
     *,
     is_first_run: bool,
+    is_second_run: bool = False,
     inbound_generation: int | str | None = None,
     inbound_message_id: str | None = None,
     process_started_at: datetime | None = None,
     credit_snapshot: Optional[Dict[str, Any]] = None,
-    run_sequence_number: Optional[int] = None,
     lock_extender: Optional[_LockExtender] = None,
     heartbeat: Optional[_ProcessingHeartbeat] = None,
     prefer_low_latency: bool | None = None,
@@ -7147,8 +7153,8 @@ def _run_agent_loop(
     Args:
         agent: Agent being processed.
         is_first_run: Whether this is the first ever processing run.
+        is_second_run: Whether this is the second processing run.
         credit_snapshot: Cached credit info for prompt context.
-        run_sequence_number: 1-based count of PROCESS_EVENTS runs for the agent.
     
     Returns:
         dict: Cumulative token usage across all iterations
@@ -7572,10 +7578,10 @@ def _run_agent_loop(
                         logger=logger,
                         context={
                             "agent_id": str(agent.id),
-                            "run_sequence_number": run_sequence_number,
                             "iteration": i + 1,
                             "max_iterations": effective_max_loop_iterations,
                             "is_first_run": is_first_run,
+                            "is_second_run": is_second_run,
                             "reasoning_only_streak": reasoning_only_streak,
                             "has_continuation_notice": bool(current_notice),
                             "routing_profile": getattr(routing_profile, "name", None),
@@ -7722,7 +7728,10 @@ def _run_agent_loop(
                         span.add_event("Agent loop aborted - llm bootstrap required")
                         break
 
-                preferred_config = _get_recent_preferred_config(agent=agent, run_sequence_number=run_sequence_number)
+                preferred_config = _get_recent_preferred_config(
+                    agent=agent,
+                    is_second_run=is_second_run,
+                )
                 if prefer_low_latency:
                     preferred_config = _filter_preferred_config_for_low_latency(
                         preferred_config,
@@ -7949,7 +7958,8 @@ def _run_agent_loop(
                         logger=logger,
                         context={
                             "agent_id": str(agent.id),
-                            "run_sequence_number": run_sequence_number,
+                            "is_first_run": is_first_run,
+                            "is_second_run": is_second_run,
                             "iteration": i + 1,
                         },
                     )
@@ -7983,7 +7993,8 @@ def _run_agent_loop(
                             "agent_id": str(agent.id),
                             "provider_candidates": _llm_provider_candidates_for_error_context(failover_configs),
                             "preferred_config": _preferred_config_for_error_context(preferred_config),
-                            "run_sequence_number": run_sequence_number,
+                            "is_first_run": is_first_run,
+                            "is_second_run": is_second_run,
                             "iteration": i + 1,
                         },
                     )

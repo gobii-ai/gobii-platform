@@ -35,6 +35,7 @@ from util.subscription_helper import (
 
 from datetime import timedelta, datetime
 from numbers import Number
+from time import monotonic
 from typing import Any, Mapping
 from django.apps import apps
 import os
@@ -46,6 +47,7 @@ tracer = trace.get_tracer("gobii.utils")
 
 # Constants for task credit thresholds
 THRESHOLDS = (75, 90, 100)
+SLOW_CREDIT_LOCK_THRESHOLD_MS = 500
 
 
 # NOTES:
@@ -801,36 +803,74 @@ class TaskCreditService:
                 return credit
             else:
                 # Fractional consumption for organizations across blocks
-                with transaction.atomic():
-                    remaining = Decimal(plan_amount)
-                    last_credit = None
-                    while remaining > 0:
-                        credit = (
-                            TaskCredit.objects.select_for_update()
-                            .filter(
-                                organization_id=owner.id,
-                                expiration_date__gt=now,
-                                credits_used__lt=F("credits"),
-                                voided=False,
-                            )
-                            .order_by("expiration_date")
-                            .first()
-                        )
+                with tracer.start_as_current_span(
+                    "TaskCreditService Consume Organization Credit Transaction"
+                ) as transaction_span:
+                    transaction_span.set_attribute("billing.owner_type", "organization")
+                    transaction_span.set_attribute("billing.owner_id", str(owner.id))
+                    with transaction.atomic():
+                        remaining = Decimal(plan_amount)
+                        last_credit = None
+                        while remaining > 0:
+                            lock_started = monotonic()
+                            with tracer.start_as_current_span(
+                                "TaskCreditService Acquire Organization Credit Lock"
+                            ) as lock_span:
+                                credit = (
+                                    TaskCredit.objects.select_for_update()
+                                    .filter(
+                                        organization_id=owner.id,
+                                        expiration_date__gt=now,
+                                        credits_used__lt=F("credits"),
+                                        voided=False,
+                                    )
+                                    .order_by("expiration_date")
+                                    .first()
+                                )
+                                lock_duration_ms = round((monotonic() - lock_started) * 1000)
+                                credit_id = str(credit.id) if credit is not None else ""
+                                lock_span.set_attributes({
+                                    "billing.owner_type": "organization",
+                                    "billing.owner_id": str(owner.id),
+                                    "billing.credit_id": credit_id,
+                                    "billing.credit_lock_duration_ms": lock_duration_ms,
+                                })
 
-                        if credit is None:
-                            raise ValidationError({"credits": "Insufficient task credits for organization"})
+                            if lock_duration_ms >= SLOW_CREDIT_LOCK_THRESHOLD_MS:
+                                logger.warning(
+                                    "Slow organization task-credit lock owner_type=%s owner_id=%s "
+                                    "credit_id=%s duration_ms=%s",
+                                    "organization",
+                                    owner.id,
+                                    credit_id or "<none>",
+                                    lock_duration_ms,
+                                )
 
-                        credit.refresh_from_db()
-                        available_here = (credit.credits - credit.credits_used)
-                        consume_now = available_here if available_here <= remaining else remaining
-                        if consume_now <= 0:
-                            break
+                            if credit is None:
+                                raise ValidationError({"credits": "Insufficient task credits for organization"})
 
-                        credit.credits_used = F("credits_used") + consume_now
-                        credit.save(update_fields=["credits_used"])
-                        credit.refresh_from_db()
-                        remaining -= consume_now
-                        last_credit = credit
+                            with tracer.start_as_current_span(
+                                "TaskCreditService Refresh Organization Credit"
+                            ):
+                                credit.refresh_from_db()
+                            available_here = (credit.credits - credit.credits_used)
+                            consume_now = available_here if available_here <= remaining else remaining
+                            if consume_now <= 0:
+                                break
+
+                            with tracer.start_as_current_span(
+                                "TaskCreditService Update Organization Credit"
+                            ) as update_span:
+                                update_span.set_attribute("billing.credit_id", str(credit.id))
+                                update_span.set_attribute("billing.credit_amount", float(consume_now))
+                                credit.credits_used = F("credits_used") + consume_now
+                                credit.save(update_fields=["credits_used"])
+                            with tracer.start_as_current_span(
+                                "TaskCreditService Refresh Organization Credit"
+                            ):
+                                credit.refresh_from_db()
+                            remaining -= consume_now
+                            last_credit = credit
 
                 return last_credit
         else:
