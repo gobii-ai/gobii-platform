@@ -3922,6 +3922,7 @@ def _prepare_tool_batch(
             logger.info("Agent %s preparing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
             preflight_entry: Optional[ToolCatalogEntry] = None
+            preflight_entry_resolved = False
             preflight_params: dict[str, Any] = {}
             try:
                 _, parsed_preflight_params = _parse_tool_call_params(
@@ -3940,6 +3941,7 @@ def _prepare_tool_batch(
             )
             if preflight_blocked_integration:
                 preflight_entry = resolve_tool_entry(agent, tool_name)
+                preflight_entry_resolved = True
                 if preflight_entry is not None:
                     preflight_blocked_integration = match_deprecated_pipedream_integration(
                         tool_name,
@@ -3972,7 +3974,8 @@ def _prepare_tool_batch(
                 and not is_credit_message_only_allowed_tool(tool_name)
             )
             if credit_message_only_restricted and not preflight_blocked_integration:
-                preflight_entry = resolve_tool_entry(agent, tool_name)
+                if not preflight_entry_resolved:
+                    preflight_entry = resolve_tool_entry(agent, tool_name)
                 preflight_blocked_integration = match_deprecated_pipedream_integration(
                     tool_name,
                     preflight_params,

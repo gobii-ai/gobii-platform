@@ -10,7 +10,7 @@ from api.agent.core.event_processing import (
     _prepare_tool_batch,
 )
 from api.agent.system_skills.defaults import APOLLO_NATIVE_SYSTEM_SKILL_KEY
-from api.agent.tools.mcp_manager import MCPToolInfo
+from api.agent.tools.mcp_manager import MCPToolInfo, MCPToolManager
 from api.agent.tools.tool_manager import ToolCatalogEntry, execute_enabled_tool
 from api.agent.tools.tracked_runtime import execute_tracked_runtime_tool_call
 from api.models import (
@@ -298,11 +298,13 @@ class PipedreamApolloExecutionGuardTests(TestCase):
             "apollo_io-internal-lookup",
             server_name="internal_crm",
         )
+        unresolved_sibling = "apollo_io-stale-sibling"
         refreshed_tools = [
             {"type": "function", "function": {"name": candidate}}
             for candidate in (
                 entry.full_name,
                 sibling.full_name,
+                unresolved_sibling,
                 sheets.full_name,
                 internal.full_name,
                 "trello-create-card",
@@ -337,10 +339,84 @@ class PipedreamApolloExecutionGuardTests(TestCase):
         }
         self.assertNotIn(entry.full_name, updated_names)
         self.assertNotIn(sibling.full_name, updated_names)
+        self.assertIn(unresolved_sibling, updated_names)
         self.assertIn(sheets.full_name, updated_names)
         self.assertIn(internal.full_name, updated_names)
         self.assertIn("trello-create-card", updated_names)
         self.assertIn("http_request", updated_names)
+
+    def test_apollo_tools_hide_from_future_rosters_after_native_handoff(self):
+        apollo = self._mcp_entry("apollo_io-search-people")
+        apollo_oauth = self._mcp_entry("apollo_io_oauth-enrich-person")
+        sheets = self._mcp_entry("google_sheets-read-rows")
+        for entry in (apollo, apollo_oauth, sheets):
+            PersistentAgentEnabledTool.objects.create(
+                agent=self.agent,
+                tool_full_name=entry.full_name,
+                tool_server=entry.tool_server,
+                tool_name=entry.tool_name,
+            )
+
+        manager = MCPToolManager()
+        with patch.object(
+            manager,
+            "get_tools_for_agent",
+            return_value=[apollo.mcp_info, apollo_oauth.mcp_info, sheets.mcp_info],
+        ), patch.object(manager, "_backfill_enabled_tool_metadata"):
+            before_handoff = manager.get_enabled_tools_definitions(self.agent)
+            handoff = execute_enabled_tool(
+                self.agent,
+                apollo.full_name,
+                {},
+                resolved_entry=apollo,
+            )
+            after_handoff = manager.get_enabled_tools_definitions(self.agent)
+
+        before_names = {definition["function"]["name"] for definition in before_handoff}
+        after_names = {definition["function"]["name"] for definition in after_handoff}
+        self.assertEqual(handoff["handoff_status"], "ready")
+        self.assertEqual(
+            before_names,
+            {apollo.full_name, apollo_oauth.full_name, sheets.full_name},
+        )
+        self.assertNotIn(apollo.full_name, after_names)
+        self.assertNotIn(apollo_oauth.full_name, after_names)
+        self.assertIn(sheets.full_name, after_names)
+
+    def test_credit_preflight_does_not_resolve_spoofed_prefix_twice(self):
+        entry = self._mcp_entry(
+            "apollo_io-internal-lookup",
+            server_name="internal_crm",
+        )
+        tool_call = {
+            "id": "call-internal-apollo",
+            "function": {"name": entry.full_name, "arguments": "{}"},
+        }
+
+        with patch(
+            "api.agent.core.event_processing.is_credit_message_only_mode",
+            return_value=True,
+        ), patch(
+            "api.agent.core.event_processing.resolve_tool_entry",
+            return_value=entry,
+        ) as resolve:
+            prepared_batch = _prepare_tool_batch(
+                self.agent,
+                tool_calls=[tool_call],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={"available": None, "daily_state": {}},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared_batch.prepared_calls, [])
+        resolve.assert_called_once_with(self.agent, entry.full_name)
 
     def test_eval_mock_cannot_bypass_apollo_guard(self):
         entry = self._mcp_entry("apollo_io-search-people")

@@ -972,6 +972,45 @@ class NativeIntegrationTests(TestCase):
                 self.assertEqual(mock_post.call_args.kwargs["data"]["client_id"], client_id)
                 self.assertEqual(mock_post.call_args.kwargs["data"]["client_secret"], client_secret)
 
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    @patch("api.services.native_integrations.httpx.post")
+    def test_apollo_oauth_callback_wakes_only_agents_with_native_skill(
+        self,
+        mock_post,
+        mock_delay,
+    ):
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key=APOLLO_NATIVE_SYSTEM_SKILL_KEY,
+            is_enabled=True,
+        )
+        unrelated_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Unrelated HTTP Agent",
+            charter="Has HTTP but not the Apollo skill.",
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=self.user,
+                name="Unrelated HTTP Browser",
+            ),
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=unrelated_agent,
+            tool_full_name="http_request",
+            tool_name="http_request",
+        )
+        state = self._start_oauth(provider_key="apollo")
+        mock_post.return_value = self._token_response(
+            access_token="apollo-access-token",
+            refresh_token="apollo-refresh-token",
+            provider=APOLLO_PROVIDER,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self._post_oauth_callback(state, provider_key="apollo")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
     @patch("api.services.native_integrations.httpx.post")
     def test_callback_stores_hubspot_scope_array(self, mock_post):
         state = self._start_oauth(provider_key="hubspot")

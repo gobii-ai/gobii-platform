@@ -93,7 +93,7 @@ from ...services.mcp_oauth import (
     ensure_mcp_oauth_credential,
 )
 from ...services.pipedream_apps import (
-    filter_guarded_pipedream_google_sheets_tools,
+    filter_guarded_pipedream_native_handoff_tools,
     get_effective_pipedream_app_slugs_for_agent,
     get_platform_pipedream_app_slugs,
     normalize_app_slug,
@@ -2513,7 +2513,7 @@ class MCPToolManager:
                 )
                 if tool.full_name not in seen_tool_names
             )
-        for tool_info in filter_guarded_pipedream_google_sheets_tools(agent, tools):
+        for tool_info in filter_guarded_pipedream_native_handoff_tools(agent, tools):
             if tool_info.full_name in enabled_set:
                 self._backfill_enabled_tool_metadata(
                     enabled_rows_by_name[tool_info.full_name],

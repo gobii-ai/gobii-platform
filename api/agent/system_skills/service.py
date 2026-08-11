@@ -117,6 +117,8 @@ def prepare_native_integration_handoff(agent: PersistentAgent, skill_key: str) -
     if not updated:
         return NATIVE_INTEGRATION_HANDOFF_EXPLICITLY_DISABLED
     return NATIVE_INTEGRATION_HANDOFF_READY
+
+
 def _system_skill_keys_for_tool(tool_name: str) -> list[str]:
     normalized_tool = str(tool_name or "").strip()
     if not normalized_tool:

@@ -239,10 +239,12 @@ def pipedream_app_slug_for_tool(tool: Any) -> str:
     )
 
 
-def _native_google_sheets_handoff_ready(agent: Optional[PersistentAgent]) -> bool:
+def _native_integration_handoff_ready(
+    agent: Optional[PersistentAgent],
+    skill_key: str,
+) -> bool:
     if agent is None or getattr(agent, "pk", None) is None:
         return False
-    from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
     from api.models import PersistentAgentSystemSkillState
     from api.services.tool_blacklist import is_tool_blacklisted_for_agent
 
@@ -253,7 +255,7 @@ def _native_google_sheets_handoff_ready(agent: Optional[PersistentAgent]) -> boo
             return False
         skill_enabled = PersistentAgentSystemSkillState.objects.filter(
             agent=agent,
-            skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+            skill_key=skill_key,
             is_enabled=True,
         ).exists()
         if not skill_enabled:
@@ -266,35 +268,51 @@ def _native_google_sheets_handoff_ready(agent: Optional[PersistentAgent]) -> boo
         ).exists()
     except DatabaseError:
         logger.warning(
-            "Unable to verify native Google Sheets handoff state for agent %s; preserving legacy tool visibility.",
+            "Unable to verify native integration handoff state for agent %s; preserving legacy tool visibility.",
             agent.pk,
             exc_info=True,
         )
         return False
 
 
-def filter_guarded_pipedream_google_sheets_tools(
+def filter_guarded_pipedream_native_handoff_tools(
     agent: Optional[PersistentAgent],
     tools: Iterable[Any],
 ) -> list[Any]:
     tool_list = list(tools)
-    has_legacy_sheets_tool = any(
-        getattr(tool, "server_name", "") == PIPEDREAM_RUNTIME_NAME
-        and pipedream_app_slug_for_tool(tool) == PIPEDREAM_GOOGLE_SHEETS_APP_SLUG
+    present_app_slugs = {
+        pipedream_app_slug_for_tool(tool)
         for tool in tool_list
-    )
-    if (
-        not has_legacy_sheets_tool
-        or not pipedream_google_sheets_guard_enabled()
-        or not _native_google_sheets_handoff_ready(agent)
-    ):
+        if getattr(tool, "server_name", "") == PIPEDREAM_RUNTIME_NAME
+    }
+    if not present_app_slugs:
         return tool_list
+
+    # Import lazily because the execution guard uses the app-slug helpers in
+    # this module while defining the shared provider specifications.
+    from api.services.deprecated_provider_guard import (
+        DEPRECATED_PIPEDREAM_INTEGRATIONS,
+        deprecated_pipedream_guard_enabled,
+    )
+
+    hidden_app_slugs = set()
+    for integration in DEPRECATED_PIPEDREAM_INTEGRATIONS.values():
+        if (
+            present_app_slugs.isdisjoint(integration.pipedream_app_slugs)
+            or not deprecated_pipedream_guard_enabled(integration)
+            or not _native_integration_handoff_ready(agent, integration.native_skill_key)
+        ):
+            continue
+        hidden_app_slugs.update(integration.pipedream_app_slugs)
+    if not hidden_app_slugs:
+        return tool_list
+
     return [
         tool
         for tool in tool_list
         if not (
             getattr(tool, "server_name", "") == PIPEDREAM_RUNTIME_NAME
-            and pipedream_app_slug_for_tool(tool) == PIPEDREAM_GOOGLE_SHEETS_APP_SLUG
+            and pipedream_app_slug_for_tool(tool) in hidden_app_slugs
         )
     ]
 
@@ -369,7 +387,7 @@ def filter_deprecated_pipedream_apps_without_agent(apps: Iterable[Any]) -> list[
 
 def filter_deprecated_pipedream_tools_for_agent(agent: PersistentAgent, tools: Iterable[Any]) -> list[Any]:
     visibility = get_pipedream_app_visibility_for_agent(agent)
-    return filter_guarded_pipedream_google_sheets_tools(agent, visibility.filter_tools(tools))
+    return filter_guarded_pipedream_native_handoff_tools(agent, visibility.filter_tools(tools))
 
 
 def get_owner_selected_app_slugs(owner_scope: str, owner_user=None, owner_org=None) -> list[str]:

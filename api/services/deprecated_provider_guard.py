@@ -72,7 +72,7 @@ DEPRECATED_PIPEDREAM_INTEGRATIONS = {
 }
 
 
-def _guard_enabled(integration: DeprecatedPipedreamIntegration) -> bool:
+def deprecated_pipedream_guard_enabled(integration: DeprecatedPipedreamIntegration) -> bool:
     return is_waffle_switch_active(integration.switch_name, default=False)
 
 
@@ -129,7 +129,7 @@ def match_deprecated_pipedream_integration(
         if entry is not None
         else _integration_for_tool_name(tool_name, params)
     )
-    return integration if integration is not None and _guard_enabled(integration) else None
+    return integration if integration is not None and deprecated_pipedream_guard_enabled(integration) else None
 
 
 def _resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Any:
@@ -225,11 +225,7 @@ def filter_deprecated_provider_blocked_tool(
     blocked_tool_names = {blocked_tool_name}
     for tool_name in candidates - blocked_tool_names:
         entry = _resolve_tool_entry(agent, tool_name)
-        detected_integration = (
-            _integration_for_entry(entry, {})
-            if entry is not None
-            else _integration_for_tool_name(tool_name, {})
-        )
+        detected_integration = _integration_for_entry(entry, {}) if entry is not None else None
         if detected_integration == blocked_integration:
             blocked_tool_names.add(tool_name)
 
@@ -355,7 +351,7 @@ def deprecated_pipedream_blocked_error(
         return None
     # Callers that classify before billing pass the decision through so a
     # mid-call switch change cannot make execution and credit handling differ.
-    if blocked_integration is None and not _guard_enabled(integration):
+    if blocked_integration is None and not deprecated_pipedream_guard_enabled(integration):
         return None
 
     from api.agent.system_skills.service import (
