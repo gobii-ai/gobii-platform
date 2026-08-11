@@ -151,6 +151,8 @@ from ..tools.request_human_input import execute_request_human_input
 from ..tools.search_tools import execute_search_tools
 from ..tools.tool_manager import (
     BUILTIN_TOOL_REGISTRY,
+    PYTHON_EXEC_TOOL_NAME,
+    RUN_COMMAND_TOOL_NAME,
     ToolCatalogEntry,
     auto_enable_heuristic_tools,
     execute_enabled_tool,
@@ -237,6 +239,7 @@ def _coerce_loop_iteration_limit(value: int | None) -> int:
 TOOL_ERROR_TYPE_MAX_BYTES = 120
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
 MESSAGE_TOOL_NAMES = set(CREDIT_MESSAGE_TOOL_NAMES) | {"send_discord_message"}
+NON_FILTERABLE_TOOL_NAMES = frozenset({PYTHON_EXEC_TOOL_NAME, RUN_COMMAND_TOOL_NAME})
 MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
 MESSAGE_TOOL_BODY_KEYS = {
     "send_email": "mobile_first_html",
@@ -1723,12 +1726,18 @@ def _filter_tools_after_non_retryable_result(
         return tools
 
     if payload.get(TERMINAL_ERROR_FLAG) is True:
-        allowed = MESSAGE_TOOL_NAMES | {"request_human_input", "sleep_until_next_trigger"}
+        allowed = MESSAGE_TOOL_NAMES | {
+            "request_human_input",
+            "sleep_until_next_trigger",
+            *NON_FILTERABLE_TOOL_NAMES,
+        }
         return [
             tool
             for tool in tools
             if tool.get("function", {}).get("name") in allowed
         ]
+    if tool_name in NON_FILTERABLE_TOOL_NAMES:
+        return tools
     return [
         tool
         for tool in tools

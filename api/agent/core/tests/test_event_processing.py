@@ -88,6 +88,8 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
     tools = [
         {"type": "function", "function": {"name": "mcp_vendor_search"}},
         {"type": "function", "function": {"name": "http_request"}},
+        {"type": "function", "function": {"name": "run_command"}},
+        {"type": "function", "function": {"name": "python_exec"}},
         {"type": "function", "function": {"name": "send_chat_message"}},
         {"type": "function", "function": {"name": "sleep_until_next_trigger"}},
     ]
@@ -101,8 +103,25 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
 
         self.assertEqual(
             _tool_names(filtered),
-            {"http_request", "send_chat_message", "sleep_until_next_trigger"},
+            {
+                "http_request",
+                "run_command",
+                "python_exec",
+                "send_chat_message",
+                "sleep_until_next_trigger",
+            },
         )
+
+    def test_non_retryable_result_keeps_compute_tools_available(self):
+        for tool_name in ("run_command", "python_exec"):
+            with self.subTest(tool_name=tool_name):
+                filtered = _filter_tools_after_non_retryable_result(
+                    self.tools,
+                    tool_name,
+                    {"status": "error", "retryable": False},
+                )
+
+                self.assertEqual(filtered, self.tools)
 
     def test_terminal_result_leaves_only_delivery_and_stop_tools(self):
         filtered = _filter_tools_after_non_retryable_result(
@@ -113,8 +132,36 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
 
         self.assertEqual(
             _tool_names(filtered),
-            {"send_chat_message", "sleep_until_next_trigger"},
+            {
+                "run_command",
+                "python_exec",
+                "send_chat_message",
+                "sleep_until_next_trigger",
+            },
         )
+
+    def test_terminal_compute_result_keeps_compute_tools_available(self):
+        for tool_name in ("run_command", "python_exec"):
+            with self.subTest(tool_name=tool_name):
+                filtered = _filter_tools_after_non_retryable_result(
+                    self.tools,
+                    tool_name,
+                    {
+                        "status": "error",
+                        "retryable": False,
+                        "terminal_error": True,
+                    },
+                )
+
+                self.assertEqual(
+                    _tool_names(filtered),
+                    {
+                        "run_command",
+                        "python_exec",
+                        "send_chat_message",
+                        "sleep_until_next_trigger",
+                    },
+                )
 
     def test_success_result_with_irrelevant_retryable_field_keeps_tools(self):
         filtered = _filter_tools_after_non_retryable_result(
@@ -333,8 +380,105 @@ class NonRetryableToolAvailabilityTests(SimpleTestCase):
                 )
                 self.assertEqual(
                     _tool_names(executed.tools),
-                    {"send_chat_message", "sleep_until_next_trigger"},
+                    {
+                        "run_command",
+                        "python_exec",
+                        "send_chat_message",
+                        "sleep_until_next_trigger",
+                    },
                 )
+
+    def test_same_batch_terminal_result_allows_pending_compute_siblings(self):
+        def prepared(idx, tool_name):
+            return _PreparedToolExecution(
+                idx=idx,
+                tool_name=tool_name,
+                tool_params={},
+                exec_params={},
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id=f"call_{idx}",
+                explicit_continue=None,
+                inferred_continue=False,
+                parallel_safe=False,
+                parallel_ineligible_reason="unsafe",
+            )
+
+        source = prepared(1, "mcp_vendor_search")
+        command = prepared(2, "run_command")
+        python = prepared(3, "python_exec")
+        outcomes = [
+            _ToolExecutionOutcome(
+                prepared=source,
+                result={
+                    "status": "error",
+                    "retryable": False,
+                    "terminal_error": True,
+                },
+                duration_ms=1,
+                updated_tools=None,
+                variable_map={},
+            ),
+            _ToolExecutionOutcome(
+                prepared=command,
+                result={"status": "ok"},
+                duration_ms=1,
+                updated_tools=None,
+                variable_map={},
+            ),
+            _ToolExecutionOutcome(
+                prepared=python,
+                result={"status": "ok"},
+                duration_ms=1,
+                updated_tools=None,
+                variable_map={},
+            ),
+        ]
+        batch = _PreparedToolBatch(
+            prepared_calls=[source, command, python],
+            followup_required=False,
+            all_calls_sleep=False,
+            abort_after_execution=False,
+            parallel_ineligible_reason="unsafe",
+        )
+        agent = SimpleNamespace(id=uuid4(), refresh_from_db=lambda **_kwargs: None)
+
+        with (
+            patch(
+                "api.agent.core.event_processing._execute_prepared_tool_call",
+                side_effect=outcomes,
+            ) as execute,
+            patch("api.agent.core.event_processing._persist_tool_execution_outcome"),
+            patch("api.agent.core.event_processing._mark_prepared_tool_started"),
+            patch(
+                "api.agent.core.event_processing._should_abort_processing",
+                return_value=False,
+            ),
+        ):
+            executed = _execute_prepared_tool_batch_inner(
+                agent,
+                batch,
+                budget_ctx=None,
+                eval_run_id=None,
+                tools=self.tools,
+                heartbeat=None,
+                lock_extender=None,
+            )
+
+        self.assertEqual(
+            [call.args[1].tool_name for call in execute.call_args_list],
+            ["mcp_vendor_search", "run_command", "python_exec"],
+        )
+        self.assertEqual(
+            _tool_names(executed.tools),
+            {
+                "run_command",
+                "python_exec",
+                "send_chat_message",
+                "sleep_until_next_trigger",
+            },
+        )
 
 
 @tag('batch_event_processing')

@@ -67,6 +67,175 @@ class ToolResultSchemaTests(SimpleTestCase):
             ),
         )
 
+    def test_failed_result_does_not_replace_last_successful_compute_batch(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id="python-success",
+                tool_name="python_exec",
+                created_at=datetime(2026, 8, 11, 0, 5, tzinfo=timezone.utc),
+                result_text=json.dumps({"status": "ok", "stdout": [{"screened": 219}]}),
+                source_batch_id="successful-scan",
+                succeeded=True,
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="python-failure",
+                tool_name="python_exec",
+                created_at=datetime(2026, 8, 11, 0, 6, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "error",
+                    "message": "HTTP Error 400",
+                    "retryable": False,
+                }),
+                source_batch_id="failed-detail-query",
+                succeeded=False,
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="http-action-required",
+                tool_name="http_request",
+                created_at=datetime(2026, 8, 11, 0, 7, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "action_required",
+                    "message": "Authorization required",
+                }),
+                source_batch_id="blocked-connector",
+                succeeded=False,
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="http-failure",
+                tool_name="http_request",
+                created_at=datetime(2026, 8, 11, 0, 8, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "error",
+                    "message": "upstream request failed",
+                }),
+                source_batch_id="failed-http",
+                succeeded=False,
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="mcp-failure",
+                tool_name="mcp_vendor_search",
+                created_at=datetime(2026, 8, 11, 0, 9, tzinfo=timezone.utc),
+                result_text=json.dumps({
+                    "status": "failed",
+                    "message": "remote task failed",
+                }),
+                source_batch_id="failed-mcp",
+                succeeded=False,
+            ),
+        ]
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite3") as db_file:
+            token = set_sqlite_db_path(db_file.name)
+            try:
+                tool_results.prepare_tool_results_for_prompt(
+                    records,
+                    recency_positions={},
+                )
+            finally:
+                reset_sqlite_db_path(token)
+
+            with sqlite3.connect(db_file.name) as conn:
+                current_batches = conn.execute(
+                    "SELECT result_id, is_current_batch FROM __tool_results ORDER BY created_at"
+                ).fetchall()
+
+        self.assertEqual(
+            current_batches,
+            [
+                ("python-success", 1),
+                ("python-failure", 0),
+                ("http-action-required", 0),
+                ("http-failure", 0),
+                ("mcp-failure", 0),
+            ],
+        )
+
+    def test_new_successful_batch_replaces_previous_batch_and_keeps_siblings(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id="old-source",
+                tool_name="http_request",
+                created_at=datetime(2026, 8, 11, 0, 1, tzinfo=timezone.utc),
+                result_text=json.dumps({"status": "ok", "result": [{"id": "old"}]}),
+                source_batch_id="old-batch",
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="new-source-a",
+                tool_name="http_request",
+                created_at=datetime(2026, 8, 11, 0, 2, tzinfo=timezone.utc),
+                result_text=json.dumps({"status": "success", "result": [{"id": "a"}]}),
+                source_batch_id="new-batch",
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="new-source-b",
+                tool_name="mcp_vendor_search",
+                created_at=datetime(2026, 8, 11, 0, 3, tzinfo=timezone.utc),
+                result_text=json.dumps({"status": "complete", "result": [{"id": "b"}]}),
+                source_batch_id="new-batch",
+            ),
+        ]
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite3") as db_file:
+            token = set_sqlite_db_path(db_file.name)
+            try:
+                tool_results.prepare_tool_results_for_prompt(
+                    records,
+                    recency_positions={},
+                )
+            finally:
+                reset_sqlite_db_path(token)
+
+            with sqlite3.connect(db_file.name) as conn:
+                current_batches = conn.execute(
+                    "SELECT result_id, is_current_batch FROM __tool_results ORDER BY created_at"
+                ).fetchall()
+
+        self.assertEqual(
+            current_batches,
+            [
+                ("old-source", 0),
+                ("new-source-a", 1),
+                ("new-source-b", 1),
+            ],
+        )
+
+    def test_no_current_batch_when_every_eligible_result_failed(self):
+        records = [
+            tool_results.ToolCallResultRecord(
+                step_id="failed-command",
+                tool_name="run_command",
+                created_at=datetime(2026, 8, 11, 0, 1, tzinfo=timezone.utc),
+                result_text=json.dumps({"status": "error"}),
+                source_batch_id="failed-command-batch",
+                succeeded=False,
+            ),
+            tool_results.ToolCallResultRecord(
+                step_id="failed-source",
+                tool_name="mcp_vendor_search",
+                created_at=datetime(2026, 8, 11, 0, 2, tzinfo=timezone.utc),
+                result_text=json.dumps({"status": "failed"}),
+                source_batch_id="failed-source-batch",
+                succeeded=False,
+            ),
+        ]
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite3") as db_file:
+            token = set_sqlite_db_path(db_file.name)
+            try:
+                tool_results.prepare_tool_results_for_prompt(
+                    records,
+                    recency_positions={},
+                )
+            finally:
+                reset_sqlite_db_path(token)
+
+            with sqlite3.connect(db_file.name) as conn:
+                current_count = conn.execute(
+                    "SELECT COUNT(*) FROM __tool_results WHERE is_current_batch=1"
+                ).fetchone()[0]
+
+        self.assertEqual(current_count, 0)
+
     def test_analyzes_array_result(self):
         payload = [{"id": 1, "name": "Alpha"}, {"id": 2, "name": "Beta"}]
 
@@ -643,6 +812,10 @@ class ToolResultSchemaTests(SimpleTestCase):
             1,
         )
         self.assertIn("do not import from memory or previews alone", combined_meta)
+        for index, record in enumerate(records):
+            preview = info[record.step_id].preview_text or ""
+            self.assertIn(f"# Interview {index}", preview)
+            self.assertIn(f"Company: Example {index}", preview)
 
     def test_http_prose_siblings_get_one_bound_row_work_set(self):
         records = [

@@ -644,6 +644,21 @@ def _tool_result_status_is_ok(result: object) -> bool:
     return isinstance(payload, dict) and str(payload.get("status") or "").casefold() == "ok"
 
 
+def _tool_result_completed_successfully(tool_status: object, result: object) -> bool:
+    if str(tool_status or "").strip().casefold() != PersistentAgentToolCall.Status.COMPLETE:
+        return False
+    try:
+        payload = result if isinstance(result, dict) else json.loads(str(result or ""))
+    except (TypeError, ValueError):
+        return True
+    if not isinstance(payload, dict):
+        return True
+    result_status = str(payload.get("status") or "").strip().casefold()
+    if not result_status:
+        return True
+    return result_status in {"ok", "success", "complete", "completed"}
+
+
 def _source_url_from_tool_params(
     agent: PersistentAgent,
     tool_name: str,
@@ -749,6 +764,7 @@ def _build_browser_task_tool_result_record(
         result_text=json.dumps(normalized_payload, ensure_ascii=False),
         result_id=str(task.id),
         source_batch_id=str(task.id),
+        succeeded=task.status == BrowserUseAgentTask.StatusChoices.COMPLETED,
     )
 
 
@@ -772,6 +788,7 @@ def _build_mcp_task_tool_result_record(task: PersistentAgentMCPTask) -> ToolCall
         result_text=json.dumps(payload, ensure_ascii=False),
         result_id=str(task.id),
         source_batch_id=str(task.id),
+        succeeded=task.status == PersistentAgentMCPTask.Status.COMPLETED,
     )
 
 
@@ -5209,6 +5226,10 @@ def _get_unified_history_prompt(
                         else None
                     ),
                     source_bearing=source_bearing,
+                    succeeded=_tool_result_completed_successfully(
+                        row.get("status"),
+                        result_text,
+                    ),
                 )
             )
         missing_parent_ids = set(tool_call_parent_ids.values()) - {record.step_id for record in tool_call_records}
@@ -5221,6 +5242,7 @@ def _get_unified_history_prompt(
                     "result",
                     "tool_name",
                     "tool_params",
+                    "status",
                     "step__created_at",
                     "step__completion_id",
                 )
@@ -5261,6 +5283,10 @@ def _get_unified_history_prompt(
                             else None
                         ),
                         source_bearing=source_bearing,
+                        succeeded=_tool_result_completed_successfully(
+                            row.get("status"),
+                            result_text,
+                        ),
                     )
                 )
         if tool_call_records:
