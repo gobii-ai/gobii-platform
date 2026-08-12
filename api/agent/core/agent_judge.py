@@ -8,9 +8,12 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+import redis
 from django.core.cache import cache
 from django.db import DatabaseError, IntegrityError, transaction
 from django.utils import timezone
+
+from config.redis_client import get_redis_client
 
 from api.agent.core.llm_config import INPUT_TOKEN_HEADROOM, LLMNotConfiguredError, get_agent_judge_llm_config, get_agent_llm_tier
 from api.agent.core.llm_utils import run_completion
@@ -49,6 +52,7 @@ JUDGE_RUN_CACHE_TTL_SECONDS = 60 * 60 * 12
 JUDGE_MIN_STEP_GAP = 10
 JUDGE_RUN_COOLDOWN_SECONDS = 60 * 45
 JUDGE_DAILY_RUN_LIMIT = 6
+BURN_RATE_TIER_STEP_DOWN_REASON = "burn_rate_tier_step_down"
 REPORT_TOOL_NAME = "report_judge_suggestion"
 NO_ACTION = "no_action"
 JUDGE_FAILED_TOOL_TRIGGER_IGNORED_TOOL_NAMES = frozenset({"send_chat_message"})
@@ -144,6 +148,13 @@ def maybe_run_agent_judge(
         )
         if trigger is None:
             return
+        if (
+            BURN_RATE_TIER_STEP_DOWN_REASON in trigger.reasons
+            and not _claim_burn_rate_judge_daily_slot(agent)
+        ):
+            trigger.reasons.remove(BURN_RATE_TIER_STEP_DOWN_REASON)
+            if not trigger.reasons:
+                return
         _run_judge(agent, trigger, routing_profile=routing_profile)
     except Exception:
         # The judge is advisory. A failure here must never interrupt agent work.
@@ -290,6 +301,8 @@ def build_judge_trigger(
         _trigger_reasons(recent_messages, recent_tool_calls),
         extra_trigger_reasons or [],
     )
+    if BURN_RATE_TIER_STEP_DOWN_REASON in reasons and _burn_rate_judge_daily_slot_claimed(agent):
+        reasons.remove(BURN_RATE_TIER_STEP_DOWN_REASON)
     if not reasons:
         return None
 
@@ -1431,6 +1444,53 @@ def _hash_payload(payload: dict[str, Any]) -> str:
 
 def _judge_run_cache_key(agent: PersistentAgent, evidence_hash: str) -> str:
     return f"agent-judge:run:{agent.id}:{evidence_hash}"
+
+
+def _burn_rate_judge_daily_cache_key(agent: PersistentAgent, now=None) -> str:
+    current_time = now or timezone.now()
+    return f"agent-judge:burn-rate:{agent.id}:{current_time.date().isoformat()}"
+
+
+def _burn_rate_judge_daily_cache_timeout(now=None) -> int:
+    current_time = now or timezone.now()
+    next_day = (current_time + timedelta(days=1)).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    return max(1, int((next_day - current_time).total_seconds()))
+
+
+def _burn_rate_judge_daily_slot_claimed(agent: PersistentAgent) -> bool:
+    try:
+        return bool(get_redis_client().get(_burn_rate_judge_daily_cache_key(agent)))
+    except redis.RedisError:
+        logger.warning(
+            "Failed to read burn-rate judge daily marker for agent %s; allowing the judge to run.",
+            agent.id,
+            exc_info=True,
+        )
+        return False
+
+
+def _claim_burn_rate_judge_daily_slot(agent: PersistentAgent) -> bool:
+    try:
+        return bool(
+            get_redis_client().set(
+                _burn_rate_judge_daily_cache_key(agent),
+                "1",
+                ex=_burn_rate_judge_daily_cache_timeout(),
+                nx=True,
+            )
+        )
+    except redis.RedisError:
+        logger.warning(
+            "Failed to claim burn-rate judge daily marker for agent %s; allowing the judge to run.",
+            agent.id,
+            exc_info=True,
+        )
+        return True
 
 
 def approve_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None:
