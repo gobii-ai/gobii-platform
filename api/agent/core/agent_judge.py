@@ -8,9 +8,12 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+import redis
 from django.core.cache import cache
 from django.db import DatabaseError, IntegrityError, transaction
 from django.utils import timezone
+
+from config.redis_client import get_redis_client
 
 from api.agent.core.llm_config import INPUT_TOKEN_HEADROOM, LLMNotConfiguredError, get_agent_judge_llm_config, get_agent_llm_tier
 from api.agent.core.llm_utils import run_completion
@@ -1465,15 +1468,34 @@ def _burn_rate_judge_daily_cache_timeout(now=None) -> int:
 
 
 def _has_burn_rate_judge_daily_slot(agent: PersistentAgent) -> bool:
-    return bool(cache.get(_burn_rate_judge_daily_cache_key(agent)))
+    try:
+        return bool(get_redis_client().get(_burn_rate_judge_daily_cache_key(agent)))
+    except redis.RedisError:
+        logger.warning(
+            "Failed to read burn-rate judge daily marker for agent %s; allowing the judge to run.",
+            agent.id,
+            exc_info=True,
+        )
+        return False
 
 
 def _claim_burn_rate_judge_daily_slot(agent: PersistentAgent) -> bool:
-    return cache.add(
-        _burn_rate_judge_daily_cache_key(agent),
-        True,
-        timeout=_burn_rate_judge_daily_cache_timeout(),
-    )
+    try:
+        return bool(
+            get_redis_client().set(
+                _burn_rate_judge_daily_cache_key(agent),
+                "1",
+                ex=_burn_rate_judge_daily_cache_timeout(),
+                nx=True,
+            )
+        )
+    except redis.RedisError:
+        logger.warning(
+            "Failed to claim burn-rate judge daily marker for agent %s; allowing the judge to run.",
+            agent.id,
+            exc_info=True,
+        )
+        return True
 
 
 def approve_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None:

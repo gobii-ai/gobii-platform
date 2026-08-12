@@ -1,10 +1,9 @@
 import json
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
 from django.db import DatabaseError
 from django.test import TestCase, tag
 from django.utils import timezone
@@ -299,6 +298,9 @@ class AgentJudgeTests(TestCase):
 
     def test_burn_rate_trigger_runs_judge_once_per_utc_day(self):
         self._add_steps(1)
+        redis_client = MagicMock()
+        redis_client.get.side_effect = [None, "1"]
+        redis_client.set.return_value = True
         response = _judge_response(
             {
                 "suggestion_type": NO_ACTION,
@@ -312,7 +314,10 @@ class AgentJudgeTests(TestCase):
         ), patch(
             "api.agent.core.agent_judge.run_completion",
             return_value=response,
-        ) as run_mock, patch("api.agent.core.agent_judge.JUDGE_RUN_COOLDOWN_SECONDS", 0):
+        ) as run_mock, patch(
+            "api.agent.core.agent_judge.get_redis_client",
+            return_value=redis_client,
+        ), patch("api.agent.core.agent_judge.JUDGE_RUN_COOLDOWN_SECONDS", 0):
             maybe_run_agent_judge(
                 self.agent,
                 tools=[],
@@ -326,9 +331,14 @@ class AgentJudgeTests(TestCase):
             )
 
         run_mock.assert_called_once()
+        redis_client.set.assert_called_once()
+        self.assertTrue(redis_client.set.call_args.kwargs["nx"])
 
     def test_burn_rate_cap_preserves_independent_automatic_trigger(self):
         self._add_steps(1)
+        redis_client = MagicMock()
+        redis_client.get.side_effect = [None, "1"]
+        redis_client.set.return_value = True
         response = _judge_response(
             {
                 "suggestion_type": NO_ACTION,
@@ -344,7 +354,10 @@ class AgentJudgeTests(TestCase):
             return_value=response,
         ) as run_mock, patch(
             "api.agent.core.agent_judge.Analytics.track_event",
-        ) as analytics_mock, patch("api.agent.core.agent_judge.JUDGE_RUN_COOLDOWN_SECONDS", 0):
+        ) as analytics_mock, patch(
+            "api.agent.core.agent_judge.get_redis_client",
+            return_value=redis_client,
+        ), patch("api.agent.core.agent_judge.JUDGE_RUN_COOLDOWN_SECONDS", 0):
             maybe_run_agent_judge(
                 self.agent,
                 tools=[],
@@ -369,12 +382,16 @@ class AgentJudgeTests(TestCase):
     def test_burn_rate_cap_resets_with_the_utc_date(self):
         self._add_steps(1)
         current_time = timezone.now()
-        today_key = _burn_rate_judge_daily_cache_key(self.agent, current_time)
-        cache.set(today_key, True, timeout=60)
+        redis_client = MagicMock()
+        redis_client.get.return_value = None
+        tomorrow = current_time + timedelta(days=1)
 
         with patch(
             "api.agent.core.agent_judge.timezone.now",
-            return_value=current_time + timedelta(days=1),
+            return_value=tomorrow,
+        ), patch(
+            "api.agent.core.agent_judge.get_redis_client",
+            return_value=redis_client,
         ):
             trigger = build_judge_trigger(
                 self.agent,
@@ -384,6 +401,7 @@ class AgentJudgeTests(TestCase):
 
         self.assertIsNotNone(trigger)
         self.assertIn(BURN_RATE_TIER_STEP_DOWN_REASON, trigger.reasons)
+        redis_client.get.assert_called_once_with(_burn_rate_judge_daily_cache_key(self.agent, tomorrow))
 
     def test_custom_tool_failure_trigger_context_reaches_judge_prompt(self):
         self._add_steps(1)
