@@ -318,6 +318,15 @@ class BlogSeoTests(TestCase):
             if link.get("href")
         ]
         self.assertEqual(article_hrefs.count("/ai-employees/"), 1)
+        recruiting_hub_links = soup.select_one(".prose").find_all(
+            "a",
+            href="/solutions/recruiting/",
+        )
+        self.assertEqual(len(recruiting_hub_links), 1)
+        self.assertEqual(
+            recruiting_hub_links[0].get_text(" ", strip=True),
+            "recruiting automation",
+        )
         rendered_hrefs = {
             link.get("href")
             for link in soup.find_all("a")
@@ -492,6 +501,15 @@ class BlogSeoTests(TestCase):
         ]
         self.assertIn("/ai-employees/", article_hrefs)
         self.assertEqual(article_hrefs.count("/ai-employees/"), 1)
+        recruiting_hub_links = soup.select_one(".prose").find_all(
+            "a",
+            href="/solutions/recruiting/",
+        )
+        self.assertEqual(len(recruiting_hub_links), 1)
+        self.assertEqual(
+            recruiting_hub_links[0].get_text(" ", strip=True),
+            "AI recruiting agents",
+        )
         self.assertIn("/blog/best-ai-employees/", article_hrefs)
         self.assertIn("/blog/newsletter-2026-06-09-browser-intelligence/", article_hrefs)
 

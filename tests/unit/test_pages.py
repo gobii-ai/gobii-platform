@@ -2780,7 +2780,7 @@ class SitemapTests(TestCase):
         self.assertEqual(
             solution_lastmods,
             {
-                "http://example.com/solutions/recruiting/": "2026-06-04",
+                "http://example.com/solutions/recruiting/": "2026-08-12",
                 "http://example.com/solutions/recruiting/candidate-sourcing/": "2026-08-11",
                 "http://example.com/solutions/sales/": "2026-06-05",
                 "http://example.com/solutions/sales/ai-sales-agent/": "2026-08-10",
@@ -3531,6 +3531,24 @@ class AIEmployeesPageTests(TestCase):
         self.assertIn(
             "One assignment. A visible trail from brief to evidence.",
             proof.get_text(" ", strip=True),
+        )
+        recruiting_hub_links = proof.find_all(
+            "a",
+            href=reverse("pages:solution", kwargs={"slug": "recruiting"}),
+        )
+        self.assertEqual(len(recruiting_hub_links), 1)
+        self.assertEqual(
+            recruiting_hub_links[0].get_text(" ", strip=True),
+            "AI recruiting software",
+        )
+        proof_intro = " ".join(
+            recruiting_hub_links[0].find_parent("p").get_text(" ", strip=True).split()
+        )
+        self.assertTrue(
+            proof_intro.endswith(
+                "See how Gobii’s AI recruiting software supports sourcing, research, and "
+                "recruiter-reviewed handoffs."
+            )
         )
         rendered_sources = {
             image["src"]
@@ -4711,6 +4729,29 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             soup.find("meta", attrs={"name": "description"})["content"],
             expected_description,
         )
+        hero = soup.select_one("section.rec-hero")
+        self.assertEqual(
+            hero.find("h1").get_text(" ", strip=True),
+            "AI recruiting agents for candidate sourcing",
+        )
+        self.assertEqual(
+            " ".join(hero.find("p", class_="gk-sub").get_text(" ", strip=True).split()),
+            "Gobii is AI recruiting software for the repetitive work before your ATS. Its "
+            "agents search approved sources, compare candidates against your criteria, and "
+            "prepare source-linked shortlists for recruiter review.",
+        )
+        visible_page_text = " ".join(
+            soup.select_one("div.gk-luxe").get_text(" ", strip=True).split()
+        )
+        self.assertEqual(visible_page_text.lower().count("ai recruiting software"), 1)
+        schemas = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        webpage_schema = next(
+            schema for schema in schemas if schema["@type"] == "WebPage"
+        )
+        self.assertEqual(webpage_schema["dateModified"], "2026-08-12")
 
         step_heading = soup.find("h3", string="Your agent surfaces matches")
         self.assertIsNotNone(step_heading)

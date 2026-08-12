@@ -190,7 +190,7 @@ Do not overvalue a perfect demo. The [2025 Gartner forecast about canceled agent
 
 Gobii fits when you want AI employees to behave like supervised AI teammates. The product language matters: "employee" captures category demand, but "teammate" describes how reliable delegation actually happens. People define the work. Gobii handles repeatable execution. Humans review judgment calls and decide what moves downstream.
 
-That makes Gobii a strong fit for workflows with browser research, files, spreadsheets, source-linked notes, and structured handoffs. Sales teams can start with an [AI sales agent](/solutions/sales/ai-sales-agent/) for prospect research and lead enrichment. Other teams can use the same operating model for recruiting, marketing, operations, and recurring research.
+That makes Gobii a strong fit for workflows with browser research, files, spreadsheets, source-linked notes, and structured handoffs. Sales teams can start with an [AI sales agent](/solutions/sales/ai-sales-agent/) for prospect research and lead enrichment. Other teams can use the same operating model for [recruiting automation](/solutions/recruiting/), marketing, operations, and recurring research.
 
 Gobii is not trying to win every category by claiming every AI employee role. It is best when the buyer can name the process, the tools, the acceptable sources, the output format, and the human review point. For a step-by-step deployment model, see [how to hire AI employees](/blog/hire-ai-employees/).
 

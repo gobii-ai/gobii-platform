@@ -4850,7 +4850,7 @@ class SolutionView(TemplateView):
                 'AI recruiting software for candidate sourcing, screening, and enrichment. '
                 'Build recruiter-reviewed shortlists and export them to your existing workflow.'
             ),
-            'date_modified': '2026-06-04',
+            'date_modified': '2026-08-12',
             'social_image': 'images/solutions/recruiting-hero.jpg',
             'social_image_alt': 'Gobii AI recruiting agents for candidate sourcing and screening',
             'related_link': {

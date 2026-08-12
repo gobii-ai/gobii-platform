@@ -90,7 +90,7 @@ Write a one-page role card with these fields:
 - **Escalations:** conditions that stop the workflow or create an exception.
 
 <!-- [UNIQUE INSIGHT] -->
-The handoff is more important than the persona. “AI recruiter” sounds concrete, but “deliver 25 source-linked candidate profiles that meet these criteria to this review queue” is manageable. It defines ownership without pretending the AI teammate has human judgment or authority.
+The handoff is more important than the persona. [AI recruiting agents](/solutions/recruiting/) sound concrete, but “deliver 25 source-linked candidate profiles that meet these criteria to this review queue” is manageable. It defines ownership without pretending the AI teammate has human judgment or authority.
 
 Include one accepted record, one rejected record, and the reason for each decision. Examples expose implicit rules, such as what counts as a credible source or an unusable record.
 
