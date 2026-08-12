@@ -4845,8 +4845,11 @@ class SolutionView(TemplateView):
             'title': 'Recruiting',
             'tagline': 'Automate candidate sourcing and screening.',
             'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.',
-            'seo_title': 'AI Recruiting Agents - Automate Sourcing & Screening | Gobii',
-            'seo_description': "Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on AI employees.",
+            'seo_title': 'AI Recruiting Software for Candidate Sourcing | Gobii',
+            'seo_description': (
+                'AI recruiting software for candidate sourcing, screening, and enrichment. '
+                'Build recruiter-reviewed shortlists and export them to your existing workflow.'
+            ),
             'date_modified': '2026-06-04',
             'social_image': 'images/solutions/recruiting-hero.jpg',
             'social_image_alt': 'Gobii AI recruiting agents for candidate sourcing and screening',

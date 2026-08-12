@@ -4691,6 +4691,68 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
                 response = self.client.get(retired_path)
                 self.assertEqual(response.status_code, 404)
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_recruiting_solution_distinguishes_match_delivery_from_outreach(self):
+        response = self.client.get(
+            reverse("pages:solution", kwargs={"slug": "recruiting"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_text = " ".join(soup.get_text(" ", strip=True).split())
+        expected_title = "AI Recruiting Software for Candidate Sourcing | Gobii"
+        expected_description = (
+            "AI recruiting software for candidate sourcing, screening, and enrichment. "
+            "Build recruiter-reviewed shortlists and export them to your existing workflow."
+        )
+
+        self.assertEqual(soup.title.get_text(strip=True), expected_title)
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            expected_description,
+        )
+
+        step_heading = soup.find("h3", string="Your agent surfaces matches")
+        self.assertIsNotNone(step_heading)
+        step = step_heading.find_parent("div", class_="rec-stepc")
+        self.assertEqual(
+            [
+                " ".join(paragraph.get_text(" ", strip=True).split())
+                for paragraph in step.find_all("p")
+            ],
+            [
+                "Working continuously in the background, your agent searches approved sources "
+                "and evaluates candidates against your criteria. As qualified matches are found, "
+                "it sends them to you for review.",
+                "The agent can prepare outreach, but it will not contact candidates or other third "
+                "parties without your approval.",
+            ],
+        )
+        self.assertIn(
+            "Your agent sends qualified candidates to you as they're found.",
+            page_text,
+        )
+        self.assertNotIn("reaches out with qualified", page_text.lower())
+
+        outreach_heading = soup.find("h3", string="Outreach AI Employee")
+        self.assertIsNotNone(outreach_heading)
+        outreach_card = outreach_heading.find_parent("div", class_="rec-agent")
+        outreach_text = " ".join(outreach_card.get_text(" ", strip=True).split())
+        self.assertIn(
+            "Prepares personalized outreach and follow-ups for recruiter approval before "
+            "contacting candidates or other third parties.",
+            outreach_text,
+        )
+        self.assertIsNotNone(
+            outreach_card.find(
+                "form",
+                action=reverse(
+                    "pages:public_template_hire",
+                    args=("sales", "outreach-agent"),
+                ),
+            )
+        )
+
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
         GOBII_RELEASE_ENV="prod",
