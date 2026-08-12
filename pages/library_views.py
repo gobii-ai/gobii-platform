@@ -55,7 +55,7 @@ def _library_page_title(selected_category: str, *, official_only: bool) -> str:
         return (
             "Official AI Employee Templates for Business | Gobii"
             if official_only
-            else "AI Employee Template Library: Business Roles | Gobii"
+            else "AI Agent Templates for Sales, Recruiting & More | Gobii"
         )
 
     prefix = "Official " if official_only else ""
@@ -411,7 +411,7 @@ class LibraryView(TemplateView):
             if selected_category
             else "Explore official Gobii AI employee templates maintained for trusted, reusable business workflows."
             if official_only
-            else "Explore Gobii's AI Employee Template Library for sales, research, recruiting, operations, finance, and more. Choose a role and customize its workflow."
+            else "Explore AI agent templates for sales, recruiting, research, operations, finance, and more. Customize any template into a Gobii AI Employee for your workflow."
         )
         page_description = compose_meta_description(
             explicit_description=description_source,

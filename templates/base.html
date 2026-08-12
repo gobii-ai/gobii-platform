@@ -45,7 +45,9 @@
 
   <!-- Connection hints for common third-party script origins -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  {% if not suppress_vite_asset_preconnect %}
   <link rel="preconnect" href="https://static.gobii.ai">
+  {% endif %}
   {% if settings.GOBII_PROPRIETARY_MODE %}
     {% if not suppress_stripe_js %}
   <link rel="preconnect" href="https://js.stripe.com">
@@ -66,7 +68,9 @@
   <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
   {% endblock %}
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+  {% if not suppress_globals_css %}
   <link rel="stylesheet" href="{% static 'css/globals.css' %}">
+  {% endif %}
   {% include "includes/_gk_theme.html" %}
   {# Emulated-app + data-viz chrome. Only the pages that show proof surfaces pull it in. #}
   {% block showcase_css %}{% endblock %}

@@ -1118,6 +1118,59 @@ class PublicTemplateRouteTests(TestCase):
         self.assertContains(response, "monitoring-only guardrails")
 
     @tag("batch_public_templates")
+    def test_public_template_detail_scopes_complete_markdown_typography(self):
+        self.create_public_template(
+            code="markdown-typography-template",
+            display_name="Markdown Typography Template",
+            handle="markdown-typography-template",
+            description_markdown=(
+                "### Workflow heading\n\n"
+                "A paragraph with **important text**, [a reference](https://example.com), "
+                "and `inline code`.\n\n"
+                "- First item\n"
+                "- Second item\n\n"
+                "1. First step\n"
+                "2. Second step\n\n"
+                "> A useful note.\n\n"
+                "```text\nexample output\n```\n\n"
+                "| Field | Value |\n"
+                "| --- | --- |\n"
+                "| Status | Ready |"
+            ),
+        )
+
+        response = self.client.get(
+            "/library/finance/markdown-typography-template/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        prose = soup.select_one(".gk-td-prose")
+        self.assertIsNotNone(prose)
+        for element_name in (
+            "h3",
+            "p",
+            "ul",
+            "ol",
+            "blockquote",
+            "pre",
+            "code",
+            "table",
+            "a",
+        ):
+            self.assertIsNotNone(prose.find(element_name), element_name)
+
+        page_styles = "\n".join(
+            style.get_text() for style in soup.find_all("style")
+        )
+        self.assertIn(".gk-td-prose ul { list-style: disc; }", page_styles)
+        self.assertIn(".gk-td-prose table", page_styles)
+
+        library_response = self.client.get("/library/")
+        self.assertEqual(library_response.status_code, 200)
+        self.assertNotContains(library_response, "gk-td-prose")
+
+    @tag("batch_public_templates")
     def test_public_template_detail_hides_related_templates_even_when_specified(self):
         template = self.create_public_template(
             code="hidden-related-source",
@@ -1767,10 +1820,19 @@ class LibraryViewTests(TestCase):
         self.assertEqual(curated_agent["templateUrl"], "/library/team-ops/gobii-project-manager/")
         self.assertEqual(curated_agent["publicProfileHandle"], "")
         self.assertFalse(curated_agent["isOfficial"])
-        self.assertContains(response, "AI Employee Template Library")
+        self.assertContains(
+            response,
+            "AI Agent Templates for Sales, Recruiting, Research, and Operations",
+        )
         self.assertEqual(
             response.context["library_page_title"],
-            "AI Employee Template Library: Business Roles | Gobii",
+            "AI Agent Templates for Sales, Recruiting & More | Gobii",
+        )
+        self.assertEqual(
+            response.context["library_page_description"],
+            "Explore AI agent templates for sales, recruiting, research, "
+            "operations, finance, and more. Customize any template into a "
+            "Gobii AI Employee for your workflow.",
         )
         self.assertLessEqual(len(response.context["library_page_title"]), 60)
         self.assertLessEqual(len(response.context["library_page_description"]), 160)

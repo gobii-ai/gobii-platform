@@ -37,10 +37,46 @@
   .gk-td-strong { color: #fff; }
   .gk-td-muted { color: #b7aed4; }
   .gk-td-lede { color: #b7aed4; font-size: 15px; line-height: 1.7; }
-  .gk-td-prose { color: #b7aed4; font-size: 14.5px; line-height: 1.75; }
-  .gk-td-prose :is(p, li) { color: #b7aed4; }
+  /* Markdown typography belongs to public template detail pages only. Keep these
+     rules under this page-private wrapper instead of broadening the shared .prose
+     styles used by blog, documentation and marketing surfaces. */
+  .gk-td-prose { color: #b7aed4; font-size: 14.5px; line-height: 1.75;
+                 overflow-wrap: anywhere; }
+  .gk-td-prose > :first-child { margin-top: 0; }
+  .gk-td-prose > :last-child { margin-bottom: 0; }
+  .gk-td-prose :is(h2, h3, h4) { color: #fff; font-weight: 600; line-height: 1.35;
+                                 letter-spacing: -.2px; margin: 1.7em 0 .55em; }
+  .gk-td-prose h2 { font-size: 18px; }
+  .gk-td-prose h3 { font-size: 16px; }
+  .gk-td-prose h4 { font-size: 14.5px; }
+  .gk-td-prose p { color: #b7aed4; margin: .85em 0; }
+  .gk-td-prose :is(ul, ol) { margin: .85em 0; padding-left: 1.4em; }
+  .gk-td-prose ul { list-style: disc; }
+  .gk-td-prose ol { list-style: decimal; }
+  .gk-td-prose li { color: #b7aed4; margin: .32em 0; padding-left: .15em; }
+  .gk-td-prose li::marker { color: #8b7fb8; }
+  .gk-td-prose li > :is(ul, ol) { margin: .35em 0; }
   .gk-td-prose :is(strong, b) { color: #fff; }
-  .gk-td-prose a { color: #c4b5fd; }
+  .gk-td-prose a { color: #c4b5fd; text-decoration: underline;
+                   text-underline-offset: 3px; }
+  .gk-td-prose a:hover { color: #fff; }
+  .gk-td-prose blockquote { color: #cfc7e8; border-left: 2px solid rgba(196,181,253,.4);
+                            margin: 1.15em 0; padding-left: 1em; }
+  .gk-td-prose blockquote > :first-child { margin-top: 0; }
+  .gk-td-prose blockquote > :last-child { margin-bottom: 0; }
+  .gk-td-prose code { color: #e9dcff; background: rgba(255,255,255,.06);
+                      border-radius: 5px; padding: .15em .4em; font-size: .92em; }
+  .gk-td-prose pre { color: #e9dcff; background: rgba(8,5,20,.62);
+                     border: 1px solid rgba(255,255,255,.09); border-radius: 10px;
+                     margin: 1.15em 0; overflow-x: auto; padding: 14px 16px; }
+  .gk-td-prose pre code { color: inherit; background: transparent; border-radius: 0;
+                          padding: 0; font-size: .9em; }
+  .gk-td-prose table { display: block; width: 100%; margin: 1.15em 0;
+                       border-collapse: collapse; overflow-x: auto; }
+  .gk-td-prose :is(th, td) { min-width: 120px; border: 1px solid rgba(255,255,255,.1);
+                             padding: 8px 10px; text-align: left; vertical-align: top; }
+  .gk-td-prose th { color: #fff; background: rgba(255,255,255,.04); font-weight: 600; }
+  .gk-td-prose td { color: #b7aed4; }
   .gk-td-charter { margin-top: 16px; padding: 22px 24px; border-radius: 16px;
                    font-size: 14px; line-height: 1.75; color: #cfc7e8;
                    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); }
