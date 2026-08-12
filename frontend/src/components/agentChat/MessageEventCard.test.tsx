@@ -74,6 +74,31 @@ describe('MessageEventCard email recipient', () => {
   })
 })
 
+describe('MessageEventCard Debug Mode timestamp', () => {
+  it('shows an exact viewer-timezone timestamp while retaining the raw datetime', () => {
+    render(
+      <MessageEventCard
+        eventCursor="cursor-1"
+        message={emailMessage({ relativeTimestamp: 'a few seconds ago' })}
+        agentFirstName="Alpha"
+        exactTimestamp
+        timeZone="America/New_York"
+      />,
+    )
+
+    const timestamp = screen.getByText('Jul 21, 2026, 3:10:39 PM EDT')
+    expect(timestamp.tagName).toBe('TIME')
+    expect(timestamp).toHaveAttribute('datetime', '2026-07-21T19:10:39Z')
+    expect(timestamp).toHaveAttribute('title', '2026-07-21T19:10:39Z')
+  })
+
+  it('keeps the relative label outside Debug Mode', () => {
+    renderCard(emailMessage({ relativeTimestamp: 'a few seconds ago' }))
+    expect(screen.getByText(/ago$/)).toBeInTheDocument()
+    expect(screen.queryByText('Jul 21, 2026, 3:10:39 PM EDT')).not.toBeInTheDocument()
+  })
+})
+
 describe('MessageEventCard reply context', () => {
   // A Discord reply's meaning lives in what it answered; the card dropped it entirely and
   // "have you been there?" rendered with no indication of what "there" meant (bug #248).

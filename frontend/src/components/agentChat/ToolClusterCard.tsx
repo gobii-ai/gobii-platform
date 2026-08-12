@@ -7,7 +7,7 @@ import { ToolProviderBadge } from './ToolProviderBadge'
 import { ToolClusterLivePreview } from './ToolClusterLivePreview'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
-import { formatRelativeTimestamp } from '../../util/time'
+import { formatAbsoluteTimestamp, formatRelativeTimestamp } from '../../util/time'
 import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { buildActionCountLabel } from './activityEntryUtils'
 import type { StatusExpansionTargets } from './statusExpansion'
@@ -19,6 +19,7 @@ import { buildToolClusterRenderSegments } from './toolClusterSegments'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
+  exactTimestamps?: boolean
   isLatestEvent?: boolean
   suppressedThinkingCursor?: string | null
   statusExpansionTargets?: StatusExpansionTargets
@@ -29,6 +30,7 @@ type ToolClusterCardProps = {
 
 export const ToolClusterCard = memo(function ToolClusterCard({
   cluster,
+  exactTimestamps = false,
   isLatestEvent = false,
   suppressedThinkingCursor,
   statusExpansionTargets,
@@ -162,7 +164,9 @@ export const ToolClusterCard = memo(function ToolClusterCard({
       return <MoodShiftCard key={entry.id} entry={entry} />
     }
     const DetailComponent = entry.detailComponent
-    const detailRelative = formatRelativeTimestamp(entry.timestamp) || entry.timestamp || ''
+    const detailRelative = (exactTimestamps
+      ? formatAbsoluteTimestamp(entry.timestamp, scheduleTimeZone)
+      : formatRelativeTimestamp(entry.timestamp)) || entry.timestamp || ''
     return (
       <article key={entry.id} className="tool-cluster-separate-card">
         <div className="tool-cluster-separate-card__header">
@@ -227,6 +231,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
               ) : (
                 <ToolClusterLivePreview
                   cluster={segmentCluster}
+                  exactTimestamps={exactTimestamps}
                   isLatestEvent={isLatestEvent && segment.isTrailing}
                   animateIncoming={animateIncoming && segment.isTrailing}
                   forceActive={forceActive && segment.isTrailing}
@@ -245,6 +250,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
         overlayId={stableOverlayId}
         title={buildActionCountLabel(resolvedTransformed.entryCount)}
         entries={resolvedTransformed.entries}
+        exactTimestamps={exactTimestamps}
         initialOpenEntryId={timelineInitialEntryId}
         onClose={() => dispatch(chatActions.activityOverlayClosed())}
       />

@@ -14,6 +14,7 @@ type ToolClusterTimelineOverlayProps = {
   title: string
   subtitle?: string
   entries: ToolEntryDisplay[]
+  exactTimestamps?: boolean
   initialOpenEntryId?: string | null
   onClose: () => void
 }
@@ -24,6 +25,7 @@ export function ToolClusterTimelineOverlay({
   title,
   subtitle = 'Action timeline',
   entries,
+  exactTimestamps = false,
   initialOpenEntryId = null,
   onClose,
 }: ToolClusterTimelineOverlayProps) {
@@ -57,7 +59,11 @@ export function ToolClusterTimelineOverlay({
 
   const overlayBody = (
     <div className="tool-cluster-timeline-body">
-      <ActivityEntryList entries={entries} initialOpenEntryId={initialOpenEntryId} />
+      <ActivityEntryList
+        entries={entries}
+        exactTimestamps={exactTimestamps}
+        initialOpenEntryId={initialOpenEntryId}
+      />
     </div>
   )
 

@@ -39,6 +39,7 @@ type AgentTimelinePaneProps = {
   contactCapOpenPacks?: () => void
   contactCapShowUpgrade?: boolean
   events: SimplifiedTimelineItem[]
+  exactTimestamps?: boolean
   hardLimitShowUpsell?: boolean
   hardLimitUpgradeUrl?: string | null
   hasMoreNewer?: boolean
@@ -101,6 +102,7 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
   contactCapOpenPacks,
   contactCapShowUpgrade = false,
   events,
+  exactTimestamps = false,
   hardLimitShowUpsell = false,
   hardLimitUpgradeUrl = null,
   hasMoreNewer = false,
@@ -251,6 +253,7 @@ export const AgentTimelinePane = memo(function AgentTimelinePane({
                   >
                     <TimelineEventItem
                       event={event}
+                      exactTimestamps={exactTimestamps}
                       isLatestEvent={index === lastRenderedIndex}
                       streamedMessageId={streamedMessageId}
                       agentFirstName={agentFirstName}

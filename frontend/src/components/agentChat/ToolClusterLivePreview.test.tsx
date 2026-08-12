@@ -5,6 +5,7 @@ import { ToolClusterLivePreview } from './ToolClusterLivePreview'
 import { transformToolCluster } from './tooling/toolRegistry'
 import type { ToolClusterEvent } from '../../types/agentChat'
 import { chatActions } from '../../store/chatSlice'
+import { immersiveShellActions } from '../../store/immersiveShellSlice'
 import { createTestAppStore, StoreProvider } from '../../test/storeTestUtils'
 
 function clusterForRequest(url: string, method = 'GET'): ToolClusterEvent {
@@ -68,14 +69,16 @@ function clusterForApplyPatch(): ToolClusterEvent {
   }
 }
 
-function renderPreview(cluster: ToolClusterEvent) {
+function renderPreview(cluster: ToolClusterEvent, exactTimestamps = false) {
   const store = createTestAppStore()
   store.dispatch(chatActions.agentSelected({ agentId: 'agent-1', options: { processingActive: true } }))
+  store.dispatch(immersiveShellActions.setViewer({ userId: 1, email: 'viewer@example.com', timeZone: 'America/New_York' }))
   return render(
     <StoreProvider store={store}>
       <ToolClusterLivePreview
         cluster={transformToolCluster(cluster)}
         isLatestEvent
+        exactTimestamps={exactTimestamps}
         onOpenTimeline={vi.fn()}
         onSelectEntry={vi.fn()}
       />
@@ -84,6 +87,14 @@ function renderPreview(cluster: ToolClusterEvent) {
 }
 
 describe('ToolClusterLivePreview Google API display', () => {
+  it('shows exact timestamps in Debug Mode while preserving the raw datetime', () => {
+    renderPreview(clusterForRequest('https://example.com'), true)
+
+    const timestamp = screen.getByText('Dec 31, 2025, 7:00:00 PM EST')
+    expect(timestamp).toHaveAttribute('datetime', '2026-01-01T00:00:00Z')
+    expect(timestamp).toHaveAttribute('title', '2026-01-01T00:00:00Z')
+  })
+
   it('renders apply_patch as a live patch preview with the target file path', () => {
     renderPreview(clusterForApplyPatch())
 

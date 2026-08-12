@@ -23,6 +23,18 @@ export type DeveloperModeControlGroups = {
 const EXPANDED_DEVELOPER_ACTIONS_MIN_WIDTH = 1360
 const PARTIAL_DEVELOPER_ACTIONS_MIN_WIDTH = 960
 
+function DebugModeSwitchIndicator({ checked }: { checked: boolean }) {
+  return (
+    <span
+      className="banner-debug-mode-switch"
+      data-checked={checked ? 'true' : 'false'}
+      aria-hidden="true"
+    >
+      <span className="banner-debug-mode-switch__thumb" />
+    </span>
+  )
+}
+
 type AgentChatBannerProps = {
   agentNameOverride?: string | null
   planSnapshot?: PlanSnapshot | null
@@ -413,12 +425,14 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               variant={developerMode ? 'solid' : 'soft'}
               size="sm"
               onClick={() => onDeveloperModeChange?.(!developerMode)}
-              aria-pressed={developerMode}
-              aria-label="Toggle Developer Mode"
-              title="Toggle Developer Mode"
+              role="switch"
+              aria-checked={developerMode}
+              aria-label="Debug Mode"
+              title={`Turn ${developerMode ? 'off' : 'on'} Debug Mode`}
             >
               <Code2 size={16} strokeWidth={2.2} />
-              <span>{developerMode ? 'Dev Mode On' : 'Dev Mode Off'}</span>
+              <span>Debug Mode</span>
+              <DebugModeSwitchIndicator checked={developerMode} />
             </AgentChatButton>
           ) : null}
           {developerMode && developerControls && developerActionLayout !== 'overflow' ? (
@@ -519,6 +533,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                           <AgentChatMenuItem
                             type="button"
                             className="banner-overflow-item"
+                            role="switch"
+                            aria-checked={developerMode}
+                            aria-label="Debug Mode"
                             onClick={() => {
                               onDeveloperModeChange?.(!developerMode)
                               setOverflowMenuOpen(false)
@@ -528,10 +545,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                               <Code2 size={14} />
                             </span>
                             <span className="banner-overflow-item-copy">
-                              <span className="banner-overflow-item-label">
-                                {developerMode ? 'Turn off Developer Mode' : 'Turn on Developer Mode'}
-                              </span>
+                              <span className="banner-overflow-item-label">Debug Mode</span>
                             </span>
+                            <DebugModeSwitchIndicator checked={developerMode} />
                           </AgentChatMenuItem>
                         ) : null}
                         {showSettingsButton ? (

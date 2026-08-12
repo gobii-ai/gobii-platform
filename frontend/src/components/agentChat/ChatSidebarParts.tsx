@@ -21,6 +21,7 @@ type AgentSearchInputProps = {
   ariaControls?: string
   ariaExpanded?: boolean
   ariaActiveDescendant?: string
+  shortcutHint?: string
 }
 
 export const AgentSearchInput = forwardRef<HTMLInputElement, AgentSearchInputProps>(function AgentSearchInput({
@@ -36,9 +37,16 @@ export const AgentSearchInput = forwardRef<HTMLInputElement, AgentSearchInputPro
   ariaControls,
   ariaExpanded,
   ariaActiveDescendant,
+  shortcutHint,
 }, ref) {
+  const showShortcutHint = Boolean(shortcutHint) && !value
+
   return (
-    <div className="agent-roster-search" data-variant={variant}>
+    <div
+      className="agent-roster-search"
+      data-variant={variant}
+      data-has-shortcut={showShortcutHint ? 'true' : undefined}
+    >
       <Search className="agent-roster-search__icon" aria-hidden="true" />
       <input
         type="text"
@@ -56,6 +64,7 @@ export const AgentSearchInput = forwardRef<HTMLInputElement, AgentSearchInputPro
         aria-controls={ariaControls}
         aria-expanded={ariaControls ? ariaExpanded : undefined}
         aria-activedescendant={ariaActiveDescendant}
+        aria-keyshortcuts={shortcutHint ? 'Meta+K Control+K' : undefined}
         autoComplete="off"
         autoCapitalize="off"
         spellCheck={false}
@@ -69,6 +78,11 @@ export const AgentSearchInput = forwardRef<HTMLInputElement, AgentSearchInputPro
         >
           <X className={variant === 'drawer' ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
         </button>
+      ) : null}
+      {showShortcutHint ? (
+        <kbd className="agent-roster-search__shortcut" aria-hidden="true">
+          {shortcutHint}
+        </kbd>
       ) : null}
     </div>
   )

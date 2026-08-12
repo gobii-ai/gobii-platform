@@ -3,7 +3,8 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ExternalLink, Search, ShieldCheck, Wand2 } from 'lucide-react'
 import { selectActiveChatSession } from '../../store/chatSlice'
 import { useAppSelector } from '../../store/hooks'
-import { formatRelativeTimestamp } from '../../util/time'
+import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
+import { formatAbsoluteTimestamp, formatRelativeTimestamp } from '../../util/time'
 import { getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
 import { extractBrightDataSearchQuery } from '../tooling/brightdata'
 import { ToolIconSlot } from './ToolIconSlot'
@@ -20,6 +21,7 @@ type ToolClusterLivePreviewProps = {
   onOpenTimeline: () => void
   onSelectEntry: (entry: ToolEntryDisplay) => void
   onIncomingAnimationConsumed?: (cursor: string) => void
+  exactTimestamps?: boolean
 }
 
 type PreviewEntry = {
@@ -1077,10 +1079,12 @@ export function ToolClusterLivePreview({
   onOpenTimeline,
   onSelectEntry,
   onIncomingAnimationConsumed,
+  exactTimestamps = false,
 }: ToolClusterLivePreviewProps) {
   const reduceMotion = useReducedMotion()
   const shouldAnimateIncoming = !reduceMotion && animateIncoming
   const processingActive = useAppSelector(selectActiveChatSession).processing.processingActive
+  const viewerTimeZone = useAppSelector(selectImmersiveShellViewer).timeZone
   const previewableEntries = useMemo(
     () => cluster.entries.filter((entry) => !entry.separateFromPreview),
     [cluster.entries],
@@ -1096,10 +1100,12 @@ export function ToolClusterLivePreview({
             entry,
             activity,
             visual: deriveEntryVisual(entry, activity),
-            relativeTime: formatRelativeTimestamp(entry.timestamp),
+            relativeTime: exactTimestamps
+              ? formatAbsoluteTimestamp(entry.timestamp, viewerTimeZone)
+              : formatRelativeTimestamp(entry.timestamp),
           }
         }),
-    [previewEntryLimit, previewableEntries],
+    [exactTimestamps, previewEntryLimit, previewableEntries, viewerTimeZone],
   )
 
   const hasActiveProcessing = forceActive || (processingActive && isLatestEvent)
@@ -1488,7 +1494,11 @@ export function ToolClusterLivePreview({
                     ) : null}
                   </span>
                   {item.relativeTime ? (
-                    <time className="tool-cluster-live-preview__entry-time" dateTime={entry.timestamp ?? undefined}>
+                    <time
+                      className="tool-cluster-live-preview__entry-time"
+                      dateTime={entry.timestamp ?? undefined}
+                      title={entry.timestamp ?? undefined}
+                    >
                       {item.relativeTime}
                     </time>
                   ) : null}

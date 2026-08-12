@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentChatBanner } from './AgentChatBanner'
@@ -89,5 +89,50 @@ describe('AgentChatBanner description vs plan task (bug #519)', () => {
     setup({ processingActive: false })
     expect(screen.getByText('Sales research assistant')).toBeInTheDocument()
     expect(screen.queryByText(/Scrape competitor pricing pages/)).not.toBeInTheDocument()
+  })
+})
+
+describe('AgentChatBanner Debug Mode switch', () => {
+  beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+
+  function renderSwitch(developerMode: boolean, onChange = vi.fn()) {
+    const store = createTestAppStore()
+    seedSubscriptionState(store, { currentPlan: 'free', isLoading: false, isProprietaryMode: false })
+    render(
+      <StoreProvider store={store}>
+        <AgentChatBanner
+          developerMode={developerMode}
+          showDeveloperMode
+          onDeveloperModeChange={onChange}
+        />
+      </StoreProvider>,
+    )
+    return onChange
+  }
+
+  it('uses accessible switch semantics and toggles the requested state', () => {
+    const onChange = renderSwitch(false)
+    const toggle = screen.getByRole('switch', { name: 'Debug Mode' })
+
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(toggle.querySelector('.banner-debug-mode-switch')).toHaveAttribute('data-checked', 'false')
+    fireEvent.click(toggle)
+    expect(onChange).toHaveBeenCalledWith(true)
+  })
+
+  it('shows the same labelled switch in the overflow menu', () => {
+    renderSwitch(true)
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+
+    const overflowToggle = screen.getByRole('switch', { name: 'Debug Mode' })
+    expect(overflowToggle).toHaveClass('banner-overflow-item')
+    expect(overflowToggle).toHaveAttribute('aria-checked', 'true')
+    expect(overflowToggle.querySelector('.banner-debug-mode-switch')).toHaveAttribute('data-checked', 'true')
   })
 })

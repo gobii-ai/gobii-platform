@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { formatRelativeTimestamp } from '../../util/time'
+import { formatAbsoluteTimestamp, formatRelativeTimestamp } from '../../util/time'
 import { slugify } from '../../util/slugify'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { ToolIconSlot } from './ToolIconSlot'
@@ -9,16 +9,21 @@ import { deriveActivityEntryPresentation } from './tooling/activityPresentation'
 import { deriveEntryCaption, deriveThinkingPreview } from './tooling/clusterPreviewText'
 import { MoodShiftCard } from './MoodShiftCard'
 import type { ToolEntryDisplay } from './tooling/types'
+import { useAppSelector } from '../../store/hooks'
+import { selectImmersiveShellViewer } from '../../store/immersiveShellSlice'
 
 type ActivityEntryListProps = {
   entries: ToolEntryDisplay[]
+  exactTimestamps?: boolean
   initialOpenEntryId?: string | null
 }
 
 export function ActivityEntryList({
   entries,
+  exactTimestamps = false,
   initialOpenEntryId = null,
 }: ActivityEntryListProps) {
+  const viewerTimeZone = useAppSelector(selectImmersiveShellViewer).timeZone
   const entryRowRefs = useRef<Record<string, HTMLLIElement | null>>({})
   const initialOpenEntryIdRef = useRef<string | null>(null)
   const [openEntryId, setOpenEntryId] = useState<string | null>(null)
@@ -63,7 +68,9 @@ export function ActivityEntryList({
         {visibleEntries.map((entry) => {
           const detailId = `tool-cluster-timeline-detail-${slugify(entry.id)}`
           const isOpen = openEntryId === entry.id
-          const relativeTime = formatRelativeTimestamp(entry.timestamp)
+          const relativeTime = exactTimestamps
+            ? formatAbsoluteTimestamp(entry.timestamp, viewerTimeZone)
+            : formatRelativeTimestamp(entry.timestamp)
           const presentation = deriveActivityEntryPresentation(entry)
           const caption = presentation.caption ?? deriveEntryCaption(entry)
           const thinkingPreview = deriveThinkingPreview(entry)

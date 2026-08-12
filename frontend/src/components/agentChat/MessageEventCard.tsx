@@ -9,6 +9,7 @@ import { DiscordEmbedCard } from './DiscordEmbedCard'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { useRelativeTimestamp } from '../../hooks/useRelativeTimestamp'
 import { sanitizeHtml } from '../../util/sanitize'
+import { formatAbsoluteTimestamp } from '../../util/time'
 
 const CHANNEL_LABELS: Record<string, string> = {
   email: 'Email',
@@ -61,6 +62,8 @@ type MessageEventCardProps = {
   onRetryMessage?: (message: AgentMessage) => void | Promise<void>
   /** Content was already revealed by the stream card; render instantly (bug #510). */
   disableFastReveal?: boolean
+  exactTimestamp?: boolean
+  timeZone?: string | null
 }
 
 // Only animate messages that arrived recently (within last 3 seconds)
@@ -110,6 +113,8 @@ export const MessageEventCard = memo(function MessageEventCard({
   onReportMessage,
   onRetryMessage,
   disableFastReveal = false,
+  exactTimestamp = false,
+  timeZone = null,
 }: MessageEventCardProps) {
   const [copied, setCopied] = useState(false)
   const [retrying, setRetrying] = useState(false)
@@ -179,6 +184,7 @@ export const MessageEventCard = memo(function MessageEventCard({
 
   const liveRelativeLabel = useRelativeTimestamp(message.timestamp)
   const relativeLabel = liveRelativeLabel || message.relativeTimestamp || ''
+  const absoluteLabel = formatAbsoluteTimestamp(message.timestamp, timeZone)
   const status = message.status
   const statusLabel = message.deliveryStatus === 'pending_approval'
     ? message.outboxReview?.status === 'discarded'
@@ -193,7 +199,11 @@ export const MessageEventCard = memo(function MessageEventCard({
         : status === 'failed'
           ? 'Failed to send'
           : null
-  const metaLabel = statusLabel || relativeLabel || message.timestamp || ''
+  const timestampLabel = exactTimestamp ? absoluteLabel : relativeLabel
+  const metaLabel = statusLabel || timestampLabel || message.timestamp || ''
+  const exactTimestampAlongsideStatus = exactTimestamp && statusLabel
+    ? absoluteLabel || message.timestamp || ''
+    : ''
   const metaTitle = message.error || message.timestamp || undefined
   const webhookMeta = isWebhook ? message.webhookMeta : null
   const webhookPayloadKind = (webhookMeta?.payloadKind || '').toLowerCase()
@@ -489,7 +499,16 @@ export const MessageEventCard = memo(function MessageEventCard({
         ) : null}
         {metaLabel ? (
           <div className="chat-message-footer">
-            <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
+            {statusLabel ? (
+              <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
+            ) : (
+              <time className="chat-timestamp" dateTime={message.timestamp ?? undefined} title={metaTitle}>{metaLabel}</time>
+            )}
+            {exactTimestampAlongsideStatus ? (
+              <time className="chat-timestamp" dateTime={message.timestamp ?? undefined} title={message.timestamp ?? undefined}>
+                {exactTimestampAlongsideStatus}
+              </time>
+            ) : null}
           </div>
         ) : null}
       </div>

@@ -16,6 +16,7 @@ import { DeveloperTimelineEventCard } from './DeveloperTimelineEventCard'
 
 type TimelineEventItemProps = {
   event: SimplifiedTimelineItem
+  exactTimestamps?: boolean
   isLatestEvent: boolean
   agentFirstName: string
   agentAvatarUrl?: string | null
@@ -35,6 +36,7 @@ type TimelineEventItemProps = {
 
 export const TimelineEventItem = memo(function TimelineEventItem({
   event,
+  exactTimestamps = false,
   isLatestEvent,
   agentFirstName,
   agentAvatarUrl,
@@ -56,7 +58,7 @@ export const TimelineEventItem = memo(function TimelineEventItem({
       return []
     }
     return event.displayEntries ?? flattenTimelineEventsToEntries(event.events)
-  }, [event, timeZone])
+  }, [event])
 
   if (event.kind.startsWith('developer_')) {
     return (
@@ -89,6 +91,8 @@ export const TimelineEventItem = memo(function TimelineEventItem({
         eventCursor={event.cursor}
         agentId={activeAgentId}
         message={event.message}
+        exactTimestamp={exactTimestamps}
+        timeZone={timeZone}
         disableFastReveal={event.message.id === streamedMessageId}
         agentFirstName={agentFirstName}
         agentAvatarUrl={agentAvatarUrl}
@@ -112,6 +116,7 @@ export const TimelineEventItem = memo(function TimelineEventItem({
     return (
       <ToolClusterCard
         cluster={buildThinkingCluster(event)}
+        exactTimestamps={exactTimestamps}
         isLatestEvent={isLatestEvent}
         suppressedThinkingCursor={suppressedThinkingCursor}
         statusExpansionTargets={statusExpansionTargets}
@@ -126,6 +131,7 @@ export const TimelineEventItem = memo(function TimelineEventItem({
   return (
     <ToolClusterCard
       cluster={event as ToolClusterEvent}
+      exactTimestamps={exactTimestamps}
       isLatestEvent={isLatestEvent}
       suppressedThinkingCursor={suppressedThinkingCursor}
       statusExpansionTargets={statusExpansionTargets}
