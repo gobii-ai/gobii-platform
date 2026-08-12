@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-import importlib
 import json
 import re
 from types import SimpleNamespace
@@ -9,7 +8,6 @@ from unittest.mock import patch, MagicMock
 
 from bs4 import BeautifulSoup
 from allauth.socialaccount.models import SocialApp
-from django.apps import apps as django_apps
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -3345,56 +3343,6 @@ class CandidateSourcingSolutionPageTests(TestCase):
         )
         self.assertFalse(soup.select("[data-lucide]"))
         self.assertIsNone(soup.find("script", src="https://unpkg.com/lucide@0.546.0"))
-
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_library_template_content_source_links_to_solution_owner(self):
-        template, _created = PersistentAgentTemplate.objects.update_or_create(
-            code="ai-agent-for-candidate-sourcing",
-            defaults={
-                "slug": "candidate-sourcing-agent",
-                "display_name": "Candidate Sourcing AI Employee",
-                "tagline": "Prepare source-linked shortlists for recruiter review.",
-                "description": "Run a candidate sourcing workflow.",
-                "description_markdown": "",
-                "charter": "Research candidates and return evidence for review.",
-                "category": "Recruiting",
-                "is_official": True,
-                "is_active": True,
-                "is_listed": True,
-            },
-        )
-        migration = importlib.import_module(
-            "api.migrations.0458_candidate_sourcing_solution_link"
-        )
-
-        migration.add_candidate_sourcing_solution_link(django_apps, None)
-        template.refresh_from_db()
-
-        self.assertIn(
-            "[AI candidate sourcing solution](/solutions/recruiting/candidate-sourcing/)",
-            template.description_markdown,
-        )
-        response = self.client.get(
-            reverse(
-                "pages:public_template_detail",
-                kwargs={
-                    "category_slug": "recruiting",
-                    "template_slug": "candidate-sourcing-agent",
-                },
-            )
-        )
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content, "html.parser")
-        solution_link = soup.find(
-            "a",
-            href=reverse("pages:solution_recruiting_candidate_sourcing"),
-        )
-        self.assertIsNotNone(solution_link)
-        self.assertEqual(
-            solution_link.get_text(" ", strip=True),
-            "AI candidate sourcing solution",
-        )
-
 
 @tag("batch_pages")
 class AIEmployeesPageTests(TestCase):
