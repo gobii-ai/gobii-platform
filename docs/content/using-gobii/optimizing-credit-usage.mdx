@@ -6,83 +6,58 @@ description: "Practical strategies to reduce credit consumption, choose the righ
 
 Credit usage is one of the most common concerns for Gobii users. This guide covers practical strategies to get the most value from every credit — from choosing the right intelligence tier to designing efficient agent workflows.
 
-## Understanding the Cost Model
+## Understanding How Credits Work
 
-Every task performed by a Gobii agent costs credits. The cost depends on two factors:
+Every task your agent performs costs credits. The cost depends mainly on the agent's intelligence tier — higher tiers give your agent more reasoning power but cost more per task.
 
-```
-Actual Cost = Base Task Cost × Intelligence Multiplier
-```
+The key thing to remember: the highest intelligence tier can cost many times more per task than the lowest. That gap adds up fast when your agent runs dozens or hundreds of tasks per day.
 
-- **Base task cost:** 0.150 credits per task (the default across all plans)
-- **Intelligence multiplier:** Determined by the agent's intelligence tier setting
-
-### Per-Task Costs by Intelligence Tier
-
-| Tier | Multiplier | Per-Task Cost | Best For |
-|---|---|---|---|
-| Standard | 1× | 0.15 credits | Simple lookups, monitoring, routine data collection, scheduled scrapes |
-| Premium | 2× | 0.30 credits | Research synthesis, multi-step analysis, summarization |
-| Max | 3× | 0.45 credits | Complex reasoning, code review, detailed report generation |
-| Ultra | 8× | 1.20 credits | Deep analysis, large-context coordination, advanced problem-solving |
-| Ultra Max | 15× | 2.25 credits | Maximum reasoning power, complex multi-agent orchestration |
-
-> The math is simple: a single Ultra Max task (2.25 credits) costs **15× more** than a Standard task (0.15 credits). If your agent runs 100 scheduled tasks per day at Ultra Max, that's 225 credits — versus 15 credits at Standard.
+The good news? Most tasks don't need the highest tier. Matching the tier to the job is the single biggest lever for keeping costs down.
 
 ## Strategy 1: Choose the Right Intelligence Tier
 
-The single biggest lever for credit optimization is the intelligence tier. Most agents don't need the highest tier for every task.
+Most agents don't need the highest intelligence tier for every task. Start low and only increase when you see the agent struggling.
 
-### When to Use Standard (1×)
+### When to Use a Lower Tier
 
-Standard handles straightforward, well-defined tasks reliably. Use it for:
+Lower tiers handle straightforward, well-defined tasks reliably. Use them for:
 
 - **Scheduled monitoring** — Checking prices, news headlines, or status pages
 - **Data collection** — Scraping structured data, pulling API results
 - **Simple formatting** — Converting data between formats, basic transformations
 - **Webhook handling** — Processing incoming webhook payloads
 
-### When to Use Premium (2×)
+### When to Use a Higher Tier
 
-Premium adds better reasoning for multi-step tasks. Use it for:
-
-- **Research synthesis** — Reading multiple sources and summarizing findings
-- **Email drafting** — Composing context-aware responses
-- **Conditional workflows** — Branching logic based on results
-
-### When to Use Max+ (3× and above)
-
-Save Max, Ultra, and Ultra Max for tasks that genuinely need deep reasoning:
+Save the higher tiers for tasks that genuinely need deeper reasoning:
 
 - **Code review and debugging**
 - **Complex analysis with many variables**
 - **Large-context document processing**
 - **Multi-agent coordination**
+- **Research synthesis** — Reading multiple sources and summarizing findings
+- **Email drafting** — Composing context-aware responses
 
-> **Tip:** Start agents at Standard or Premium. Only increase the tier if you see the agent making reasoning errors on its current tasks. You can always bump it up later.
+> **Tip:** Start agents on a lower tier. Only bump it up if you see the agent making reasoning errors on its current tasks. You can always change it later.
 
 ## Strategy 2: Set Effective Daily Budgets
 
-Every agent has a configurable daily **soft limit** for credit usage. When the agent approaches this limit, Gobii aims to stay within it. A **hard limit** (derived from the soft limit — 2× by default) stops the agent for the day once reached.
-
-### Budgeting Guidelines
-
-| Agent Type | Suggested Daily Limit | Reasoning |
-|---|---|---|
-| Simple monitor (Standard, once/hour) | 5–10 credits | ~33–66 tasks/day covers hourly checks |
-| Research assistant (Premium, scheduled briefings) | 10–20 credits | Allows a few research sessions per day |
-| Multi-agent coordinator | 20–50+ credits | Coordination tasks are deeper; adjust based on observed usage |
+Every agent has a configurable daily credit target. This acts as a soft limit — Gobii aims to stay within it — with a hard limit as a backstop that stops the agent for the day once reached.
 
 ### Start Conservative
 
-1. Set a low initial budget (e.g., 10 credits/day)
+1. Set a low initial budget
 2. Monitor actual usage on the Usage dashboard for a few days
 3. Increase only if the agent is consistently hitting its limit while producing valuable work
 4. If the agent rarely hits its limit, consider lowering it further
 
-### Plan-Level Defaults
+### Rules of Thumb
 
-Each plan has a default daily credit target, but you can adjust it per agent. The slider lets you set a soft limit with a hard limit (typically a multiple of the soft limit) as a backstop.
+- **Simple monitors** (low tier, once/hour): A small daily budget is usually plenty
+- **Research assistants** (mid tier, scheduled briefings): A moderate budget allows a few research sessions per day
+- **Multi-agent coordinators** (higher tiers): These tasks are deeper and cost more, so budget accordingly based on observed usage
+
+You can adjust the daily target per agent, regardless of your plan's default.
 
 ## Strategy 3: Design Credit-Efficient Workflows
 
@@ -123,7 +98,7 @@ The [Usage dashboard](https://gobii.ai/app/billing) shows credit consumption per
 
 ### Signs of Inefficient Usage
 
-- **High per-task cost variance** — Same agent sometimes costs 0.15 credits, other times 1.20+ → Check if the intelligence tier is stable
+- **High per-task cost variance** — Same agent's cost per task swings widely → Check if the intelligence tier is stable
 - **Steady burn rate with no output** — Agent using credits but not delivering → Review instructions for loops or vague prompts
 - **Unexpected spikes** — Sudden jump in usage → Check for new schedules, peer-linked agents triggering each other, or changed instructions
 
@@ -139,11 +114,11 @@ Gobii monitors burn rate across your agents. If consumption exceeds normal thres
 
 | Action | Impact | Effort |
 |---|---|---|
-| Lower intelligence tier (e.g., Max → Premium) | Up to 33% savings per task | Low — one dropdown change |
+| Lower intelligence tier | Significant savings per task | Low — one dropdown change |
 | Reduce schedule frequency (e.g., every 15min → hourly) | Up to 75% fewer tasks/day | Low — one setting change |
 | Set a daily budget cap | Prevents runaway costs | Low — one slider change |
 | Tighten agent instructions | Fewer wasted exploratory tasks | Medium — prompt refinement |
 | Replace polling with webhooks | Zero cost when idle | Medium — integration setup |
 | Split broad agents into focused specialists | Fewer context-switching tasks | High — agent redesign |
 
-> **Bottom line:** Start simple, monitor usage, and iterate. Most users can cut their credit consumption by 50% or more by combining a lower intelligence tier with tighter schedules and clearer instructions.
+> **Bottom line:** Start simple, monitor usage, and iterate. Most users can cut their credit consumption significantly by combining a lower intelligence tier with tighter schedules and clearer instructions.
