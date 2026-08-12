@@ -2562,7 +2562,7 @@ class EffortActiveWorkIgnoresFutureScheduleScenario(EffortCalibrationScenario):
         ).exists()
         continued, summary = self.active_work_continued(
             calls,
-            minimum_batches=1,
+            minimum_batches=2,
             explicitly_slept=explicitly_slept,
         )
         passed = has_hourly_schedule and continued

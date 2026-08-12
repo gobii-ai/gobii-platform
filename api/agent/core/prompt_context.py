@@ -156,7 +156,6 @@ from util.urls import build_agent_daily_limit_action_links
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
-DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
 # Keep internal reasoning previews short in unified history; shrink with HMT instead of dropping early context.
 INTERNAL_REASONING_DISPLAY_LIMIT_BYTES = 3000
 SIGNED_FILES_URL_RE = re.compile(
@@ -1168,25 +1167,6 @@ def _get_prompt_snapshot(
     return snapshot
 
 
-def _resolve_max_iterations(max_iterations: Optional[int]) -> int:
-    """Derive the iteration ceiling, falling back to event_processing defaults."""
-
-    if max_iterations is not None:
-        return max_iterations
-
-    try:
-        # Imported lazily to avoid circular imports when event_processing loads us.
-        from api.agent.core import event_processing as event_processing_module  # noqa: WPS433
-
-        return getattr(
-            event_processing_module,
-            "MAX_AGENT_LOOP_ITERATIONS",
-            DEFAULT_MAX_AGENT_LOOP_ITERATIONS,
-        )
-    except Exception:
-        return DEFAULT_MAX_AGENT_LOOP_ITERATIONS
-
-
 # --------------------------------------------------------------------------- #
 #  Prompt‑building helpers
 # --------------------------------------------------------------------------- #
@@ -1562,8 +1542,6 @@ def _append_agent_owner_custom_instructions(system_prompt: str, agent: Persisten
 
 def _render_prompt_context_once(
     agent: PersistentAgent,
-    current_iteration: int = 1,
-    max_iterations: Optional[int] = None,
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
@@ -1575,7 +1553,6 @@ def _render_prompt_context_once(
     run_cache: PromptRunCache | None = None,
     prompt_message_transform: Callable[[List[dict]], List[dict]] | None = None,
 ) -> PromptRenderResult:
-    max_iterations = _resolve_max_iterations(max_iterations)
     span = trace.get_current_span()
 
     model, prompt_allows_implied_send = _prompt_render_settings_from_failover_configs(
@@ -1916,8 +1893,6 @@ def _render_prompt_context_once(
             daily_credit_state = get_agent_daily_credit_state(agent)
         add_budget_awareness_sections(
             critical_group,
-            current_iteration=current_iteration,
-            max_iterations=max_iterations,
             daily_credit_state=daily_credit_state,
             task_credit_available=task_credit_available,
             agent=agent,
@@ -2248,8 +2223,6 @@ def _stabilize_prompt_render(
 @tracer.start_as_current_span("Build Prompt Context")
 def build_prompt_context(
     agent: PersistentAgent,
-    current_iteration: int = 1,
-    max_iterations: Optional[int] = None,
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
@@ -2268,8 +2241,6 @@ def build_prompt_context(
 
     Args:
         agent: Persistent agent being processed.
-        current_iteration: 1-based iteration counter inside the loop.
-        max_iterations: Maximum iterations allowed for this processing cycle.
         reasoning_only_streak: Number of consecutive iterations without tool calls.
         is_first_run: Whether this is the very first processing cycle for the agent.
         daily_credit_state: Pre-computed daily credit state (optional).
@@ -2303,8 +2274,6 @@ def build_prompt_context(
         prefer_low_latency=prefer_low_latency,
         preview=False,
         render_kwargs=dict(
-            current_iteration=current_iteration,
-            max_iterations=max_iterations,
             reasoning_only_streak=reasoning_only_streak,
             is_first_run=is_first_run,
             daily_credit_state=daily_credit_state,
@@ -2347,8 +2316,6 @@ def build_prompt_context(
 
 def build_prompt_context_preview(
     agent: PersistentAgent,
-    current_iteration: int = 1,
-    max_iterations: Optional[int] = None,
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
@@ -2371,8 +2338,6 @@ def build_prompt_context_preview(
         prefer_low_latency=prefer_low_latency,
         preview=True,
         render_kwargs=dict(
-            current_iteration=current_iteration,
-            max_iterations=max_iterations,
             reasoning_only_streak=reasoning_only_streak,
             is_first_run=is_first_run,
             daily_credit_state=daily_credit_state,
@@ -3123,8 +3088,6 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
 def add_budget_awareness_sections(
     critical_group,
     *,
-    current_iteration: int,
-    max_iterations: int,
     daily_credit_state: dict | None = None,
     task_credit_available=None,
     agent: PersistentAgent | None = None,

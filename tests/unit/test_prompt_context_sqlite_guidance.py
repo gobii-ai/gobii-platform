@@ -318,29 +318,6 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("group_concat(DISTINCT x)", guidance)
         self.assertNotIn("Copy names/paths/values/URLs", guidance)
 
-    def test_low_iteration_warning_keeps_unfinished_work_active(self):
-        collector = _NestedPromptSectionCollector()
-        with (
-            patch("api.agent.core.prompt_context.get_budget_context", return_value=None),
-            patch("api.agent.core.prompt_context.get_browser_daily_task_limit", return_value=None),
-            patch(
-                "api.agent.core.prompt_context.get_tool_cost_overview",
-                return_value=(Decimal("1"), {}),
-            ),
-        ):
-            added = prompt_context.add_budget_awareness_sections(
-                collector,
-                current_iteration=9,
-                max_iterations=10,
-            )
-
-        warning = collector.sections["iteration_warning"]
-        self.assertTrue(added)
-        self.assertIn("never false-complete", warning)
-        self.assertIn("unfinished scope", warning)
-        self.assertIn("next cycle", warning)
-        self.assertNotIn("set a schedule", warning)
-
     def test_sqlite_retry_warning_flags_repeated_empty_probes(self):
         warning = prompt_context._build_sqlite_retry_warning(
             [
