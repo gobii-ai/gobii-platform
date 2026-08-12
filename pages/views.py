@@ -4862,16 +4862,19 @@ class SolutionView(TemplateView):
         },
         'recruiting/candidate-sourcing': {
             'title': 'Candidate Sourcing',
-            'tagline': 'Automate candidate sourcing before the ATS bottleneck.',
-            'description': 'Find, qualify, enrich, and export candidate shortlists with Gobii AI agents built for top-of-funnel recruiting work.',
-            'seo_title': 'AI Candidate Sourcing - Automate Recruiting Research | Gobii',
+            'tagline': 'Turn a role brief into an evidence-backed shortlist.',
+            'description': 'Search approved sources, qualify candidates with evidence, and prepare export-ready shortlists for recruiter review.',
+            'seo_title': 'AI Candidate Sourcing Tool for Recruiters | Gobii',
             'seo_description': (
-                'Use a Candidate Sourcing AI Employee across approved sources to find, '
-                'qualify, enrich, and export recruiter-reviewed shortlists.'
+                "Use Gobii's AI sourcing agent to search approved sources, qualify candidates "
+                'with evidence, and deliver recruiter-reviewed, export-ready shortlists.'
             ),
-            'date_modified': '2026-06-07',
+            'date_modified': '2026-08-11',
             'social_image': 'images/solutions/recruiting-hero.jpg',
             'social_image_alt': 'Gobii AI candidate sourcing agent for recruiter-reviewed shortlists',
+            'service_name': 'Gobii AI Candidate Sourcing',
+            'service_type': 'AI candidate sourcing tool',
+            'service_category': 'Recruiting workflow automation',
             'url_name': 'pages:solution_recruiting_candidate_sourcing',
             'url_kwargs': {},
             'breadcrumb_parents': [
@@ -4889,6 +4892,56 @@ class SolutionView(TemplateView):
                     'template_slug': 'candidate-sourcing-agent',
                 },
             },
+            'include_faq_schema': True,
+            'faq_items': [
+                {
+                    'question': 'What is AI candidate sourcing?',
+                    'answer': (
+                        'AI candidate sourcing uses software agents to turn a role brief into a researched '
+                        'list of potential candidates. The agent searches permitted sources, evaluates '
+                        'job-related evidence, and prepares a shortlist for recruiter review.'
+                    ),
+                },
+                {
+                    'question': 'How does an AI sourcing agent work?',
+                    'answer': (
+                        'A recruiter provides the role, required skills, exclusions, seniority, location, '
+                        'approved sources, and output format. The agent searches, compares evidence with those '
+                        'criteria, surfaces gaps, and organizes the results for review and export.'
+                    ),
+                },
+                {
+                    'question': 'What should recruiters look for in an AI sourcing tool?',
+                    'answer': (
+                        'Look for configurable job-related criteria, source transparency, visible uncertainty, '
+                        'review and correction controls, useful export options, and clear limits on consequential '
+                        'outreach or hiring decisions.'
+                    ),
+                },
+                {
+                    'question': 'Can AI help find passive candidates?',
+                    'answer': (
+                        'Yes. An AI sourcing agent can research potential candidates in approved public, '
+                        'professional, and team-provided sources, including people who have not applied. A '
+                        'recruiter still verifies fit and decides whether outreach is appropriate.'
+                    ),
+                },
+                {
+                    'question': 'Does AI candidate sourcing replace recruiters?',
+                    'answer': (
+                        'No. Gobii handles repeatable research and organization. Recruiters retain control over '
+                        'candidate evaluation, corrections, outreach approval, interviews, and hiring decisions.'
+                    ),
+                },
+                {
+                    'question': 'How can recruiters review or correct candidate matches?',
+                    'answer': (
+                        'Recruiters can inspect the evidence and missing information behind each recommendation, '
+                        'correct the criteria or exclusions, add review notes, and ask the agent to revise or '
+                        'refresh the shortlist before any next step.'
+                    ),
+                },
+            ],
         },
         'sales': {
             'title': 'Sales',
@@ -5110,6 +5163,23 @@ class SolutionView(TemplateView):
                     item['answer_html'],
                     pricing_url=reverse('proprietary:pricing'),
                 )
+        faq_schema = None
+        if data.get('include_faq_schema') and faq_items:
+            faq_schema = {
+                "@context": "https://schema.org",
+                "@type": "FAQPage",
+                "mainEntity": [
+                    {
+                        "@type": "Question",
+                        "name": item['question'],
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": item['answer'],
+                        },
+                    }
+                    for item in faq_items
+                ],
+            }
         breadcrumb_items = [
             {
                 "@type": "ListItem",
@@ -5156,6 +5226,7 @@ class SolutionView(TemplateView):
             'canonical_url': solution_url,
             'solution_structured_data_json': html_safe_json_dumps(structured_data),
             'solution_breadcrumb_json': html_safe_json_dumps(breadcrumb_data),
+            'solution_faq_json': html_safe_json_dumps(faq_schema) if faq_schema else '',
             'solution_faq_items': faq_items,
             'solution_spawn_requires_trial': solution_spawn_requires_trial,
             'solution_trial_days': solution_trial_days,

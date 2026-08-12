@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+import importlib
 import json
 import re
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from unittest.mock import patch, MagicMock
 
 from bs4 import BeautifulSoup
 from allauth.socialaccount.models import SocialApp
+from django.apps import apps as django_apps
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -2781,7 +2783,7 @@ class SitemapTests(TestCase):
             solution_lastmods,
             {
                 "http://example.com/solutions/recruiting/": "2026-06-04",
-                "http://example.com/solutions/recruiting/candidate-sourcing/": "2026-06-07",
+                "http://example.com/solutions/recruiting/candidate-sourcing/": "2026-08-11",
                 "http://example.com/solutions/sales/": "2026-06-05",
                 "http://example.com/solutions/sales/ai-sales-agent/": "2026-08-10",
                 "http://example.com/solutions/engineering/": "2026-08-09",
@@ -3150,6 +3152,238 @@ class SitemapTests(TestCase):
         self.assertNotIn("http://example.com/blog/best-ai-employees/", content)
         self.assertNotIn("http://example.com/blog/hire-ai-employees/", content)
         self.assertNotIn("http://example.com/solutions/", content)
+
+
+@tag("batch_pages")
+class CandidateSourcingSolutionPageTests(TestCase):
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        GOBII_RELEASE_ENV="prod",
+        PUBLIC_SITE_URL="https://gobii.ai",
+    )
+    @patch("pages.views.get_stripe_settings")
+    def test_page_renders_metadata_proof_controls_ctas_and_schema(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(startup_trial_days=7)
+
+        response = self.client.get(
+            reverse("pages:solution_recruiting_candidate_sourcing")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        expected_url = "https://gobii.ai/solutions/recruiting/candidate-sourcing/"
+        expected_title = "AI Candidate Sourcing Tool for Recruiters | Gobii"
+        expected_description = (
+            "Use Gobii's AI sourcing agent to search approved sources, qualify "
+            "candidates with evidence, and deliver recruiter-reviewed, export-ready "
+            "shortlists."
+        )
+
+        self.assertEqual(soup.title.string, expected_title)
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "description"})["content"],
+            expected_description,
+        )
+        self.assertEqual(soup.find("meta", property="og:title")["content"], expected_title)
+        self.assertEqual(
+            soup.find("meta", property="og:description")["content"],
+            expected_description,
+        )
+        self.assertEqual(
+            soup.find("meta", attrs={"name": "twitter:title"})["content"],
+            expected_title,
+        )
+        self.assertEqual(soup.find("link", rel="canonical")["href"], expected_url)
+        self.assertEqual(soup.find("meta", property="og:url")["content"], expected_url)
+
+        h1s = soup.find_all("h1")
+        self.assertEqual(len(h1s), 1)
+        self.assertEqual(
+            h1s[0].get_text(" ", strip=True),
+            "AI candidate sourcing for recruiter-reviewed shortlists",
+        )
+        page_text = soup.get_text(" ", strip=True)
+        self.assertIn(
+            "AI candidate sourcing uses software agents to turn a role brief into a "
+            "researched list of potential candidates.",
+            page_text,
+        )
+        self.assertIn(
+            "recruiters retain control over final evaluation and outreach",
+            page_text,
+        )
+        self.assertIn("Automate the research, not the employment decision", page_text)
+        self.assertIn("What Gobii does not automate", page_text)
+
+        sample = soup.find("section", id="sample-shortlist")
+        self.assertIsNotNone(sample)
+        self.assertIn("Illustrative example", sample.get_text(" ", strip=True))
+        self.assertIn("identifiers and details are fictional", sample.get_text(" ", strip=True))
+        sample_region = sample.find(
+            "div",
+            {"role": "region", "tabindex": "0"},
+        )
+        self.assertEqual(
+            sample_region.get("aria-label"),
+            "Illustrative candidate shortlist table",
+        )
+        sample_table = sample_region.find("table")
+        self.assertIsNotNone(sample_table.find("caption"))
+        self.assertTrue(sample_table.find_all("th", scope="col"))
+        self.assertTrue(sample_table.find_all("th", scope="row"))
+        for required_field in (
+            "Candidate",
+            "Recommendation",
+            "Evidence for required criteria",
+            "Source labels",
+            "Location and role history",
+            "Open questions",
+            "Suggested recruiter follow-up",
+        ):
+            with self.subTest(required_field=required_field):
+                self.assertIn(required_field, sample_table.get_text(" ", strip=True))
+        self.assertNotIn("% fit", page_text)
+        self.assertNotIn("M. Kessler", page_text)
+
+        hire_url = reverse(
+            "pages:public_template_hire",
+            kwargs={
+                "category_slug": "recruiting",
+                "template_slug": "candidate-sourcing-agent",
+            },
+        )
+        hero_form = soup.find(
+            "form",
+            {"data-analytics-cta-id": "candidate_sourcing_hero"},
+        )
+        self.assertEqual(hero_form.get("action"), hire_url)
+        self.assertEqual(hero_form.get("data-analytics-placement"), "hero")
+        self.assertIsNotNone(soup.find("a", href="#sample-shortlist"))
+        template_url = reverse(
+            "pages:public_template_detail",
+            kwargs={
+                "category_slug": "recruiting",
+                "template_slug": "candidate-sourcing-agent",
+            },
+        )
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                href=reverse("pages:solution", kwargs={"slug": "recruiting"}),
+            )
+        )
+        self.assertIsNotNone(soup.find("a", href=template_url))
+        contact_link = soup.find(
+            "a",
+            {
+                "href": reverse("pages:recruiting_contact"),
+                "data-analytics-cta-id": "candidate_sourcing_contact",
+            },
+        )
+        self.assertIsNotNone(contact_link)
+        self.assertEqual(contact_link.get("data-analytics-placement"), "final_cta")
+
+        faq_questions = [
+            "What is AI candidate sourcing?",
+            "How does an AI sourcing agent work?",
+            "What should recruiters look for in an AI sourcing tool?",
+            "Can AI help find passive candidates?",
+            "Does AI candidate sourcing replace recruiters?",
+            "How can recruiters review or correct candidate matches?",
+        ]
+        self.assertEqual(
+            [
+                summary.get_text(" ", strip=True)
+                for summary in soup.select("#candidate-sourcing-faq summary")
+            ],
+            faq_questions,
+        )
+
+        schemas = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        schemas_by_type = {schema["@type"]: schema for schema in schemas}
+        self.assertEqual(
+            set(schemas_by_type),
+            {"WebPage", "BreadcrumbList", "FAQPage"},
+        )
+        webpage_schema = schemas_by_type["WebPage"]
+        self.assertEqual(webpage_schema["url"], expected_url)
+        self.assertEqual(webpage_schema["dateModified"], "2026-08-11")
+        self.assertEqual(
+            webpage_schema["mainEntity"]["name"],
+            "Gobii AI Candidate Sourcing",
+        )
+        self.assertEqual(
+            webpage_schema["mainEntity"]["serviceType"],
+            "AI candidate sourcing tool",
+        )
+        self.assertEqual(
+            [
+                item["name"]
+                for item in schemas_by_type["BreadcrumbList"]["itemListElement"]
+            ],
+            ["Home", "Solutions", "Recruiting", "Candidate Sourcing"],
+        )
+        self.assertEqual(
+            [item["name"] for item in schemas_by_type["FAQPage"]["mainEntity"]],
+            faq_questions,
+        )
+        self.assertFalse(soup.select("[data-lucide]"))
+        self.assertIsNone(soup.find("script", src="https://unpkg.com/lucide@0.546.0"))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_library_template_content_source_links_to_solution_owner(self):
+        template, _created = PersistentAgentTemplate.objects.update_or_create(
+            code="ai-agent-for-candidate-sourcing",
+            defaults={
+                "slug": "candidate-sourcing-agent",
+                "display_name": "Candidate Sourcing AI Employee",
+                "tagline": "Prepare source-linked shortlists for recruiter review.",
+                "description": "Run a candidate sourcing workflow.",
+                "description_markdown": "",
+                "charter": "Research candidates and return evidence for review.",
+                "category": "Recruiting",
+                "is_official": True,
+                "is_active": True,
+                "is_listed": True,
+            },
+        )
+        migration = importlib.import_module(
+            "api.migrations.0458_candidate_sourcing_solution_link"
+        )
+
+        migration.add_candidate_sourcing_solution_link(django_apps, None)
+        template.refresh_from_db()
+
+        self.assertIn(
+            "[AI candidate sourcing solution](/solutions/recruiting/candidate-sourcing/)",
+            template.description_markdown,
+        )
+        response = self.client.get(
+            reverse(
+                "pages:public_template_detail",
+                kwargs={
+                    "category_slug": "recruiting",
+                    "template_slug": "candidate-sourcing-agent",
+                },
+            )
+        )
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        solution_link = soup.find(
+            "a",
+            href=reverse("pages:solution_recruiting_candidate_sourcing"),
+        )
+        self.assertIsNotNone(solution_link)
+        self.assertEqual(
+            solution_link.get_text(" ", strip=True),
+            "AI candidate sourcing solution",
+        )
 
 
 @tag("batch_pages")
