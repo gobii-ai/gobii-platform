@@ -37,3 +37,35 @@ export function formatRelativeTimestamp(value?: string | null, referenceDate: Da
   return RELATIVE_FORMATTER.format(Math.round(diffYears), 'year')
 }
 
+function absoluteTimestampFormatter(timeZone?: string | null): Intl.DateTimeFormat {
+  const options: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short',
+  }
+  if (timeZone?.trim()) {
+    options.timeZone = timeZone.trim()
+  }
+  return new Intl.DateTimeFormat('en-US', options)
+}
+
+export function formatAbsoluteTimestamp(value?: string | null, timeZone?: string | null): string | null {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  try {
+    return absoluteTimestampFormatter(timeZone).format(parsed)
+  } catch (error) {
+    if (!(error instanceof RangeError) || !timeZone) {
+      return null
+    }
+    return absoluteTimestampFormatter().format(parsed)
+  }
+}

@@ -21,6 +21,7 @@ import { getNextAgentChatSidebarMode, getPreviousAgentChatSidebarMode, type Agen
 import { useMobileDrawerHistory } from './useMobileDrawerHistory'
 import { AgentChatAvatar, AgentChatButton } from './uiPrimitives'
 import { VirtualizedRosterSurface, type VirtualRosterRow } from './VirtualizedRosterSurface'
+import { getMessageSearchShortcutLabel, handleMessageSearchShortcut } from './chatShortcuts'
 
 type AgentContextMenuState = FixedContextMenuPosition & {
   agent: AgentRosterEntry
@@ -119,6 +120,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   const updateMessageSearchState = onMessageSearchStateChange ?? setLocalMessageSearchState
   const messageSearchOpen = messageSearchState.open
   const searchQuery = messageSearchState.query
+  const messageSearchShortcutHint = isMobile ? undefined : getMessageSearchShortcutLabel()
   const setMessageSearchOpen = useCallback((open: boolean) => {
     updateMessageSearchState((current) => (
       current.open === open ? current : { ...current, open }
@@ -225,22 +227,12 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [openMessageSearch])
 
   useEffect(() => {
-    const handleFindShortcut = (event: globalThis.KeyboardEvent) => {
-      if (
-        event.defaultPrevented
-        || event.key.toLocaleLowerCase() !== 'f'
-        || (!event.metaKey && !event.ctrlKey)
-        || event.altKey
-        || event.shiftKey
-      ) {
-        return
-      }
-      event.preventDefault()
-      openAndFocusMessageSearch()
+    const handleSearchShortcut = (event: globalThis.KeyboardEvent) => {
+      handleMessageSearchShortcut(event, openAndFocusMessageSearch)
     }
 
-    document.addEventListener('keydown', handleFindShortcut, true)
-    return () => document.removeEventListener('keydown', handleFindShortcut, true)
+    document.addEventListener('keydown', handleSearchShortcut, true)
+    return () => document.removeEventListener('keydown', handleSearchShortcut, true)
   }, [openAndFocusMessageSearch])
 
   const handleAgentSelect = useCallback(
@@ -538,6 +530,7 @@ export const ChatSidebar = memo(function ChatSidebar({
       onStateChange={updateMessageSearchState}
       onAgentSelect={handleAgentSelect}
       onResultSelect={isMobile ? () => setDrawerOpen(false) : undefined}
+      shortcutHint={messageSearchShortcutHint}
     />
   )
 
@@ -805,6 +798,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                 onChange={setSearchQuery}
                 onClear={() => setSearchQuery('')}
                 onFocus={openMessageSearch}
+                shortcutHint={messageSearchShortcutHint}
               />
               {showSortToggle ? (
                 <AgentSortToggle

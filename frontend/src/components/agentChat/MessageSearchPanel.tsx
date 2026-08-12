@@ -32,6 +32,7 @@ type MessageSearchPanelProps = {
   onStateChange: Dispatch<SetStateAction<MessageSearchState>>
   onAgentSelect?: (agent: AgentRosterEntry, messageId?: string) => void
   onResultSelect?: () => void
+  shortcutHint?: string
 }
 
 type ParsedSearch = AgentMessageSearchFilters & {
@@ -206,6 +207,7 @@ export function MessageSearchPanel({
   onStateChange,
   onAgentSelect,
   onResultSelect,
+  shortcutHint,
 }: MessageSearchPanelProps) {
   const { query, submittedQuery } = state
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -396,6 +398,7 @@ export function MessageSearchPanel({
           onChange={handleQueryChange}
           onClear={() => handleQueryChange('')}
           placeholder="Search agents and messages…"
+          shortcutHint={shortcutHint}
           autoFocus
           onKeyDown={handleSearchInputKeyDown}
           ariaControls={showShortcutSuggestions ? SHORTCUT_LIST_ID : undefined}

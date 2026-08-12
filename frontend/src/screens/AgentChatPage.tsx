@@ -2618,7 +2618,7 @@ export function AgentChatPage({
     rosterQuery.data?.context.personalSignupPreviewCreateAvailable,
   )
   const sendMessageDisabledReason = !isNewAgent && !activeCanSendMessages
-    ? 'This staff view is read-only. You can send a system message in Developer Mode.'
+    ? 'This staff view is read-only. You can send a system message in Debug Mode.'
     : !isNewAgent && !activeAgentIsActive
       ? 'This agent is paused and won’t respond or do work until it’s reactivated.'
     : !isNewAgent && selectedAgentAccountPause?.paused

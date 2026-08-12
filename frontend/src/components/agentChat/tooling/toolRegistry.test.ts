@@ -126,6 +126,56 @@ describe('transformToolCluster Google API display', () => {
     })
   })
 
+  it.each([
+    'send_email',
+    'send_sms',
+    'send_web_message',
+    'send_chat_message',
+    'send_discord_message',
+    'discord_send_message',
+    'send_agent_message',
+  ])('shows raw developer %s calls', (toolName) => {
+    const cluster = clusterForRequest('https://example.com')
+    cluster.entries[0] = {
+      ...cluster.entries[0],
+      toolName,
+      parameters: { body: 'Hello from the agent' },
+      result: { message_id: 'message-1' },
+      developerEvent: {
+        kind: 'tool_call',
+        id: 'tool-call-1',
+        timestamp: '2026-01-01T00:00:00Z',
+        completion_id: 'completion-1',
+        tool_name: toolName,
+        parameters: { body: 'Hello from the agent' },
+        result: { message_id: 'message-1' },
+      },
+    }
+
+    const transformed = transformToolCluster(cluster)
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: toolName,
+      rawParameters: { body: 'Hello from the agent' },
+      result: { message_id: 'message-1' },
+    })
+  })
+
+  it.each([
+    'send_email',
+    'send_sms',
+    'send_web_message',
+    'send_chat_message',
+    'send_discord_message',
+    'discord_send_message',
+    'send_agent_message',
+  ])('continues to hide normal %s tool cards', (toolName) => {
+    const cluster = clusterForRequest('https://example.com')
+    cluster.entries[0] = { ...cluster.entries[0], toolName }
+
+    expect(transformToolCluster(cluster).entries).toEqual([])
+  })
+
   it('renders developer steps as expandable tool-cluster entries', () => {
     const cluster = clusterForRequest('https://example.com')
     cluster.collapseThreshold = Number.POSITIVE_INFINITY

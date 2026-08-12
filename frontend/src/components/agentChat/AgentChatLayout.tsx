@@ -1537,6 +1537,7 @@ export function AgentChatLayout({
               centers instead. */}
           {spawnIntentLoading ? null : (
           <AgentTimelinePane
+            exactTimestamps={developerMode}
             composerDisabled={composerDisabled}
             contactCapOpenPacks={contactPackCanManageBilling ? () => handleAddonsOpen('contacts') : undefined}
             contactCapShowUpgrade={contactPackShowUpgrade}
