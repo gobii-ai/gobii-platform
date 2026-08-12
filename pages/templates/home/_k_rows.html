@@ -1,10 +1,10 @@
 {% load static %}
-<section id="hire-agents" class="gk-section gk-rows scroll-mt-24" aria-label="Agents for hire">
+<section id="hire-agents" class="gk-section gk-rows scroll-mt-24" aria-label="Recruiting agents for hire">
   {% for group in home_hero_groups %}
     <div class="gk-row-block" data-row="{{ group.key }}" id="row-{{ group.key }}" data-animate>
       <div class="gk-row-title">
         <h2>{{ group.label }}</h2>
-        <a href="{% url 'pages:library' %}">See all agents &rarr;</a>
+        <a href="{% url 'pages:solution' slug='recruiting' %}">See recruiting solutions &rarr;</a>
       </div>
       <div class="gk-row-grid">
         {% for worker in group.workers %}
@@ -36,16 +36,13 @@
     </div>
   {% endfor %}
   <div class="gk-browse-all" data-animate>
-    <a class="gk-btn-quiet" href="{% url 'pages:library' %}"
+    <a class="gk-btn-quiet" href="{% url 'pages:solution' slug='recruiting' %}"
        data-analytics-cta-id="home_k_browse_all" data-analytics-placement="template_rows" data-analytics-intent="browse_agents">
-      Browse the full agent library
+      Browse recruiting agents
     </a>
-    <nav class="gk-solution-links" aria-label="Explore AI agent solutions">
+    <nav class="gk-solution-links" aria-label="Explore AI recruiting solutions">
       <a href="{% url 'pages:solution_recruiting_candidate_sourcing' %}">
         How AI candidate sourcing works <span aria-hidden="true">→</span>
-      </a>
-      <a href="{% url 'pages:solution_sales_ai_sales_agent' %}">
-        How AI sales agents work <span aria-hidden="true">→</span>
       </a>
     </nav>
   </div>

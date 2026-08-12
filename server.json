@@ -8,7 +8,7 @@
     "url": "https://github.com/gobii-ai/gobii-platform",
     "source": "github"
   },
-  "version": "2.30.1",
+  "version": "2.31.0",
   "remotes": [
     {
       "type": "streamable-http",

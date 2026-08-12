@@ -78,6 +78,12 @@
             <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>
           </button>
           <span class="gk-dd-panel" id="gk-dd-panel"><span class="gk-dd-inner">
+            {% if home_recruiting_only %}
+            <a class="gk-dd-item" href="{% url 'pages:solution' slug='recruiting' %}">
+              <span class="gk-dd-ic">{% lucide "users" class="h-4 w-4" %}</span>
+              <span class="gk-dd-tx"><span class="gk-dd-t">Recruiting</span><span class="gk-dd-s">Qualified candidates, every week</span></span>
+            </a>
+            {% else %}
             <a class="gk-dd-item" href="{% url 'pages:library' %}">
               <span class="gk-dd-ic">{% lucide "layout-grid" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">Agent library</span><span class="gk-dd-s">Premade agents, ready to hire</span></span>
@@ -102,6 +108,7 @@
               <span class="gk-dd-ic">{% lucide "grip" class="h-4 w-4" %}</span>
               <span class="gk-dd-tx"><span class="gk-dd-t">All Solutions</span><span class="gk-dd-s">Every workflow we cover</span></span>
             </a>
+            {% endif %}
           </span></span>
         </span>
         <a class="gk-l" href="{% url 'proprietary:pricing' %}">Pricing</a>
@@ -278,12 +285,16 @@
 <div class="relative z-50">
   <div class="gk-mobile-panel" id="gk-mobile-nav-panel" hidden>
     {% if settings.GOBII_PROPRIETARY_MODE %}
+      {% if home_recruiting_only %}
+      <a class="gk-mm-sub" href="{% url 'pages:solution' slug='recruiting' %}">Recruiting</a>
+      {% else %}
       <a href="{% url 'pages:library' %}">Agent library</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='recruiting' %}">Recruiting</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='sales' %}">Sales</a>
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='engineering' %}">API</a>
       <a class="gk-mm-sub" href="{% url 'pages:solutions' %}">All Solutions</a>
       <a href="{% url 'proprietary:teams' %}">Teams</a>
+      {% endif %}
       <a href="{% url 'proprietary:pricing' %}">Pricing</a>
       <a href="{% url 'proprietary:support' %}">Support</a>
     {% else %}

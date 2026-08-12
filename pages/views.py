@@ -237,25 +237,22 @@ HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
     "slack": "images/integrations/pipedream/slack.svg",
     "trello": "images/integrations/pipedream/trello.svg",
 }
-HOMEPAGE_META_TITLE_SUFFIX = "AI Employees for Teams With Real Work to Do"
+HOMEPAGE_META_TITLE_SUFFIX = "AI Recruiting Agents for Candidate Sourcing"
 # Category labels are free text and drift between deployments ("People" in code
-# fallbacks, "Recruiting" in production rows), so each hero pill matches a set of
-# labels case-insensitively. Templates in no group still appear in the directory.
+# fallbacks, "Recruiting" in production rows), so the recruiting homepage accepts
+# the known recruiting labels case-insensitively.
+HOMEPAGE_RECRUITING_CATEGORY_LABELS = {
+    "people",
+    "recruiting",
+    "recruitment",
+    "hr & recruiting",
+    "talent",
+}
 HOMEPAGE_HERO_GROUP_DEFS = (
     (
         "recruiting",
         "Recruiting",
-        {"people", "recruiting", "recruitment", "hr & recruiting", "talent"},
-    ),
-    (
-        "sales",
-        "Sales",
-        {"revenue", "sales", "sales-outreach", "lead generation", "lead-generation"},
-    ),
-    (
-        "research",
-        "Research",
-        {"research", "external intel", "market research", "market-research", "market intelligence"},
+        HOMEPAGE_RECRUITING_CATEGORY_LABELS,
     ),
 )
 HOMEPAGE_HERO_ROW_SIZE = 3
@@ -263,13 +260,6 @@ HOMEPAGE_HERO_FEATURED_TEMPLATE_CODES = {
     "recruiting": (
         "ai-agent-for-candidate-sourcing",
         "talent-scout",
-    ),
-    "sales": (
-        "b2b-lead-research-agent",
-        "lead-hunter",
-    ),
-    "research": (
-        "competitor-intelligence-analyst",
     ),
 }
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
@@ -1124,11 +1114,12 @@ class HomePage(TemplateView):
         context["home_brand_name"] = home_brand_name
         context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
         context["home_meta_description"] = (
-            f"{home_brand_name} AI employees have their own identity, memory, and tools. "
-            "Email or text them—they browse the web, collect data, and deliver reports "
-            "around the clock."
+            f"{home_brand_name} recruiting agents source, screen, and enrich qualified "
+            "candidates, then deliver source-linked shortlists to your ATS on schedules "
+            "your hiring team chooses."
         )
-        context["home_social_image_alt"] = f"{home_brand_name} AI employee platform preview"
+        context["home_social_image_alt"] = f"{home_brand_name} AI recruiting agent preview"
+        context["home_recruiting_only"] = True
         context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
         context["home_canonical_url"] = _public_site_absolute_url("/")
         context["home_social_image_url"] = _public_site_absolute_url(
@@ -1332,18 +1323,24 @@ class HomePage(TemplateView):
         if settings.GOBII_PROPRIETARY_MODE:
             payload = get_homepage_pretrained_payload()
             all_templates = list(payload.get("templates") or [])
+            homepage_templates = [
+                template
+                for template in all_templates
+                if (template.get("category") or "").strip().lower()
+                in HOMEPAGE_RECRUITING_CATEGORY_LABELS
+            ]
 
             category_filter = (self.request.GET.get("pretrained_category") or "").strip()
             search_term = (self.request.GET.get("pretrained_search") or "").strip()
+            selected_category = category_filter
 
-            filtered_templates = list(all_templates)
+            filtered_templates = list(homepage_templates)
             if category_filter:
                 category_lower = category_filter.lower()
-                filtered_templates = [
-                    template
-                    for template in filtered_templates
-                    if (template.get("category") or "").lower() == category_lower
-                ]
+                if category_lower in HOMEPAGE_RECRUITING_CATEGORY_LABELS:
+                    selected_category = "Recruiting"
+                else:
+                    filtered_templates = []
 
             if search_term:
                 search_lower = search_term.lower()
@@ -1359,10 +1356,10 @@ class HomePage(TemplateView):
             context.update(
                 {
                     "homepage_pretrained_workers": filtered_workers,
-                    "homepage_pretrained_total": payload.get("total", len(all_templates)),
+                    "homepage_pretrained_total": len(homepage_templates),
                     "homepage_pretrained_filtered_count": len(filtered_workers),
-                    "homepage_pretrained_categories": payload.get("categories") or [],
-                    "homepage_pretrained_selected_category": category_filter,
+                    "homepage_pretrained_categories": ["Recruiting"],
+                    "homepage_pretrained_selected_category": selected_category,
                     "homepage_pretrained_search_term": search_term,
                 }
             )
@@ -1382,7 +1379,7 @@ class HomePage(TemplateView):
                 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 
                 context["home_dark_header"] = True
-                context["home_hero_groups"] = build_homepage_hero_groups(all_templates)
+                context["home_hero_groups"] = build_homepage_hero_groups(homepage_templates)
                 # Same live sources as PricingView: prices refresh from StripeConfig
                 # and credits come from the active public plan, so the homepage
                 # pricing card can never disagree with /pricing/.

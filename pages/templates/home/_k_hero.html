@@ -1,46 +1,13 @@
 {% load static %}
 <div class="gk-hero">
-  <div class="gk-cats" id="gk-cats">
-    {% for group in home_hero_groups %}
-      <a href="#{{ group.key }}" class="gk-pill gk-cat" data-k="{{ group.key }}" data-active="{% if forloop.first %}true{% else %}false{% endif %}"
-         data-analytics-cta-id="home_k_category_{{ group.key }}" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">{{ group.label }}</a>
-    {% endfor %}
-    <a href="#all" class="gk-pill gk-cat" data-k="all" data-active="{% if not home_hero_groups %}true{% else %}false{% endif %}"
-       data-analytics-cta-id="home_k_category_all" data-analytics-placement="hero_categories" data-analytics-intent="select_agent_category">All agents</a>
-  </div>
-
-  <div class="gk-hswap" id="gk-hswap">
-    {% for group in home_hero_groups %}
-      {% if group.key == "recruiting" %}
-        <div class="gk-hgroup{% if forloop.first %} gk-live{% endif %}" data-g="recruiting">
-          {% if forloop.first %}<h1 class="gk-h1">{% else %}<p class="gk-h1">{% endif %}<span class="gk-accent">20 qualified candidates</span>, delivered to your ATS every&nbsp;week.{% if forloop.first %}</h1>{% else %}</p>{% endif %}
-          <p class="gk-sub">Hire a Gobii that already knows the job. It sources, screens, and enriches &mdash; then delivers straight to Greenhouse or your ATS, until the role is&nbsp;filled.</p>
-        </div>
-      {% elif group.key == "sales" %}
-        <div class="gk-hgroup{% if forloop.first %} gk-live{% endif %}" data-g="sales">
-          {% if forloop.first %}<h1 class="gk-h1">{% else %}<p class="gk-h1">{% endif %}<span class="gk-accent">10 qualified leads</span>, delivered to your inbox every&nbsp;morning.{% if forloop.first %}</h1>{% else %}</p>{% endif %}
-          <p class="gk-sub">Every lead arrives with the intent signal that makes it worth your time &mdash; waiting in your inbox or CRM before you sit&nbsp;down.</p>
-        </div>
-      {% elif group.key == "research" %}
-        <div class="gk-hgroup{% if forloop.first %} gk-live{% endif %}" data-g="research">
-          {% if forloop.first %}<h1 class="gk-h1">{% else %}<p class="gk-h1">{% endif %}Your market, <span class="gk-accent">summarized on your desk</span> every&nbsp;Monday.{% if forloop.first %}</h1>{% else %}</p>{% endif %}
-          <p class="gk-sub">Funding rounds, launches, pricing moves, and people changes &mdash; watched all week, distilled into one&nbsp;briefing.</p>
-        </div>
-      {% endif %}
-    {% endfor %}
-    <div class="gk-hgroup{% if not home_hero_groups %} gk-live{% endif %}" data-g="all">
-      {% if not home_hero_groups %}<h1 class="gk-h1">{% else %}<p class="gk-h1">{% endif %}Hire an agent.<br><span class="gk-accent">Get results</span>, every&nbsp;week.{% if not home_hero_groups %}</h1>{% else %}</p>{% endif %}
-      <p class="gk-sub">Gobii agents do the recurring work and deliver the output where you already live &mdash; your ATS, CRM, inbox, or&nbsp;spreadsheet.</p>
+  <div class="gk-hswap">
+    <div class="gk-hgroup gk-live" data-g="recruiting">
+      <h1 class="gk-h1"><span class="gk-accent">20 qualified candidates</span>, delivered to your ATS every&nbsp;week.</h1>
+      <p class="gk-sub">Hire a recruiting agent that already knows the job. It sources, screens, and enriches &mdash; then delivers straight to Greenhouse or your ATS, until the role is&nbsp;filled.</p>
     </div>
   </div>
 
   <div class="gk-cta-row">
-{% comment %}
-  The primary CTA hires the featured agent for the active category — the same POST the
-  "Deploy This Employee" buttons make — rather than scrolling the page. Its action swaps
-  with the category tabs; see _k_scripts.html. When there are no categories at all it
-  falls back to browsing, which is the only case where scrolling is the right behaviour.
-{% endcomment %}
     {% if home_hero_groups %}
     <form method="post" action="{{ home_hero_groups.0.featured_worker.hire_url }}" id="gk-cta-form" data-lazy-csrf
           data-analytics-cta-id="home_k_hero" data-analytics-placement="hero" data-analytics-intent="hire_agent">
@@ -54,7 +21,7 @@
     {% else %}
     <a id="gk-cta-browse" class="gk-btn" href="#hire-agents"
        data-analytics-cta-id="home_k_hero_browse" data-analytics-placement="hero" data-analytics-intent="browse_agents">
-      Browse all agents
+      Browse recruiting agents
     </a>
     {% endif %}
     <a class="gk-btn-quiet" href="#pricing"
