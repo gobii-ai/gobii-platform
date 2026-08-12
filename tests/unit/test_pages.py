@@ -3276,6 +3276,16 @@ class CandidateSourcingSolutionPageTests(TestCase):
             )
         )
         self.assertIsNotNone(soup.find("a", href=template_url))
+        launch_template_link = next(
+            (
+                link
+                for link in soup.find_all("a", href=template_url)
+                if "Launch the Candidate Sourcing AI Employee"
+                in link.get_text(" ", strip=True)
+            ),
+            None,
+        )
+        self.assertIsNotNone(launch_template_link)
         contact_link = soup.find(
             "a",
             {
