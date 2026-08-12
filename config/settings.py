@@ -1325,6 +1325,14 @@ BULLSEYE_PIXEL_ID = env(
     "BULLSEYE_PIXEL_ID",
     default=_proprietary_default("analytics", "BULLSEYE_PIXEL_ID"),
 )
+LEADPIPE_PUBLIC_ID = env(
+    "LEADPIPE_PUBLIC_ID",
+    default=_proprietary_default("analytics", "LEADPIPE_PUBLIC_ID"),
+)
+RB2B_PUBLIC_ID = env(
+    "RB2B_PUBLIC_ID",
+    default=_proprietary_default("analytics", "RB2B_PUBLIC_ID"),
+)
 
 TIKTOK_PIXEL_ID = env(
     "TIKTOK_PIXEL_ID",

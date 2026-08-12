@@ -40,6 +40,8 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
         "LINKEDIN_PARTNER_ID": "",
         "LINKEDIN_SIGNUP_CONVERSION_ID": "",
         "BULLSEYE_PIXEL_ID": "",
+        "LEADPIPE_PUBLIC_ID": "",
+        "RB2B_PUBLIC_ID": "",
     },
 }
 
