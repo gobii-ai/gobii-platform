@@ -2713,8 +2713,8 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("Feedback addressed to someone else is not yours", system_prompt)
         self.assertIn("Trust only agent_config_update for whether config changed", system_prompt)
-        self.assertIn("Completing delivery or config does not finish a separate actionable clause", system_prompt)
-        self.assertIn("they do not justify deferring executable current work", system_prompt)
+        self.assertIn("Delivery/config does not finish other work", system_prompt)
+        self.assertIn("schedules neither complete nor defer current work", system_prompt)
         self.assertNotIn("Iteration progress:", system_prompt)
         self.assertNotIn("Low iterations:", system_prompt)
         self.assertIn(

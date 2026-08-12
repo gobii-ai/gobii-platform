@@ -4219,11 +4219,9 @@ def _get_system_instruction(
     )
     stop_continue_examples = (
         "## Stop/continue\n\n"
-        "Set will_continue_work=true only while this active request has unsent results, unverified constraints, needed tool "
-        "results, immediately executable work, or its own plan cleanup. Completing delivery or config does not finish a "
-        "separate actionable clause in the same request. Set false only when the current request is complete or blocked. "
-        "Future schedules, queued conversations, and their plan items do not by themselves keep a completed turn open; "
-        "they do not justify deferring executable current work.\n"
+        "Set will_continue_work=true while this request has unsent/unverified results, needed tool results, executable "
+        "work, or plan cleanup. Delivery/config does not finish other work. Set false only when complete or blocked; "
+        "schedules neither complete nor defer current work.\n"
         f"{text_only_guidance}"
         "Before final delivery, mark its delivery step done and leave unrelated steps in todo. Never send a "
         "complete answer with true for cleanup: update_plan "
