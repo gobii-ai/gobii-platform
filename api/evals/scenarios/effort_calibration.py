@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Iterable
 
 from django.db.models import Sum
+from django.test import override_settings
 
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
@@ -51,6 +52,7 @@ EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME = "effort_unscheduled_remaining_wo
 EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES = "effort_partial_source_block_reports_and_resumes"
 EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE = "effort_tool_wait_next_schedule_requires_schedule"
 EFFORT_AUTOMATIC_FUTURE_EVENTS_STAY_OFF_PLAN = "effort_automatic_future_events_stay_off_plan"
+EFFORT_ACTIVE_WORK_IGNORES_FUTURE_SCHEDULE = "effort_active_work_ignores_future_schedule"
 DEEP_WORK_CORRECTION_STEP_PREFIX = "Deep-work communication correction:"
 
 EFFORT_CALIBRATION_SCENARIO_SLUGS = [
@@ -68,6 +70,7 @@ EFFORT_CALIBRATION_SCENARIO_SLUGS = [
     EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
     EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE,
     EFFORT_AUTOMATIC_FUTURE_EVENTS_STAY_OFF_PLAN,
+    EFFORT_ACTIVE_WORK_IGNORES_FUTURE_SCHEDULE,
 ]
 
 MESSAGE_TOOL_NAMES = {
@@ -2419,6 +2422,170 @@ class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenar
             forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
         )
         self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=5)
+
+
+@register_scenario
+class EffortActiveWorkIgnoresFutureScheduleScenario(EffortCalibrationScenario):
+    slug = EFFORT_ACTIVE_WORK_IGNORES_FUTURE_SCHEDULE
+    description = (
+        "An hourly fallback schedule should not make an agent stop while its active request still has immediately "
+        "actionable bounded work."
+    )
+    tags = (*EffortCalibrationScenario.tags, "continuation", "scheduling", "real_harness")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_active_work_continued", assertion_type="tool_call"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="tool_call"),
+    ]
+
+    @staticmethod
+    def active_work_continued(
+        calls: Iterable[PersistentAgentToolCall],
+        *,
+        minimum_batches: int = 8,
+        explicitly_slept: bool = False,
+    ) -> tuple[bool, str]:
+        work_calls = []
+        for call in calls:
+            if call.tool_name == "eval_prepare_next_batch":
+                if call.status != PersistentAgentToolCall.Status.COMPLETE:
+                    continue
+                work_calls.append(call)
+                continue
+            if call.tool_name == "sleep_until_next_trigger":
+                return False, f"The agent slept after only {len(work_calls)} bounded batch(es)."
+            if call.tool_name in MESSAGE_TOOL_NAMES and resolved_tool_param(call, "will_continue_work") is False:
+                return False, f"The agent sent a terminal update after only {len(work_calls)} bounded batch(es)."
+
+        if explicitly_slept:
+            return False, f"The agent explicitly slept with active work after {len(work_calls)} bounded batch(es)."
+        if len(work_calls) >= minimum_batches:
+            return True, f"The agent kept active work moving across {len(work_calls)} bounded batches."
+        return False, f"The agent processed only {len(work_calls)} bounded batch(es)."
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(
+            agent_id,
+            charter=(
+                "Work through the owner's active analysis backlog with the configured batch-preparation workflow. "
+                "Preserve durable checkpoints so scheduled wakes can recover from an interruption."
+            ),
+            schedule=None,
+        )
+        self._enable_eval_synthetic_tools(agent_id, ["eval_prepare_next_batch"])
+        self._seed_prior_trajectory_tool_call(
+            agent_id,
+            tool_name="eval_prepare_next_batch",
+            tool_params={"batch_size": 4, "query": "analysis-offset-0"},
+            result={
+                "status": "ok",
+                "prepared_count": 4,
+                "remaining_work": 996,
+                "next_cursor": "analysis-offset-4",
+                "next_action": "Continue bounded work now with query='analysis-offset-4'.",
+            },
+        )
+
+        def batch_result(next_offset: int) -> dict:
+            remaining = 1000 - next_offset
+            return {
+                "status": "ok",
+                "prepared_count": 4,
+                "remaining_work": remaining,
+                "next_cursor": f"analysis-offset-{next_offset}",
+                "next_action": f"Continue bounded work now with query='analysis-offset-{next_offset}'.",
+                "verification": "This receipt is authoritative; more bounded batches are immediately available.",
+            }
+
+        mock_config = {
+            "eval_prepare_next_batch": {
+                "rules": [
+                    {
+                        "param_contains": {"query": f"analysis-offset-{offset}"},
+                        "result": batch_result(offset + 4),
+                    }
+                    for offset in range(4, 84, 4)
+                ],
+                "default": {
+                    "status": "error",
+                    "message": "Pass the latest next_cursor in query to advance the active batch.",
+                    "retryable": True,
+                },
+            }
+        }
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with override_settings(AGENT_INTERACTIVE_MAX_LOOP_ITERATIONS=5), self.wait_for_agent_idle(
+            agent_id,
+            timeout=180,
+        ):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Set the analysis schedule to run every hour. In fact, do not stop until the active backlog is "
+                    "finished."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["eval_prepare_next_batch", "sqlite_batch"],
+                    "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "max_relevant_tool_calls": 8,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Active work request completed through the real agent harness.",
+            artifacts={"message": inbound},
+        )
+
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        has_hourly_schedule = (agent.schedule or "").strip() in {
+            "0 * * * *",
+            "@every 1h",
+        } or agent.additional_schedules.filter(
+            enabled=True,
+            kind="recurring",
+            expression__in=("0 * * * *", "@every 1h"),
+        ).exists()
+        explicitly_slept = PersistentAgentStep.objects.filter(
+            agent_id=agent_id,
+            created_at__gte=inbound.timestamp,
+            description="Decided to sleep until next trigger.",
+        ).exists()
+        continued, summary = self.active_work_continued(
+            calls,
+            minimum_batches=1,
+            explicitly_slept=explicitly_slept,
+        )
+        passed = has_hourly_schedule and continued
+        if not has_hourly_schedule:
+            summary = f"The hourly schedule was not configured. {summary}"
+        work_calls = [
+            call
+            for call in calls
+            if call.tool_name == "eval_prepare_next_batch"
+            and call.status == PersistentAgentToolCall.Status.COMPLETE
+        ]
+        self.record_task_result(
+            run_id,
+            work_calls[-1].step if work_calls else None,
+            EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
+            task_name="verify_active_work_continued",
+            expected_summary=(
+                "The agent should configure the requested hourly fallback and then perform current actionable work "
+                "before any terminal update or voluntary sleep."
+            ),
+            observed_summary=summary,
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=10)
 
 
 @register_scenario

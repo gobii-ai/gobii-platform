@@ -3143,16 +3143,6 @@ def add_budget_awareness_sections(
             return f"{seconds // 3600}h"
         return f"{seconds // 86400}d"
 
-    if max_iterations and max_iterations > 0:
-        iteration_text = (
-            f"Iteration progress: {current_iteration}/{max_iterations} in this processing cycle."
-        )
-    else:
-        iteration_text = (
-            f"Iteration progress: {current_iteration} with no maximum iterations specified for this cycle."
-        )
-    sections.append(("iteration_progress", iteration_text, 3, True))
-
     try:
         ctx = get_budget_context()
         if ctx is not None:
@@ -3440,21 +3430,6 @@ def add_budget_awareness_sections(
         ))
     except Exception:
         logger.debug("Failed to append tool cost overview to budget awareness.", exc_info=True)
-
-    if max_iterations and max_iterations > 0:
-        try:
-            if (current_iteration / max_iterations) > 0.8:
-                sections.append(
-                    (
-                        "iteration_warning",
-                        "Low iterations: never false-complete; carry unfinished scope into the next cycle.",
-                        2,
-                        True,
-                    )
-                )
-        except Exception:
-            # Non-fatal; omit iteration warning on any arithmetic error
-            pass
 
     if not sections:
         return False
@@ -4244,9 +4219,11 @@ def _get_system_instruction(
     )
     stop_continue_examples = (
         "## Stop/continue\n\n"
-        "Set will_continue_work=true only while this active request has unsent results, unverified constraints, needed "
-        "tool results, or its own plan cleanup. Set false after delivery/config; future schedules, queued conversations, "
-        "and their plan items do not keep this turn open.\n"
+        "Set will_continue_work=true only while this active request has unsent results, unverified constraints, needed tool "
+        "results, immediately executable work, or its own plan cleanup. Completing delivery or config does not finish a "
+        "separate actionable clause in the same request. Set false only when the current request is complete or blocked. "
+        "Future schedules, queued conversations, and their plan items do not by themselves keep a completed turn open; "
+        "they do not justify deferring executable current work.\n"
         f"{text_only_guidance}"
         "Before final delivery, mark its delivery step done and leave unrelated steps in todo. Never send a "
         "complete answer with true for cleanup: update_plan "
