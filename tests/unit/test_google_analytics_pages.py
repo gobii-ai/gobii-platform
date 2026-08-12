@@ -81,8 +81,10 @@ class GoogleAnalyticsRenderingTests(TestCase):
         GOBII_RELEASE_ENV="production",
         GOBII_PROPRIETARY_MODE=True,
         BULLSEYE_PIXEL_ID="bullseye-test-id",
+        LEADPIPE_PUBLIC_ID="181ddcad-eda6-4f51-8e9c-ce8255d5091a",
+        RB2B_PUBLIC_ID="4N210HX5PP6Z",
     )
-    def test_public_page_renders_bullseye_pixel(self):
+    def test_public_page_renders_production_tracking_scripts(self):
         response = self.client.get(reverse("pages:home"))
 
         self.assertEqual(response.status_code, 200)
@@ -93,38 +95,56 @@ class GoogleAnalyticsRenderingTests(TestCase):
             'data-bullseye-pixel="bullseye-test-id"></script>',
             html=True,
         )
+        self.assertContains(response, "https://ddwl4m2hdecbv.cloudfront.net/b/")
+        self.assertContains(response, '}("4N210HX5PP6Z");')
+        self.assertContains(
+            response,
+            '<script src="https://leadpipe.aws53.cloud/p/'
+            '181ddcad-eda6-4f51-8e9c-ce8255d5091a.js" async></script>',
+            html=True,
+        )
 
     @override_settings(
         GOBII_RELEASE_ENV="local",
         GOBII_PROPRIETARY_MODE=True,
         BULLSEYE_PIXEL_ID="bullseye-test-id",
+        LEADPIPE_PUBLIC_ID="181ddcad-eda6-4f51-8e9c-ce8255d5091a",
+        RB2B_PUBLIC_ID="4N210HX5PP6Z",
     )
-    def test_public_page_does_not_render_bullseye_pixel_outside_production(self):
+    def test_public_tracking_scripts_require_production(self):
         response = self.client.get(reverse("pages:home"))
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "script.bullseye.so")
+        self.assertNotContains(response, "leadpipe.aws53.cloud")
+        self.assertNotContains(response, "ddwl4m2hdecbv.cloudfront.net")
 
     @override_settings(
         DEBUG=False,
         GOBII_PROPRIETARY_MODE=True,
         BULLSEYE_PIXEL_ID="bullseye-test-id",
+        LEADPIPE_PUBLIC_ID="181ddcad-eda6-4f51-8e9c-ce8255d5091a",
+        RB2B_PUBLIC_ID="4N210HX5PP6Z",
     )
-    def test_app_shell_does_not_render_public_bullseye_pixel(self):
+    def test_app_shell_does_not_render_public_tracking_scripts(self):
         response = self.client.get("/app")
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "script.bullseye.so")
+        self.assertNotContains(response, "leadpipe.aws53.cloud")
+        self.assertNotContains(response, "ddwl4m2hdecbv.cloudfront.net")
 
     @override_settings(
         GOBII_RELEASE_ENV="production",
         GOBII_PROPRIETARY_MODE=True,
         BULLSEYE_PIXEL_ID="bullseye-test-id",
+        LEADPIPE_PUBLIC_ID="181ddcad-eda6-4f51-8e9c-ce8255d5091a",
+        RB2B_PUBLIC_ID="4N210HX5PP6Z",
     )
-    def test_staff_page_does_not_render_public_bullseye_pixel(self):
+    def test_staff_page_does_not_render_public_tracking_scripts(self):
         admin_user = User.objects.create_superuser(
-            username="bullseye-admin@example.com",
-            email="bullseye-admin@example.com",
+            username="tracking-admin@example.com",
+            email="tracking-admin@example.com",
             password="testpass123",
         )
         self.client.force_login(admin_user)
@@ -133,6 +153,8 @@ class GoogleAnalyticsRenderingTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "script.bullseye.so")
+        self.assertNotContains(response, "leadpipe.aws53.cloud")
+        self.assertNotContains(response, "ddwl4m2hdecbv.cloudfront.net")
 
     @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123")
     def test_base_template_uses_page_meta_title_in_ga_config(self):
