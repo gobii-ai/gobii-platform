@@ -152,13 +152,8 @@ def maybe_run_agent_judge(
             BURN_RATE_TIER_STEP_DOWN_REASON in trigger.reasons
             and not _claim_burn_rate_judge_daily_slot(agent)
         ):
-            trigger = build_judge_trigger(
-                agent,
-                tools=tools,
-                extra_trigger_reasons=extra_trigger_reasons,
-                trigger_context=trigger_context,
-            )
-            if trigger is None:
+            trigger.reasons.remove(BURN_RATE_TIER_STEP_DOWN_REASON)
+            if not trigger.reasons:
                 return
         _run_judge(agent, trigger, routing_profile=routing_profile)
     except Exception:
@@ -306,7 +301,7 @@ def build_judge_trigger(
         _trigger_reasons(recent_messages, recent_tool_calls),
         extra_trigger_reasons or [],
     )
-    if BURN_RATE_TIER_STEP_DOWN_REASON in reasons and _has_burn_rate_judge_daily_slot(agent):
+    if BURN_RATE_TIER_STEP_DOWN_REASON in reasons and _burn_rate_judge_daily_slot_claimed(agent):
         reasons.remove(BURN_RATE_TIER_STEP_DOWN_REASON)
     if not reasons:
         return None
@@ -1467,7 +1462,7 @@ def _burn_rate_judge_daily_cache_timeout(now=None) -> int:
     return max(1, int((next_day - current_time).total_seconds()))
 
 
-def _has_burn_rate_judge_daily_slot(agent: PersistentAgent) -> bool:
+def _burn_rate_judge_daily_slot_claimed(agent: PersistentAgent) -> bool:
     try:
         return bool(get_redis_client().get(_burn_rate_judge_daily_cache_key(agent)))
     except redis.RedisError:

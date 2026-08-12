@@ -337,8 +337,8 @@ class AgentJudgeTests(TestCase):
     def test_burn_rate_cap_preserves_independent_automatic_trigger(self):
         self._add_steps(1)
         redis_client = MagicMock()
-        redis_client.get.side_effect = [None, "1"]
-        redis_client.set.return_value = True
+        redis_client.get.side_effect = [None, None]
+        redis_client.set.side_effect = [True, False]
         response = _judge_response(
             {
                 "suggestion_type": NO_ACTION,
@@ -357,7 +357,13 @@ class AgentJudgeTests(TestCase):
         ) as analytics_mock, patch(
             "api.agent.core.agent_judge.get_redis_client",
             return_value=redis_client,
-        ), patch("api.agent.core.agent_judge.JUDGE_RUN_COOLDOWN_SECONDS", 0):
+        ), patch(
+            "api.agent.core.agent_judge.build_judge_trigger",
+            wraps=build_judge_trigger,
+        ) as build_trigger_mock, patch(
+            "api.agent.core.agent_judge.JUDGE_RUN_COOLDOWN_SECONDS",
+            0,
+        ):
             maybe_run_agent_judge(
                 self.agent,
                 tools=[],
@@ -372,6 +378,7 @@ class AgentJudgeTests(TestCase):
             )
 
         self.assertEqual(run_mock.call_count, 2)
+        self.assertEqual(build_trigger_mock.call_count, 2)
         triggered_properties = [
             call.kwargs["properties"]
             for call in analytics_mock.call_args_list
