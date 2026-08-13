@@ -7541,8 +7541,6 @@ def _run_agent_loop(
                 try:
                     prompt_context_result = build_prompt_context(
                         agent,
-                        current_iteration=i + 1,
-                        max_iterations=effective_max_loop_iterations,
                         reasoning_only_streak=reasoning_only_streak,
                         is_first_run=is_first_run,
                         daily_credit_state=daily_state,

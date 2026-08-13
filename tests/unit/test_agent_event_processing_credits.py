@@ -1177,8 +1177,6 @@ class PersistentAgentToolCreditTests(TestCase):
         }
         result = add_budget_awareness_sections(
             critical_group,
-            current_iteration=2,
-            max_iterations=4,
             daily_credit_state=state,
         )
         self.assertTrue(result)
@@ -1213,8 +1211,6 @@ class PersistentAgentToolCreditTests(TestCase):
         with patch("api.agent.core.event_processing.Analytics.track_event") as track_mock:
             add_budget_awareness_sections(
                 critical_group,
-                current_iteration=1,
-                max_iterations=2,
                 daily_credit_state=state,
                 agent=self.agent,
             )
@@ -1234,8 +1230,6 @@ class PersistentAgentToolCreditTests(TestCase):
         }
         result = add_budget_awareness_sections(
             critical_group,
-            current_iteration=1,
-            max_iterations=0,
             daily_credit_state=state,
         )
         self.assertTrue(result)
@@ -1274,8 +1268,6 @@ class PersistentAgentToolCreditTests(TestCase):
 
         result = add_budget_awareness_sections(
             critical_group,
-            current_iteration=1,
-            max_iterations=5,
             daily_credit_state=None,
             agent=self.agent,
         )

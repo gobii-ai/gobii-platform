@@ -23,6 +23,7 @@ from api.agent.tools.request_human_input import execute_request_human_input, get
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.evals.scenarios.effort_calibration import (
     ARTIFACT_TOOL_NAMES,
+    EFFORT_ACTIVE_WORK_IGNORES_FUTURE_SCHEDULE,
     EFFORT_CALIBRATION_SCENARIO_SLUGS,
     EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
     EFFORT_ORDINARY_CONTINUATION_AVOIDS_CORRECTIVE_CHURN,
@@ -33,6 +34,7 @@ from api.evals.scenarios.effort_calibration import (
     EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT,
     EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE,
     EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME,
+    EffortActiveWorkIgnoresFutureScheduleScenario,
     EffortCalibrationScenario,
     EffortOrdinaryContinuationAvoidsCorrectiveChurnScenario,
     EffortSimpleCurrentCompanyReportScenario,
@@ -177,6 +179,34 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn(EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME, suite.scenario_slugs)
         self.assertIn(EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES, suite.scenario_slugs)
         self.assertIn(EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE, suite.scenario_slugs)
+        self.assertIn(EFFORT_ACTIVE_WORK_IGNORES_FUTURE_SCHEDULE, suite.scenario_slugs)
+
+    def test_active_work_continuation_requires_two_batches_before_stopping(self):
+        work_call = _eval_tool_call("eval_prepare_next_batch")
+        second_work_call = _eval_tool_call("eval_prepare_next_batch")
+        terminal = _eval_tool_call(
+            "send_chat_message",
+            {"body": "I'll resume on the hour.", "will_continue_work": False},
+        )
+        sleep = _eval_tool_call("sleep_until_next_trigger")
+
+        passed, _summary = EffortActiveWorkIgnoresFutureScheduleScenario.active_work_continued(
+            [work_call, second_work_call], minimum_batches=2
+        )
+        terminal_passed, terminal_summary = (
+            EffortActiveWorkIgnoresFutureScheduleScenario.active_work_continued(
+                [work_call, terminal], minimum_batches=2
+            )
+        )
+        sleep_passed, sleep_summary = EffortActiveWorkIgnoresFutureScheduleScenario.active_work_continued(
+            [work_call, sleep], minimum_batches=2
+        )
+
+        self.assertTrue(passed)
+        self.assertFalse(terminal_passed)
+        self.assertIn("terminal update", terminal_summary)
+        self.assertFalse(sleep_passed)
+        self.assertIn("slept", sleep_summary)
 
     def test_sqlite_tool_results_suite_contains_item_link_report(self):
         suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
@@ -2683,7 +2713,10 @@ class FirstRunPromptCalibrationTests(TestCase):
         )
         self.assertIn("Feedback addressed to someone else is not yours", system_prompt)
         self.assertIn("Trust only agent_config_update for whether config changed", system_prompt)
-        self.assertIn("Set false after delivery/config; future schedules, queued conversations", system_prompt)
+        self.assertIn("Delivery/config does not finish other work", system_prompt)
+        self.assertIn("schedules neither complete nor defer current work", system_prompt)
+        self.assertNotIn("Iteration progress:", system_prompt)
+        self.assertNotIn("Low iterations:", system_prompt)
         self.assertIn(
             "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
             system_prompt,
