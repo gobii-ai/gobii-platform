@@ -33,6 +33,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentSchedule,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -53,6 +54,7 @@ EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES = "effort_partial_source_block_r
 EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE = "effort_tool_wait_next_schedule_requires_schedule"
 EFFORT_AUTOMATIC_FUTURE_EVENTS_STAY_OFF_PLAN = "effort_automatic_future_events_stay_off_plan"
 EFFORT_ACTIVE_WORK_IGNORES_FUTURE_SCHEDULE = "effort_active_work_ignores_future_schedule"
+EFFORT_CONTINUOUS_WORK_DAILY_ONLY_REPORTING = "effort_continuous_work_daily_only_reporting"
 DEEP_WORK_CORRECTION_STEP_PREFIX = "Deep-work communication correction:"
 
 EFFORT_CALIBRATION_SCENARIO_SLUGS = [
@@ -71,6 +73,7 @@ EFFORT_CALIBRATION_SCENARIO_SLUGS = [
     EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE,
     EFFORT_AUTOMATIC_FUTURE_EVENTS_STAY_OFF_PLAN,
     EFFORT_ACTIVE_WORK_IGNORES_FUTURE_SCHEDULE,
+    EFFORT_CONTINUOUS_WORK_DAILY_ONLY_REPORTING,
 ]
 
 MESSAGE_TOOL_NAMES = {
@@ -2586,6 +2589,300 @@ class EffortActiveWorkIgnoresFutureScheduleScenario(EffortCalibrationScenario):
             observed_summary=summary,
         )
         self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=10)
+
+
+@register_scenario
+class EffortContinuousWorkDailyOnlyReportingScenario(EffortCalibrationScenario):
+    slug = EFFORT_CONTINUOUS_WORK_DAILY_ONLY_REPORTING
+    description = (
+        "A strict daily reporting preference should not gain invented exceptions, while an independent recurring work "
+        "cadence should not make the agent stop with actionable work remaining."
+    )
+    tags = (*EffortCalibrationScenario.tags, "continuation", "scheduling", "communication", "real_harness")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_daily_only_boundary", assertion_type="tool_call"),
+        ScenarioTask(name="trigger_off_cadence_work", assertion_type="agent_processing"),
+        ScenarioTask(name="verify_off_cadence_silence", assertion_type="message"),
+        ScenarioTask(name="verify_active_work_continued", assertion_type="tool_call"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="tool_call"),
+    ]
+
+    @staticmethod
+    def daily_only_messages_respected(
+        calls: Iterable[PersistentAgentToolCall],
+        *,
+        maximum_acknowledgements: int = 1,
+    ) -> tuple[bool, str]:
+        message_calls = [
+            call
+            for call in calls
+            if call.tool_name in MESSAGE_TOOL_NAMES
+            and call.status == PersistentAgentToolCall.Status.COMPLETE
+        ]
+        if len(message_calls) > maximum_acknowledgements:
+            return False, f"The agent sent {len(message_calls)} immediate messages instead of preserving the daily cadence."
+        if any(resolved_tool_param(call, "will_continue_work") is False for call in message_calls):
+            return False, "The agent treated an immediate message as terminal while continuous work remained."
+        return True, f"The agent sent {len(message_calls)} non-terminal acknowledgement(s) and no extra update."
+
+    @staticmethod
+    def strict_daily_config_respected(agent: PersistentAgent) -> tuple[bool, str]:
+        schedules = list(agent.additional_schedules.filter(enabled=True))
+        schedule_expressions = {
+            (schedule.expression or "").strip()
+            for schedule in schedules
+        }
+        if agent.schedule:
+            schedule_expressions.add(agent.schedule.strip())
+
+        has_hourly_work = bool(schedule_expressions & {"0 * * * *", "@every 1h"})
+        has_daily_report = "0 9 * * *" in schedule_expressions
+        config_text = "\n".join(
+            [agent.charter or ""]
+            + [schedule.instruction or "" for schedule in schedules]
+        ).casefold()
+        invented_exceptions = [
+            phrase
+            for phrase in ("material correction", "verified solution", "earlier notice", "send sooner")
+            if phrase in config_text
+        ]
+        reporting_schedules = [
+            schedule
+            for schedule in schedules
+            if any(
+                marker in (schedule.instruction or "").casefold()
+                for marker in ("send", "report", "update", "checkpoint")
+            )
+        ]
+        per_wake_reporting = any(
+            phrase in config_text
+            for phrase in (
+                "after each scheduled wake",
+                "after each wake",
+                "each scheduled wake",
+                "hourly update",
+                "hourly checkpoint",
+            )
+        )
+        has_strict_daily_rule = (
+            re.search(r"\b(?:only|once|one)\b.{0,80}\b(?:daily|per day|a day)\b", config_text) is not None
+            or (
+                bool(reporting_schedules)
+                and all((schedule.expression or "").strip() == "0 9 * * *" for schedule in reporting_schedules)
+                and not per_wake_reporting
+            )
+        )
+        config_has_daily_timing = (
+            any(time_text in config_text for time_text in ("9am", "9 am", "09:00", "9:00"))
+            and has_strict_daily_rule
+        )
+        has_daily_reporting_timing = has_daily_report or config_has_daily_timing
+
+        failures = []
+        if not has_hourly_work:
+            failures.append("the independent hourly work cadence was removed")
+        if not has_daily_reporting_timing:
+            failures.append("the requested 09:00 daily reporting timing was not persisted")
+        if not has_strict_daily_rule:
+            failures.append("the strict daily-only communication boundary was not persisted")
+        if invented_exceptions:
+            failures.append(f"invented reporting exception(s): {invented_exceptions}")
+        if per_wake_reporting:
+            failures.append("durable config still authorizes per-wake owner updates")
+        if failures:
+            return False, "; ".join(failures)
+        return True, "Hourly work and daily reporting are separated without reporting exceptions."
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(
+            agent_id,
+            charter=(
+                "Continuously work through the owner's active research backlog. Preserve verifiable checkpoints and "
+                "send the owner a concise progress update after each scheduled wake."
+            ),
+            schedule=None,
+        )
+        PersistentAgentSchedule.objects.create(
+            agent_id=agent_id,
+            schedule_key="research_hourly",
+            name="Hourly research",
+            instruction="Continue the active research backlog and send the owner a concise checkpoint.",
+            kind=PersistentAgentSchedule.Kind.RECURRING,
+            expression="0 * * * *",
+            timezone="UTC",
+            enabled=True,
+        )
+        self._enable_eval_synthetic_tools(agent_id, ["eval_prepare_next_batch"])
+        self._seed_prior_trajectory_tool_call(
+            agent_id,
+            tool_name="eval_prepare_next_batch",
+            tool_params={"batch_size": 4, "query": "research-offset-0"},
+            result={
+                "status": "ok",
+                "prepared_count": 4,
+                "remaining_work": 996,
+                "next_cursor": "research-offset-4",
+                "next_action": "Continue bounded work now with query='research-offset-4'.",
+            },
+        )
+
+        mock_config = {
+            "eval_prepare_next_batch": {
+                "rules": [
+                    {
+                        "param_contains": {"query": f"research-offset-{offset}"},
+                        "result": {
+                            "status": "ok",
+                            "prepared_count": 4,
+                            "remaining_work": 996 - offset,
+                            "next_cursor": f"research-offset-{offset + 4}",
+                            "next_action": (
+                                f"Continue bounded work now with query='research-offset-{offset + 4}'."
+                            ),
+                            "verification": (
+                                "This receipt is authoritative; more bounded batches are immediately available."
+                            ),
+                            "notable_finding": (
+                                "Material correction: a prior working assumption is contradicted by the verified "
+                                "batch, but the correction can be included in the next scheduled owner report."
+                            ),
+                        },
+                    }
+                    for offset in range(4, 84, 4)
+                ],
+                "default": {
+                    "status": "error",
+                    "message": "Pass the latest next_cursor in query to advance the active batch.",
+                    "retryable": True,
+                },
+            }
+        }
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with override_settings(AGENT_INTERACTIVE_MAX_LOOP_ITERATIONS=6), self.wait_for_agent_idle(
+            agent_id,
+            timeout=180,
+        ):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Keep working continuously until the active backlog is finished, but only send me one update a "
+                    "day at 9am UTC."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["eval_prepare_next_batch", "sqlite_batch"],
+                    "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "max_relevant_tool_calls": 6,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Daily-only continuous-work request completed through the real agent harness.",
+            artifacts={"message": inbound},
+        )
+
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        config_passed, config_summary = self.strict_daily_config_respected(agent)
+        messages_passed, messages_summary = self.daily_only_messages_respected(calls)
+        daily_boundary_passed = config_passed and messages_passed
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if daily_boundary_passed else EvalRunTask.Status.FAILED,
+            task_name="verify_daily_only_boundary",
+            expected_summary=(
+                "The agent should separate the hourly work cadence from a strict 09:00 daily report, invent no "
+                "exceptions, and send no immediate progress update beyond a non-terminal acknowledgement."
+            ),
+            observed_summary=f"{config_summary} {messages_summary}",
+        )
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="trigger_off_cadence_work")
+        cron_step = PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            description="Cron trigger: 0 * * * *",
+        )
+        PersistentAgentCronTrigger.objects.create(step=cron_step, cron_expression="0 * * * *")
+        with override_settings(AGENT_INTERACTIVE_MAX_LOOP_ITERATIONS=5), self.wait_for_agent_idle(
+            agent_id,
+            timeout=180,
+        ):
+            self.trigger_processing(
+                agent_id,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["eval_prepare_next_batch", "sqlite_batch"],
+                    "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "max_relevant_tool_calls": 10,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            cron_step,
+            EvalRunTask.Status.PASSED,
+            task_name="trigger_off_cadence_work",
+            observed_summary="An hourly work wake before the daily report was processed through the real harness.",
+        )
+
+        off_cadence_messages = _outbound_messages_after(agent_id, cron_step.created_at)
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED if not off_cadence_messages else EvalRunTask.Status.FAILED,
+            task_name="verify_off_cadence_silence",
+            expected_summary=(
+                "A material intermediate finding outside the daily report time should be retained for the daily update, "
+                "not sent immediately."
+            ),
+            observed_summary=(
+                "No off-cadence update was sent."
+                if not off_cadence_messages
+                else f"The agent sent {len(off_cadence_messages)} off-cadence update(s)."
+            ),
+            artifacts={"message": off_cadence_messages[0]} if off_cadence_messages else {},
+        )
+
+        explicitly_slept = PersistentAgentStep.objects.filter(
+            agent_id=agent_id,
+            created_at__gte=inbound.timestamp,
+            description="Decided to sleep until next trigger.",
+        ).exists()
+        continued, continuation_summary = EffortActiveWorkIgnoresFutureScheduleScenario.active_work_continued(
+            calls,
+            minimum_batches=2,
+            explicitly_slept=explicitly_slept,
+        )
+        work_calls = [
+            call
+            for call in calls
+            if call.tool_name == "eval_prepare_next_batch"
+            and call.status == PersistentAgentToolCall.Status.COMPLETE
+        ]
+        self.record_task_result(
+            run_id,
+            work_calls[-1].step if work_calls else None,
+            EvalRunTask.Status.PASSED if continued else EvalRunTask.Status.FAILED,
+            task_name="verify_active_work_continued",
+            expected_summary=(
+                "The agent should complete at least two immediately actionable batches without a terminal send or "
+                "voluntary sleep."
+            ),
+            observed_summary=continuation_summary,
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=14)
 
 
 @register_scenario

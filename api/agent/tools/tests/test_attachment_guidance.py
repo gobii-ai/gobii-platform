@@ -94,7 +94,9 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("reports/dashboards", surface_guidance)
         self.assertIn("Never leave metrics in plain lists", email_tool["function"]["description"])
         self.assertIn("styled tables or metric blocks", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
-        self.assertIn("false when this email is the requested final delivery", email_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"])
+        email_continue_guidance = email_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
+        self.assertIn("false when this email completes the active request", email_continue_guidance)
+        self.assertIn("future schedule does not make unfinished work complete", email_continue_guidance)
         self.assertIn("Do not use this to simulate or confirm an email/SMS delivery", chat_tool["function"]["description"])
         chat_continue_guidance = chat_tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
         self.assertIn("this active request", chat_continue_guidance)

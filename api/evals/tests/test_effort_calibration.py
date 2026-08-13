@@ -25,6 +25,7 @@ from api.evals.scenarios.effort_calibration import (
     ARTIFACT_TOOL_NAMES,
     EFFORT_ACTIVE_WORK_IGNORES_FUTURE_SCHEDULE,
     EFFORT_CALIBRATION_SCENARIO_SLUGS,
+    EFFORT_CONTINUOUS_WORK_DAILY_ONLY_REPORTING,
     EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
     EFFORT_ORDINARY_CONTINUATION_AVOIDS_CORRECTIVE_CHURN,
     EFFORT_OVERWORK_TOOL_NAMES,
@@ -36,6 +37,7 @@ from api.evals.scenarios.effort_calibration import (
     EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME,
     EffortActiveWorkIgnoresFutureScheduleScenario,
     EffortCalibrationScenario,
+    EffortContinuousWorkDailyOnlyReportingScenario,
     EffortOrdinaryContinuationAvoidsCorrectiveChurnScenario,
     EffortSimpleCurrentCompanyReportScenario,
     EffortTrivialAnswerStopsScenario,
@@ -180,6 +182,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn(EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES, suite.scenario_slugs)
         self.assertIn(EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE, suite.scenario_slugs)
         self.assertIn(EFFORT_ACTIVE_WORK_IGNORES_FUTURE_SCHEDULE, suite.scenario_slugs)
+        self.assertIn(EFFORT_CONTINUOUS_WORK_DAILY_ONLY_REPORTING, suite.scenario_slugs)
 
     def test_active_work_continuation_requires_two_batches_before_stopping(self):
         work_call = _eval_tool_call("eval_prepare_next_batch")
@@ -207,6 +210,143 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("terminal update", terminal_summary)
         self.assertFalse(sleep_passed)
         self.assertIn("slept", sleep_summary)
+
+    def test_daily_only_reporting_rejects_extra_or_terminal_messages(self):
+        acknowledgement = _eval_tool_call(
+            "send_chat_message",
+            {"body": "Understood. Daily updates only.", "will_continue_work": True},
+        )
+        extra_update = _eval_tool_call(
+            "send_email",
+            {"mobile_first_html": "A material correction.", "will_continue_work": True},
+        )
+        terminal_acknowledgement = _eval_tool_call(
+            "send_chat_message",
+            {"body": "Understood. Daily updates only.", "will_continue_work": False},
+        )
+
+        passed, _summary = EffortContinuousWorkDailyOnlyReportingScenario.daily_only_messages_respected(
+            [acknowledgement]
+        )
+        extra_passed, extra_summary = (
+            EffortContinuousWorkDailyOnlyReportingScenario.daily_only_messages_respected(
+                [acknowledgement, extra_update]
+            )
+        )
+        terminal_passed, terminal_summary = (
+            EffortContinuousWorkDailyOnlyReportingScenario.daily_only_messages_respected(
+                [terminal_acknowledgement]
+            )
+        )
+
+        self.assertTrue(passed)
+        self.assertFalse(extra_passed)
+        self.assertIn("2 immediate messages", extra_summary)
+        self.assertFalse(terminal_passed)
+        self.assertIn("terminal", terminal_summary)
+
+    def test_daily_only_config_accepts_hourly_work_with_strict_daily_send_timing(self):
+        schedules = [
+            SimpleNamespace(
+                expression="0 * * * *",
+                instruction="Continue the active backlog. Only send the owner an update at 9am UTC once daily.",
+            ),
+        ]
+        agent = SimpleNamespace(
+            charter="Keep working continuously and send only one daily update at 9am UTC.",
+            schedule=None,
+            additional_schedules=SimpleNamespace(filter=lambda **_kwargs: schedules),
+        )
+
+        passed, summary = EffortContinuousWorkDailyOnlyReportingScenario.strict_daily_config_respected(agent)
+
+        self.assertTrue(passed, summary)
+
+    def test_daily_only_config_rejects_invented_material_correction_exception(self):
+        schedules = [
+            SimpleNamespace(
+                expression="0 * * * *",
+                instruction="Continue the active backlog without sending updates.",
+            ),
+            SimpleNamespace(
+                expression="0 9 * * *",
+                instruction="Send one daily update, or send sooner for a material correction.",
+            ),
+        ]
+        agent = SimpleNamespace(
+            charter="Keep working continuously and send only one daily update at 9am UTC.",
+            schedule=None,
+            additional_schedules=SimpleNamespace(filter=lambda **_kwargs: schedules),
+        )
+
+        passed, summary = EffortContinuousWorkDailyOnlyReportingScenario.strict_daily_config_respected(agent)
+
+        self.assertFalse(passed)
+        self.assertIn("material correction", summary)
+
+    def test_daily_only_config_accepts_natural_strict_wording_across_split_schedules(self):
+        schedules = [
+            SimpleNamespace(
+                expression="0 * * * *",
+                instruction="Continue the active backlog.",
+            ),
+            SimpleNamespace(
+                expression="0 9 * * *",
+                instruction="Send the owner a concise progress update.",
+            ),
+        ]
+        agent = SimpleNamespace(
+            charter="Keep working continuously and send one concise progress update daily at 9am UTC.",
+            schedule=None,
+            additional_schedules=SimpleNamespace(filter=lambda **_kwargs: schedules),
+        )
+
+        passed, summary = EffortContinuousWorkDailyOnlyReportingScenario.strict_daily_config_respected(agent)
+
+        self.assertTrue(passed, summary)
+
+    def test_daily_only_config_accepts_single_reporting_schedule_without_magic_wording(self):
+        schedules = [
+            SimpleNamespace(
+                expression="0 * * * *",
+                instruction="Continue the active backlog.",
+            ),
+            SimpleNamespace(
+                expression="0 9 * * *",
+                instruction="Send a concise progress update.",
+            ),
+        ]
+        agent = SimpleNamespace(
+            charter="Keep working continuously.",
+            schedule=None,
+            additional_schedules=SimpleNamespace(filter=lambda **_kwargs: schedules),
+        )
+
+        passed, summary = EffortContinuousWorkDailyOnlyReportingScenario.strict_daily_config_respected(agent)
+
+        self.assertTrue(passed, summary)
+
+    def test_daily_only_config_rejects_stale_per_wake_charter_rule(self):
+        schedules = [
+            SimpleNamespace(
+                expression="0 * * * *",
+                instruction="Continue the active backlog.",
+            ),
+            SimpleNamespace(
+                expression="0 9 * * *",
+                instruction="Send one progress update daily.",
+            ),
+        ]
+        agent = SimpleNamespace(
+            charter="Keep working continuously and send an update after each scheduled wake.",
+            schedule=None,
+            additional_schedules=SimpleNamespace(filter=lambda **_kwargs: schedules),
+        )
+
+        passed, summary = EffortContinuousWorkDailyOnlyReportingScenario.strict_daily_config_respected(agent)
+
+        self.assertFalse(passed)
+        self.assertIn("per-wake", summary)
 
     def test_sqlite_tool_results_suite_contains_item_link_report(self):
         suite = SuiteRegistry.get(SQLITE_TOOL_RESULT_SUITE_SLUG)
@@ -2715,10 +2855,17 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Trust only agent_config_update for whether config changed", system_prompt)
         self.assertIn("Delivery/config does not finish other work", system_prompt)
         self.assertIn("schedules neither complete nor defer current work", system_prompt)
+        self.assertIn("Communication timing is a ceiling: never invent exceptions", system_prompt)
+        self.assertIn("A communication-only change keeps each work schedule expression unchanged", system_prompt)
+        self.assertIn("replace conflicting send rules in Charter/instructions", system_prompt)
+        self.assertIn("add a report schedule if needed", system_prompt)
+        self.assertIn("Reporting-time changes affect only communication, never work frequency", system_prompt)
+        self.assertIn("otherwise retain findings for the next allowed report", system_prompt)
+        self.assertIn("Set false or sleep only when complete or blocked", system_prompt)
         self.assertNotIn("Iteration progress:", system_prompt)
         self.assertNotIn("Low iterations:", system_prompt)
         self.assertIn(
-            "Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled",
+            "Ongoing work/reminders/future triggers may be scheduled",
             system_prompt,
         )
         self.assertIn("explicit SQLite/database request and sqlite_batch is callable", system_prompt)
@@ -2752,7 +2899,7 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Claim external action only after its tool succeeds", system_prompt)
         self.assertIn("Charts: create only when requested/materially useful", system_prompt)
         self.assertIn(
-            "Finished answers/briefings/charts/lookups/one-off research are not config changes",
+            "Finished answers/reports/lookups are not config",
             system_prompt,
         )
         self.assertIn("Email/SMS imperatives map directly to send_email/send_sms", system_prompt)
@@ -2762,7 +2909,7 @@ class FirstRunPromptCalibrationTests(TestCase):
             system_prompt,
         )
         self.assertIn(
-            "If substantial work continues after a meaningful evidence batch",
+            "Send later evidence updates only when user/Charter cadence permits",
             system_prompt,
         )
         self.assertIn(
