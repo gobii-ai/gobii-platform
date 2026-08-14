@@ -728,7 +728,7 @@ def _cancel_partial_subscription(
     try:
         stripe.Subscription.delete(
             subscription_id,
-            prorate=False,
+            proration_behavior='none',
             api_key=stripe.api_key,
         )
     except stripe.error.StripeError:

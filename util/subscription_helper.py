@@ -422,7 +422,7 @@ def ensure_single_individual_subscription(
                 dup_id,
                 customer_id,
             )
-            stripe.Subscription.delete(dup_id, prorate=True)  # type: ignore[attr-defined]
+            stripe.Subscription.delete(dup_id, proration_behavior='create_prorations')  # type: ignore[attr-defined]
         except Exception:
             logger.warning(
                 "Failed to cancel duplicate subscription %s for customer %s",
