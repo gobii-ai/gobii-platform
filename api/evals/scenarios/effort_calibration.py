@@ -298,6 +298,30 @@ def _tool_calls_for_run(run_id: str, *, after=None, tool_names: Iterable[str] | 
     return list(queryset.select_related("step", "step__agent").order_by("step__created_at", "step__id"))
 
 
+def _has_recurring_expression(
+    primary_expression: str | None,
+    schedules: Iterable[PersistentAgentSchedule],
+    expressions: Iterable[str],
+) -> bool:
+    expected = {expression.strip() for expression in expressions}
+    if primary_expression and primary_expression.strip() in expected:
+        return True
+    return any(
+        schedule.kind == PersistentAgentSchedule.Kind.RECURRING
+        and (schedule.expression or "").strip() in expected
+        for schedule in schedules
+    )
+
+
+def _instruction_sends_report(instruction: str) -> bool:
+    text = instruction.casefold()
+    if re.search(r"\b(?:do not|don't|never|without)\s+(?:send|deliver|report|update)", text):
+        return False
+    if re.search(r"\bno\s+(?:owner\s+)?(?:update|checkpoint|report)", text):
+        return False
+    return any(marker in text for marker in ("send", "deliver", "report", "update", "checkpoint"))
+
+
 def _relevant_tool_calls_for_run(
     run_id: str,
     *,
@@ -2548,16 +2572,14 @@ class EffortActiveWorkIgnoresFutureScheduleScenario(EffortCalibrationScenario):
             artifacts={"message": inbound},
         )
 
-        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
         agent = PersistentAgent.objects.get(id=agent_id)
-        has_hourly_schedule = (agent.schedule or "").strip() in {
-            "0 * * * *",
-            "@every 1h",
-        } or agent.additional_schedules.filter(
-            enabled=True,
-            kind="recurring",
-            expression__in=("0 * * * *", "@every 1h"),
-        ).exists()
+        schedules = list(agent.additional_schedules.filter(enabled=True))
+        has_hourly_schedule = _has_recurring_expression(
+            agent.schedule,
+            schedules,
+            {"0 * * * *", "@every 1h"},
+        )
+        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
         explicitly_slept = PersistentAgentStep.objects.filter(
             agent_id=agent_id,
             created_at__gte=inbound.timestamp,
@@ -2629,15 +2651,11 @@ class EffortContinuousWorkDailyOnlyReportingScenario(EffortCalibrationScenario):
     @staticmethod
     def strict_daily_config_respected(agent: PersistentAgent) -> tuple[bool, str]:
         schedules = list(agent.additional_schedules.filter(enabled=True))
-        schedule_expressions = {
-            (schedule.expression or "").strip()
-            for schedule in schedules
-        }
-        if agent.schedule:
-            schedule_expressions.add(agent.schedule.strip())
-
-        has_hourly_work = bool(schedule_expressions & {"0 * * * *", "@every 1h"})
-        has_daily_report = "0 9 * * *" in schedule_expressions
+        has_hourly_work = _has_recurring_expression(
+            agent.schedule,
+            schedules,
+            {"0 * * * *", "@every 1h"},
+        )
         config_text = "\n".join(
             [agent.charter or ""]
             + [schedule.instruction or "" for schedule in schedules]
@@ -2650,10 +2668,14 @@ class EffortContinuousWorkDailyOnlyReportingScenario(EffortCalibrationScenario):
         reporting_schedules = [
             schedule
             for schedule in schedules
-            if any(
-                marker in (schedule.instruction or "").casefold()
-                for marker in ("send", "report", "update", "checkpoint")
-            )
+            if _instruction_sends_report(schedule.instruction or "")
+        ]
+        daily_reporting_schedules = [
+            schedule
+            for schedule in reporting_schedules
+            if schedule.kind == PersistentAgentSchedule.Kind.RECURRING
+            and (schedule.expression or "").strip() == "0 9 * * *"
+            and (schedule.timezone or "").strip().casefold() == "utc"
         ]
         per_wake_reporting = any(
             phrase in config_text
@@ -2666,24 +2688,18 @@ class EffortContinuousWorkDailyOnlyReportingScenario(EffortCalibrationScenario):
             )
         )
         has_strict_daily_rule = (
-            re.search(r"\b(?:only|once|one)\b.{0,80}\b(?:daily|per day|a day)\b", config_text) is not None
+            re.search(r"\b(?:only|once|one)\b.{0,80}\b(?:daily|per day|a day|each day)\b", config_text) is not None
             or (
                 bool(reporting_schedules)
                 and all((schedule.expression or "").strip() == "0 9 * * *" for schedule in reporting_schedules)
                 and not per_wake_reporting
             )
         )
-        config_has_daily_timing = (
-            any(time_text in config_text for time_text in ("9am", "9 am", "09:00", "9:00"))
-            and has_strict_daily_rule
-        )
-        has_daily_reporting_timing = has_daily_report or config_has_daily_timing
-
         failures = []
         if not has_hourly_work:
             failures.append("the independent hourly work cadence was removed")
-        if not has_daily_reporting_timing:
-            failures.append("the requested 09:00 daily reporting timing was not persisted")
+        if not daily_reporting_schedules:
+            failures.append("the requested 09:00 UTC daily reporting schedule was not persisted")
         if not has_strict_daily_rule:
             failures.append("the strict daily-only communication boundary was not persisted")
         if invented_exceptions:
@@ -2855,19 +2871,20 @@ class EffortContinuousWorkDailyOnlyReportingScenario(EffortCalibrationScenario):
             artifacts={"message": off_cadence_messages[0]} if off_cadence_messages else {},
         )
 
+        off_cadence_calls = _tool_calls_for_run(run_id, after=cron_step.created_at)
         explicitly_slept = PersistentAgentStep.objects.filter(
             agent_id=agent_id,
-            created_at__gte=inbound.timestamp,
+            created_at__gte=cron_step.created_at,
             description="Decided to sleep until next trigger.",
         ).exists()
         continued, continuation_summary = EffortActiveWorkIgnoresFutureScheduleScenario.active_work_continued(
-            calls,
+            off_cadence_calls,
             minimum_batches=2,
             explicitly_slept=explicitly_slept,
         )
         work_calls = [
             call
-            for call in calls
+            for call in off_cadence_calls
             if call.tool_name == "eval_prepare_next_batch"
             and call.status == PersistentAgentToolCall.Status.COMPLETE
         ]

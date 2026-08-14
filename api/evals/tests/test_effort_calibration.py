@@ -108,6 +108,15 @@ def _eval_tool_call(tool_name, tool_params=None, *, step=None, result='{"status"
     )
 
 
+def _recurring_schedule(expression, instruction, *, timezone_name="UTC"):
+    return SimpleNamespace(
+        kind=PersistentAgentSchedule.Kind.RECURRING,
+        expression=expression,
+        timezone=timezone_name,
+        instruction=instruction,
+    )
+
+
 @tag("eval_sim")
 class ResumeStateHeuristicTests(SimpleTestCase):
     def test_patch_text_cursor_in_charter_is_not_domain_resume_state(self):
@@ -245,11 +254,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertFalse(terminal_passed)
         self.assertIn("terminal", terminal_summary)
 
-    def test_daily_only_config_accepts_hourly_work_with_strict_daily_send_timing(self):
+    def test_daily_only_config_rejects_charter_timing_without_daily_report_schedule(self):
         schedules = [
-            SimpleNamespace(
-                expression="0 * * * *",
-                instruction="Continue the active backlog. Only send the owner an update at 9am UTC once daily.",
+            _recurring_schedule(
+                "0 * * * *",
+                "Continue the active backlog. Only send the owner an update at 9am UTC once daily.",
             ),
         ]
         agent = SimpleNamespace(
@@ -260,17 +269,18 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         passed, summary = EffortContinuousWorkDailyOnlyReportingScenario.strict_daily_config_respected(agent)
 
-        self.assertTrue(passed, summary)
+        self.assertFalse(passed)
+        self.assertIn("09:00 UTC daily reporting schedule", summary)
 
     def test_daily_only_config_rejects_invented_material_correction_exception(self):
         schedules = [
-            SimpleNamespace(
-                expression="0 * * * *",
-                instruction="Continue the active backlog without sending updates.",
+            _recurring_schedule(
+                "0 * * * *",
+                "Continue the active backlog without sending updates.",
             ),
-            SimpleNamespace(
-                expression="0 9 * * *",
-                instruction="Send one daily update, or send sooner for a material correction.",
+            _recurring_schedule(
+                "0 9 * * *",
+                "Send one daily update, or send sooner for a material correction.",
             ),
         ]
         agent = SimpleNamespace(
@@ -286,14 +296,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
     def test_daily_only_config_accepts_natural_strict_wording_across_split_schedules(self):
         schedules = [
-            SimpleNamespace(
-                expression="0 * * * *",
-                instruction="Continue the active backlog.",
-            ),
-            SimpleNamespace(
-                expression="0 9 * * *",
-                instruction="Send the owner a concise progress update.",
-            ),
+            _recurring_schedule("0 * * * *", "Continue the active backlog."),
+            _recurring_schedule("0 9 * * *", "Send the owner a concise progress update."),
         ]
         agent = SimpleNamespace(
             charter="Keep working continuously and send one concise progress update daily at 9am UTC.",
@@ -307,14 +311,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
     def test_daily_only_config_accepts_single_reporting_schedule_without_magic_wording(self):
         schedules = [
-            SimpleNamespace(
-                expression="0 * * * *",
-                instruction="Continue the active backlog.",
-            ),
-            SimpleNamespace(
-                expression="0 9 * * *",
-                instruction="Send a concise progress update.",
-            ),
+            _recurring_schedule("0 * * * *", "Continue the active backlog."),
+            _recurring_schedule("0 9 * * *", "Send a concise progress update."),
         ]
         agent = SimpleNamespace(
             charter="Keep working continuously.",
@@ -326,16 +324,64 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertTrue(passed, summary)
 
+    def test_daily_only_config_accepts_silenced_hourly_work_schedule(self):
+        schedules = [
+            _recurring_schedule(
+                "0 * * * *",
+                "Continue the active backlog. Do not send a checkpoint; the daily report schedule handles updates.",
+            ),
+            _recurring_schedule("0 9 * * *", "Send one concise progress update."),
+        ]
+        agent = SimpleNamespace(
+            charter="Keep working continuously and send one concise progress update each day at 9am UTC only.",
+            schedule=None,
+            additional_schedules=SimpleNamespace(filter=lambda **_kwargs: schedules),
+        )
+
+        passed, summary = EffortContinuousWorkDailyOnlyReportingScenario.strict_daily_config_respected(agent)
+
+        self.assertTrue(passed, summary)
+
+    def test_daily_only_config_rejects_daily_report_in_non_utc_timezone(self):
+        schedules = [
+            _recurring_schedule("0 * * * *", "Continue the active backlog."),
+            _recurring_schedule(
+                "0 9 * * *",
+                "Send one concise progress update daily.",
+                timezone_name="America/New_York",
+            ),
+        ]
+        agent = SimpleNamespace(
+            charter="Keep working continuously and send one update daily at 9am UTC.",
+            schedule=None,
+            additional_schedules=SimpleNamespace(filter=lambda **_kwargs: schedules),
+        )
+
+        passed, summary = EffortContinuousWorkDailyOnlyReportingScenario.strict_daily_config_respected(agent)
+
+        self.assertFalse(passed)
+        self.assertIn("09:00 UTC daily reporting schedule", summary)
+
+    def test_daily_only_config_rejects_non_reporting_schedule_at_daily_time(self):
+        schedules = [
+            _recurring_schedule("0 * * * *", "Continue the active backlog."),
+            _recurring_schedule("0 9 * * *", "Continue validating the active backlog."),
+        ]
+        agent = SimpleNamespace(
+            charter="Keep working continuously and send one update daily at 9am UTC.",
+            schedule=None,
+            additional_schedules=SimpleNamespace(filter=lambda **_kwargs: schedules),
+        )
+
+        passed, summary = EffortContinuousWorkDailyOnlyReportingScenario.strict_daily_config_respected(agent)
+
+        self.assertFalse(passed)
+        self.assertIn("09:00 UTC daily reporting schedule", summary)
+
     def test_daily_only_config_rejects_stale_per_wake_charter_rule(self):
         schedules = [
-            SimpleNamespace(
-                expression="0 * * * *",
-                instruction="Continue the active backlog.",
-            ),
-            SimpleNamespace(
-                expression="0 9 * * *",
-                instruction="Send one progress update daily.",
-            ),
+            _recurring_schedule("0 * * * *", "Continue the active backlog."),
+            _recurring_schedule("0 9 * * *", "Send one progress update daily."),
         ]
         agent = SimpleNamespace(
             charter="Keep working continuously and send an update after each scheduled wake.",
@@ -2855,11 +2901,12 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Trust only agent_config_update for whether config changed", system_prompt)
         self.assertIn("Delivery/config does not finish other work", system_prompt)
         self.assertIn("schedules neither complete nor defer current work", system_prompt)
-        self.assertIn("Communication timing is a ceiling: never invent exceptions", system_prompt)
-        self.assertIn("A communication-only change keeps each work schedule expression unchanged", system_prompt)
-        self.assertIn("replace conflicting send rules in Charter/instructions", system_prompt)
-        self.assertIn("add a report schedule if needed", system_prompt)
-        self.assertIn("Reporting-time changes affect only communication, never work frequency", system_prompt)
+        self.assertIn("Communication timing has no invented exceptions", system_prompt)
+        self.assertIn("MUST use separate schedules; NEVER alter/delete work cadence", system_prompt)
+        self.assertIn("strip sends from work instructions", system_prompt)
+        self.assertIn("preserve each expression/task", system_prompt)
+        self.assertIn("create/update a distinct report schedule", system_prompt)
+        self.assertIn("A work-schedule wake MUST execute its work even if no report is due", system_prompt)
         self.assertIn("otherwise retain findings for the next allowed report", system_prompt)
         self.assertIn("Set false or sleep only when complete or blocked", system_prompt)
         self.assertNotIn("Iteration progress:", system_prompt)

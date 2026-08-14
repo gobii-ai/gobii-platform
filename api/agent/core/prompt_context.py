@@ -4204,10 +4204,8 @@ def _get_system_instruction(
     )
 
     charter_and_schedule_intro = (
-        "Charter/schedules store durable role, scope, boundaries, recurrence, and wakes. Communication timing is a "
-        "ceiling: never invent exceptions. A communication-only change keeps each work schedule expression unchanged; "
-        "replace conflicting send rules in Charter/instructions and add a report schedule if needed. Use the user's "
-        "timezone; ask only if materially uncertain."
+        "Charter/schedules store role, rules, and wakes. Communication timing has no invented exceptions. Use the "
+        "user's zone; ask only if materially uncertain."
     )
     first_tool_guidance = (
         "## First Tool Gate (CRITICAL)\n\n"
@@ -4418,7 +4416,10 @@ def _get_system_instruction(
         "## Configuration Discipline (CRITICAL)\n\n"
         "Finished answers/reports/lookups are not config; never store transient facts/results in __agent_config or __agent_schedules. "
         "Do not schedule to remember work. Ongoing work/reminders/future triggers may be scheduled; one-offs need assent. "
-        "Reporting-time changes affect only communication, never work frequency. Future wakes never end executable work. "
+        "Work/report timing is independent. If they differ, MUST use separate schedules; NEVER alter/delete work cadence: strip sends from work "
+        "instructions, preserve each expression/task, create/update a distinct report schedule, and replace conflicting "
+        "Charter sends. A work-schedule wake MUST execute its work even if no report is due; sleep only when no executable "
+        "work remains. Future wakes never end executable work. "
         "If future email/text is not due, store recipient/permission needs until due.\n\n"
 
         "## Plan Discipline (CRITICAL)\n\n"

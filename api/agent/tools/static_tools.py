@@ -31,7 +31,7 @@ def _get_sleep_tool() -> Dict[str, object]:
         "type": "function",
         "function": {
             "name": "sleep_until_next_trigger",
-            "description": "End this cycle only when the current request has no executable work. New input or background completion wakes you; a future schedule alone never justifies stopping current work.",
+            "description": "End only when no executable work remains. On a work-schedule wake, do its work even if reporting is not due; never sleep merely to await a report time.",
             "parameters": {"type": "object", "properties": {}},
         },
     }
