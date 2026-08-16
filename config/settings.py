@@ -316,6 +316,29 @@ def _public_site_url_default(*, debug: bool | None = None) -> str:
 PUBLIC_SITE_URL = env("PUBLIC_SITE_URL", default=_public_site_url_default())
 
 
+def _secure_transport_default(site_url: str, *, debug: bool | None = None) -> bool:
+    debug_mode = DEBUG if debug is None else debug
+    return not debug_mode and urlparse((site_url or "").strip()).scheme.lower() == "https"
+
+
+_SECURE_TRANSPORT_DEFAULT = _secure_transport_default(PUBLIC_SITE_URL)
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=_SECURE_TRANSPORT_DEFAULT)
+# Cluster and load-balancer probes reach the app directly over the private HTTP network.
+SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
+SECURE_HSTS_SECONDS = env.int(
+    "SECURE_HSTS_SECONDS",
+    default=31536000 if _SECURE_TRANSPORT_DEFAULT else 0,
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool(
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS",
+    default=_SECURE_TRANSPORT_DEFAULT,
+)
+SECURE_HSTS_PRELOAD = env.bool(
+    "SECURE_HSTS_PRELOAD",
+    default=_SECURE_TRANSPORT_DEFAULT,
+)
+
+
 def _cookie_secure_default(site_url: str, *, debug: bool | None = None) -> bool:
     debug_mode = DEBUG if debug is None else debug
     if debug_mode:
