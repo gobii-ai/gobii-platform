@@ -282,7 +282,10 @@ class PricingPageCtaCopyTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
-    def test_pricing_page_uses_cta_registry_for_enterprise_request_call_text(self, mock_get_stripe_settings):
+    def test_pricing_page_does_not_render_enterprise_action_control(
+        self,
+        mock_get_stripe_settings,
+    ):
         mock_get_stripe_settings.return_value = SimpleNamespace(
             startup_trial_days=7,
             scale_trial_days=14,
@@ -296,7 +299,9 @@ class PricingPageCtaCopyTests(TestCase):
         response = self.client.get(reverse("proprietary:pricing"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Talk to sales")
+        self.assertContains(response, "Let's design your deployment.")
+        self.assertNotContains(response, "Talk to sales")
+        self.assertNotContains(response, reverse("proprietary:prequalify"))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
