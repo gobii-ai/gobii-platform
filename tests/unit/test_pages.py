@@ -140,7 +140,38 @@ class HomePageTests(TestCase):
         self.assertIsNone(
             soup.find("script", src="https://unpkg.com/lucide@0.546.0")
         )
-        self.assertIsNotNone(soup.select_one("svg.lucide-users[aria-hidden='true']"))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_community_homepage_preserves_agent_creation_experience(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "home.html")
+        self.assertTemplateNotUsed(response, "home_shutdown.html")
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        self.assertIsNotNone(soup.find("form", {"id": "create-agent-form"}))
+        self.assertIsNone(soup.select_one("article.shutdown-notice"))
+        self.assertNotContains(response, "Gobii is winding down")
+        self.assertNotContains(response, "contact@gobii.ai")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_shutdown_homepage_keeps_existing_customer_access(self):
+        user = get_user_model().objects.create_user(
+            username="existing-customer@example.com",
+            email="existing-customer@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "home_shutdown.html")
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        header = soup.find("header")
+        self.assertIsNotNone(header.find("a", href="/app/agents", string="My Agents"))
+        self.assertNotIn("Pricing", header.get_text(" ", strip=True))
+        self.assertNotIn("Start free trial", header.get_text(" ", strip=True))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_page_shows_wind_down_notice_and_removes_marketing_content(self):
@@ -161,6 +192,9 @@ class HomePageTests(TestCase):
         notice_text = re.sub(r"\s+", " ", notice.get_text(" ", strip=True))
         self.assertIn("September 1, 2026", notice_text)
         self.assertIn("customers, contributors", notice_text)
+        self.assertIn("active paid subscriptions", notice_text)
+        self.assertIn("any applicable refunds", notice_text)
+        self.assertIn("email communications directly to customers", notice_text)
         self.assertIn("ZIP archive", notice_text)
         self.assertIn("Manus, Hermes, ChatGPT, Gemini", notice_text)
         self.assertIn("when it is ready", notice_text)
@@ -173,6 +207,24 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(soup.find("footer"))
         self.assertIsNone(soup.find("form", {"id": "create-agent-form"}))
         self.assertIsNone(soup.select_one("#what-is-gobii"))
+        header = soup.find("header")
+        header_text = header.get_text(" ", strip=True)
+        self.assertNotIn("Product", header_text)
+        self.assertNotIn("Pricing", header_text)
+        self.assertNotIn("Start free trial", header_text)
+        self.assertIsNotNone(header.find("a", string=lambda text: text and text.strip() == "Log in"))
+        self.assertNotContains(response, "Start free trial")
+        self.assertNotContains(response, reverse("proprietary:pricing"))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_shutdown_homepage_suppresses_signup_modal_assets(self):
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "gobii-cta-signup-modal-config")
+        self.assertNotContains(response, 'id="cta-signup-modal"')
+        self.assertNotContains(response, "gobii-deferred-auth-modal-loader")
 
     @override_settings(
         PUBLIC_BRAND_NAME="Acme",
@@ -230,6 +282,7 @@ class HomePageTests(TestCase):
         self.assertEqual(soup.find_all("script", {"type": "application/ld+json"}), [])
 
     @override_settings(
+        PUBLIC_BRAND_NAME="Gobii",
         PUBLIC_SITE_URL="https://gobii.ai",
         GOBII_RELEASE_ENV="prod",
         GOBII_PROPRIETARY_MODE=True,
@@ -407,6 +460,7 @@ class HomePageTests(TestCase):
 
 
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_home_page_defers_csrf_token_for_passive_get(self):
         response = self.client.get("/")
 
@@ -420,8 +474,11 @@ class HomePageTests(TestCase):
             form for form in soup.find_all("form")
             if (form.get("method") or "").lower() == "post"
         ]
-        self.assertEqual(lazy_post_forms, [])
+        self.assertGreater(len(lazy_post_forms), 0)
+        for form in lazy_post_forms:
+            self.assertTrue(form.has_attr("data-lazy-csrf"))
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_home_page_defers_csrf_token_with_signup_modal_enabled(self):
         with override_flag("cta_signup_modal", active=True):
             response = self.client.get("/")
@@ -513,12 +570,12 @@ class HomePageTests(TestCase):
                 self.assertIsNotNone(soup.find("header").find("img"))
                 self.assertIsNotNone(soup.find("footer").find("img"))
 
-    @override_settings(PUBLIC_BRAND_NAME="Acme")
+    @override_settings(PUBLIC_BRAND_NAME="Acme", GOBII_PROPRIETARY_MODE=False)
     def test_home_page_has_meta_description(self):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Acme is winding down. Our final day of operations will be September 1, 2026. We are preparing agent exports and transfer guidance for customers.">',
+            '<meta name="description" content="Acme recruiting agents source, screen, and enrich qualified candidates, then deliver source-linked shortlists to your ATS on schedules your hiring team chooses.">',
         )
 
     @override_settings(PUBLIC_BRAND_NAME="Acme", GOBII_PROPRIETARY_MODE=True)
@@ -536,6 +593,7 @@ class HomePageTests(TestCase):
         self.assertNotContains(response, "gobii-cta-signup-modal-config")
         self.assertNotContains(response, 'id="cta-signup-modal"')
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_home_page_renders_signup_modal_shell_when_flag_is_on_for_anonymous_users(self):
         with override_flag("cta_signup_modal", active=True):
             response = self.client.get("/")
@@ -544,6 +602,7 @@ class HomePageTests(TestCase):
         self.assertContains(response, "gobii-cta-signup-modal-config")
         self.assertContains(response, 'id="cta-signup-modal"')
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_home_page_signup_modal_config_includes_analytics_events_when_flag_is_on(self):
         with override_flag("cta_signup_modal", active=True):
             response = self.client.get("/")
@@ -559,6 +618,7 @@ class HomePageTests(TestCase):
 
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
     @override_settings(
+        GOBII_PROPRIETARY_MODE=False,
         TURNSTILE_ENABLED=True,
         ACCOUNT_FORMS={
             "signup": "turnstile_signup.SignupFormWithTurnstile",
@@ -3523,7 +3583,6 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
         )
         cache.clear()
         paths = (
-            "/",
             "/ai-employees/",
             "/library/",
             "/solutions/",
@@ -3546,7 +3605,6 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
                 page_text = BeautifulSoup(response.content, "html.parser").get_text(" ", strip=True)
                 self.assertNotRegex(page_text, r"(?i)\b(?:worker|coworker)s?\b")
                 if path in (
-                    "/",
                     "/library/",
                     "/library/recruiting/candidate-sourcing-agent/",
                 ):
@@ -3575,14 +3633,6 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             detail_soup.get_text(" ", strip=True),
         )
 
-        home_response = self.client.get("/")
-        home_soup = BeautifulSoup(home_response.content, "html.parser")
-        contextual_link = home_soup.find(
-            "a",
-            string=re.compile(r"View the Candidate Sourcing AI Employee"),
-        )
-        self.assertIsNotNone(contextual_link)
-
         with override_settings(GOBII_PROPRIETARY_MODE=False):
             response = self.client.get("/docs/guides/api/")
             self.assertEqual(response.status_code, 200)
@@ -3590,46 +3640,32 @@ class RestoredPublicMarketingSurfaceTests(TestCase):
             self.assertNotRegex(page_text, r"(?i)\b(?:worker|coworker)s?\b")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_header_limits_product_navigation_to_recruiting(self):
+    def test_shutdown_home_header_hides_product_navigation(self):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
-        ai_employees_url = reverse("pages:ai_employees")
-        desktop_product_menu = soup.find(id="gk-dd-panel")
+        header = soup.find("header")
+        self.assertIsNone(header.find(id="gk-dd-panel"))
         mobile_menu = soup.select_one(".gk-mobile-panel")
-        recruiting_url = reverse("pages:solution", kwargs={"slug": "recruiting"})
-        self.assertIsNotNone(desktop_product_menu.find("a", href=recruiting_url))
-        self.assertIsNotNone(mobile_menu.find("a", href=recruiting_url))
+        self.assertIsNotNone(mobile_menu)
         for hidden_url in (
-            ai_employees_url,
+            reverse("pages:ai_employees"),
             reverse("pages:solutions"),
             reverse("pages:solution", kwargs={"slug": "sales"}),
             reverse("pages:solution", kwargs={"slug": "engineering"}),
+            reverse("pages:solution", kwargs={"slug": "recruiting"}),
             reverse("pages:library"),
+            reverse("proprietary:pricing"),
         ):
-            self.assertIsNone(desktop_product_menu.find("a", href=hidden_url))
+            self.assertIsNone(header.find("a", href=hidden_url))
             self.assertIsNone(mobile_menu.find("a", href=hidden_url))
-        self.assertIsNone(soup.find("footer").find("a", href=ai_employees_url))
-        page_text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
-        page_text = page_text.replace(" ,", ",").replace(" .", ".")
+        self.assertNotIn("Start free trial", header.get_text(" ", strip=True))
+        self.assertIsNotNone(
+            header.find("a", string=lambda text: text and text.strip() == "Log in")
+        )
         h1_text = re.sub(r"\s+", " ", soup.find("h1").get_text(" ", strip=True))
-        h1_text = h1_text.replace(" ,", ",").replace(" .", ".")
-        self.assertEqual(
-            h1_text,
-            "20 qualified candidates, delivered to your ATS every week.",
-        )
-        self.assertIn(
-            "Hire a recruiting agent that already knows the job.",
-            page_text,
-        )
-        for retired_slug in ("health-care", "defense"):
-            self.assertIsNone(
-                soup.find(
-                    "a",
-                    {"href": reverse("pages:solution", kwargs={"slug": retired_slug})},
-                )
-            )
+        self.assertEqual(h1_text, "Gobii is winding down.")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_home_header_keeps_solution_and_developer_navigation_hidden_in_community_mode(self):

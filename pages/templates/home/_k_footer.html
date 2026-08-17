@@ -42,13 +42,13 @@
       <h4>Product</h4>
       <ul>
         <li><a href="{% url 'pages:home' %}">Gobii</a></li>
-        {% if settings.GOBII_PROPRIETARY_MODE %}
+        {% if settings.GOBII_PROPRIETARY_MODE and not shutdown_homepage %}
           <li><a href="{% url 'proprietary:teams' %}">Teams</a></li>
           <li><a href="{% url 'proprietary:pricing' %}">Pricing</a></li>
         {% endif %}
         <li><a href="{% url 'agents' %}">My Agents</a></li>
         <li><a href="https://github.com/gobii-ai/gobii-platform" title="Self-Host Gobii">Self-Host</a></li>
-        {% if settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_AFFILIATE_LINK %}
+        {% if settings.GOBII_PROPRIETARY_MODE and not shutdown_homepage and settings.REWARDFUL_AFFILIATE_LINK %}
           <li><a href="{{ settings.REWARDFUL_AFFILIATE_LINK }}" title="Gobii Affiliate Program" target="_blank" rel="noopener">Affiliate Program</a></li>
         {% endif %}
       </ul>

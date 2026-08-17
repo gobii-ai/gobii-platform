@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% load static %}
+{% load inline_static %}
+
+{% block segment_bootstrap_js %}<script>{% inline_minified_static_js 'js/segment_bootstrap.js' %}</script>{% endblock %}
+{% block lucide_js %}{% endblock %}
+{% block tailwind_css %}
+  <link rel="stylesheet" href="{% static 'css/home_tailwind.css' %}">
+{% endblock %}
+{% block title %}{{ home_meta_title }}{% endblock %}
+
+{% block canonical_link %}
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and home_canonical_url %}
+  <link rel="canonical" href="{{ home_canonical_url }}">
+  {% endif %}
+{% endblock %}
+
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="{{ home_meta_description }}">
+  {% if home_social_metadata_enabled %}
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="{{ home_meta_title }}">
+  <meta property="og:description" content="{{ home_meta_description }}">
+  <meta property="og:url" content="{{ home_canonical_url }}">
+  <meta property="og:site_name" content="{{ home_brand_name }}">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{ home_meta_title }}">
+  <meta name="twitter:description" content="{{ home_meta_description }}">
+  {% endif %}
+  {% if home_structured_data_json %}
+  <script type="application/ld+json">{{ home_structured_data_json }}</script>
+  {% endif %}
+{% endblock %}
+
+{% block early_head_styles %}
+  {{ block.super }}
+  <style>
+    body {
+      background: #100a20;
+    }
+
+    .shutdown-main {
+      position: relative;
+      display: grid;
+      min-height: clamp(560px, 72vh, 760px);
+      place-items: center;
+      overflow: hidden;
+      padding: clamp(6.5rem, 13vw, 10rem) 1.5rem clamp(7rem, 14vw, 11rem);
+      color: #ece9f6;
+      background:
+        radial-gradient(circle at 74% 26%, rgba(124, 58, 237, 0.18), transparent 31rem),
+        linear-gradient(165deg, #100a20 0%, #16102b 56%, #1d153a 100%);
+    }
+
+    .shutdown-main::before {
+      position: absolute;
+      top: clamp(5rem, 11vw, 9rem);
+      left: max(1.5rem, calc(50% - 340px));
+      width: 42px;
+      height: 3px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #c4b5fd, #f0abfc);
+      content: "";
+    }
+
+    .shutdown-notice {
+      position: relative;
+      width: min(100%, 680px);
+    }
+
+    .shutdown-kicker {
+      margin: 0 0 1.75rem;
+      color: #c4b5fd;
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.19em;
+      text-transform: uppercase;
+    }
+
+    .shutdown-title {
+      max-width: 12ch;
+      margin: 0;
+      color: #fff;
+      font-size: clamp(2.75rem, 8vw, 5.75rem);
+      font-weight: 300;
+      letter-spacing: -0.055em;
+      line-height: 0.98;
+      text-wrap: balance;
+    }
+
+    .shutdown-copy {
+      max-width: 590px;
+      margin-top: clamp(2rem, 5vw, 3.25rem);
+      color: #cfc7e8;
+      font-size: clamp(1.05rem, 2vw, 1.2rem);
+      line-height: 1.75;
+    }
+
+    .shutdown-copy p {
+      margin: 0;
+    }
+
+    .shutdown-copy p + p {
+      margin-top: 1.35rem;
+    }
+
+    .shutdown-date {
+      color: #fff;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .shutdown-email {
+      color: #f0abfc;
+      font-weight: 600;
+      text-decoration-color: rgba(240, 171, 252, 0.45);
+      text-underline-offset: 0.2em;
+      white-space: nowrap;
+    }
+
+    .shutdown-email:hover {
+      color: #f5d0fe;
+      text-decoration-color: currentColor;
+    }
+
+    .shutdown-email:focus-visible {
+      border-radius: 2px;
+      outline: 2px solid #c4b5fd;
+      outline-offset: 4px;
+    }
+
+    @media (max-width: 520px) {
+      .shutdown-main {
+        min-height: 600px;
+        padding-right: 1.25rem;
+        padding-left: 1.25rem;
+      }
+
+      .shutdown-main::before {
+        left: 1.25rem;
+      }
+
+      .shutdown-title {
+        font-size: clamp(2.75rem, 15vw, 4rem);
+      }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<main id="main-content" class="shutdown-main">
+  <article class="shutdown-notice" aria-labelledby="shutdown-title">
+    <p class="shutdown-kicker">Company update</p>
+    <h1 id="shutdown-title" class="shutdown-title">Gobii is winding down.</h1>
+    <div class="shutdown-copy">
+      <p>
+        Our final day of operations will be
+        <time class="shutdown-date" datetime="2026-09-01">September 1, 2026</time>.
+      </p>
+      <p>
+        To our customers, contributors, and everyone in the Gobii community: thank you.
+        We are deeply grateful for your trust, support, and belief in what we built together.
+      </p>
+      <p>
+        For customers with active paid subscriptions, we're working through the appropriate
+        next steps, including any applicable refunds. We will send email communications directly
+        to customers with further details.
+      </p>
+      <p>
+        We are working on an agent export tool that will let you download a ZIP archive of
+        your agent data, along with brief instructions for transferring your agents to Manus,
+        Hermes, ChatGPT, Gemini, and other platforms. We will share more details here when it is ready.
+      </p>
+      <p>
+        If you have any questions, please contact us at
+        <a class="shutdown-email" href="mailto:{{ wind_down_contact_email }}">{{ wind_down_contact_email }}</a>.
+      </p>
+    </div>
+  </article>
+</main>
+{% endblock %}

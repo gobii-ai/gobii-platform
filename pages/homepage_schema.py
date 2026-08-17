@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.templatetags.static import static
 
+HOMEPAGE_SOCIAL_IMAGE_PATH = "images/gobii_og_image_1200x630.png"
 WIND_DOWN_CONTACT_EMAIL = "contact@gobii.ai"
 
 

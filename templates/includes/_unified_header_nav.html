@@ -71,7 +71,7 @@
       {% include "includes/_header_logo_image.html" %}
     </a>
     <nav class="gk-nav-links" aria-label="Main">
-      {% if settings.GOBII_PROPRIETARY_MODE %}
+      {% if settings.GOBII_PROPRIETARY_MODE and not shutdown_homepage %}
         <span class="gk-dd" id="gk-dd">
           <button type="button" class="gk-dd-trigger" id="gk-dd-trigger" aria-expanded="false" aria-haspopup="true">
             Product
@@ -112,7 +112,7 @@
           </span></span>
         </span>
         <a class="gk-l" href="{% url 'proprietary:pricing' %}">Pricing</a>
-      {% else %}
+      {% elif not settings.GOBII_PROPRIETARY_MODE %}
         <a class="gk-l" href="{% url 'pages:library' %}">Agents</a>
       {% endif %}
       {% if request.user.is_authenticated %}
@@ -120,10 +120,12 @@
       {% else %}
         {% with request.session.utm_querystring as utm_qs %}
         <a class="gk-login gk-l" href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}">Log in</a>
+        {% if not shutdown_homepage %}
         {% url 'account_signup' as account_signup_url %}
         <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
            data-analytics-cta-id="nav_start_trial" data-analytics-placement="header" data-analytics-intent="signup"
            class="gk-nav-cta">Start free trial</a>
+        {% endif %}
         {% endwith %}
       {% endif %}
       {% if request.user.is_authenticated %}
@@ -284,7 +286,7 @@
 <!-- Mobile Navigation Panel -->
 <div class="relative z-50">
   <div class="gk-mobile-panel" id="gk-mobile-nav-panel" hidden>
-    {% if settings.GOBII_PROPRIETARY_MODE %}
+    {% if settings.GOBII_PROPRIETARY_MODE and not shutdown_homepage %}
       {% if home_recruiting_only %}
       <a class="gk-mm-sub" href="{% url 'pages:solution' slug='recruiting' %}">Recruiting</a>
       {% else %}
@@ -297,10 +299,12 @@
       {% endif %}
       <a href="{% url 'proprietary:pricing' %}">Pricing</a>
       <a href="{% url 'proprietary:support' %}">Support</a>
-    {% else %}
+    {% elif not settings.GOBII_PROPRIETARY_MODE %}
       <a href="{% url 'pages:library' %}">Agents</a>
     {% endif %}
+    {% if not shutdown_homepage %}
     <div class="gk-mm-sep"></div>
+    {% endif %}
     {% if request.user.is_authenticated %}
       <a href="/app/agents">My Agents</a>
       <a href="{% url 'profile' %}">Profile</a>
@@ -311,10 +315,12 @@
     {% else %}
       {% with request.session.utm_querystring as utm_qs %}
       <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}">Log in</a>
+      {% if not shutdown_homepage %}
       {% url 'account_signup' as account_signup_url %}
       <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}"
          data-analytics-cta-id="nav_start_trial" data-analytics-placement="header_mobile" data-analytics-intent="signup"
          class="gk-mm-cta">Start free trial</a>
+      {% endif %}
       {% endwith %}
     {% endif %}
   </div>

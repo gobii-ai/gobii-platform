@@ -1,178 +1,1368 @@
 {% extends "base.html" %}
 {% load static %}
+{% load cta_tags %}
 {% load inline_static %}
-
 {% block segment_bootstrap_js %}<script>{% inline_minified_static_js 'js/segment_bootstrap.js' %}</script>{% endblock %}
-{% block lucide_js %}{% endblock %}
+{% block lucide_js %}{% if not home_use_k %}{{ block.super }}{% endif %}{% endblock %}
 {% block tailwind_css %}
+  {% if home_use_k %}
   <link rel="stylesheet" href="{% static 'css/home_tailwind.css' %}">
-{% endblock %}
-{% block title %}{{ home_meta_title }}{% endblock %}
-
-{% block canonical_link %}
-  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and home_canonical_url %}
-  <link rel="canonical" href="{{ home_canonical_url }}">
+  {% else %}
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
   {% endif %}
 {% endblock %}
-
+{% block title %}{{ home_meta_title }}{% endblock %}
+{% block canonical_link %}
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and home_canonical_url %}
+  {% if home_search_indexable %}
+  <link rel="canonical" href="{{ home_canonical_url }}">
+  {% endif %}
+  {% endif %}
+{% endblock %}
+{% block showcase_css %}{% if home_use_k %}{% include "includes/_gk_showcase.html" %}{% endif %}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="{{ home_meta_description }}">
+  {% if not home_search_indexable %}
+  <meta name="robots" content="noindex, follow">
+  {% endif %}
   {% if home_social_metadata_enabled %}
+  {% if home_search_indexable %}
   <meta property="og:type" content="website">
   <meta property="og:locale" content="en_US">
   <meta property="og:title" content="{{ home_meta_title }}">
   <meta property="og:description" content="{{ home_meta_description }}">
   <meta property="og:url" content="{{ home_canonical_url }}">
   <meta property="og:site_name" content="{{ home_brand_name }}">
-  <meta name="twitter:card" content="summary">
+  <meta property="og:image" content="{{ home_social_image_url }}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="{{ home_social_image_alt }}">
+  <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ home_meta_title }}">
   <meta name="twitter:description" content="{{ home_meta_description }}">
+  <meta name="twitter:image" content="{{ home_social_image_url }}">
+  <meta name="twitter:image:alt" content="{{ home_social_image_alt }}">
+  {% endif %}
   {% endif %}
   {% if home_structured_data_json %}
   <script type="application/ld+json">{{ home_structured_data_json }}</script>
   {% endif %}
+  {% if not home_use_k %}
+    {% if immersive_app_assets %}
+      {% for href in immersive_app_assets.styles %}
+        <link rel="preload" as="style" href="{{ href }}">
+      {% endfor %}
+      {% for src in immersive_app_assets.scripts %}
+        <link rel="modulepreload" href="{{ src }}">
+      {% endfor %}
+    {% endif %}
+  {% endif %}
 {% endblock %}
-
 {% block early_head_styles %}
   {{ block.super }}
   <style>
-    body {
-      background: #100a20;
+    .gobii-hero-fish-cursor {
+      --fish-cursor-x: 0px;
+      --fish-cursor-y: 0px;
+      --fish-cursor-rot: 0deg;
+      --fish-eye-x: 0px;
+      --fish-eye-y: 0px;
+      display: inline-block;
+      transform: translate3d(var(--fish-cursor-x), var(--fish-cursor-y), 0) rotate(var(--fish-cursor-rot));
+      transform-origin: center;
+      transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+      will-change: transform;
     }
 
-    .shutdown-main {
+    .gobii-hero-fish {
+      width: clamp(140px, 24vw, 280px);
+      animation: gobii-hero-swim-soft 5.6s ease-in-out infinite;
+      transform-origin: center;
+      will-change: transform;
+    }
+
+    .gobii-hero-fish svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      overflow: visible;
+    }
+
+    .gobii-hero-fish svg #body,
+    .gobii-hero-fish svg #top-fin,
+    .gobii-hero-fish svg #tail-fin,
+    .gobii-hero-fish svg #bottom-left-fin,
+    .gobii-hero-fish svg #bottom-right-fin,
+    .gobii-hero-fish svg #left-eye,
+    .gobii-hero-fish svg #right-eye {
+      transform-box: fill-box;
+      will-change: transform;
+    }
+
+    .gobii-hero-fish svg #body {
+      transform-origin: 48% 53%;
+      animation: gobii-body-roll-soft 2.8s ease-in-out infinite;
+    }
+
+    .gobii-hero-fish svg #top-fin {
+      transform-origin: 58% 88%;
+      animation: gobii-top-fin-soft 2.2s ease-in-out infinite;
+    }
+
+    .gobii-hero-fish svg #tail-fin {
+      transform-origin: 12% 50%;
+      animation: gobii-tail-fin-soft 1.65s ease-in-out infinite;
+    }
+
+    .gobii-hero-fish svg #bottom-left-fin {
+      transform-origin: 68% 26%;
+      animation: gobii-bottom-left-fin-soft 1.9s ease-in-out infinite;
+    }
+
+    .gobii-hero-fish svg #bottom-right-fin {
+      transform-origin: 20% 70%;
+      animation: gobii-bottom-right-fin-soft 1.85s ease-in-out infinite;
+    }
+
+    .gobii-hero-fish svg #left-eye,
+    .gobii-hero-fish svg #right-eye {
+      transform: translate3d(var(--fish-eye-x), var(--fish-eye-y), 0);
+      animation: gobii-eye-glow-soft 3s ease-in-out infinite;
+    }
+
+    .gobii-hero-fish svg #left-eye path,
+    .gobii-hero-fish svg #right-eye path {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: gobii-eye-blink-soft 9.6s ease-in-out infinite;
+    }
+
+    @keyframes gobii-hero-swim-soft {
+      0%, 100% {
+        transform: translate3d(0, 0, 0) rotate(0deg);
+      }
+      25% {
+        transform: translate3d(4px, -3px, 0) rotate(-0.7deg);
+      }
+      50% {
+        transform: translate3d(8px, 0, 0) rotate(0.4deg);
+      }
+      75% {
+        transform: translate3d(4px, 3px, 0) rotate(-0.5deg);
+      }
+    }
+
+    @keyframes gobii-body-roll-soft {
+      0%, 100% { transform: translateY(0px) rotate(0deg); }
+      50% { transform: translateY(-2px) rotate(-0.5deg); }
+    }
+
+    @keyframes gobii-top-fin-soft {
+      0%, 100% { transform: rotate(0deg); }
+      50% { transform: rotate(-4deg); }
+    }
+
+    @keyframes gobii-tail-fin-soft {
+      0%, 100% { transform: rotate(0deg); }
+      25% { transform: rotate(4.5deg); }
+      75% { transform: rotate(-4.5deg); }
+    }
+
+    @keyframes gobii-bottom-left-fin-soft {
+      0%, 100% { transform: rotate(0deg); }
+      50% { transform: rotate(6deg); }
+    }
+
+    @keyframes gobii-bottom-right-fin-soft {
+      0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+      50% { transform: translate3d(2px, -2px, 0) rotate(-5deg); }
+    }
+
+    @keyframes gobii-eye-glow-soft {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.95; }
+    }
+
+    @keyframes gobii-eye-blink-soft {
+      0%, 86%, 100% { transform: scaleY(1); }
+      88% { transform: scaleY(0.14); }
+      90% { transform: scaleY(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .gobii-hero-fish-cursor {
+        transition: none !important;
+        transform: none !important;
+      }
+
+      .gobii-hero-fish,
+      .gobii-hero-fish svg #body,
+      .gobii-hero-fish svg #top-fin,
+      .gobii-hero-fish svg #tail-fin,
+      .gobii-hero-fish svg #bottom-left-fin,
+      .gobii-hero-fish svg #bottom-right-fin,
+      .gobii-hero-fish svg #left-eye,
+      .gobii-hero-fish svg #right-eye,
+      .gobii-hero-fish svg #left-eye path,
+      .gobii-hero-fish svg #right-eye path {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+
+    #create-agent-form textarea[name="charter"],
+    #charter-ghost {
+      line-height: 1.6;
+    }
+
+    #create-agent-form textarea[name="charter"] {
+      min-height: 6.75rem;
+      padding: 1rem 1.25rem;
+    }
+
+    #charter-ghost {
+      padding: 1rem 1.25rem;
+    }
+
+    @media (min-width: 640px) {
+      #create-agent-form textarea[name="charter"] {
+        min-height: 6.5rem;
+        padding: 1.125rem 1.5rem;
+      }
+
+      #charter-ghost {
+        padding: 1.125rem 1.5rem;
+      }
+    }
+
+    {% if homepage_perf_motion_reduction_enabled %}
+    @media (pointer: coarse), (max-width: 767px) {
+      .gobii-hero-fish-cursor,
+      .gobii-hero-fish,
+      .gobii-hero-fish svg #body,
+      .gobii-hero-fish svg #top-fin,
+      .gobii-hero-fish svg #tail-fin,
+      .gobii-hero-fish svg #bottom-left-fin,
+      .gobii-hero-fish svg #bottom-right-fin,
+      .gobii-hero-fish svg #left-eye,
+      .gobii-hero-fish svg #right-eye,
+      .gobii-hero-fish svg #left-eye path,
+      .gobii-hero-fish svg #right-eye path {
+        animation: none !important;
+        transition: none !important;
+        will-change: auto;
+      }
+    }
+    {% endif %}
+
+    .game-of-life-panel {
       position: relative;
-      display: grid;
-      min-height: clamp(560px, 72vh, 760px);
-      place-items: center;
-      overflow: hidden;
-      padding: clamp(6.5rem, 13vw, 10rem) 1.5rem clamp(7rem, 14vw, 11rem);
-      color: #ece9f6;
-      background:
-        radial-gradient(circle at 74% 26%, rgba(124, 58, 237, 0.18), transparent 31rem),
-        linear-gradient(165deg, #100a20 0%, #16102b 56%, #1d153a 100%);
+      overflow: clip;
+      isolation: isolate;
+      z-index: 1;
     }
 
-    .shutdown-main::before {
-      position: absolute;
-      top: clamp(5rem, 11vw, 9rem);
-      left: max(1.5rem, calc(50% - 340px));
-      width: 42px;
-      height: 3px;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #c4b5fd, #f0abfc);
+    .game-of-life-panel::before {
       content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 20% 25%, rgba(79, 70, 229, 0.16) 0%, rgba(79, 70, 229, 0) 55%),
+        radial-gradient(circle at 80% 18%, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0) 60%),
+        radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.1) 0%, rgba(129, 140, 248, 0) 70%);
+      opacity: 0.8;
+      filter: blur(40px);
+      pointer-events: none;
+      z-index: 1;
     }
 
-    .shutdown-notice {
+    .game-of-life-panel::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
+      pointer-events: none;
+      z-index: 2;
+      mix-blend-mode: lighten;
+    }
+
+    .game-of-life-gradient-bg {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background: linear-gradient(180deg, rgba(99, 102, 241, 0.45) 0%, rgba(129, 140, 248, 0.5) 40%, rgba(59, 130, 246, 0.4) 100%);
+      -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
+      mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
+    }
+
+    .game-of-life-content {
       position: relative;
-      width: min(100%, 680px);
+      z-index: 20;
     }
 
-    .shutdown-kicker {
-      margin: 0 0 1.75rem;
-      color: #c4b5fd;
-      font-size: 0.75rem;
-      font-weight: 650;
-      letter-spacing: 0.19em;
-      text-transform: uppercase;
+    /* Pure white background for input areas */
+    .game-of-life-content .bg-white {
+      background: #ffffff;
     }
 
-    .shutdown-title {
-      max-width: 12ch;
-      margin: 0;
-      color: #fff;
-      font-size: clamp(2.75rem, 8vw, 5.75rem);
-      font-weight: 300;
-      letter-spacing: -0.055em;
-      line-height: 0.98;
-      text-wrap: balance;
+    /* Ensure crisp edges on rounded corners */
+    .game-of-life-content .rounded-xl {
+      border-radius: 0.75rem;
+      transform: translateZ(0);
+      -webkit-transform: translateZ(0);
     }
 
-    .shutdown-copy {
-      max-width: 590px;
-      margin-top: clamp(2rem, 5vw, 3.25rem);
-      color: #cfc7e8;
-      font-size: clamp(1.05rem, 2vw, 1.2rem);
-      line-height: 1.75;
+    .magic-cta {
+      position: relative;
+      overflow: hidden;
+      transform: translateZ(0);
+      box-shadow: 0 18px 32px -20px rgba(139, 92, 246, 0.55);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      animation: softPulse 4.2s ease-in-out infinite;
     }
 
-    .shutdown-copy p {
-      margin: 0;
+    .magic-cta::before {
+      content: "";
+      position: absolute;
+      inset: -40%;
+      background: radial-gradient(circle at center, rgba(196, 181, 253, 0.45), rgba(124, 58, 237, 0));
+      opacity: 0.35;
+      transform: scale(0.9);
+      animation: glowBloom 6s ease-in-out infinite;
+      pointer-events: none;
     }
 
-    .shutdown-copy p + p {
-      margin-top: 1.35rem;
+    .magic-cta::after {
+      content: "";
+      position: absolute;
+      top: -160%;
+      left: 0;
+      width: 35%;
+      height: 420%;
+      background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.15) 30%, rgba(255, 255, 255, 0.65) 50%, rgba(255, 255, 255, 0.15) 70%, transparent 100%);
+      transform: translateX(-140%) rotate(18deg);
+      animation: shimmerSweep 5.8s ease-in-out infinite;
+      pointer-events: none;
     }
 
-    .shutdown-date {
-      color: #fff;
-      font-weight: 600;
-      white-space: nowrap;
+    .magic-cta:hover {
+      transform: translateY(-1px) scale(1.01);
+      box-shadow: 0 20px 38px -18px rgba(109, 40, 217, 0.58);
     }
 
-    .shutdown-email {
-      color: #f0abfc;
-      font-weight: 600;
-      text-decoration-color: rgba(240, 171, 252, 0.45);
-      text-underline-offset: 0.2em;
-      white-space: nowrap;
-    }
-
-    .shutdown-email:hover {
-      color: #f5d0fe;
-      text-decoration-color: currentColor;
-    }
-
-    .shutdown-email:focus-visible {
-      border-radius: 2px;
-      outline: 2px solid #c4b5fd;
-      outline-offset: 4px;
-    }
-
-    @media (max-width: 520px) {
-      .shutdown-main {
-        min-height: 600px;
-        padding-right: 1.25rem;
-        padding-left: 1.25rem;
+    @keyframes softPulse {
+      0%, 100% {
+        filter: brightness(1);
       }
-
-      .shutdown-main::before {
-        left: 1.25rem;
-      }
-
-      .shutdown-title {
-        font-size: clamp(2.75rem, 15vw, 4rem);
+      45% {
+        filter: brightness(1.06);
       }
     }
+
+    @keyframes glowBloom {
+      0%, 100% {
+        opacity: 0.35;
+        transform: scale(0.92);
+      }
+      50% {
+        opacity: 0.6;
+        transform: scale(1.05);
+      }
+    }
+
+    @keyframes shimmerSweep {
+      0% {
+        transform: translateX(-140%) rotate(18deg);
+        opacity: 0;
+      }
+      20% {
+        opacity: 0.75;
+      }
+      45% {
+        transform: translateX(140%) rotate(18deg);
+        opacity: 0;
+      }
+      100% {
+        transform: translateX(160%) rotate(18deg);
+        opacity: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .magic-cta,
+      .magic-cta::before,
+      .magic-cta::after {
+        animation: none !important;
+        transition: none;
+      }
+    }
+
+    {% if homepage_perf_motion_reduction_enabled %}
+    @media (pointer: coarse), (max-width: 767px) {
+      .magic-cta,
+      .magic-cta::before,
+      .magic-cta::after {
+        animation: none !important;
+        transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+      }
+
+      .magic-cta::before,
+      .magic-cta::after {
+        opacity: 0;
+      }
+
+      .magic-cta:hover {
+        transform: none;
+        box-shadow: 0 18px 32px -20px rgba(139, 92, 246, 0.55);
+      }
+    }
+    {% endif %}
+
+    /* Scroll-triggered fade-in animation */
+    [data-animate] {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    [data-animate].is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      [data-animate] {
+        opacity: 1;
+        transform: none;
+        transition: none;
+      }
+    }
+
+    {% if homepage_perf_motion_reduction_enabled %}
+    @media (pointer: coarse), (max-width: 767px) {
+      [data-animate] {
+        opacity: 1;
+        transform: none;
+        transition: none;
+      }
+    }
+    {% endif %}
+
+    {% include "partials/_immersive_overlay_styles.html" %}
   </style>
+  {% include "home/_k_styles.html" %}
 {% endblock %}
-
 {% block content %}
-<main id="main-content" class="shutdown-main">
-  <article class="shutdown-notice" aria-labelledby="shutdown-title">
-    <p class="shutdown-kicker">Company update</p>
-    <h1 id="shutdown-title" class="shutdown-title">Gobii is winding down.</h1>
-    <div class="shutdown-copy">
-      <p>
-        Our final day of operations will be
-        <time class="shutdown-date" datetime="2026-09-01">September 1, 2026</time>.
-      </p>
-      <p>
-        To our customers, contributors, and everyone in the Gobii community: thank you.
-        We are deeply grateful for your trust, support, and belief in what we built together.
-      </p>
-      <p>
-        We are working on an agent export tool that will let you download a ZIP archive of
-        your agent data, along with brief instructions for transferring your agents to Manus,
-        Hermes, ChatGPT, Gemini, and other platforms. We will share more details here when it is ready.
-      </p>
-      <p>
-        If you have any questions, please contact us at
-        <a class="shutdown-email" href="mailto:{{ wind_down_contact_email }}">{{ wind_down_contact_email }}</a>.
-      </p>
+{% if home_use_k %}
+{% include "home/_k_page.html" %}
+{% else %}
+<main id="main-content" class="relative game-of-life-panel -mt-16 min-h-[420px] sm:min-h-[520px]">
+  <div class="game-of-life-gradient-bg" aria-hidden="true"></div>
+
+  <!-- Grid pattern overlay -->
+  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[-1]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
+
+  <!-- Seamless Gradient Fade -->
+  <div class="absolute bottom-0 left-0 right-0 h-64 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none z-10"></div>
+
+  <!-- ========================================================= -->
+  <!-- Agent Spawn Hero -->
+  <section class="relative pb-8 game-of-life-content z-20">
+
+    <!-- Content container with enhanced styling -->
+    <div class="relative max-w-5xl mx-auto px-6 pt-20 sm:pt-28 pb-0">
+
+      <!-- Ambient Glow centered on hero + input -->
+      <div class="absolute top-16 sm:top-24 left-1/2 -translate-x-1/2 w-[600px] sm:w-[1000px] h-[500px] sm:h-[800px] bg-white blur-[80px] sm:blur-[100px] opacity-90 rounded-full pointer-events-none -z-10"></div>
+
+      <!-- Main Headline -->
+      {% include "home/_hero.html" %}
+
+      <div class="gk-spawn contents">{% include "home/_spawn_module.html" %}</div>
+
     </div>
-  </article>
+  </section>
+
+  <!-- Value proposition sections (proprietary only) -->
+  {% if settings.GOBII_PROPRIETARY_MODE %}
+    {% include "home/_flow_strip.html" %}
+    <section id="what-is-gobii" class="relative py-10 sm:py-12" aria-labelledby="what-is-gobii-heading" data-animate>
+      <div class="max-w-3xl mx-auto px-6 text-center">
+        <h2 id="what-is-gobii-heading" class="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">What is Gobii?</h2>
+        <p class="mt-4 text-base sm:text-lg leading-relaxed text-slate-600">
+          Gobii gives recruiting teams always-on agents that source, screen, enrich, and deliver qualified candidates into the hiring tools they already use.
+        </p>
+      </div>
+    </section>
+    {% include "home/_value_sections.html" %}
+    {% include "home/_vision_and_trust.html" %}
+  {% endif %}
+
+  <!-- OR Divider -->
+  <section class="relative">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="relative flex items-center justify-center py-8 sm:py-10">
+        <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
+        <span class="flex-shrink-0 mx-6 text-xs font-bold tracking-[0.25em] uppercase text-indigo-400">OR</span>
+        <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
+      </div>
+    </div>
+  </section>
+  {% include "home/_directory.html" %}
 </main>
+{% endif %}
+  {% if homepage_perf_motion_reduction_enabled %}
+  <script>
+    window.GobiiHomePerf = window.GobiiHomePerf || (function () {
+      const matchesMedia = function (query) {
+        return typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
+      };
+
+      const shouldReduceHomepageMotion = function () {
+        return (
+          matchesMedia('(prefers-reduced-motion: reduce)') ||
+          matchesMedia('(pointer: coarse)') ||
+          matchesMedia('(max-width: 767px)')
+        );
+      };
+
+      const runWhenIdle = function (callback, timeout) {
+        const resolvedTimeout = timeout || 1500;
+        if ('requestIdleCallback' in window) {
+          window.requestIdleCallback(callback, { timeout: resolvedTimeout });
+          return;
+        }
+        window.setTimeout(callback, 250);
+      };
+
+      return {
+        runWhenIdle: runWhenIdle,
+        shouldReduceHomepageMotion: shouldReduceHomepageMotion
+      };
+    })();
+  </script>
+  {% endif %}
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const initFishCursor = function () {
+        const fish = document.querySelector('[data-gobii-fish-cursor]');
+        if (!fish) return;
+
+        const homePerf = window.GobiiHomePerf;
+        if (
+          homePerf &&
+          typeof homePerf.shouldReduceHomepageMotion === 'function' &&
+          homePerf.shouldReduceHomepageMotion()
+        ) {
+          return;
+        }
+
+        const MAX_X = 11;
+        const MAX_Y = 8;
+        const MAX_ROT = 3.2;
+        const MAX_EYE_X = 6.2;
+        const MAX_EYE_Y = 3.6;
+        const SMOOTHING = 0.14;
+
+        let targetX = 0;
+        let targetY = 0;
+        let targetRot = 0;
+        let targetEyeX = 0;
+        let targetEyeY = 0;
+        let currentX = 0;
+        let currentY = 0;
+        let currentRot = 0;
+        let currentEyeX = 0;
+        let currentEyeY = 0;
+        let rafId = null;
+
+        const applyTransform = () => {
+          currentX += (targetX - currentX) * SMOOTHING;
+          currentY += (targetY - currentY) * SMOOTHING;
+          currentRot += (targetRot - currentRot) * SMOOTHING;
+          currentEyeX += (targetEyeX - currentEyeX) * SMOOTHING;
+          currentEyeY += (targetEyeY - currentEyeY) * SMOOTHING;
+
+          fish.style.setProperty('--fish-cursor-x', `${currentX.toFixed(2)}px`);
+          fish.style.setProperty('--fish-cursor-y', `${currentY.toFixed(2)}px`);
+          fish.style.setProperty('--fish-cursor-rot', `${currentRot.toFixed(2)}deg`);
+          fish.style.setProperty('--fish-eye-x', `${currentEyeX.toFixed(2)}px`);
+          fish.style.setProperty('--fish-eye-y', `${currentEyeY.toFixed(2)}px`);
+
+          const stillMoving =
+            Math.abs(targetX - currentX) > 0.02 ||
+            Math.abs(targetY - currentY) > 0.02 ||
+            Math.abs(targetRot - currentRot) > 0.02 ||
+            Math.abs(targetEyeX - currentEyeX) > 0.02 ||
+            Math.abs(targetEyeY - currentEyeY) > 0.02;
+
+          if (stillMoving) {
+            rafId = window.requestAnimationFrame(applyTransform);
+          } else {
+            rafId = null;
+          }
+        };
+
+        const scheduleFrame = () => {
+          if (rafId !== null) return;
+          rafId = window.requestAnimationFrame(applyTransform);
+        };
+
+        const handleMove = (event) => {
+          const nx = (event.clientX / window.innerWidth) * 2 - 1;
+          const ny = (event.clientY / window.innerHeight) * 2 - 1;
+          const nMag = Math.hypot(nx, ny);
+          const nScale = nMag > 1 ? 1 / nMag : 1;
+
+          targetX = nx * MAX_X;
+          targetY = ny * MAX_Y;
+          targetRot = nx * MAX_ROT;
+          targetEyeX = nx * nScale * MAX_EYE_X;
+          targetEyeY = ny * nScale * MAX_EYE_Y;
+          scheduleFrame();
+        };
+
+        const reset = () => {
+          targetX = 0;
+          targetY = 0;
+          targetRot = 0;
+          targetEyeX = 0;
+          targetEyeY = 0;
+          scheduleFrame();
+        };
+
+        window.addEventListener('mousemove', handleMove, { passive: true });
+        document.addEventListener('mouseleave', reset);
+        window.addEventListener('blur', reset);
+      };
+
+      {% if homepage_perf_motion_reduction_enabled %}
+      if (window.GobiiHomePerf && typeof window.GobiiHomePerf.runWhenIdle === 'function') {
+        window.GobiiHomePerf.runWhenIdle(initFishCursor, 1800);
+        return;
+      }
+      window.setTimeout(initFishCursor, 250);
+      {% else %}
+      initFishCursor();
+      {% endif %}
+    });
+  </script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const textarea = document.getElementById('id_charter');
+      const ghostWrapper = document.getElementById('charter-ghost');
+      const ghostText = document.getElementById('charter-ghost-text');
+
+      if (!textarea || !ghostWrapper || !ghostText) {
+        return;
+      }
+
+      const homePerf = window.GobiiHomePerf;
+      const baseScenarios = [
+        ' find candidates with Python and healthcare AI experience each week.',
+        ' source product managers from healthcare startups and rank them by fit.',
+        ' build a weekly shortlist of senior backend engineers in New York.',
+        ' enrich candidate profiles with verified work history and contact details.',
+        ' screen new applicants against our role requirements every weekday.',
+        ' find technical founders who are ready for their next engineering role.',
+        ' keep our Greenhouse pipeline current and flag the strongest new matches.',
+        ' prepare personalized candidate outreach for recruiter review.',
+        ' source healthcare account executives and exclude staffing agencies.',
+        ' send hiring managers a ranked candidate brief every Monday.'
+      ];
+
+      function toggleGhostVisibility() {
+        const hasValue = textarea.value.trim().length > 0;
+        ghostWrapper.classList.toggle('opacity-0', hasValue);
+        ghostWrapper.classList.toggle('invisible', hasValue);
+        ghostWrapper.setAttribute('aria-hidden', hasValue ? 'true' : 'false');
+      }
+
+      textarea.addEventListener('input', toggleGhostVisibility);
+      textarea.addEventListener('focus', toggleGhostVisibility);
+      textarea.addEventListener('blur', toggleGhostVisibility);
+
+      // Submit on cmd/ctrl-Enter like the in-app composer. requestSubmit (not submit()) so the
+      // intelligence gate, CSRF, and analytics submit listeners all still run.
+      textarea.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' || event.isComposing) return;
+        if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+        const form = textarea.closest('form');
+        if (!form) return;
+        event.preventDefault();
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit();
+        } else {
+          form.submit();
+        }
+      });
+
+      toggleGhostVisibility();
+
+      if (
+        homePerf &&
+        typeof homePerf.shouldReduceHomepageMotion === 'function' &&
+        homePerf.shouldReduceHomepageMotion()
+      ) {
+        ghostText.textContent = baseScenarios[0];
+        return;
+      }
+
+      function shuffle(list) {
+        const array = [...list];
+        for (let i = array.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+      }
+
+      let scenarioQueue = [];
+      let currentScenario = '';
+      let lastScenario = '';
+
+      function refillQueue() {
+        scenarioQueue = shuffle(baseScenarios);
+        if (scenarioQueue.length > 1 && scenarioQueue[0] === lastScenario) {
+          [scenarioQueue[0], scenarioQueue[1]] = [scenarioQueue[1], scenarioQueue[0]];
+        }
+      }
+
+      function pickNextScenario() {
+        if (!scenarioQueue.length) {
+          refillQueue();
+        }
+        currentScenario = scenarioQueue.shift();
+        lastScenario = currentScenario;
+      }
+
+      refillQueue();
+      pickNextScenario();
+
+      let charIndex = 0;
+      let isDeleting = false;
+
+      ghostText.textContent = '';
+
+      function typeLoop() {
+        const hasValue = textarea.value.trim().length > 0;
+        if (hasValue) {
+          setTimeout(typeLoop, 400);
+          return;
+        }
+
+        if (!isDeleting && charIndex <= currentScenario.length) {
+          ghostText.textContent = currentScenario.slice(0, charIndex);
+          charIndex += 1;
+          setTimeout(typeLoop, 30 + Math.random() * 15);
+          return;
+        }
+
+        if (!isDeleting && charIndex > currentScenario.length) {
+          isDeleting = true;
+          setTimeout(typeLoop, 1500);
+          return;
+        }
+
+        if (isDeleting && charIndex > 0) {
+          charIndex -= 1;
+          ghostText.textContent = currentScenario.slice(0, charIndex);
+          setTimeout(typeLoop, 18 + Math.random() * 10);
+          return;
+        }
+
+        if (isDeleting && charIndex === 0) {
+          isDeleting = false;
+          pickNextScenario();
+          setTimeout(typeLoop, 300);
+          return;
+        }
+      }
+
+      const startTypeLoop = function () {
+        setTimeout(typeLoop, 400);
+      };
+
+      if (homePerf && typeof homePerf.runWhenIdle === 'function') {
+        homePerf.runWhenIdle(startTypeLoop, 1800);
+        return;
+      }
+      startTypeLoop();
+    });
+  </script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const selector = document.querySelector('[data-intelligence-selector]')
+	      if (!selector) {
+	        return
+	      }
+	      const trigger = selector.querySelector('[data-intelligence-trigger]')
+	      const menu = selector.querySelector('[data-intelligence-menu]')
+	      const input = selector.querySelector('input[name="preferred_llm_tier"]')
+	      const currentLabel = selector.querySelector('[data-intelligence-current]')
+	      const options = Array.from(selector.querySelectorAll('[data-intelligence-option]'))
+
+	      if (!trigger || !menu || !input || options.length === 0) {
+	        return
+	      }
+
+      const resolveLabel = (tier, fallback = 'this tier') => {
+        if (!tier) {
+          return fallback
+        }
+        const option = options.find((item) => item.dataset.tier === tier)
+        if (option && option.dataset.label) {
+          return option.dataset.label
+        }
+        return tier
+          .split('_')
+          .map((segment) => (segment ? segment[0].toUpperCase() + segment.slice(1) : segment))
+          .join(' ')
+      }
+
+	      const applySelection = (tier) => {
+	        const label = resolveLabel(tier)
+	        currentLabel.textContent = label
+	        options.forEach((item) => {
+	          const isSelected = item.dataset.tier === tier
+	          const checkIcon = item.querySelector('[data-intelligence-check]')
+	          if (checkIcon) {
+	            checkIcon.classList.toggle('hidden', !isSelected)
+	          }
+	          item.classList.toggle('bg-indigo-50/40', isSelected)
+	        })
+	      }
+
+	      const chevron = selector.querySelector('[data-intelligence-chevron]')
+
+	      // Portal the menu to <body> when opened so it isn't clipped/hidden by sibling stacking contexts.
+	      const originalParent = menu.parentNode
+	      const originalNextSibling = menu.nextSibling
+	      let isOpen = false
+	      let rafId = null
+
+	      const positionMenu = () => {
+	        if (!isOpen) return
+	        const anchorRect = selector.getBoundingClientRect()
+	        // Temporarily ensure menu is measurable.
+	        const prevVisibility = menu.style.visibility
+	        menu.style.visibility = 'hidden'
+	        menu.classList.remove('hidden')
+	        const menuRect = menu.getBoundingClientRect()
+	        menu.style.visibility = prevVisibility
+
+	        const gap = 6 // ~mt-1.5
+	        let top = anchorRect.bottom + gap
+	        let left = anchorRect.right - menuRect.width
+
+	        const padding = 8
+	        const maxLeft = Math.max(padding, window.innerWidth - menuRect.width - padding)
+	        left = Math.min(Math.max(padding, left), maxLeft)
+
+	        // If it would go below the viewport, try positioning above.
+	        const bottomOverflow = top + menuRect.height + padding - window.innerHeight
+	        if (bottomOverflow > 0) {
+	          const aboveTop = anchorRect.top - gap - menuRect.height
+	          if (aboveTop >= padding) {
+	            top = aboveTop
+	          }
+	        }
+
+	        menu.style.position = 'fixed'
+	        menu.style.top = `${Math.round(top)}px`
+	        menu.style.left = `${Math.round(left)}px`
+	        menu.style.right = 'auto'
+	        menu.style.bottom = 'auto'
+	        menu.style.marginTop = '0px'
+	        menu.style.zIndex = '1000'
+	      }
+
+	      const schedulePosition = () => {
+	        if (rafId) return
+	        rafId = window.requestAnimationFrame(() => {
+	          rafId = null
+	          positionMenu()
+	        })
+	      }
+
+	      const openMenu = () => {
+	        if (originalParent && menu.parentNode !== document.body) {
+	          document.body.appendChild(menu)
+	        }
+	        isOpen = true
+	        positionMenu()
+	        menu.classList.remove('hidden')
+	        trigger.setAttribute('aria-expanded', 'true')
+	        if (chevron) chevron.style.transform = 'rotate(180deg)'
+	      }
+
+	      const closeMenu = () => {
+	        isOpen = false
+	        menu.classList.add('hidden')
+	        trigger.setAttribute('aria-expanded', 'false')
+	        if (chevron) chevron.style.transform = ''
+	        if (originalParent && menu.parentNode === document.body) {
+	          if (originalNextSibling) {
+	            originalParent.insertBefore(menu, originalNextSibling)
+	          } else {
+	            originalParent.appendChild(menu)
+	          }
+	        }
+	      }
+
+	      trigger.addEventListener('click', (event) => {
+	        event.preventDefault()
+	        if (menu.classList.contains('hidden')) {
+	          openMenu()
+	        } else {
+	          closeMenu()
+	        }
+	      })
+
+	      document.addEventListener('click', (event) => {
+	        if (!isOpen) return
+	        const target = event.target
+	        if (trigger.contains(target) || menu.contains(target)) {
+	          return
+	        }
+	        closeMenu()
+	      })
+
+	      document.addEventListener('keydown', (event) => {
+	        if (event.key === 'Escape') {
+	          closeMenu()
+	        }
+	      })
+
+	      window.addEventListener('resize', schedulePosition)
+	      window.addEventListener('scroll', schedulePosition, { passive: true })
+
+	      options.forEach((option) => {
+	        option.addEventListener('click', (event) => {
+	          event.preventDefault()
+	          const tier = option.dataset.tier
+	          if (!tier) {
+	            return
+	          }
+	          input.value = tier
+	          applySelection(tier)
+	          closeMenu()
+	        })
+	      })
+
+      const form = document.getElementById('create-agent-form')
+      const gateModal = document.getElementById('intelligence-gate-modal')
+      const gateTitle = gateModal ? gateModal.querySelector('[data-gate-title]') : null
+      const gateMessage = gateModal ? gateModal.querySelector('[data-gate-message]') : null
+      const gateDetail = gateModal ? gateModal.querySelector('[data-gate-detail]') : null
+      const gateUpgrade = gateModal ? gateModal.querySelector('[data-gate-upgrade]') : null
+      const gateAddPack = gateModal ? gateModal.querySelector('[data-gate-add-pack]') : null
+      const gateContinue = gateModal ? gateModal.querySelector('[data-gate-continue]') : null
+      const gateClose = gateModal ? gateModal.querySelectorAll('[data-gate-close]') : []
+      const isAuthenticated = form ? form.dataset.authenticated === 'true' : false
+      const requiresTrialFlow = form ? form.dataset.requiresTrial === 'true' : false
+      const billingUrl = selector.dataset.billingUrl || '/app/billing'
+      const upgradeUrl = selector.dataset.intelligenceUpgrade || ''
+      const maxAllowedTier = selector.dataset.intelligenceMaxTier || 'standard'
+      const LOW_CREDIT_DAY_THRESHOLD = 2
+      let bypassGate = false
+      const submitForm = () => {
+        if (!form) return
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit()
+          return
+        }
+        form.submit()
+      }
+
+      const closeGate = () => {
+        if (!gateModal) return
+        gateModal.classList.add('hidden')
+        gateModal.setAttribute('aria-hidden', 'true')
+      }
+
+      const openGate = ({ locked, lowCredits, estimatedDaysRemaining, selectedLabel, allowedLabel }) => {
+        if (!gateModal || !gateTitle || !gateMessage || !gateContinue) return
+        const reason = locked && lowCredits ? 'both' : locked ? 'plan' : 'credits'
+        const remainingLabel = estimatedDaysRemaining !== null
+          ? (estimatedDaysRemaining < 1 ? 'less than 1' : estimatedDaysRemaining.toFixed(1))
+          : 'a few'
+
+        if (reason === 'plan') {
+          gateTitle.textContent = `Unlock ${selectedLabel}`
+          gateMessage.textContent = `Your plan does not include ${selectedLabel}.`
+        } else if (reason === 'credits') {
+          gateTitle.textContent = 'Credits running low'
+          gateMessage.textContent = `At ${selectedLabel}, you have about ${remainingLabel} days left.`
+        } else {
+          gateTitle.textContent = `Unlock ${selectedLabel}`
+          gateMessage.textContent = `Your plan does not include ${selectedLabel}, and you have about ${remainingLabel} days left.`
+        }
+
+        if (gateDetail) {
+          gateDetail.textContent = locked
+            ? 'Upgrade to Pro or Scale to unlock this tier.'
+            : 'Higher tiers burn credits faster.'
+        }
+
+        if (gateUpgrade) {
+          gateUpgrade.classList.toggle('hidden', !upgradeUrl)
+        }
+        if (gateAddPack) {
+          gateAddPack.classList.toggle('hidden', !billingUrl)
+        }
+        gateContinue.textContent = locked ? `Use ${allowedLabel}` : 'Continue anyway'
+        gateModal.classList.remove('hidden')
+        gateModal.setAttribute('aria-hidden', 'false')
+      }
+
+      if (gateUpgrade) {
+        gateUpgrade.addEventListener('click', () => {
+          if (upgradeUrl) {
+            window.open(upgradeUrl, '_top')
+          }
+          closeGate()
+        })
+      }
+
+      if (gateAddPack) {
+        gateAddPack.addEventListener('click', () => {
+          if (billingUrl) {
+            window.open(billingUrl, '_top')
+          }
+          closeGate()
+        })
+      }
+
+      if (gateContinue && form) {
+        gateContinue.addEventListener('click', () => {
+          const selectedOption = options.find((item) => item.dataset.tier === input.value) || options[0]
+          const locked = selectedOption ? selectedOption.dataset.locked === 'true' : false
+          if (locked) {
+            input.value = maxAllowedTier || 'standard'
+            applySelection(input.value)
+          }
+          bypassGate = true
+          closeGate()
+          submitForm()
+        })
+      }
+
+      if (gateClose && gateClose.length) {
+        gateClose.forEach((btn) => {
+          btn.addEventListener('click', () => closeGate())
+        })
+      }
+
+      if (form) {
+        form.addEventListener('submit', async (event) => {
+          if (bypassGate) {
+            bypassGate = false
+            return
+          }
+
+          if (!isAuthenticated) {
+            bypassGate = true
+            submitForm()
+            return
+          }
+
+          if (requiresTrialFlow) {
+            bypassGate = true
+            submitForm()
+            return
+          }
+
+          event.preventDefault()
+
+          const selectedOption = options.find((item) => item.dataset.tier === input.value) || options[0]
+          const selectedLabel = resolveLabel(input.value, 'this tier')
+          const allowedLabel = resolveLabel(maxAllowedTier, 'this tier')
+          const locked = selectedOption ? selectedOption.dataset.locked === 'true' : false
+
+          let lowCredits = false
+          let estimatedDaysRemaining = null
+          if (isAuthenticated) {
+            try {
+              const tierKey = input.value || 'standard'
+              const response = await fetch(`/console/api/usage/burn-rate/?tier=${encodeURIComponent(tierKey)}`, { credentials: 'same-origin' })
+              if (response.ok) {
+                const payload = await response.json()
+                const quota = payload ? payload.quota : null
+                const projection = payload ? payload.projection : null
+                const hasUnlimited = quota ? Boolean(quota.unlimited) : false
+                const extraEnabled = Boolean(payload && payload.extra_tasks && payload.extra_tasks.enabled)
+                const projectedDays = projection && typeof projection.projected_days_remaining === 'number'
+                  ? projection.projected_days_remaining
+                  : null
+                if (!hasUnlimited && !extraEnabled && projectedDays !== null) {
+                  estimatedDaysRemaining = projectedDays
+                  lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
+                }
+              }
+            } catch (err) {
+              lowCredits = false
+            }
+          }
+
+          if (!locked && !lowCredits) {
+            bypassGate = true
+            submitForm()
+            return
+          }
+
+          openGate({ locked, lowCredits, estimatedDaysRemaining, selectedLabel, allowedLabel })
+        })
+      }
+
+      applySelection(input.value || 'standard')
+    })
+  </script>
+    <script>
+      function setPrompt(promptText) {
+        const textarea = document.querySelector('textarea[name="charter"]');
+        if (textarea) {
+          textarea.value = promptText;
+          textarea.focus();
+          textareaAutoResize(textarea);
+        }
+
+        // Analytics CTA
+        if (window.analytics && analytics.track) {
+          const properties = {
+            {% if user.is_authenticated %}user_id: "{{ user }}", {% endif %}
+            charter: promptText,
+            medium: 'Web',
+          };
+          analytics.track('{{ analytics.cta.CTA_EXAMPLE_AGENT_CLICKED.value }}', properties);
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        const textarea = document.querySelector('textarea[name="charter"]');
+        if (textarea) {
+          textareaAutoResize(textarea);
+          {% if home_use_k %}
+          // The charter box sits below the fold on the template-first layout;
+          // focusing it on load would scroll the visitor past the hero.
+          return;
+          {% endif %}
+          const homePerf = window.GobiiHomePerf;
+          if (
+            homePerf &&
+            typeof homePerf.shouldReduceHomepageMotion === 'function' &&
+            homePerf.shouldReduceHomepageMotion()
+          ) {
+            return;
+          }
+          textarea.focus();
+          // Move cursor to the end of the text
+          const length = textarea.value.length;
+          textarea.setSelectionRange(length, length);
+        }
+      });
+
+      function textareaAutoResize(el) {
+        const maxHeight = parseInt(el.dataset.maxHeight || 400);
+        el.style.height = 'auto';
+        if (el.scrollHeight <= maxHeight) {
+          el.style.height = el.scrollHeight + 'px';
+          el.style.overflowY = 'hidden';
+        } else {
+          el.style.height = maxHeight + 'px';
+          el.style.overflowY = 'auto';
+        }
+      }
+    </script>
+
+    {% include "partials/_immersive_overlay.html" %}
+
+    <script>
+      (function () {
+        const STORAGE_KEYS = {
+          type: 'gobii:console:context-type',
+          id: 'gobii:console:context-id',
+        };
+        const LEGACY_KEYS = {
+          type: 'contextType',
+          id: 'contextId',
+        };
+
+        function readStoredContextValue(key) {
+          try {
+            return window.sessionStorage.getItem(STORAGE_KEYS[key])
+              || window.localStorage.getItem(STORAGE_KEYS[key])
+              || window.localStorage.getItem(LEGACY_KEYS[key])
+              || '';
+          } catch (error) {
+            return '';
+          }
+        }
+
+        document.addEventListener('submit', function (event) {
+          const form = event.target;
+          if (!(form instanceof HTMLFormElement) || form.id !== 'create-agent-form') {
+            return;
+          }
+          const contextTypeInput = form.querySelector('#agent-context-type');
+          const contextIdInput = form.querySelector('#agent-context-id');
+          const contextType = readStoredContextValue('type');
+          const contextId = readStoredContextValue('id');
+          if (!contextType || !contextId || !contextTypeInput || !contextIdInput) {
+            return;
+          }
+          contextTypeInput.value = contextType;
+          contextIdInput.value = contextId;
+        }, true);
+      })();
+    </script>
+
+    <script>
+      (function () {
+        const csrfTokenUrl = "{% url 'pages:homepage_csrf_token' %}";
+        const csrfFieldName = "csrfmiddlewaretoken";
+        let csrfRequest = null;
+
+        function readCsrfToken() {
+          if (typeof window.getCsrfTokenValue === 'function') {
+            return window.getCsrfTokenValue() || '';
+          }
+          return '';
+        }
+
+        function setFormCsrfToken(form, token) {
+          if (!token) return;
+          let input = form.querySelector(`input[name="${csrfFieldName}"]`);
+          if (!input) {
+            input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = csrfFieldName;
+            form.prepend(input);
+          }
+          input.value = token;
+        }
+
+        async function fetchCsrfToken() {
+          const existingToken = readCsrfToken();
+          if (existingToken) {
+            return existingToken;
+          }
+          if (!csrfRequest) {
+            csrfRequest = fetch(csrfTokenUrl, {
+              credentials: 'same-origin',
+              headers: { 'Accept': 'application/json' },
+            })
+              .then(async (response) => {
+                if (!response.ok) {
+                  throw new Error('CSRF token request failed');
+                }
+                const payload = await response.json();
+                return payload.csrfToken || readCsrfToken();
+              })
+              .finally(() => {
+                csrfRequest = null;
+              });
+          }
+          return csrfRequest;
+        }
+
+        document.addEventListener('submit', function (event) {
+          const form = event.target;
+          if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-lazy-csrf')) {
+            return;
+          }
+          const existingInput = form.querySelector(`input[name="${csrfFieldName}"]`);
+          if (existingInput && existingInput.value) {
+            return;
+          }
+          const cookieToken = readCsrfToken();
+          if (cookieToken) {
+            setFormCsrfToken(form, cookieToken);
+            return;
+          }
+
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          fetchCsrfToken()
+            .then((token) => {
+              setFormCsrfToken(form, token);
+              if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+              } else {
+                form.submit();
+              }
+            })
+            .catch(() => {
+              form.submit();
+            });
+        }, true);
+      })();
+    </script>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('create-agent-form');
+        if (form) {
+          form.addEventListener('submit', function (e) {
+            // Optional: fire analytics before submit
+            if (window.analytics && analytics.track) {
+              const properties = {
+                {% if user.is_authenticated %}user_id: "{{ user.id }}", {% endif %}
+                charter: document.querySelector('textarea[name="charter"]').value,
+                medium: 'Web'
+              };
+
+              analytics.track('{{ analytics.cta.CTA_CREATE_AGENT_CLICKED.value }}', properties);
+            }
+          });
+        }
+      });
+    </script>
+
+    {% include "partials/_immersive_overlay_script.html" %}
+
+    <!-- Scroll-triggered fade-in -->
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        const initScrollAnimations = function () {
+          if (
+            window.GobiiHomePerf &&
+            typeof window.GobiiHomePerf.shouldReduceHomepageMotion === 'function' &&
+            window.GobiiHomePerf.shouldReduceHomepageMotion()
+          ) {
+            return;
+          }
+
+          const animatedElements = document.querySelectorAll('[data-animate]');
+          if (!animatedElements.length) {
+            return;
+          }
+
+          if (!('IntersectionObserver' in window)) {
+            animatedElements.forEach(function (el) {
+              el.classList.add('is-visible');
+            });
+            return;
+          }
+
+          var observer = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('is-visible');
+                observer.unobserve(entry.target);
+              }
+            });
+          }, { threshold: 0.15 });
+          animatedElements.forEach(function (el) {
+            observer.observe(el);
+          });
+        };
+
+        initScrollAnimations();
+      });
+    </script>
 {% endblock %}
