@@ -61,7 +61,7 @@
   {% endif %}
 {% endblock %}
 {% block content %}
-<div class="gk-luxe relative overflow-hidden" id="pricing-page" data-current-plan="{{ current_plan_id|default:'' }}" data-current-plan-paid="{{ current_plan_is_paid|yesno:'true,false' }}">
+<div class="gk-luxe relative overflow-hidden" id="pricing-page">
   <div class="gk-aurora-drift" aria-hidden="true"></div>
   <style>
     #pricing-page { padding-bottom: 84px; }
@@ -81,11 +81,6 @@
                         align-content: start; gap: 8px; font-size: 13px; line-height: 1.5; color: #d5cdec; }
     .pricing-features .font-semibold { color: #fff; }
     .pricing-features i, .pricing-features svg { color: #a78bfa; }
-    .pricing-card .plan-cta { width: 100%; }
-    .pricing-cta-disabled { margin-top: auto; display: inline-flex; min-height: 48px; width: 100%;
-        align-items: center; justify-content: center; border-radius: 12px;
-        border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04); color: #8b7fb8;
-        font-size: 14px; font-weight: 600; cursor: not-allowed; user-select: none; }
     .pricing-trial-note { margin-top: 12px; text-align: center; font-size: 12px; color: #8b7fb8; }
     .pricing-grid-note { margin-top: 28px; text-align: center; font-size: 12px; color: #8b7fb8; }
     .pricing-row2 { max-width: 1120px; margin: 20px auto 0; padding: 0 24px; display: grid;
@@ -153,25 +148,6 @@
             </li>
           {% endfor %}
         </ul>
-        {% if plan.disabled or plan.cta_disabled or plan.current_plan %}
-          <span class="pricing-cta-disabled">{{ plan.cta }}</span>
-        {% else %}
-          <a href="{{ plan.cta_url }}"
-            data-plan-code="{{ plan.code }}"
-            data-plan-name="{{ plan.name }}"
-            {% if not plan.external %}
-            data-cta-signup-modal="pricing-plan"
-            {% endif %}
-            data-analytics-cta-id="{% if plan.analytics_cta_id %}{{ plan.analytics_cta_id }}{% else %}pricing_{{ plan.code|lower }}_plan{% endif %}"
-            data-analytics-placement="pricing_grid"
-            data-analytics-intent="{{ plan.analytics_intent|default:'select_plan' }}"
-            data-analytics-label="{{ plan.cta }}"
-            {% if plan.external %}target="_blank" rel="noopener noreferrer"{% endif %}
-            class="plan-cta mt-auto {% if plan.cta_variant == 'primary' %}gk-btn{% else %}gk-btn-quiet{% endif %}">
-            {% if plan.cta_icon %}<i data-lucide="{{ plan.cta_icon }}" class="h-4 w-4"></i>{% endif %}
-            {{ plan.cta }}
-          </a>
-        {% endif %}
         {% if plan.trial_cancel_text %}
           <p class="pricing-trial-note">{{ plan.trial_cancel_text }}</p>
         {% endif %}
@@ -191,10 +167,6 @@
         <h3>Let's design your deployment.</h3>
         <p>Enterprise plans with dedicated infrastructure, SLAs, and custom governance.</p>
       </div>
-      <a href="{% url 'proprietary:prequalify' %}" class="gk-btn gk-btn-sm">
-        {% cta_text "cta_enterprise_request_call" fallback="Request a call" %}
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-      </a>
     </div>
     <div class="gk-glassrow pricing-mini">
       <div>
@@ -309,85 +281,4 @@
   </div>
 </div>
 
-<!-- Plan change confirmation modal -->
-<div id="plan-change-modal" class="hs-overlay hidden fixed inset-0 z-[90] flex items-center justify-center">
-  <div class="absolute inset-0 bg-slate-900/60"></div>
-  <div class="relative max-w-lg w-[92%] sm:w-full rounded-2xl p-6 animate-[fadeIn_120ms_ease-out]" style="background:#1e1337;border:1px solid rgba(255,255,255,.14);box-shadow:0 30px 80px rgba(5,2,16,.6);color:#ece9f6">
-    <div class="flex items-start justify-between gap-4">
-      <div>
-        <p class="text-xs font-semibold uppercase tracking-[0.08em]" style="color:#8b7fb8">Confirm change</p>
-        <h3 id="plan-change-title" class="mt-1 text-xl font-semibold text-white"></h3>
-      </div>
-      <button type="button" style="color:#8b7fb8" data-close-plan-modal>
-        <svg class="w-5 h-5" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6 6 18M6 6l12 12"/></svg>
-      </button>
-    </div>
-    <p id="plan-change-body" class="mt-3 text-sm" style="color:#b7aed4"></p>
-    <div class="mt-6 flex flex-col sm:flex-row sm:justify-end gap-3">
-      <button type="button" class="gk-btn-quiet w-full sm:w-auto" data-close-plan-modal>Keep current plan</button>
-      <button type="button" class="gk-btn w-full sm:w-auto" id="plan-change-confirm">Change plan</button>
-    </div>
-  </div>
-</div>
-
-<script>
-  (() => {
-    const page = document.getElementById("pricing-page");
-    if (!page) return;
-
-    const currentPlan = (page.dataset.currentPlan || "").toLowerCase();
-    const currentPaid = page.dataset.currentPlanPaid === "true";
-    const paidPlans = new Set(["{{ PlanNames.STARTUP }}", "{{ PlanNames.SCALE }}"]);
-    const modal = document.getElementById("plan-change-modal");
-    const titleEl = document.getElementById("plan-change-title");
-    const bodyEl = document.getElementById("plan-change-body");
-    const confirmBtn = document.getElementById("plan-change-confirm");
-    let pendingHref = null;
-
-    const closeModal = () => {
-      modal.classList.add("hidden");
-      pendingHref = null;
-    };
-
-    modal?.querySelectorAll("[data-close-plan-modal]").forEach(btn => {
-      btn.addEventListener("click", closeModal);
-    });
-
-    confirmBtn?.addEventListener("click", () => {
-      if (pendingHref) {
-        window.location.href = pendingHref;
-      }
-    });
-
-    const shouldConfirm = (targetPlan) => {
-      if (!currentPaid) return false;
-      if (!targetPlan) return false;
-      if (targetPlan === currentPlan) return false;
-      // Only confirm when switching between paid plans.
-      return paidPlans.has(targetPlan);
-    };
-
-    document.querySelectorAll(".plan-cta").forEach(link => {
-      link.addEventListener("click", (e) => {
-        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-          return;
-        }
-        const targetPlan = (link.dataset.planCode || "").toLowerCase();
-        const targetName = link.dataset.planName || "this plan";
-        if (!shouldConfirm(targetPlan)) {
-          return;
-        }
-
-        e.preventDefault();
-	        pendingHref = link.getAttribute("href");
-
-        if (titleEl) titleEl.textContent = `Switch to ${targetName}`;
-        if (bodyEl) {
-          bodyEl.textContent = "You’re switching plans. We’ll update your billing and keep your payment method on file.";
-        }
-        modal.classList.remove("hidden");
-      });
-    });
-  })();
-</script>
 {% endblock %}
