@@ -3,7 +3,6 @@ from functools import lru_cache
 import json
 import mimetypes
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Mapping
 from urllib.parse import parse_qsl, urlencode, urlsplit
 import uuid
@@ -33,7 +32,6 @@ from django.db import DatabaseError
 from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.db.models.functions import Lower
 from api.models import (
-    MCPServerConfig,
     PaidPlanIntent,
     PersistentAgent,
     PersistentAgentTemplate,
@@ -45,9 +43,7 @@ from api.models import (
     TrialPromoRedemptionStatusChoices,
     UserBilling,
 )
-from api.agent.short_description import build_listing_description
 from agents.services import PretrainedWorkerTemplateService
-from api.models import OrganizationMembership
 from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial_eligibility, user_has_prior_individual_history
 from api.services.trial_promos import (
     TRIAL_PROMO_REASON_EMAIL_NOT_ALLOWLISTED,
@@ -127,27 +123,24 @@ from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from constants.feature_flags import (
     CTA_SIGNUP_FIRST,
     CTA_SIGNUP_MODAL,
-    HOMEPAGE_PERF_MOTION_REDUCTION,
     SOLUTION_CRAWLABLE_LINKS,
     STRIPE_SCALE_TRIAL_CHECKOUT_BILLING_ADDRESS_REQUIRED,
     STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_ENABLED,
     STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_OPTIONAL,
 )
-from util.urls import IMMERSIVE_APP_BASE_PATH, IMMERSIVE_RETURN_TO_SESSION_KEY, append_context_query, append_query_params, build_immersive_agents_url, build_immersive_chat_url, normalize_return_to
-from pages.context_processors import account_info as build_account_info_context
+from util.urls import IMMERSIVE_APP_BASE_PATH, IMMERSIVE_RETURN_TO_SESSION_KEY, append_context_query, append_query_params, normalize_return_to
 from util.attribution_referrers import ATTRIBUTION_REFERRER_SESSION_KEYS, clean_acquisition_referrer, decode_attribution_value
-from util.waffle_flags import is_waffle_flag_active, is_waffle_switch_active
+from util.waffle_flags import is_waffle_flag_active
 from util.fish_collateral import build_web_manifest_payload
-from api.services.pipedream_apps import PipedreamCatalogError, PipedreamCatalogService, get_owner_selected_app_slugs
-from api.services.native_integrations import list_native_integration_providers
+from api.services.pipedream_apps import PipedreamCatalogError, PipedreamCatalogService
 from api.pipedream_app_utils import normalize_app_slugs
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from middleware.utm_capture import UTMTrackingMiddleware
 from console.context_helpers import build_console_context, resolve_console_context
 from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import render_public_template_markdown, load_page, get_prev_next, get_all_doc_pages
-from .homepage_cache import get_homepage_integrations_payload, get_homepage_pretrained_payload
-from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, build_homepage_structured_data
+from .homepage_cache import get_homepage_integrations_payload
+from .homepage_schema import WIND_DOWN_CONTACT_EMAIL, build_homepage_structured_data
 from .legacy_pretrained_worker_redirects import (
     get_legacy_pretrained_worker_redirect,
     get_retired_library_template_redirect,
@@ -176,8 +169,7 @@ from .public_template_urls import (
 from .comparisons import COMPARISON_CATALOG, COMPARISON_STATUS_PUBLISHED, get_comparison, get_published_comparisons
 from .forms import MarketingContactForm
 from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE, AGENT_TEMPLATE_SOURCE_SESSION_KEY, AGENT_TEMPLATE_SOURCE_TRIAL_PROMO, stage_agent_template_session
-from console.views import build_llm_intelligence_props
-from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
+from api.agent.core.llm_config import resolve_preferred_tier_for_owner
 from django.contrib import sitemaps
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
@@ -225,104 +217,8 @@ SIGNUP_TRACKING_SESSION_KEYS = (
     'signup_auth_provider',
 )
 PREFERRED_LLM_TIER_SESSION_KEY = "agent_preferred_llm_tier"
-HOMEPAGE_INLINE_INTEGRATION_SLUGS = (
-    "linkedin",
-    "google_sheets",
-    "trello",
-    "slack",
-)
-HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
-    "google_sheets": "images/integrations/pipedream/google_sheets.svg",
-    "linkedin": "images/integrations/pipedream/linkedin.svg",
-    "slack": "images/integrations/pipedream/slack.svg",
-    "trello": "images/integrations/pipedream/trello.svg",
-}
-HOMEPAGE_META_TITLE_SUFFIX = "AI Recruiting Agents for Candidate Sourcing"
-# Category labels are free text and drift between deployments ("People" in code
-# fallbacks, "Recruiting" in production rows), so the recruiting homepage accepts
-# the known recruiting labels case-insensitively.
-HOMEPAGE_RECRUITING_CATEGORY_LABELS = {
-    "people",
-    "recruiting",
-    "recruitment",
-    "hr & recruiting",
-    "talent",
-}
-HOMEPAGE_HERO_GROUP_DEFS = (
-    (
-        "recruiting",
-        "Recruiting",
-        HOMEPAGE_RECRUITING_CATEGORY_LABELS,
-    ),
-)
-HOMEPAGE_HERO_ROW_SIZE = 3
-HOMEPAGE_HERO_FEATURED_TEMPLATE_CODES = {
-    "recruiting": (
-        "ai-agent-for-candidate-sourcing",
-        "talent-scout",
-    ),
-}
+HOMEPAGE_META_TITLE_SUFFIX = "Company Update"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
-
-
-def build_homepage_hero_groups(templates: list[dict]) -> list[dict]:
-    groups = []
-    for key, label, category_labels in HOMEPAGE_HERO_GROUP_DEFS:
-        workers = [
-            SimpleNamespace(**template)
-            for template in templates
-            if (template.get("category") or "").strip().lower() in category_labels
-        ]
-        if workers:
-            featured_codes = HOMEPAGE_HERO_FEATURED_TEMPLATE_CODES.get(key, ())
-            featured_worker = next(
-                (
-                    worker
-                    for featured_code in featured_codes
-                    for worker in workers
-                    if worker.code == featured_code
-                ),
-                workers[0],
-            )
-            groups.append(
-                {
-                    "key": key,
-                    "label": label,
-                    "workers": workers[:HOMEPAGE_HERO_ROW_SIZE],
-                    "featured_worker": featured_worker,
-                }
-            )
-    return groups
-
-
-def _with_homepage_inline_integration_icon(app: dict) -> dict:
-    slug = str(app.get("slug") or "").strip()
-    icon_path = HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS.get(slug)
-    if not icon_path:
-        return app
-    return {**app, "inline_icon_url": static(icon_path)}
-
-
-def _homepage_native_integration_providers() -> list[dict[str, object]]:
-    return [
-        {
-            "provider_key": provider.key,
-            "display_name": provider.display_name,
-            "description": provider.description,
-            "auth_type": provider.auth_type,
-            "icon": provider.icon,
-            "api_hosts": list(provider.api_hosts),
-            "scopes": list(provider.scopes),
-            "connected": False,
-            "scope": "",
-            "expires_at": None,
-            "connect_url": reverse("console-native-integration-connect", args=[provider.key]),
-            "files_url": reverse("console-native-integration-files", args=[provider.key]),
-            "picker_token_url": reverse("console-native-integration-picker-token", args=[provider.key]),
-            "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
-        }
-        for provider in list_native_integration_providers()
-    ]
 
 
 def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
@@ -1066,389 +962,42 @@ def _create_checkout_session_with_customer_context(
 class HomePage(TemplateView):
     template_name = "home.html"
 
-    def _renders_legacy_home(self) -> bool:
-        # Mirrors the template-branch decision made in get_context_data: landing
-        # params, explicit custom creation, and a session-saved (non-template)
-        # charter render the legacy page with the charter box; the default render
-        # is the template-first page.
-        if not settings.GOBII_PROPRIETARY_MODE:
-            return True
-        request = self.request
-        if request.GET.get("spawn") == "1":
-            return True
-        if "dc" in request.GET or "g" in request.GET:
-            return True
-        return (
-            "agent_charter" in request.session
-            and request.session.get("agent_charter_source") != "template"
-        )
-
-    def _has_direct_checkout_cta(self) -> bool:
-        if not settings.GOBII_PROPRIETARY_MODE or not self.request.user.is_authenticated:
-            return False
-        # The direct-checkout upsell panel only exists on the legacy layout.
-        if not self._renders_legacy_home():
-            return False
-
-        account = build_account_info_context(self.request).get("account") or {}
-        usage = account.get("usage") or {}
-        agents_available = usage.get("agents_available")
-        return (
-            usage.get("agents_unlimited") is not True
-            and agents_available is not None
-            and agents_available <= 0
-        )
-
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["suppress_htmx"] = True
-        context["suppress_preline"] = True
-        context["suppress_phone_format_js"] = True
-        context["defer_auth_modal_assets"] = True
-        context["suppress_stripe_js"] = not self._has_direct_checkout_cta()
-        context["homepage_perf_motion_reduction_enabled"] = is_waffle_switch_active(
-            HOMEPAGE_PERF_MOTION_REDUCTION,
-            default=True,
-        )
         home_brand_name = settings.PUBLIC_BRAND_NAME or "Gobii"
-        context["home_brand_name"] = home_brand_name
-        context["home_meta_title"] = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
-        context["home_meta_description"] = (
-            f"{home_brand_name} recruiting agents source, screen, and enrich qualified "
-            "candidates, then deliver source-linked shortlists to your ATS on schedules "
-            "your hiring team chooses."
+        home_meta_title = f"{home_brand_name} - {HOMEPAGE_META_TITLE_SUFFIX}"
+        home_meta_description = (
+            f"{home_brand_name} is winding down. Our final day of operations will be "
+            "September 1, 2026. We are preparing agent exports and transfer guidance for customers."
         )
-        context["home_social_image_alt"] = f"{home_brand_name} AI recruiting agent preview"
-        context["home_recruiting_only"] = True
-        context["home_social_metadata_enabled"] = settings.GOBII_PROPRIETARY_MODE
-        context["home_canonical_url"] = _public_site_absolute_url("/")
-        context["home_social_image_url"] = _public_site_absolute_url(
-            static(HOMEPAGE_SOCIAL_IMAGE_PATH)
-        )
-        context["home_custom_agent_creation"] = self.request.GET.get("spawn") == "1"
-        # Add agent charter form for the home page spawn functionality
-        from console.forms import PersistentAgentCharterForm
-
-        initial = {}
-        resolved = None
-
-        # If 'spawn=1' parameter is present, clear any stored charter to start fresh
-        if self.request.GET.get('spawn') == '1':
-            if 'agent_charter' in self.request.session:
-                del self.request.session['agent_charter']
-            if 'agent_charter_source' in self.request.session:
-                del self.request.session['agent_charter_source']
-            if PREFERRED_LLM_TIER_SESSION_KEY in self.request.session:
-                del self.request.session[PREFERRED_LLM_TIER_SESSION_KEY]
-            initial['charter'] = ''
-        # If the GET parameter 'dc' (default charter) is present, use it in the initial data
-        elif 'dc' in self.request.GET:
-            initial['charter'] = self.request.GET['dc'].strip()
-            context['default_charter'] = initial['charter']
-        elif 'g' in self.request.GET:
-            # If 'g' is present, it indicates a landing page code
-            try:
-                landing = LandingPage.objects.get(code=self.request.GET['g'], disabled=False)
-                initial['charter'] = landing.charter.strip()
-                context['default_charter'] = initial['charter']
-
-                hero_text = landing.hero_text.strip()
-
-                # Replace {blue} and {/blue} tags with HTML span elements
-                hero_text = escape(hero_text)  # Escape HTML to prevent XSS
-                hero_text = hero_text.replace(
-                    "{blue}",
-                    '<span class="bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">'
-                ).replace(
-                    "{/blue}",
-                    '</span>'
-                )
-
-                context['landing_hero_text'] = hero_text
-
-                context['landing_preview_image'] = landing.image_url.strip() if landing.image_url else None
-                context['landing_title'] = landing.title.strip() if landing.title else None
-                context['landing_code'] = landing.code.strip() if landing.code else None
-
-            except LandingPage.DoesNotExist:
-                # If no valid landing page found, use an empty charter
-                initial['charter'] = ''
-                context['default_charter'] = ''
-        elif 'agent_charter' in self.request.session:
-            if self.request.session.get('agent_charter_source') != 'template':
-                initial['charter'] = self.request.session['agent_charter'].strip()
-                context['default_charter'] = initial['charter']
-                context['agent_charter_saved'] = True
-
-        context['agent_charter_form'] = PersistentAgentCharterForm(
-            initial=initial
-        )
-
-        if not settings.VITE_USE_DEV_SERVER:
-            try:
-                from config.vite import ViteManifestError, get_vite_asset
-                context["immersive_app_assets"] = get_vite_asset("src/main.tsx")
-            except ViteManifestError:
-                context["immersive_app_assets"] = None
-
-        if self.request.user.is_authenticated:
-            from console.context_helpers import build_console_context
-
-            resolved = build_console_context(self.request)
-            context['current_context'] = {
-                'type': resolved.current_context.type,
-                'id': resolved.current_context.id,
-                'name': resolved.current_context.name,
-            }
-            context['can_manage_org_agents'] = resolved.can_manage_org_agents
-            if resolved.current_membership is not None:
-                context['current_membership'] = resolved.current_membership
-
-            context['user_organizations'] = (
-                OrganizationMembership.objects.filter(
-                    user=self.request.user,
-                    status=OrganizationMembership.OrgStatus.ACTIVE,
-                )
-                .select_related('org')
-                .order_by('org__name')
-            )
-
-        intelligence_upgrade_url = None
-        if settings.GOBII_PROPRIETARY_MODE:
-            try:
-                intelligence_upgrade_url = reverse('proprietary:pricing')
-            except NoReverseMatch:
-                try:
-                    intelligence_upgrade_url = reverse('proprietary:startup_checkout')
-                except NoReverseMatch:
-                    intelligence_upgrade_url = None
-
-        owner = None
-        owner_type = 'user'
-        organization = None
-        if self.request.user.is_authenticated:
-            owner = self.request.user
-            if resolved and resolved.current_context.type == 'organization' and resolved.current_membership is not None:
-                organization = resolved.current_membership.org
-                owner = organization
-                owner_type = 'organization'
-
-        home_spawn_requires_trial = False
-        if self.request.user.is_authenticated:
-            in_organization_context = bool(
-                resolved
-                and resolved.current_context.type == 'organization'
-                and resolved.current_membership is not None
-            )
-            home_spawn_requires_trial = (
-                not in_organization_context
-                and not can_user_use_personal_agents_and_api(self.request.user)
-            )
-        context["home_spawn_requires_trial"] = home_spawn_requires_trial
-
-        preferred_llm_tier_raw = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
-        # Never plan-clamp in the homepage selector. Clamping happens when the agent is
-        # persisted and at runtime.
-        preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
-        # Do not write back the clamped tier into the session.
-        # We want to preserve the user's requested tier so it can take effect automatically
-        # after a plan upgrade (e.g., returning from Stripe before webhooks settle).
-        context['preferred_llm_tier'] = preferred_llm_tier
-        context['preferred_llm_tier_label'] = get_llm_tier_label(preferred_llm_tier)
-
-        context['llm_intelligence'] = build_llm_intelligence_props(
-            owner,
-            owner_type,
-            organization,
-            intelligence_upgrade_url,
-        )
-        try:
-            billing_url = f"{IMMERSIVE_APP_BASE_PATH}/billing"
-            if organization is not None:
-                billing_url = append_context_query(billing_url, str(organization.id))
-        except NoReverseMatch:
-            billing_url = ""
-        context['billing_url'] = billing_url
-
-        integrations_payload = get_homepage_integrations_payload()
-        builtin_integrations = list(integrations_payload.get("builtins") or [])
-        builtin_by_slug = {
-            str(app.get("slug") or "").strip(): app
-            for app in builtin_integrations
-            if str(app.get("slug") or "").strip()
-        }
-        inline_builtin_integrations = [
-            _with_homepage_inline_integration_icon(builtin_by_slug[slug])
-            for slug in HOMEPAGE_INLINE_INTEGRATION_SLUGS
-            if slug in builtin_by_slug
-        ]
-        integrations_enabled = bool(integrations_payload.get("enabled"))
-
-        initial_selected_pipedream_app_slugs = normalize_app_slugs(
-            self.request.session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY) or []
-        )
-        if integrations_enabled and self.request.user.is_authenticated:
-            owner_scope = (
-                MCPServerConfig.Scope.ORGANIZATION
-                if organization is not None
-                else MCPServerConfig.Scope.USER
-            )
-            enabled_pipedream_app_slugs = get_owner_selected_app_slugs(
-                owner_scope,
-                owner_user=None if organization is not None else self.request.user,
-                owner_org=organization,
-            )
-            initial_selected_pipedream_app_slugs = normalize_app_slugs(
-                [*enabled_pipedream_app_slugs, *initial_selected_pipedream_app_slugs]
-            )
 
         context.update(
             {
-                "homepage_integrations_enabled": integrations_enabled,
-                "homepage_integrations_inline_builtins": inline_builtin_integrations,
-                "homepage_integrations_initial_selected_app_slugs": initial_selected_pipedream_app_slugs,
-                "homepage_integrations_modal_props": {
-                    "builtins": builtin_integrations,
-                    "initialSearchTerm": (self.request.GET.get("integration_search") or "").strip(),
-                    "initialSelectedAppSlugs": initial_selected_pipedream_app_slugs,
-                    "searchUrl": reverse("pages:homepage_integrations_search"),
-                    "nativeIntegrationsUrl": reverse("console-native-integration-list"),
-                    "nativeProviders": _homepage_native_integration_providers(),
-                    "isAuthenticated": self.request.user.is_authenticated,
-                    "selectedFieldsContainerId": "homepage-integrations-selected-fields",
-                },
+                "suppress_htmx": True,
+                "suppress_preline": True,
+                "suppress_phone_format_js": True,
+                "defer_auth_modal_assets": True,
+                "suppress_stripe_js": True,
+                "home_brand_name": home_brand_name,
+                "home_meta_title": home_meta_title,
+                "home_meta_description": home_meta_description,
+                "wind_down_contact_email": WIND_DOWN_CONTACT_EMAIL,
+                "home_recruiting_only": True,
+                "home_social_metadata_enabled": settings.GOBII_PROPRIETARY_MODE,
+                "home_canonical_url": _public_site_absolute_url("/"),
+                "home_search_indexable": True,
+                "home_use_k": True,
+                "home_dark_header": True,
+                "suppress_globals_css": True,
+                "suppress_vite_asset_preconnect": True,
             }
         )
-
         if settings.GOBII_PROPRIETARY_MODE:
-            payload = get_homepage_pretrained_payload()
-            all_templates = list(payload.get("templates") or [])
-            homepage_templates = [
-                template
-                for template in all_templates
-                if (template.get("category") or "").strip().lower()
-                in HOMEPAGE_RECRUITING_CATEGORY_LABELS
-            ]
-
-            category_filter = (self.request.GET.get("pretrained_category") or "").strip()
-            search_term = (self.request.GET.get("pretrained_search") or "").strip()
-            selected_category = category_filter
-
-            filtered_templates = list(homepage_templates)
-            if category_filter:
-                category_lower = category_filter.lower()
-                if category_lower in HOMEPAGE_RECRUITING_CATEGORY_LABELS:
-                    selected_category = "Recruiting"
-                else:
-                    filtered_templates = []
-
-            if search_term:
-                search_lower = search_term.lower()
-                filtered_templates = [
-                    template
-                    for template in filtered_templates
-                    if search_lower in (template.get("display_name") or "").lower()
-                    or search_lower in (template.get("tagline") or "").lower()
-                    or search_lower in (template.get("description") or "").lower()
-                ]
-
-            filtered_workers = [SimpleNamespace(**template) for template in filtered_templates]
-            context.update(
-                {
-                    "homepage_pretrained_workers": filtered_workers,
-                    "homepage_pretrained_total": len(homepage_templates),
-                    "homepage_pretrained_filtered_count": len(filtered_workers),
-                    "homepage_pretrained_categories": ["Recruiting"],
-                    "homepage_pretrained_selected_category": selected_category,
-                    "homepage_pretrained_search_term": search_term,
-                }
-            )
-
-            # The template-first hero replaces the charter-box hero on the default
-            # render only. Explicit custom creation, landing renders (?g=/?dc=),
-            # and a session-saved charter keep the legacy hero so the relevant
-            # instructions remain above the fold.
-            home_use_k = not (
-                context["home_custom_agent_creation"]
-                or context.get("landing_hero_text")
-                or context.get("default_charter")
-                or context.get("agent_charter_saved")
-            )
-            context["home_use_k"] = home_use_k
-            context["suppress_globals_css"] = home_use_k
-            context["suppress_vite_asset_preconnect"] = home_use_k
-            if home_use_k:
-                from billing.plan_resolver import get_active_public_plan_monthly_task_credits
-
-                context["home_dark_header"] = True
-                context["home_hero_groups"] = build_homepage_hero_groups(homepage_templates)
-                # Same live sources as PricingView: prices refresh from StripeConfig
-                # and credits come from the active public plan, so the homepage
-                # pricing card can never disagree with /pricing/.
-                pro_plan = get_plan_config(PlanNames.STARTUP) or {}
-                scale_plan = get_plan_config(PlanNames.SCALE) or {}
-                context["home_pricing"] = {
-                    "pro_price": pro_plan.get("price", STARTUP_MONTHLY_PRICE_USD),
-                    "pro_credits": f"{get_active_public_plan_monthly_task_credits(PlanNames.STARTUP):,}",
-                    "scale_price": scale_plan.get("price", 250),
-                    "scale_credits": f"{get_active_public_plan_monthly_task_credits(PlanNames.SCALE):,}",
-                }
-
-        if self.request.user.is_authenticated:
-            recent_agents_qs = PersistentAgent.objects.non_eval().alive().filter(user_id=self.request.user.id)
-            total_agents = recent_agents_qs.count()
-            recent_agents = list(recent_agents_qs.order_by('-updated_at')[:3])
-            context['recent_agents_all_url'] = build_immersive_agents_url(
-                self.request,
-                return_to=self.request.get_full_path(),
-            )
-
-            for agent in recent_agents:
-                schedule_text = None
-                if agent.schedule:
-                    schedule_text = PretrainedWorkerTemplateService.describe_schedule(agent.schedule)
-                    if not schedule_text:
-                        schedule_text = agent.schedule
-                agent.display_schedule = schedule_text
-
-                description, source = build_listing_description(agent, max_length=140)
-                agent.listing_description = description
-                agent.listing_description_source = source
-                agent.is_initializing = source == "placeholder"
-
-                if getattr(agent, "life_state", "active") == PersistentAgent.LifeState.EXPIRED:
-                    agent.status_label = "Expired"
-                    agent.status_class = "text-slate-500 bg-slate-100"
-                else:
-                    agent.status_label = "Active"
-                    agent.status_class = "text-emerald-600 bg-emerald-50"
-                agent.chat_url = build_immersive_chat_url(
-                    self.request,
-                    agent.id,
-                    return_to=self.request.get_full_path(),
-                )
-
-            context['recent_agents'] = recent_agents
-
-            fallback_total = total_agents
-            if fallback_total == 0:
-                account = context.get('account')
-                usage = getattr(account, 'usage', None)
-                fallback_total = getattr(usage, 'agents_in_use', 0) if usage else 0
-
-            context['recent_agents_remaining'] = max(fallback_total - len(recent_agents), 0)
-            context['recent_agents_total'] = fallback_total
-
-        context["home_search_indexable"] = (
-            not context["home_custom_agent_creation"]
-            and (not context.get("default_charter") or context.get("agent_charter_saved"))
-        )
-        if settings.GOBII_PROPRIETARY_MODE and context["home_search_indexable"]:
             context["home_structured_data_json"] = html_safe_json_dumps(
                 build_homepage_structured_data(
                     brand_name=home_brand_name,
-                    page_title=context["home_meta_title"],
-                    page_description=context["home_meta_description"],
+                    page_title=home_meta_title,
+                    page_description=home_meta_description,
                 )
             )
 
