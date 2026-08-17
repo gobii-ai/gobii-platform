@@ -147,7 +147,7 @@ from console.context_helpers import build_console_context, resolve_console_conte
 from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import render_public_template_markdown, load_page, get_prev_next, get_all_doc_pages
 from .homepage_cache import get_homepage_integrations_payload, get_homepage_pretrained_payload
-from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, build_homepage_structured_data
+from .homepage_schema import HOMEPAGE_SOCIAL_IMAGE_PATH, WIND_DOWN_CONTACT_EMAIL, build_homepage_structured_data
 from .legacy_pretrained_worker_redirects import (
     get_legacy_pretrained_worker_redirect,
     get_retired_library_template_redirect,
@@ -262,6 +262,7 @@ HOMEPAGE_HERO_FEATURED_TEMPLATE_CODES = {
         "talent-scout",
     ),
 }
+SHUTDOWN_META_TITLE_SUFFIX = "Company Update"
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
 
@@ -1066,6 +1067,52 @@ def _create_checkout_session_with_customer_context(
 class HomePage(TemplateView):
     template_name = "home.html"
 
+    def get_template_names(self):
+        if settings.GOBII_PROPRIETARY_MODE:
+            return ["home_shutdown.html"]
+        return super().get_template_names()
+
+    def _get_shutdown_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        home_brand_name = settings.PUBLIC_BRAND_NAME or "Gobii"
+        home_meta_title = f"{home_brand_name} - {SHUTDOWN_META_TITLE_SUFFIX}"
+        home_meta_description = (
+            f"{home_brand_name} is winding down. Our final day of operations will be "
+            "September 1, 2026. We are preparing agent exports and transfer guidance for customers."
+        )
+        context.update(
+            {
+                "suppress_htmx": True,
+                "suppress_preline": True,
+                "suppress_phone_format_js": True,
+                "defer_auth_modal_assets": True,
+                "suppress_stripe_js": True,
+                "home_brand_name": home_brand_name,
+                "home_meta_title": home_meta_title,
+                "home_meta_description": home_meta_description,
+                "wind_down_contact_email": WIND_DOWN_CONTACT_EMAIL,
+                "home_social_metadata_enabled": True,
+                "home_canonical_url": _public_site_absolute_url("/"),
+                "home_search_indexable": True,
+                "home_use_k": True,
+                "home_dark_header": True,
+                "shutdown_homepage": True,
+                "suppress_globals_css": True,
+                "suppress_public_conversion_assets": True,
+                "suppress_rewardful_js": True,
+                "suppress_signup_tracking_snippet": True,
+                "suppress_vite_asset_preconnect": True,
+            }
+        )
+        context["home_structured_data_json"] = html_safe_json_dumps(
+            build_homepage_structured_data(
+                brand_name=home_brand_name,
+                page_title=home_meta_title,
+                page_description=home_meta_description,
+            )
+        )
+        return context
+
     def _renders_legacy_home(self) -> bool:
         # Mirrors the template-branch decision made in get_context_data: landing
         # params, explicit custom creation, and a session-saved (non-template)
@@ -1100,6 +1147,9 @@ class HomePage(TemplateView):
         )
 
     def get_context_data(self, **kwargs):
+        if settings.GOBII_PROPRIETARY_MODE:
+            return self._get_shutdown_context_data(**kwargs)
+
         context = super().get_context_data(**kwargs)
         context["suppress_htmx"] = True
         context["suppress_preline"] = True
@@ -1458,6 +1508,11 @@ class HomePage(TemplateView):
 class HomeAgentSpawnView(TemplateView):
     """Handle agent charter submission from the home page."""
     template_name = "home.html"
+
+    def get_template_names(self):
+        if settings.GOBII_PROPRIETARY_MODE:
+            return ["home_shutdown.html"]
+        return super().get_template_names()
 
     def post(self, request, *args, **kwargs):
         from console.forms import PersistentAgentCharterForm
