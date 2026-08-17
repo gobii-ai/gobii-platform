@@ -1285,6 +1285,14 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
         yield db_path
 
 
+def write_agent_sqlite_export_snapshot(agent_uuid: str, destination_path: str) -> None:
+    """Write a validated, persistence-equivalent SQLite snapshot for a portable export."""
+    with agent_sqlite_db(agent_uuid) as db_path:
+        create_validated_sqlite_snapshot(db_path, destination_path)
+        _maintain_sqlite_persistence_candidate(destination_path)
+        validate_sqlite_file(destination_path)
+
+
 @contextlib.contextmanager
 def _agent_sqlite_db_uncoordinated(agent_uuid: str):
     """Context manager that restores/persists the per-agent SQLite DB.

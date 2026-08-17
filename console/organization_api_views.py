@@ -36,6 +36,7 @@ from console.agent_creation import AGENT_TEMPLATE_SOURCE_ORGANIZATION_TEMPLATE, 
 from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.urls import IMMERSIVE_APP_BASE_PATH
+from constants.feature_flags import PORTABLE_AGENT_EXPORTS
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ def _serialize_invite(invite: OrganizationInvite) -> dict:
     }
 
 
-def _serialize_organization(org: Organization, membership: OrganizationMembership) -> dict:
+def _serialize_organization(request, org: Organization, membership: OrganizationMembership) -> dict:
     role_choices = _resolve_allowed_role_choices_for_role(membership.role)
     billing = getattr(org, "billing", None)
     custom_instructions = get_custom_instructions_for_organization_id(org.id)
@@ -162,6 +163,10 @@ def _serialize_organization(org: Organization, membership: OrganizationMembershi
             "canEditMemberAgentCreation": membership.role in ORG_AGENT_CONFIG_AUTHORITY_ROLES,
             "canManageMembers": membership.role in MEMBER_MANAGE_ROLES,
             "canManageBilling": membership.role in BILLING_MANAGE_ROLES,
+            "canExportAgents": membership.role in ORG_AGENT_CONFIG_AUTHORITY_ROLES,
+        },
+        "features": {
+            "portableAgentExports": flag_is_active(request, PORTABLE_AGENT_EXPORTS),
         },
         "roles": [
             {"value": value, "label": label}
@@ -398,7 +403,7 @@ class CurrentOrganizationAPIView(LoginRequiredMixin, View):
             return _json_error(str(exc), status=404)
         if error:
             return error
-        return JsonResponse(_serialize_organization(org, membership))
+        return JsonResponse(_serialize_organization(request, org, membership))
 
     @transaction.atomic
     def patch(self, request):
@@ -472,7 +477,7 @@ class CurrentOrganizationAPIView(LoginRequiredMixin, View):
                 source=AnalyticsSource.WEB,
                 properties=props.copy(),
             ))
-        return JsonResponse(_serialize_organization(org, membership))
+        return JsonResponse(_serialize_organization(request, org, membership))
 
 
 class CurrentOrganizationTemplateAPIView(LoginRequiredMixin, View):
@@ -711,7 +716,7 @@ class CurrentOrganizationInviteAPIView(LoginRequiredMixin, View):
         except (AnymailError, OSError, smtplib.SMTPException) as exc:
             logger.warning("Failed sending org invite email: %s", exc)
 
-        return JsonResponse(_serialize_organization(org, membership), status=201)
+        return JsonResponse(_serialize_organization(request, org, membership), status=201)
 
 
 class CurrentOrganizationInviteDetailAPIView(LoginRequiredMixin, View):
@@ -744,7 +749,7 @@ class CurrentOrganizationInviteDetailAPIView(LoginRequiredMixin, View):
             source=AnalyticsSource.WEB,
             properties=props.copy(),
         ))
-        return JsonResponse(_serialize_organization(org, membership))
+        return JsonResponse(_serialize_organization(request, org, membership))
 
 
 class CurrentOrganizationInviteResendAPIView(LoginRequiredMixin, View):
@@ -782,7 +787,7 @@ class CurrentOrganizationInviteResendAPIView(LoginRequiredMixin, View):
         except (AnymailError, OSError, smtplib.SMTPException) as exc:
             logger.warning("Failed resending org invite email: %s", exc)
 
-        return JsonResponse(_serialize_organization(org, membership))
+        return JsonResponse(_serialize_organization(request, org, membership))
 
 
 class CurrentOrganizationMemberAPIView(LoginRequiredMixin, View):
@@ -810,7 +815,7 @@ class CurrentOrganizationMemberAPIView(LoginRequiredMixin, View):
             status=OrganizationMembership.OrgStatus.ACTIVE,
         )
         if target_membership.role == new_role:
-            return JsonResponse(_serialize_organization(org, membership))
+            return JsonResponse(_serialize_organization(request, org, membership))
 
         if (
             membership.role == OrganizationMembership.OrgRole.ADMIN
@@ -847,7 +852,7 @@ class CurrentOrganizationMemberAPIView(LoginRequiredMixin, View):
             source=AnalyticsSource.WEB,
             properties=props.copy(),
         ))
-        return JsonResponse(_serialize_organization(org, membership))
+        return JsonResponse(_serialize_organization(request, org, membership))
 
     @transaction.atomic
     def delete(self, request, user_id: int):
@@ -897,4 +902,4 @@ class CurrentOrganizationMemberAPIView(LoginRequiredMixin, View):
             source=AnalyticsSource.WEB,
             properties=props.copy(),
         ))
-        return JsonResponse(_serialize_organization(org, membership))
+        return JsonResponse(_serialize_organization(request, org, membership))

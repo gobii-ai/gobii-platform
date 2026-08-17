@@ -920,6 +920,13 @@ CELERY_BEAT_SCHEDULE = {
             "routing_key": "celery.single_instance",
         },
     },
+    "prune-portable-agent-exports": {
+        "task": "api.tasks.portable_agent_exports.prune_portable_agent_exports",
+        "schedule": crontab(minute=15, hour=3),
+        "options": {
+            "routing_key": "celery.single_instance",
+        },
+    },
     "sandbox-compute-idle-sweep": {
         "task": "api.tasks.sandbox_compute.sweep_idle_sessions",
         "schedule": timedelta(seconds=env.int("SANDBOX_COMPUTE_IDLE_SWEEP_INTERVAL_SECONDS", default=300)),
@@ -1095,6 +1102,20 @@ AGENT_EVENT_PROCESSING_PENDING_FALLBACK_DELAY_SECONDS = AGENT_EVENT_PROCESSING_P
 # Default to explicit management in admin; core features are not gated anymore.
 # You can still override with WAFFLE_FLAG_DEFAULT=1 in environments where you want missing flags active.
 WAFFLE_FLAG_DEFAULT = env.bool("WAFFLE_FLAG_DEFAULT", default=False)
+
+# Portable agent migration exports remain private and short-lived even after download links are emailed.
+PORTABLE_AGENT_EXPORT_ARTIFACT_TTL_DAYS = env.int(
+    "PORTABLE_AGENT_EXPORT_ARTIFACT_TTL_DAYS",
+    default=7,
+)
+PORTABLE_AGENT_EXPORT_METADATA_TTL_DAYS = env.int(
+    "PORTABLE_AGENT_EXPORT_METADATA_TTL_DAYS",
+    default=30,
+)
+PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES = env.int(
+    "PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES",
+    default=5 * 1024 * 1024 * 1024,
+)
 
 # computer.cpp desktop relay
 COMPUTER_CPP_RELEASE_BASE_URL = env.str(

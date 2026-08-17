@@ -41,6 +41,9 @@ export type UserProfilePayload = {
   pendingPhone?: PhoneState | null
   supportedPhoneRegions: SupportedPhoneRegion[]
   discordIdentity: DiscordIdentityState | null
+  features: {
+    portableAgentExports: boolean
+  }
 }
 
 export type UserProfileErrorPayload = {

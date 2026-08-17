@@ -17,7 +17,8 @@ from api.services.agent_webhooks import (
     AgentWebhookService,
     build_inbound_webhook_url,
 )
-from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL
+from constants.feature_flags import CONTACT_AUTO_APPROVE_EMAIL, PORTABLE_AGENT_EXPORTS
+from api.services.portable_agent_exports import user_can_export_agent
 from api.services.outbound_email_policy import (
     email_review_outbox_enabled,
     get_effective_email_sending_mode,
@@ -1078,6 +1079,10 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
             'organizations': flag_is_active(request, 'organizations'),
             'contactAutoApproveEmail': flag_is_active(request, CONTACT_AUTO_APPROVE_EMAIL),
             'emailReviewOutbox': email_review_outbox_enabled(agent.user),
+            'portableAgentExports': (
+                flag_is_active(request, PORTABLE_AGENT_EXPORTS)
+                and user_can_export_agent(request.user, agent)
+            ),
         }
 
         can_reassign = bool(context.get('can_reassign'))
@@ -1132,6 +1137,7 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     organization_id=str(agent.organization_id) if agent.organization_id else None,
                 ),
                 'delete': reverse('agent_delete', args=[agent.id]),
+                'agentExports': reverse('console_portable_agent_exports'),
             },
             'agent': {
                 'id': str(agent.id),

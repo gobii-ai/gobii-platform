@@ -37,6 +37,7 @@ export type AgentChatIdentityState = {
   agentIsOrgOwned: boolean
   agentIsActive: boolean
   canManageAgent: boolean
+  portableExportEnabled: boolean
   canReactivateAgent: boolean
   canSendMessages: boolean
   isCollaborator: boolean
@@ -124,6 +125,7 @@ type AgentIdentityUpdateInput = {
   agentIsOrgOwned?: boolean
   agentIsActive?: boolean
   canManageAgent?: boolean
+  portableExportEnabled?: boolean
   canReactivateAgent?: boolean
   canSendMessages?: boolean
   isCollaborator?: boolean
@@ -179,6 +181,7 @@ export function createInitialSession(): AgentChatSession {
       agentIsOrgOwned: false,
       agentIsActive: true,
       canManageAgent: true,
+      portableExportEnabled: false,
       canReactivateAgent: false,
       canSendMessages: true,
       isCollaborator: false,
@@ -287,6 +290,9 @@ function applyIdentityUpdate(session: AgentChatSession, update: AgentIdentityUpd
   }
   if (update?.canManageAgent !== undefined) {
     session.identity.canManageAgent = update?.canManageAgent ?? true
+  }
+  if (update?.portableExportEnabled !== undefined) {
+    session.identity.portableExportEnabled = Boolean(update.portableExportEnabled)
   }
   if (update?.canReactivateAgent !== undefined) {
     session.identity.canReactivateAgent = Boolean(update.canReactivateAgent)

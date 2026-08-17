@@ -107,6 +107,11 @@ from console.api_views import (
     StaffAgentSystemMessageDetailAPIView,
     StaffPromptArchiveAPIView,
 )
+from console.agent_exports_api import (
+    PortableAgentExportDetailAPIView,
+    PortableAgentExportDownloadAPIView,
+    PortableAgentExportListCreateAPIView,
+)
 from console.evals.api_views import (
     EvalRunCompareAPIView,
     EvalRunDetailAPIView,
@@ -446,6 +451,9 @@ urlpatterns = [
     path("console/api/product-announcements/", ProductAnnouncementListAPIView.as_view(), name="console_product_announcements"),
     path("console/api/product-announcements/read/", ProductAnnouncementReadAPIView.as_view(), name="console_product_announcements_read"),
     path("console/api/user/profile/", UserProfileAPIView.as_view(), name="console_user_profile"),
+    path("console/api/agent-exports/", PortableAgentExportListCreateAPIView.as_view(), name="console_portable_agent_exports"),
+    path("console/api/agent-exports/<uuid:export_id>/", PortableAgentExportDetailAPIView.as_view(), name="console_portable_agent_export_detail"),
+    path("console/api/agent-exports/<uuid:export_id>/download/", PortableAgentExportDownloadAPIView.as_view(), name="console_portable_agent_export_download"),
     path("console/api/user/phone/", UserPhoneAPIView.as_view(), name="console_user_phone"),
     path("console/api/user/phone/cancel/", UserPhoneCancelAPIView.as_view(), name="console_user_phone_cancel"),
     path("console/api/user/phone/verify/", UserPhoneVerifyAPIView.as_view(), name="console_user_phone_verify"),

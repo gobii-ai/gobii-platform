@@ -88,6 +88,10 @@ export type CurrentOrganizationPayload = {
     canEditMemberAgentCreation: boolean
     canManageMembers: boolean
     canManageBilling: boolean
+    canExportAgents: boolean
+  }
+  features: {
+    portableAgentExports: boolean
   }
   roles: OrganizationRole[]
   members: OrganizationMember[]
