@@ -33,6 +33,7 @@ import { AsyncActionConfirmDialog } from '../components/common/ActionConfirmDial
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { FormField, SelectInput, TextareaInput, TextInput } from '../components/common/FormControls'
 import { ModalForm } from '../components/common/ModalForm'
+import { PortableAgentExportSection } from '../components/exports/PortableAgentExportSection'
 import { CustomInstructionsSection } from '../components/settings/CustomInstructionsSection'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
@@ -932,6 +933,16 @@ export function OrganizationScreen() {
           </>
         ) : null}
       </section>
+
+      {data.features.portableAgentExports && data.viewer.canExportAgents ? (
+        <PortableAgentExportSection
+          surface="profile"
+          scope="organization"
+          title="Export Team Agents"
+          description="Create one portable ZIP containing all active and paused agents in this team."
+          buttonLabel="Export all team agents"
+        />
+      ) : null}
 
       <section className="profile-screen__section">
         <div className="profile-screen__section-header organization-screen__section-header">

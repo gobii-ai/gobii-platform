@@ -13852,6 +13852,157 @@ class AgentOwnerCustomInstructions(models.Model):
         return f"Custom instructions for {owner}"
 
 
+class PortableAgentExport(models.Model):
+    class Scope(models.TextChoices):
+        AGENT = "agent", "Agent"
+        PERSONAL = "personal", "Personal workspace"
+        ORGANIZATION = "organization", "Organization"
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        READY = "ready", "Ready"
+        READY_WITH_WARNINGS = "ready_with_warnings", "Ready with warnings"
+        FAILED = "failed", "Failed"
+        EXPIRED = "expired", "Expired"
+
+    ACTIVE_STATUSES = (Status.QUEUED, Status.RUNNING)
+    READY_STATUSES = (Status.READY, Status.READY_WITH_WARNINGS)
+    FORMAT_VERSION = "gobii.agent-portable-export/v1"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="portable_agent_exports",
+    )
+    scope = models.CharField(max_length=24, choices=Scope.choices)
+    scope_key = models.CharField(max_length=128)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="portable_exports",
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="portable_agent_exports",
+    )
+    format_version = models.CharField(max_length=64, default=FORMAT_VERSION)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    phase = models.CharField(max_length=32, default="queued")
+    total_agents = models.PositiveIntegerField(default=0)
+    completed_agents = models.PositiveIntegerField(default=0)
+    failed_agents = models.PositiveIntegerField(default=0)
+    warning_count = models.PositiveIntegerField(default=0)
+    redaction_count = models.PositiveIntegerField(default=0)
+    storage_key = models.CharField(max_length=512, blank=True)
+    archive_filename = models.CharField(max_length=255, blank=True)
+    archive_size_bytes = models.PositiveBigIntegerField(null=True, blank=True)
+    archive_sha256 = models.CharField(max_length=64, blank=True)
+    error_code = models.CharField(max_length=64, blank=True)
+    error_message = models.CharField(max_length=512, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    email_sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["requester", "scope_key"],
+                condition=models.Q(status__in=["queued", "running"]),
+                name="uniq_active_portable_export_scope",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["requester", "scope_key", "-created_at"], name="pa_export_req_scope_idx"),
+            models.Index(fields=["status", "expires_at"], name="pa_export_status_exp_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"PortableAgentExport<{self.scope}:{self.status}:{self.id}>"
+
+
+class PortableAgentExportItem(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    export = models.ForeignKey(
+        PortableAgentExport,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="portable_export_items",
+    )
+    source_agent_id = models.UUIDField()
+    source_agent_name = models.CharField(max_length=255)
+    folder_name = models.CharField(max_length=320)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    snapshot_at = models.DateTimeField(null=True, blank=True)
+    message_count = models.PositiveIntegerField(default=0)
+    step_count = models.PositiveIntegerField(default=0)
+    file_count = models.PositiveIntegerField(default=0)
+    warning_count = models.PositiveIntegerField(default=0)
+    redaction_count = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=64, blank=True)
+    error_message = models.CharField(max_length=512, blank=True)
+
+    class Meta:
+        ordering = ["source_agent_name", "source_agent_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["export", "source_agent_id"], name="uniq_export_source_agent"),
+            models.UniqueConstraint(fields=["export", "folder_name"], name="uniq_export_agent_folder"),
+        ]
+        indexes = [
+            models.Index(fields=["export", "status"], name="pa_export_item_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"PortableAgentExportItem<{self.source_agent_name}:{self.status}>"
+
+
+class PortableAgentExportArtifactCleanup(models.Model):
+    storage_key = models.CharField(max_length=512, unique=True)
+    source_export_id = models.UUIDField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+
+@receiver(post_delete, sender=PortableAgentExport)
+def delete_portable_agent_export_file(sender, instance: PortableAgentExport, **kwargs):
+    if not instance.storage_key:
+        return
+    from api.services.portable_agent_exports import try_portable_agent_export_artifact_cleanup
+
+    cleanup, _created = PortableAgentExportArtifactCleanup.objects.get_or_create(
+        storage_key=instance.storage_key,
+        defaults={"source_export_id": instance.id},
+    )
+    transaction.on_commit(
+        lambda: try_portable_agent_export_artifact_cleanup(cleanup.id),
+        robust=True,
+    )
+
+
 class AgentOwnerCategoryProfile(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

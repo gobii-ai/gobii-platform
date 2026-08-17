@@ -32,6 +32,7 @@ export type AgentRosterEntry = {
   isOrgOwned?: boolean
   isCollaborator?: boolean
   canManageAgent?: boolean
+  portableExportEnabled?: boolean
   canReactivateAgent?: boolean
   canManageCollaborators?: boolean
   canSendMessages?: boolean

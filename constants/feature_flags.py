@@ -2,6 +2,9 @@
 PERSISTENT_AGENTS = "persistent_agents"
 ORGANIZATIONS = "organizations"
 
+# User-facing, background migration bundles for moving agents to other harnesses.
+PORTABLE_AGENT_EXPORTS = "portable_agent_exports"
+
 # Controls whether users may opt agents into automatically allowing new email contacts.
 CONTACT_AUTO_APPROVE_EMAIL = "contact_auto_approve_email"
 

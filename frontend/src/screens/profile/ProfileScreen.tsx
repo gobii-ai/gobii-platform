@@ -7,6 +7,7 @@ import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { updateUserCustomInstructions, updateUserEmail, updateUserProfile } from '../../api/userProfile'
 import type { EmailVerificationState, UserProfileFormState, UserProfilePayload } from '../../api/userProfile'
 import { PhoneNumberInput, type SupportedPhoneRegion } from '../../components/common/PhoneNumberInput'
+import { PortableAgentExportSection } from '../../components/exports/PortableAgentExportSection'
 import { PetProfileSection } from '../../components/pets/PetProfileSection'
 import { CustomInstructionsSection } from '../../components/settings/CustomInstructionsSection'
 import { useUserPhoneVerification } from '../../hooks/useUserPhoneVerification'
@@ -487,6 +488,16 @@ export function ProfileScreen({ initialData }: ProfileScreenProps) {
         onSave={handleCustomInstructionsSave}
         formatErrorMessages={formatCustomInstructionsErrors}
       />
+
+      {data.features.portableAgentExports ? (
+        <PortableAgentExportSection
+          surface="profile"
+          scope="personal"
+          title="Export Personal Agents"
+          description="Create one portable ZIP containing all of your personal agents."
+          buttonLabel="Export all personal agents"
+        />
+      ) : null}
 
       <section className="profile-screen__section">
         <div className="profile-screen__section-header">

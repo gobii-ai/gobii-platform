@@ -238,6 +238,7 @@ export type AgentSettingsData = {
     organizations: boolean
     contactAutoApproveEmail: boolean
     emailReviewOutbox: boolean
+    portableAgentExports: boolean
   }
   reassignment: AgentSettingsReassignmentInfo
   llmIntelligence: LlmIntelligenceConfig | null

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Code2, CreditCard, EllipsisVertical, ListTodo, Mail, Phone, Settings, Share2, UserPlus, X, Zap } from 'lucide-react'
+import { Code2, CreditCard, Download, EllipsisVertical, ListTodo, Mail, Phone, Settings, Share2, UserPlus, X, Zap } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import { ensureAuthenticated, selectSubscriptionState, subscriptionActions } from '../../store/subscriptionSlice'
@@ -10,6 +10,7 @@ import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { PlanSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
 import { AgentEmotionIndicator } from '../common/AgentEmotionIndicator'
+import { PortableAgentExportConfirmDialog } from '../exports/PortableAgentExportSection'
 import type { AgentChatSidebarMode } from './sidebarMode'
 import { AgentChatAvatar, AgentChatButton, AgentChatMenuItem, AgentChatStatusBadge } from './uiPrimitives'
 
@@ -107,6 +108,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const agentIsActive = activeSession.identity.agentIsActive
   const isOrgOwned = activeSession.identity.agentIsOrgOwned
   const canManageAgent = activeSession.identity.canManageAgent
+  const portableExportEnabled = activeSession.identity.portableExportEnabled
   const isCollaborator = activeSession.identity.isCollaborator
   const processingActive = activeSession.processing.processingActive
   const signupPreviewState = activeSession.identity.signupPreviewState
@@ -200,12 +202,15 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const showIdentitySettingsButton = Boolean(onIdentitySettingsOpen)
   const showShareButton = canShowBannerActions && Boolean(onShare)
   const showPublicShareButton = canShowBannerActions && Boolean(onPublicShare)
+  const showExportButton = canShowBannerActions && portableExportEnabled && Boolean(agentId)
   const showAttentionDot = softTargetExceeded || hardLimitReached
   const settingsLabel = hardLimitReached
     ? 'Daily task limit reached. Open agent settings'
     : 'Open agent settings'
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false)
-  const showMobileOverflow = showShareButton || showPublicShareButton || showSettingsButton || showDeveloperMode
+  const [exportDialogAgentId, setExportDialogAgentId] = useState<string | null>(null)
+  const exportDialogOpen = Boolean(agentId && exportDialogAgentId === agentId)
+  const showMobileOverflow = showShareButton || showPublicShareButton || showExportButton || showSettingsButton || showDeveloperMode
   const shareLabel = shareDisabledReason || 'Invite collaborators'
   const publicShareLabel = publicShareDisabledReason || 'Share this agent'
   const resolvedSettingsLabel = settingsDisabledReason || settingsLabel
@@ -471,6 +476,19 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <span className="banner-share-label">Share</span>
             </AgentChatButton>
           ) : null}
+          {showExportButton ? (
+            <AgentChatButton
+              className="banner-action banner-action--pill banner-desktop-only"
+              variant="soft"
+              size="sm"
+              onClick={() => setExportDialogAgentId(agentId)}
+              aria-label="Export agent"
+              title="Export agent"
+            >
+              <Download size={16} strokeWidth={2.2} />
+              <span>Export</span>
+            </AgentChatButton>
+          ) : null}
           {showMobileOverflow ? (
             <DialogTrigger isOpen={overflowMenuOpen} onOpenChange={setOverflowMenuOpen}>
               <Button
@@ -481,7 +499,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               </Button>
               <Popover className="banner-overflow-popover">
                 <Dialog className="banner-overflow-menu">
-                  {showShareButton || showPublicShareButton || showSettingsButton || showDeveloperMode ? (
+                  {showShareButton || showPublicShareButton || showExportButton || showSettingsButton || showDeveloperMode ? (
                     <div className="banner-overflow-section">
                       <div className="banner-overflow-heading">Actions</div>
                       <div className="banner-overflow-items">
@@ -526,6 +544,23 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                             </span>
                             <span className="banner-overflow-item-copy">
                               <span className="banner-overflow-item-label">Share</span>
+                            </span>
+                          </AgentChatMenuItem>
+                        ) : null}
+                        {showExportButton ? (
+                          <AgentChatMenuItem
+                            type="button"
+                            className="banner-overflow-item"
+                            onClick={() => {
+                              setOverflowMenuOpen(false)
+                              setExportDialogAgentId(agentId)
+                            }}
+                          >
+                            <span className="banner-overflow-item-icon" aria-hidden="true">
+                              <Download size={14} />
+                            </span>
+                            <span className="banner-overflow-item-copy">
+                              <span className="banner-overflow-item-label">Export</span>
                             </span>
                           </AgentChatMenuItem>
                         ) : null}
@@ -617,6 +652,14 @@ export const AgentChatBanner = memo(function AgentChatBanner({
         </div>
       </div>
       {children ? <div className="banner-secondary">{children}</div> : null}
+      {agentId ? (
+        <PortableAgentExportConfirmDialog
+          open={exportDialogOpen}
+          scope="agent"
+          agentId={agentId}
+          onClose={() => setExportDialogAgentId(null)}
+        />
+      ) : null}
     </div>
   )
 })

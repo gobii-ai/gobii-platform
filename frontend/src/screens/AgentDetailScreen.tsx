@@ -31,6 +31,7 @@ import { getSettingsSurfaceClassName } from '../components/common/SettingsSurfac
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { InlineStatusBanner } from '../components/common/InlineStatusBanner'
 import { SaveBar } from '../components/common/SaveBar'
+import { PortableAgentExportSection } from '../components/exports/PortableAgentExportSection'
 import { AddContactModal, EditContactModal } from '../components/agentSettings/AddContactModal'
 import { AllowlistContactsTable } from '../components/agentSettings/AllowlistContactsTable'
 import { CollaboratorsTable } from '../components/agentSettings/CollaboratorsTable'
@@ -3494,7 +3495,7 @@ function ActionsSection({
     <CollapsibleSettingsSection
       id="agent-ownership"
       title="Actions"
-      subtitle="Ownership, transfer, and deletion tools."
+      subtitle="Ownership, export, transfer, and deletion tools."
       bodyClassName="divide-y divide-slate-200/15 p-0"
     >
         {features.organizations && reassignment.enabled && (
@@ -3607,6 +3608,15 @@ function ActionsSection({
             </form>
           )}
         </section>
+
+        {features.portableAgentExports ? (
+          <PortableAgentExportSection
+            scope="agent"
+            agentId={agent.id}
+            title="Export Agent"
+            description="Create a portable copy of this agent for moving to another platform."
+          />
+        ) : null}
 
         <section className="px-4 py-5 sm:px-5">
           <div className="flex gap-x-4">

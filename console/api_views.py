@@ -150,6 +150,8 @@ from api.services.agent_owner_custom_instructions import (
     normalize_custom_instructions,
     save_custom_instructions_for_user_id,
 )
+from api.services.portable_agent_exports import user_can_export_agent
+from constants.feature_flags import PORTABLE_AGENT_EXPORTS
 from api.services.product_announcements import build_product_announcements_payload, mark_product_announcements_read
 from api.services.signup_preview import resume_signup_preview_agent_if_eligible, user_has_existing_personal_agent_for_signup_preview
 from api.services.email_verification import (
@@ -693,6 +695,9 @@ def _serialize_user_profile_payload(request: HttpRequest) -> dict[str, Any]:
         "pendingPhone": serialize_phone(pending_phone),
         "supportedPhoneRegions": serialize_supported_phone_regions(),
         "discordIdentity": _serialize_user_discord_identity(request),
+        "features": {
+            "portableAgentExports": flag_is_active(request, PORTABLE_AGENT_EXPORTS),
+        },
     }
 
 
@@ -3024,6 +3029,10 @@ def _serialize_agent_profile_payload(
         "can_reactivate_agent": can_reactivate_agent,
         "can_manage_collaborators": can_manage_collaborators,
         "can_send_messages": can_send_messages,
+        "portable_export_enabled": bool(
+            flag_is_active(request, PORTABLE_AGENT_EXPORTS)
+            and user_can_export_agent(user, agent)
+        ),
         "developer_live_chat_url": card_payload["developerChatUrl"],
         "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
         "email": card_payload["primaryEmail"],

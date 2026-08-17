@@ -1,0 +1,176 @@
+---
+title: "Export Agents And Move To Another Platform"
+description: "Export a Gobii, download its portable ZIP, and use the included guides to rebuild it on another agent platform."
+sidebar_label: "Export Agents"
+---
+
+Portable agent exports help you move a Gobii to another platform without starting from an empty agent. The export includes the Gobii's instructions, memory, visible conversation history, work, files, skills, tool descriptions, and other reusable setup information.
+
+An export is a migration kit, not a perfect clone. Agent platforms use different models, tools, memory systems, and file limits, so you will still need to review the imported information and reconnect services.
+
+## Before you export
+
+An export can contain private messages, attachments, workspace files, contacts, and SQLite data. Treat the downloaded ZIP like other sensitive business data.
+
+The export does not include managed passwords, API keys, OAuth tokens, or other credential values. You will reconnect those directly on the destination platform.
+
+Schedules are included for reference but are turned off for import. This prevents the new agent from unexpectedly sending messages or starting work before you finish checking its setup.
+
+## Export one agent
+
+You can start an export from either of these places:
+
+- Open the agent and choose **Export** from its banner. On a smaller screen, look in the banner's overflow menu.
+- Open **Agent Settings**, find **Export Agent** near the bottom of the page, and choose **Export Agent**.
+
+Review the confirmation, then choose **Start Export**. Gobii prepares the ZIP in the background, so you can leave the page.
+
+When the export is ready:
+
+- Gobii emails you a sign-in-protected download link.
+- The latest export also appears in the agent's **Export Agent** settings section.
+- The download remains available for seven days.
+
+Only the owner of a personal agent, or someone with management authority for an organization agent, can export it. Being a collaborator does not grant export access.
+
+## Export several agents together
+
+Use a bulk export when you are moving a personal workspace or an organization:
+
+- In your profile, choose **Export all personal agents**.
+- In an organization workspace, open the organization screen and choose **Export all organization agents**.
+
+The ZIP contains one clearly named folder for each agent. Active and paused agents are included; deleted agents are not.
+
+Organization exports are available to organization owners, administrators, and other roles with agent-management authority. Ordinary organization members cannot export the organization.
+
+If an agent cannot be included, the bulk export can still finish with warnings as long as at least one agent succeeds.
+
+## Understand the downloaded ZIP
+
+Start with `README.md` at the top of the ZIP. Then open the folder for the agent you want to move under `agents/`.
+
+You do not need to use every file. These are the most useful parts:
+
+| What you want to move | Where to start |
+| --- | --- |
+| Name, purpose, and standing instructions | `identity/instructions.md` |
+| Current memory and compacted summaries | `memory/current-state.md` and `memory/snapshots.jsonl` |
+| Conversation history | `history/transcript.md` and `history/messages.jsonl` |
+| Plans, tasks, and schedules | `work/` |
+| Workspace files and attachments | `files/` |
+| Reusable skills | `skills/` |
+| Tool and app requirements | `tools/capabilities.json` and `connections/README.md` |
+| Help for a particular destination | `adapters/<provider>/README.md` |
+
+The archive also contains manifests, checksums, and SQLite state. These help technical import tools preserve or verify more of the agent, but you do not need to open them for a normal manual migration.
+
+In a bulk export, a file used by several agents may be stored only once. Keep the complete ZIP together until you finish the migration so those references continue to make sense.
+
+## Move the agent to another provider
+
+Most platforms can accept the same core parts even when they use different names for them. Look for a place to create an agent, assistant, project, workspace, GPT, or Gem, then follow this checklist.
+
+1. Create an empty agent on the destination platform.
+2. Open the matching guide under `adapters/` in the exported agent folder. If the provider is not listed, use the provider-neutral mapping below.
+3. Copy `identity/instructions.md` into the destination's instructions or system-instructions area.
+4. Add `memory/current-state.md` as initial memory or reference material.
+5. Upload only the history and workspace files the new agent still needs. Start small instead of uploading the entire archive blindly.
+6. Add compatible skills. If the destination does not support skill folders, use each `SKILL.md` as a guide for configuring equivalent instructions or tools.
+7. Review `tools/capabilities.json` and `connections/README.md`. Reconnect required apps and credentials on the destination platform.
+8. Recreate schedules only after checking their time zones, recipients, and actions. Leave them off during testing.
+9. Give the new agent a few safe test requests and compare its answers with the original.
+
+### Provider-neutral mapping
+
+| If the destination asks for | Use this from the export |
+| --- | --- |
+| Instructions, role, or behavior | `identity/instructions.md` |
+| Memory or background context | `memory/current-state.md` |
+| Knowledge files | Selected files from `files/`, `memory/`, and `history/` |
+| Skills or extensions | Folders under `skills/` |
+| Actions, tools, or integrations | `tools/capabilities.json` |
+| Connections or credentials | Recreate the items described in `connections/` |
+| Tasks or automations | Review `work/tasks.json` and `work/schedules.json` |
+
+## Notes for common destinations
+
+### Hermes
+
+Open `adapters/hermes/README.md`. The canonical skill folders under `skills/` are ready to copy into a compatible Hermes skills setup. Use the identity instructions and current memory as the new agent's starting context, then reconnect tools.
+
+### Manus
+
+Open `adapters/manus/README.md`. Add the identity instructions, current memory, and selected files to the appropriate Manus agent or workspace. Copy compatible skill folders, then recreate integrations and schedules manually.
+
+### ChatGPT
+
+Open `adapters/chatgpt/README.md`. Use the identity instructions when configuring the GPT or agent, and add selected memory, history, and workspace files as knowledge. Recreate compatible actions and connections in ChatGPT rather than uploading credential files.
+
+ChatGPT may have different instruction and file-size limits. If content does not fit, prioritize current instructions, current memory, active work, and the files the agent uses most often.
+
+### Gemini
+
+Open `adapters/gemini/README.md`. Use the identity instructions and current memory to configure the destination Gem or agent experience. Add selected files as context, then reconnect tools and recreate schedules manually.
+
+### Another provider
+
+Use the provider-neutral mapping above. If the destination supports only a prompt and file uploads, start with:
+
+1. `identity/instructions.md`
+2. `memory/current-state.md`
+3. The most relevant files from `files/`
+4. `history/transcript.md` only when old conversations are still useful
+
+Then use `tools/capabilities.json` and the `skills/` folders as a checklist for anything you need to rebuild by hand.
+
+## What will not switch automatically
+
+Expect to reconfigure these items:
+
+- Passwords, API keys, OAuth connections, and other secrets.
+- Apps, MCP servers, webhooks, email or messaging channels, and browser access.
+- Schedules and other automatic triggers.
+- Provider-specific tools that do not exist on the destination.
+- Model choice, usage limits, permissions, and approval rules.
+- Live browser sessions, running tasks, and other temporary activity.
+
+The new agent may behave differently even with the same instructions. Different models interpret instructions differently, and providers may handle memory, tools, and files in different ways.
+
+## Check the migrated agent before relying on it
+
+Use a small acceptance checklist:
+
+- Ask it to explain its purpose and important boundaries.
+- Ask what active work and important memory it retained.
+- Confirm that it can find the files you uploaded.
+- Test read-only tools before allowing changes in external systems.
+- Verify contacts and recipients before enabling messages.
+- Review every schedule before turning it on.
+- Keep the original agent available until the replacement passes your checks.
+
+## Troubleshooting
+
+### I do not see an Export option
+
+Portable exports may not be enabled for your account or organization yet. You also may not have the required ownership or management permission.
+
+### The email did not arrive
+
+Return to the place where you started the export. A completed archive remains available there even if email delivery fails. Check your spam folder and confirm that your account email is verified.
+
+### The export says Ready with warnings
+
+Open the ZIP and review the agent's `README.md` and manifest. A missing file or unavailable piece of state does not necessarily make the rest of the export unusable.
+
+### The destination rejects a file
+
+Unzip the archive first, then upload only the individual text and workspace files the destination accepts. The ZIP itself is a migration package and may not be accepted as a single knowledge file.
+
+### The new agent behaves differently
+
+Check that the full identity instructions and current memory were copied. Then compare model choice, tool availability, file access, approval settings, and schedule configuration between the two platforms.
+
+## After the switch
+
+Keep the export only as long as you need it. When the migration is complete, remove extra copies from downloads, shared drives, and messaging apps. The archive may contain sensitive information even though credential values were removed.
