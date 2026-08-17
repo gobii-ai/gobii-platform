@@ -31,7 +31,7 @@ def _get_sleep_tool() -> Dict[str, object]:
         "type": "function",
         "function": {
             "name": "sleep_until_next_trigger",
-            "description": "Pause the agent until the next external trigger (no further action this cycle). You will wake on new user input or background task completion events.",
+            "description": "End only when no executable work remains. On a work-schedule wake, do its work even if reporting is not due; never sleep merely to await a report time.",
             "parameters": {"type": "object", "properties": {}},
         },
     }

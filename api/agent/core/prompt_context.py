@@ -4182,8 +4182,8 @@ def _get_system_instruction(
     )
     stop_continue_examples = (
         "## Stop/continue\n\n"
-        "Set will_continue_work=true while this request has unsent/unverified results, needed tool results, executable "
-        "work, or plan cleanup. Delivery/config does not finish other work. Set false only when complete or blocked; "
+        "Set will_continue_work=true while this request has unsent/unverified results, needed results, executable work, "
+        "or plan cleanup. Delivery/config does not finish other work. Set false or sleep only when complete or blocked; "
         "schedules neither complete nor defer current work.\n"
         f"{text_only_guidance}"
         "Before final delivery, mark its delivery step done and leave unrelated steps in todo. Never send a "
@@ -4204,8 +4204,8 @@ def _get_system_instruction(
     )
 
     charter_and_schedule_intro = (
-        "Charter/schedules store ongoing role, scope, preferences, boundaries, recurrence, and future wake-ups. "
-        "Use the user/conversation timezone; ask only if timing may be materially wrong."
+        "Charter/schedules store role, rules, and wakes. Communication timing has no invented exceptions. Use the "
+        "user's zone; ask only if materially uncertain."
     )
     first_tool_guidance = (
         "## First Tool Gate (CRITICAL)\n\n"
@@ -4236,9 +4236,9 @@ def _get_system_instruction(
         "investment diligence, multi-entity comparisons, list building, and research whose requested scope clearly "
         "needs several sources or tool rounds. Its kickoff says what you are taking on and the first useful result you "
         "will bring back. "
-        "Discord research always gets this acknowledgment. If substantial work continues after a meaningful evidence "
-        "batch, send one concise update with the strongest finding and what remains; otherwise finish without another "
-        "update. A decision-ready result ends the work: if an active plan remains, close it once, then deliver; never "
+        "Discord research always gets this acknowledgment. Send later evidence updates only when user/Charter cadence "
+        "permits; otherwise retain findings for the next allowed report. Never invent exceptions. A decision-ready result "
+        "ends the work: if an active plan remains, close it once, then deliver; never "
         "send a progress note, run a validation query, or make an intermediate plan update. "
         "Short, one-shot work gets no pre-work status. "
         "Inbound: email=send_email in-thread, SMS=send_sms, web=send_chat_message, Discord=send_discord_message. "
@@ -4414,10 +4414,13 @@ def _get_system_instruction(
         "For explicit deep/exhaustive research and finite-set coverage, do not finalize from search results: after discovery, scrape/open at least 4 promising URLs (or every useful URL if fewer), then synthesize. A structured source already containing every requested field needs no item refetch. Snippets are leads, not sources. Start with one broad search, two if it misses an angle. For named sets, batch gaps, follow up misses, and reconcile coverage; never repeat a successful URL/query. Send a kickoff only for genuinely substantial/long-running work, not a small finite set. If sources support the memo, final next with linked evidence; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
-        "Finished answers/briefings/charts/lookups/one-off research are not config changes; never store transient facts, results, or guesses in __agent_config or __agent_schedules. "
-        "Do not schedule merely to continue or remember your own work. Explicit or clearly implied ongoing work, reminders, and future triggers may be scheduled; one-off work needs assent before becoming recurring. "
-        "Keep every unrelated cadence unless changed. Set future work once and stop; do not run it unless asked. "
-        "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due.\n\n"
+        "Finished answers/reports/lookups are not config; never store transient facts/results in __agent_config or __agent_schedules. "
+        "Do not schedule to remember work. Ongoing work/reminders/future triggers may be scheduled; one-offs need assent. "
+        "Work/report timing is independent. If they differ, MUST use separate schedules; NEVER alter/delete work cadence: strip sends from work "
+        "instructions, preserve each expression/task, create/update a distinct report schedule, and replace conflicting "
+        "Charter sends. A work-schedule wake MUST execute its work even if no report is due; sleep only when no executable "
+        "work remains. Future wakes never end executable work. "
+        "If future email/text is not due, store recipient/permission needs until due.\n\n"
 
         "## Plan Discipline (CRITICAL)\n\n"
         "Use `update_plan` only for substantial multi-step work where a visible plan helps. "
