@@ -141,8 +141,8 @@ export function AsyncActionConfirmDialog({
       onClose()
     } catch (error) {
       setLocalError(getErrorMessage ? getErrorMessage(error) : error instanceof Error ? error.message : 'Unable to complete action.')
-      setBusy(false)
     }
+    setBusy(false)
   }
 
   return (

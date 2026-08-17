@@ -218,7 +218,6 @@ class AnalyticsEvent(StrEnum):
     AGENT_PORTABLE_EXPORT_REQUESTED = 'Agent Portable Export Requested'
     AGENT_PORTABLE_EXPORT_COMPLETED = 'Agent Portable Export Completed'
     AGENT_PORTABLE_EXPORT_FAILED = 'Agent Portable Export Failed'
-    AGENT_PORTABLE_EXPORT_DOWNLOADED = 'Agent Portable Export Downloaded'
     AGENT_PORTABLE_EXPORT_EXPIRED = 'Agent Portable Export Expired'
     AGENT_ATTACHMENT_IMPORTED = 'Agent Attachment Imported'
 

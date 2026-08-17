@@ -11,11 +11,9 @@ from pathlib import Path, PurePosixPath
 from typing import Mapping
 from urllib.parse import urlsplit, urlunsplit
 
-from botocore.exceptions import BotoCoreError, ClientError
 from cryptography.exceptions import InvalidTag
 from django.core.files.storage import default_storage
 from django.db.models import Q
-from django.utils import timezone
 from django.utils.text import get_valid_filename, slugify
 
 from api.agent.system_skills.registry import get_system_skill_definition
@@ -39,6 +37,7 @@ from api.services.agent_owner_custom_instructions import (
 )
 from api.services.agent_sqlite_coordination import AgentSQLiteBusy
 from api.services.mcp_servers import agent_accessible_server_configs
+from api.services.portable_agent_exports import STORAGE_ERRORS
 from console.agent_chat.timeline import visible_agent_message_queryset, visible_tool_steps_queryset
 
 
@@ -68,7 +67,7 @@ def _json_default(value):
     return str(value)
 
 
-def _write_json(path: Path, value) -> None:
+def write_json_file(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=_json_default) + "\n",
@@ -199,12 +198,16 @@ class AgentArchiveResult:
 
 
 class ExportFileCollector:
-    def __init__(self, agent: PersistentAgent, agent_dir: Path, result: AgentArchiveResult):
+    def __init__(
+        self, agent: PersistentAgent, agent_dir: Path, result: AgentArchiveResult,
+        content_registry: dict[str, str], archive_prefix: str,
+    ):
         self.agent = agent
         self.agent_dir = agent_dir
         self.result = result
+        self.content_registry = content_registry
+        self.archive_prefix = archive_prefix.strip("/")
         self.entries: list[dict] = []
-        self.canonical_by_digest: dict[str, str] = {}
         self.used_paths: set[str] = set()
 
     def _unique_path(self, proposed: str, identifier) -> str:
@@ -252,21 +255,34 @@ class ExportFileCollector:
                     destination.write(chunk)
                     digest.update(chunk)
                     copied += len(chunk)
-        except (BotoCoreError, ClientError, OSError, ValueError) as exc:
+        except STORAGE_ERRORS as exc:
+            logger.warning(
+                "Could not include portable export file agent=%s error=%s",
+                self.agent.id,
+                type(exc).__name__,
+            )
             target.unlink(missing_ok=True)
-            warning = f"Could not include {logical_path}: {exc}"
+            warning = "A referenced file could not be included."
             self.result.warnings.append(warning)
             entry.update({"archivePath": None, "missing": True, "warning": warning})
             self.entries.append(entry)
             return entry
 
         actual_digest = digest.hexdigest()
-        if actual_digest in self.canonical_by_digest:
+        canonical_path = self.content_registry.get(actual_digest)
+        if canonical_path:
             target.unlink(missing_ok=True)
-            entry["archivePath"] = self.canonical_by_digest[actual_digest]
+            own_prefix = f"{self.archive_prefix}/" if self.archive_prefix else ""
+            if own_prefix and canonical_path.startswith(own_prefix):
+                entry["archivePath"] = canonical_path.removeprefix(own_prefix)
+            else:
+                entry["archivePath"] = canonical_path
+                entry["archivePathScope"] = "bundle"
             entry["deduplicated"] = True
         else:
-            self.canonical_by_digest[actual_digest] = relative_target
+            self.content_registry[actual_digest] = (
+                f"{self.archive_prefix}/{relative_target}" if self.archive_prefix else relative_target
+            )
             self.result.file_count += 1
         entry["sha256"] = actual_digest
         entry["sizeBytes"] = copied
@@ -367,21 +383,32 @@ class ExportFileCollector:
         )
 
     def write_index(self) -> None:
-        _write_json(self.agent_dir / "files/index.json", {"files": self.entries})
+        write_json_file(self.agent_dir / "files/index.json", {"files": self.entries})
 
 
 class PortableAgentArchiveBuilder:
-    def __init__(self, agent: PersistentAgent, item: PortableAgentExportItem, destination: Path):
+    def __init__(
+        self,
+        agent: PersistentAgent,
+        item: PortableAgentExportItem,
+        destination: Path,
+        *,
+        content_registry: dict[str, str] | None = None,
+    ):
         self.agent = agent
         self.item = item
         self.destination = destination
         self.result = AgentArchiveResult()
         self.redactor = ExportRedactor(_load_known_secret_values(agent))
+        self.content_registry = content_registry if content_registry is not None else {}
+        self.archive_prefix = f"agents/{item.folder_name}" if content_registry is not None else ""
 
     def build(self) -> AgentArchiveResult:
         self.result.display_name = self.redactor.redact_text(self.agent.name) or "Agent"
         self.destination.mkdir(parents=True, exist_ok=True)
-        collector = ExportFileCollector(self.agent, self.destination, self.result)
+        collector = ExportFileCollector(
+            self.agent, self.destination, self.result, self.content_registry, self.archive_prefix,
+        )
         collector.collect_workspace()
         self._write_identity()
         self._write_memory()
@@ -393,7 +420,7 @@ class PortableAgentArchiveBuilder:
         self._write_sqlite()
         self._write_adapters()
         self.result.redaction_report = self.redactor.report()
-        _write_json(self.destination / "redaction-report.json", self.result.redaction_report)
+        write_json_file(self.destination / "redaction-report.json", self.result.redaction_report)
         self._write_manifest()
         return self.result
 
@@ -422,7 +449,7 @@ class PortableAgentArchiveBuilder:
             "ownerInstructionsSource": "organization" if self.agent.organization_id else "personal",
             "ownerInstructions": self.redactor.redact_text(owner_instructions),
         }
-        _write_json(self.destination / "identity/profile.json", profile)
+        write_json_file(self.destination / "identity/profile.json", profile)
         instructions = (
             f"# {profile['name']}\n\n"
             f"## Charter\n\n{profile['charter'] or 'No charter was configured.'}\n\n"
@@ -436,8 +463,13 @@ class PortableAgentArchiveBuilder:
             try:
                 with default_storage.open(self.agent.avatar.name, "rb") as source, target.open("wb") as output:
                     shutil.copyfileobj(source, output, length=1024 * 1024)
-            except (BotoCoreError, ClientError, OSError, ValueError) as exc:
-                self.result.warnings.append(f"Could not include the agent avatar: {exc}")
+            except STORAGE_ERRORS as exc:
+                logger.warning(
+                    "Could not include portable export avatar agent=%s error=%s",
+                    self.agent.id,
+                    type(exc).__name__,
+                )
+                self.result.warnings.append("The agent avatar could not be included.")
                 target.unlink(missing_ok=True)
 
     def _write_memory(self) -> None:
@@ -470,7 +502,7 @@ class PortableAgentArchiveBuilder:
 
     def _write_work(self) -> None:
         work = self.destination / "work"
-        _write_json(work / "plan.json", {
+        write_json_file(work / "plan.json", {
             "state": self.agent.planning_state,
             "plan": self.redactor.redact_text(self.agent.planning_plan),
             "completedAt": self.agent.planning_completed_at,
@@ -483,7 +515,7 @@ class PortableAgentArchiveBuilder:
                 for row in self.agent.plan_deliverables.order_by("position", "id")
             ],
         })
-        _write_json(work / "tasks.json", {
+        write_json_file(work / "tasks.json", {
             "tasks": [
                 {
                     "id": str(card.id), "title": self.redactor.redact_text(card.title),
@@ -509,13 +541,13 @@ class PortableAgentArchiveBuilder:
                 "nextRunAt": schedule.next_run_at, "lastFiredAt": schedule.last_fired_at,
                 "revision": schedule.revision,
             })
-        _write_json(work / "schedules.json", {"schedules": schedules, "importPolicy": "disabled"})
+        write_json_file(work / "schedules.json", {"schedules": schedules, "importPolicy": "disabled"})
         pending = PersistentAgentHumanInputRequest.objects.filter(
             agent=self.agent,
             status=PersistentAgentHumanInputRequest.Status.PENDING,
             created_at__lte=self.item.snapshot_at,
         ).order_by("created_at", "id")
-        _write_json(work / "pending-inputs.json", {
+        write_json_file(work / "pending-inputs.json", {
             "requests": [
                 {
                     "id": str(row.id), "question": self.redactor.redact_text(row.question),
@@ -527,22 +559,9 @@ class PortableAgentArchiveBuilder:
                 for row in pending
             ]
         })
-        external_tasks = []
-        for task in self.agent.mcp_tasks.filter(created_at__lte=self.item.snapshot_at).order_by("created_at", "id"):
-            external_tasks.append({
-                "id": str(task.id), "serverName": task.server_name, "toolName": task.tool_name,
-                "status": task.status, "statusMessage": self.redactor.redact_text(task.status_message),
-                "arguments": self.redactor.redact(task.tool_arguments),
-                "inputRequests": self.redactor.redact(task.input_requests),
-                "result": self.redactor.redact(task.result), "createdAt": task.created_at,
-                "updatedAt": task.updated_at, "terminalAt": task.terminal_at,
-                "resumableOnImport": False,
-            })
-        _write_json(work / "external-tasks.json", {"tasks": external_tasks})
-
     def _write_communications(self) -> None:
         comms = self.destination / "communications"
-        _write_json(comms / "endpoints.json", {
+        write_json_file(comms / "endpoints.json", {
             "endpoints": [
                 {
                     "id": str(row.id), "channel": row.channel,
@@ -560,14 +579,14 @@ class PortableAgentArchiveBuilder:
             }
             for row in self.agent.manual_allowlist.order_by("channel", "address", "id")
         ]
-        _write_json(comms / "contacts.json", {"contacts": contacts})
-        _write_json(comms / "allowlist.json", {
+        write_json_file(comms / "contacts.json", {"contacts": contacts})
+        write_json_file(comms / "allowlist.json", {
             "policy": self.agent.whitelist_policy,
             "contactApprovalMode": self.agent.contact_approval_mode,
             "emailSendingMode": self.agent.email_sending_mode,
-            "entries": contacts,
+            "contactsFile": "contacts.json",
         })
-        _write_json(comms / "webhooks.json", {
+        write_json_file(comms / "webhooks.json", {
             "outbound": [
                 {
                     "id": str(row.id),
@@ -599,15 +618,16 @@ class PortableAgentArchiveBuilder:
                 "counterpartAgentName": self.redactor.redact_text(counterpart.name), "enabled": link.is_enabled,
                 "messagesPerWindow": link.messages_per_window, "windowHours": link.window_hours,
             })
-        _write_json(comms / "relationships.json", {"peerAgents": relationships})
+        write_json_file(comms / "relationships.json", {"peerAgents": relationships})
 
     def _write_history(self, collector: ExportFileCollector) -> None:
         history = self.destination / "history"
         history.mkdir(parents=True, exist_ok=True)
-        message_output = (history / "messages.jsonl").open("w", encoding="utf-8")
-        transcript_output = (history / "transcript.md").open("w", encoding="utf-8")
-        transcript_output.write(f"# Conversation history for {self.redactor.redact_text(self.agent.name)}\n\n")
-        try:
+        with (
+            (history / "messages.jsonl").open("w", encoding="utf-8") as message_output,
+            (history / "transcript.md").open("w", encoding="utf-8") as transcript_output,
+        ):
+            transcript_output.write(f"# Conversation history for {self.redactor.redact_text(self.agent.name)}\n\n")
             messages = (
                 visible_agent_message_queryset(self.agent)
                 .filter(timestamp__lte=self.item.snapshot_at)
@@ -625,13 +645,11 @@ class PortableAgentArchiveBuilder:
                     transcript_output.write(f"**Subject:** {payload['subject']}\n\n")
                 transcript_output.write(f"{payload['body']}\n\n")
                 self.result.message_count += 1
-        finally:
-            message_output.close()
-            transcript_output.close()
 
-        step_output = (history / "steps.jsonl").open("w", encoding="utf-8")
-        tool_output = (history / "tool-calls.jsonl").open("w", encoding="utf-8")
-        try:
+        with (
+            (history / "steps.jsonl").open("w", encoding="utf-8") as step_output,
+            (history / "tool-calls.jsonl").open("w", encoding="utf-8") as tool_output,
+        ):
             steps = (
                 visible_tool_steps_queryset(self.agent)
                 .filter(created_at__lte=self.item.snapshot_at, system_step__isnull=True)
@@ -656,9 +674,6 @@ class PortableAgentArchiveBuilder:
                 step_output.write(json.dumps(step_payload, ensure_ascii=False, default=_json_default) + "\n")
                 tool_output.write(json.dumps(tool_payload, ensure_ascii=False, default=_json_default) + "\n")
                 self.result.step_count += 1
-        finally:
-            step_output.close()
-            tool_output.close()
 
     def _serialize_message(self, message: PersistentAgentMessage, collector: ExportFileCollector) -> dict:
         channel = (
@@ -744,11 +759,16 @@ class PortableAgentArchiveBuilder:
                 connection.close()
             schema_sql = "\n\n".join(row[3].rstrip(";") + ";" for row in schema_rows) + "\n"
             (state_dir / "schema.sql").write_text(schema_sql, encoding="utf-8")
-            _write_json(state_dir / "tables.json", {"tables": tables})
+            write_json_file(state_dir / "tables.json", {"tables": tables})
         except (OSError, sqlite3.Error, SQLiteStateError, AgentSQLiteBusy) as exc:
+            logger.warning(
+                "Could not include portable SQLite state agent=%s error=%s",
+                self.agent.id,
+                type(exc).__name__,
+            )
             db_path.unlink(missing_ok=True)
-            self.result.warnings.append(f"SQLite state could not be included: {exc}")
-            _write_json(state_dir / "tables.json", {"tables": [], "unavailable": True})
+            self.result.warnings.append("SQLite state could not be included.")
+            write_json_file(state_dir / "tables.json", {"tables": [], "unavailable": True})
             (state_dir / "schema.sql").write_text("-- SQLite state was unavailable during export.\n", encoding="utf-8")
 
     def _write_skills_tools_and_connections(self) -> None:
@@ -779,22 +799,12 @@ class PortableAgentArchiveBuilder:
             if definition is None:
                 system_skills.append({"key": state.skill_key, "definitionAvailable": False})
                 continue
-            instructions = definition.render_prompt_instructions(self.agent)
-            folder = skills_dir / f"system-{_safe_segment(slugify(definition.skill_key), 'skill')}"
-            folder.mkdir(parents=True, exist_ok=True)
-            setup = "\n".join(f"- {step}" for step in definition.setup_steps) or "- Reconnect the required service in the destination harness."
-            body = (
-                "---\n"
-                f"name: {json.dumps(definition.name)}\n"
-                f"description: {json.dumps(definition.search_summary)}\n"
-                "---\n\n"
-                f"# {definition.name}\n\n{self.redactor.redact_text(instructions)}\n\n"
-                f"## Setup\n\n{self.redactor.redact_text(definition.setup_instructions)}\n\n{self.redactor.redact_text(setup)}\n"
-            )
-            (folder / "SKILL.md").write_text(body, encoding="utf-8")
             system_skills.append({
                 "key": definition.skill_key, "name": definition.name,
-                "toolNames": list(definition.tool_names), "definitionAvailable": True,
+                "toolNames": list(definition.tool_names),
+                "setupInstructions": self.redactor.redact_text(definition.setup_instructions),
+                "setupSteps": self.redactor.redact(list(definition.setup_steps)),
+                "definitionAvailable": True, "portability": "reconnect-required",
             })
 
         custom_tools = []
@@ -817,8 +827,14 @@ class PortableAgentArchiveBuilder:
                     target = self.destination / "tools/custom" / f"{_safe_segment(tool.tool_name, 'tool')}.py"
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(self.redactor.redact_text(text), encoding="utf-8")
-                except (BotoCoreError, ClientError, OSError, UnicodeDecodeError, ValueError) as exc:
-                    self.result.warnings.append(f"Custom tool source {tool.source_path} could not be included: {exc}")
+                except STORAGE_ERRORS + (UnicodeDecodeError,) as exc:
+                    logger.warning(
+                        "Could not include custom tool source agent=%s tool=%s error=%s",
+                        self.agent.id,
+                        tool.id,
+                        type(exc).__name__,
+                    )
+                    self.result.warnings.append("A custom tool source file could not be included.")
             else:
                 self.result.warnings.append(f"Custom tool source {tool.source_path} was not found.")
 
@@ -836,9 +852,9 @@ class PortableAgentArchiveBuilder:
                 "authMethod": config.auth_method,
                 "managedIntegrationKey": config.managed_integration_key or None,
                 "requiredScopes": self.redactor.redact(metadata.get("scopes", [])),
-                "metadata": self.redactor.redact(metadata), "portability": "reconnect-required",
+                "portability": "reconnect-required",
             })
-        _write_json(self.destination / "tools/mcp-servers.json", {"servers": servers})
+        write_json_file(self.destination / "tools/mcp-servers.json", {"servers": servers})
         enabled_tools = [
             {
                 "id": str(row.id), "fullName": row.tool_full_name, "server": row.tool_server,
@@ -848,7 +864,7 @@ class PortableAgentArchiveBuilder:
             }
             for row in self.agent.enabled_tools.order_by("tool_full_name", "id")
         ]
-        _write_json(self.destination / "tools/capabilities.json", {
+        write_json_file(self.destination / "tools/capabilities.json", {
             "enabledTools": enabled_tools, "customTools": custom_tools, "systemSkills": system_skills,
         })
 
@@ -873,9 +889,9 @@ class PortableAgentArchiveBuilder:
                 "domain": secret.domain_pattern, "description": self.redactor.redact_text(secret.description),
                 "requiredScopes": [],
             })
-        _write_json(self.destination / "connections/requirements.json", {
+        write_json_file(self.destination / "connections/requirements.json", {
             "credentialsIncluded": False, "secretRequirements": secret_requirements,
-            "mcpServers": servers,
+            "mcpServersFile": "../tools/mcp-servers.json",
         })
         connections_readme = (
             "# Reconnect services\n\n"
@@ -888,21 +904,21 @@ class PortableAgentArchiveBuilder:
     def _write_adapters(self) -> None:
         adapters = {
             "hermes": (
-                "Copy the ready-to-use folders under `skills/` into your Hermes skills directory. Use "
+                "Copy the ready-to-use folders under `../../skills/` into your Hermes skills directory. Use "
                 "`../../identity/instructions.md` as the agent system instructions and `../../memory/current-state.md` "
                 "as initial memory. Reconnect every requirement first."
             ),
             "manus": (
-                "Upload or copy the ready-to-use folders under `skills/` as Manus skills. Add "
+                "Upload or copy the ready-to-use folders under `../../skills/` as Manus skills. Add "
                 "`../../identity/instructions.md`, current memory, and selected files as project context. Recreate schedules "
                 "only after reviewing them."
             ),
             "chatgpt": (
-                "Use `identity/instructions.md` as GPT instructions. Add `memory/current-state.md`, the transcript, and selected workspace "
-                "files as knowledge. Recreate compatible actions from `tools/capabilities.json`; this is not a one-click GPT import."
+                "Use `../../identity/instructions.md` as GPT instructions. Add `../../memory/current-state.md`, the transcript, and selected "
+                "workspace files as knowledge. Recreate compatible actions from `../../tools/capabilities.json`; this is not a one-click GPT import."
             ),
             "gemini": (
-                "Use `identity/instructions.md` and `memory/current-state.md` as initial instructions and memory. Add the transcript and "
+                "Use `../../identity/instructions.md` and `../../memory/current-state.md` as initial instructions and memory. Add the transcript and "
                 "selected workspace files as context. Reconnect tools manually; this is not a one-click Gemini import."
             ),
         }
@@ -910,24 +926,9 @@ class PortableAgentArchiveBuilder:
             folder = self.destination / "adapters" / name
             folder.mkdir(parents=True, exist_ok=True)
             (folder / "README.md").write_text(f"# Import into {name.title()}\n\n{body}\n", encoding="utf-8")
-            (folder / "instructions.md").write_text(
-                (self.destination / "identity/instructions.md").read_text(encoding="utf-8"),
-                encoding="utf-8",
-            )
-            if name in {"hermes", "manus"}:
-                ready_skills = folder / "skills"
-                ready_skills.mkdir(parents=True, exist_ok=True)
-                for skill_folder in sorted((self.destination / "skills").iterdir()):
-                    if skill_folder.is_dir():
-                        shutil.copytree(skill_folder, ready_skills / skill_folder.name)
-            else:
-                knowledge = folder / "knowledge"
-                knowledge.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(self.destination / "memory/current-state.md", knowledge / "current-state.md")
-                shutil.copy2(self.destination / "memory/snapshots.jsonl", knowledge / "memory-snapshots.jsonl")
 
     def _write_manifest(self) -> None:
-        _write_json(self.destination / "manifest.json", {
+        write_json_file(self.destination / "manifest.json", {
             "formatVersion": "gobii.agent-portable-export/v1",
             "agentId": str(self.agent.id), "agentName": self.redactor.redact_text(self.agent.name),
             "snapshotAt": self.item.snapshot_at, "folderName": self.item.folder_name,

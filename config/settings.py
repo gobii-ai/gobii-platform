@@ -604,6 +604,10 @@ VITE_ASSET_RELEASE_ID_FILE = Path(
 )
 MEDIA_URL = "/media/"
 MEDIA_ROOT = env('MEDIA_ROOT', default=BASE_DIR / 'mediafiles')
+PORTABLE_AGENT_EXPORT_ROOT = env(
+    "PORTABLE_AGENT_EXPORT_ROOT",
+    default=BASE_DIR / "privatefiles" / "portable-agent-exports",
+)
 USER_PET_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 USER_PET_MAX_CUSTOM_PETS = 10
 
@@ -615,6 +619,13 @@ STORAGES = {
     "public_template_social_images": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
         "OPTIONS": {"location": MEDIA_ROOT, "base_url": MEDIA_URL},
+    },
+    "portable_agent_exports": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {
+            "location": PORTABLE_AGENT_EXPORT_ROOT,
+            "base_url": "/private-agent-exports/",
+        },
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
@@ -670,6 +681,12 @@ if STORAGE_BACKEND_TYPE == "GCS":
         },
     }
     STORAGES["public_template_social_images"] = deepcopy(STORAGES["default"])
+    STORAGES["portable_agent_exports"] = deepcopy(STORAGES["default"])
+    STORAGES["portable_agent_exports"]["OPTIONS"].update({
+        "location": "portable-agent-exports",
+        "default_acl": "projectPrivate",
+        "querystring_auth": True,
+    })
     # Static files continue to be served by WhiteNoise as configured above
 
 elif STORAGE_BACKEND_TYPE == "S3":
@@ -694,6 +711,13 @@ elif STORAGE_BACKEND_TYPE == "S3":
         },
     }
     STORAGES["public_template_social_images"] = deepcopy(STORAGES["default"])
+    STORAGES["portable_agent_exports"] = deepcopy(STORAGES["default"])
+    STORAGES["portable_agent_exports"]["OPTIONS"].update({
+        "location": "portable-agent-exports",
+        "default_acl": "private",
+        "querystring_auth": True,
+        "object_parameters": {"CacheControl": "private, no-store"},
+    })
     STORAGES["staticfiles"] = { # S3 overrides WhiteNoise for static files if S3 is chosen
             "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
             "OPTIONS": {

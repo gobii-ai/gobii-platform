@@ -13906,7 +13906,6 @@ class PortableAgentExport(models.Model):
     archive_sha256 = models.CharField(max_length=64, blank=True)
     error_code = models.CharField(max_length=64, blank=True)
     error_message = models.CharField(max_length=512, blank=True)
-    requested_at = models.DateTimeField(default=timezone.now)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -13962,11 +13961,8 @@ class PortableAgentExportItem(models.Model):
     file_count = models.PositiveIntegerField(default=0)
     warning_count = models.PositiveIntegerField(default=0)
     redaction_count = models.PositiveIntegerField(default=0)
-    warnings = models.JSONField(default=list, blank=True)
     error_code = models.CharField(max_length=64, blank=True)
     error_message = models.CharField(max_length=512, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["source_agent_name", "source_agent_id"]
@@ -13986,8 +13982,10 @@ class PortableAgentExportItem(models.Model):
 def delete_portable_agent_export_file(sender, instance: PortableAgentExport, **kwargs):
     if not instance.storage_key:
         return
+    from api.services.portable_agent_exports import delete_portable_agent_export_artifact
+
     storage_key = instance.storage_key
-    transaction.on_commit(lambda: default_storage.delete(storage_key))
+    transaction.on_commit(lambda: delete_portable_agent_export_artifact(storage_key, export_id=instance.id))
 
 
 class AgentOwnerCategoryProfile(models.Model):

@@ -1,31 +1,29 @@
 import logging
 
-from botocore.exceptions import BotoCoreError, ClientError
 from celery.exceptions import CeleryError
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.files.storage import default_storage
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views import View
 from kombu.exceptions import OperationalError as KombuOperationalError
 
-from api.models import PersistentAgent, PortableAgentExport
-from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
+from api.models import PortableAgentExport
 from api.services.portable_agent_exports import (
     create_portable_agent_export,
+    expire_export_artifact,
     load_download_token,
+    portable_agent_export_storage,
+    resolve_portable_export_scope,
     revoke_export_artifact,
     serialize_portable_agent_export,
     user_can_access_export,
-    user_can_export_agent,
 )
-from api.tasks.portable_agent_exports import process_portable_agent_export
+from api.tasks.portable_agent_exports import mark_portable_agent_export_failed, process_portable_agent_export
 from console.api_helpers import ApiLoginRequiredMixin, _parse_json_body
-from console.context_helpers import build_console_context
 from constants.feature_flags import PORTABLE_AGENT_EXPORTS
 from util.analytics import Analytics, AnalyticsEvent
 from util.waffle_flags import is_waffle_flag_active
@@ -44,47 +42,20 @@ def _expire_if_needed(export: PortableAgentExport) -> None:
         and export.expires_at
         and export.expires_at <= timezone.now()
     ):
-        artifact_deleted = not export.storage_key
-        if export.storage_key:
-            try:
-                if default_storage.exists(export.storage_key):
-                    default_storage.delete(export.storage_key)
-                artifact_deleted = True
-            except (BotoCoreError, ClientError, OSError, ValueError):
-                logger.warning("Could not delete expired portable export %s", export.id, exc_info=True)
-        export.status = PortableAgentExport.Status.EXPIRED
-        export.phase = "expired"
-        update_fields = ["status", "phase", "updated_at"]
-        if artifact_deleted:
-            export.storage_key = ""
-            export.archive_size_bytes = None
-            export.archive_sha256 = ""
-            update_fields.extend(["storage_key", "archive_size_bytes", "archive_sha256"])
-        export.save(update_fields=update_fields)
+        expire_export_artifact(export)
 
 
 def _scope_queryset(request, scope: str, agent_id: str | None):
+    scope_key, _agent, _organization, _agents = resolve_portable_export_scope(
+        request,
+        scope,
+        agent_id,
+        include_agents=False,
+    )
     queryset = PortableAgentExport.objects.filter(requester=request.user).select_related(
         "requester", "agent", "organization",
     )
-    if scope == PortableAgentExport.Scope.PERSONAL:
-        return queryset.filter(scope_key=f"personal:{request.user.id}")
-    if scope == PortableAgentExport.Scope.AGENT:
-        if not agent_id:
-            raise ValidationError({"agentId": "agentId is required."})
-        agent = PersistentAgent.objects.non_eval().alive().filter(pk=agent_id).first()
-        if agent is None or not user_can_export_agent(request.user, agent):
-            raise PermissionDenied("You do not have permission to view exports for this agent.")
-        return queryset.filter(scope_key=f"agent:{agent.id}")
-    if scope == PortableAgentExport.Scope.ORGANIZATION:
-        context = build_console_context(request)
-        membership = context.current_membership
-        if context.current_context.type != "organization" or membership is None:
-            raise ValidationError({"scope": "Switch to an organization first."})
-        if membership.role not in ORG_AGENT_CONFIG_AUTHORITY_ROLES:
-            raise PermissionDenied("You do not have permission to view this organization's exports.")
-        return queryset.filter(scope_key=f"organization:{membership.org_id}")
-    raise ValidationError({"scope": "scope must be agent, personal, or organization."})
+    return queryset.filter(scope_key=scope_key)
 
 
 class PortableAgentExportListCreateAPIView(ApiLoginRequiredMixin, View):
@@ -133,26 +104,16 @@ class PortableAgentExportListCreateAPIView(ApiLoginRequiredMixin, View):
             )
             try:
                 process_portable_agent_export.delay(str(export.id))
-            except (CeleryError, KombuOperationalError, OSError, RuntimeError):
-                logger.exception("Failed to queue portable export %s", export.id)
-                export.status = PortableAgentExport.Status.FAILED
-                export.phase = "failed"
-                export.error_code = "queue_failed"
-                export.error_message = "The export could not be queued. Please try again."
-                export.completed_at = timezone.now()
-                export.save(update_fields=[
-                    "status", "phase", "error_code", "error_message", "completed_at", "updated_at",
-                ])
-                Analytics.track(
-                    user_id=request.user.id,
-                    event=AnalyticsEvent.AGENT_PORTABLE_EXPORT_FAILED,
-                    properties={
-                        "export_id": str(export.id),
-                        "scope": export.scope,
-                        "error_code": "queue_failed",
-                        "agent_count": export.total_agents,
-                    },
-                    user=request.user,
+            except (CeleryError, KombuOperationalError, OSError, RuntimeError) as exc:
+                logger.warning(
+                    "Failed to queue portable export %s error=%s",
+                    export.id,
+                    type(exc).__name__,
+                )
+                mark_portable_agent_export_failed(
+                    export,
+                    code="queue_failed",
+                    message="The export could not be queued. Please try again.",
                 )
                 return _error(export.error_message, status=503)
         return JsonResponse(
@@ -205,23 +166,11 @@ class PortableAgentExportDownloadAPIView(LoginRequiredMixin, View):
         _expire_if_needed(export)
         if export.status not in PortableAgentExport.READY_STATUSES or not export.storage_key:
             return _error("This export is not available for download.", status=410)
-        if not default_storage.exists(export.storage_key):
+        storage = portable_agent_export_storage()
+        if not storage.exists(export.storage_key):
             return _error("The export file is no longer available.", status=410)
-        Analytics.track(
-            user_id=request.user.id,
-            event=AnalyticsEvent.AGENT_PORTABLE_EXPORT_DOWNLOADED,
-            properties={
-                "export_id": str(export.id),
-                "scope": export.scope,
-                "agent_count": export.completed_agents,
-                "warning_count": export.warning_count,
-                "redaction_count": export.redaction_count,
-                "archive_size_bytes": export.archive_size_bytes,
-            },
-            user=request.user,
-        )
         response = FileResponse(
-            default_storage.open(export.storage_key, "rb"),
+            storage.open(export.storage_key, "rb"),
             as_attachment=True,
             filename=export.archive_filename or "gobii-agent-export.zip",
             content_type="application/zip",

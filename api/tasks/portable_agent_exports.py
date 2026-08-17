@@ -1,6 +1,5 @@
 import hashlib
 import html
-import json
 import logging
 import os
 import shutil
@@ -12,13 +11,12 @@ from datetime import timedelta
 from pathlib import Path
 
 from anymail.exceptions import AnymailError
-from botocore.exceptions import BotoCoreError, ClientError
 from celery import shared_task
 from django.conf import settings
 from django.core.files import File
-from django.core.files.storage import default_storage
 from django.core.mail import send_mail
 from django.db import DatabaseError, transaction
+from django.db.models import F
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import get_valid_filename
@@ -37,9 +35,13 @@ from api.models import (
 )
 from api.services.agent_sqlite_coordination import AgentSQLiteBusy
 from api.services.email_verification import has_verified_email_address
-from api.services.portable_agent_export_archive import PortableAgentArchiveBuilder
+from api.services.portable_agent_export_archive import PortableAgentArchiveBuilder, write_json_file
 from api.services.portable_agent_exports import (
+    STORAGE_ERRORS,
     build_download_token,
+    delete_portable_agent_export_artifact,
+    expire_export_artifact,
+    portable_agent_export_storage,
     revoke_export_artifact,
     user_can_access_export,
     user_can_export_agent,
@@ -49,21 +51,30 @@ from util.analytics import Analytics, AnalyticsEvent
 
 logger = logging.getLogger(__name__)
 
-
-def _safe_failure_message() -> str:
-    return "The export could not be completed. Please try again."
+SAFE_FAILURE_MESSAGE = "The export could not be completed. Please try again."
+ARCHIVE_BUILD_ERRORS = (
+    AttributeError,
+    *STORAGE_ERRORS,
+    KeyError,
+    RuntimeError,
+    TypeError,
+    sqlite3.Error,
+    DatabaseError,
+    SQLiteStateError,
+    AgentSQLiteBusy,
+)
 
 
 def _duration_seconds(export: PortableAgentExport, *, finished_at=None) -> float:
     finished = finished_at or timezone.now()
-    return max(0.0, (finished - export.requested_at).total_seconds())
+    return max(0.0, (finished - export.created_at).total_seconds())
 
 
-def _mark_export_failed(export: PortableAgentExport, *, code: str, message: str | None = None) -> None:
+def mark_portable_agent_export_failed(export: PortableAgentExport, *, code: str, message: str | None = None) -> None:
     export.status = PortableAgentExport.Status.FAILED
     export.phase = "failed"
     export.error_code = code[:64]
-    export.error_message = (message or _safe_failure_message())[:512]
+    export.error_message = (message or SAFE_FAILURE_MESSAGE)[:512]
     export.completed_at = timezone.now()
     export.save(update_fields=[
         "status", "phase", "error_code", "error_message", "completed_at", "updated_at",
@@ -93,7 +104,7 @@ def _write_root_files(staging: Path, export: PortableAgentExport, items, results
         "formatVersion": export.format_version,
         "exportId": str(export.id),
         "scope": export.scope,
-        "requestedAt": export.requested_at.isoformat(),
+        "requestedAt": export.created_at.isoformat(),
         "generatedAt": timezone.now().isoformat(),
         "agents": [
             {
@@ -124,10 +135,7 @@ def _write_root_files(staging: Path, export: PortableAgentExport, items, results
             "containsPotentiallySensitiveUserContent": True,
         },
     }
-    (staging / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    write_json_file(staging / "manifest.json", manifest)
     readme = (
         "# Gobii portable agent export\n\n"
         "Each agent has its own folder under `agents/`. Begin with that agent's README and destination adapter. "
@@ -155,21 +163,13 @@ def _write_root_files(staging: Path, export: PortableAgentExport, items, results
                 for owner in reference.get("ownerAgents", [])
             ]
             shared_references.append(normalized)
-    (staging / "shared-files/index.json").parent.mkdir(parents=True, exist_ok=True)
-    (staging / "shared-files/index.json").write_text(
-        json.dumps({"references": shared_references}, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    write_json_file(staging / "shared-files/index.json", {"references": shared_references})
 
     checksum_lines = []
     for path in sorted(staging.rglob("*")):
         if not path.is_file() or path.name == "checksums.sha256":
             continue
-        digest = hashlib.sha256()
-        with path.open("rb") as source:
-            while chunk := source.read(1024 * 1024):
-                digest.update(chunk)
-        checksum_lines.append(f"{digest.hexdigest()}  {path.relative_to(staging).as_posix()}")
+        checksum_lines.append(f"{_sha256_file(path)}  {path.relative_to(staging).as_posix()}")
     (staging / "checksums.sha256").write_text("\n".join(checksum_lines) + "\n", encoding="utf-8")
 
 
@@ -250,8 +250,12 @@ def _send_from_agent(export: PortableAgentExport, recipient: str) -> bool:
         )
         deliver_agent_email(message)
         message.refresh_from_db(fields=["latest_status"])
-    except (AnymailError, DatabaseError, smtplib.SMTPException, OSError, ValueError):
-        logger.warning("Agent delivery failed for portable export %s", export.id, exc_info=True)
+    except (AnymailError, DatabaseError, smtplib.SMTPException, OSError, ValueError) as exc:
+        logger.warning(
+            "Agent delivery failed for portable export %s error=%s",
+            export.id,
+            type(exc).__name__,
+        )
         return False
     return message.latest_status in {DeliveryStatus.SENT, DeliveryStatus.DELIVERED}
 
@@ -260,8 +264,12 @@ def _send_completion_email(export: PortableAgentExport) -> bool:
     recipient = str(export.requester.email or "").strip()
     try:
         verified_recipient = bool(recipient and has_verified_email_address(export.requester, recipient))
-    except DatabaseError:
-        logger.warning("Could not verify the email recipient for portable export %s", export.id, exc_info=True)
+    except DatabaseError as exc:
+        logger.warning(
+            "Could not verify the email recipient for portable export %s error=%s",
+            export.id,
+            type(exc).__name__,
+        )
         return False
     if not verified_recipient:
         logger.info("Portable export %s is ready without email because requester has no verified address", export.id)
@@ -278,19 +286,19 @@ def _send_completion_email(export: PortableAgentExport) -> bool:
             html_message=html_body,
             fail_silently=False,
         )
-    except (AnymailError, DatabaseError, smtplib.SMTPException, OSError, ValueError):
-        logger.warning("System delivery failed for portable export %s", export.id, exc_info=True)
+    except (AnymailError, DatabaseError, smtplib.SMTPException, OSError, ValueError) as exc:
+        logger.warning(
+            "System delivery failed for portable export %s error=%s",
+            export.id,
+            type(exc).__name__,
+        )
         return False
     return sent > 0
 
 
-def _update_export_progress(export: PortableAgentExport) -> None:
-    items = PortableAgentExportItem.objects.filter(export=export)
-    PortableAgentExport.objects.filter(pk=export.pk).update(
-        completed_agents=items.filter(status=PortableAgentExportItem.Status.READY).count(),
-        failed_agents=items.filter(status=PortableAgentExportItem.Status.FAILED).count(),
-        phase="snapshotting",
-    )
+def _record_item_progress(export: PortableAgentExport, status: str) -> None:
+    field = "completed_agents" if status == PortableAgentExportItem.Status.READY else "failed_agents"
+    PortableAgentExport.objects.filter(pk=export.pk).update(**{field: F(field) + 1, "phase": "snapshotting"})
 
 
 def _agent_remains_in_export_scope(export: PortableAgentExport, agent: PersistentAgent) -> bool:
@@ -305,7 +313,7 @@ def _agent_remains_in_export_scope(export: PortableAgentExport, agent: Persisten
 
 def _process_portable_agent_export(export: PortableAgentExport) -> None:
     if not user_can_access_export(export.requester, export):
-        _mark_export_failed(export, code="access_revoked", message="Access to the requested agents is no longer available.")
+        mark_portable_agent_export_failed(export, code="access_revoked", message="Access to the requested agents is no longer available.")
         return
 
     with transaction.atomic():
@@ -320,6 +328,7 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
     export.refresh_from_db()
     items = list(export.items.select_related("agent").order_by("source_agent_name", "source_agent_id"))
     results = {}
+    content_registry = {}
     with tempfile.TemporaryDirectory(prefix=f"gobii-portable-export-{export.id}-") as temp_dir:
         staging = Path(temp_dir) / "bundle"
         agents_root = staging / "agents"
@@ -328,7 +337,7 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
             snapshot_at = timezone.now()
             item.status = PortableAgentExportItem.Status.RUNNING
             item.snapshot_at = snapshot_at
-            item.save(update_fields=["status", "snapshot_at", "updated_at"])
+            item.save(update_fields=["status", "snapshot_at"])
             agent = PersistentAgent.objects.non_eval().alive().select_related(
                 "user", "organization", "preferred_llm_tier",
             ).filter(pk=item.source_agent_id).first()
@@ -336,33 +345,34 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
                 item.status = PortableAgentExportItem.Status.FAILED
                 item.error_code = "access_revoked"
                 item.error_message = "This agent is no longer available to export."
-                item.save(update_fields=["status", "error_code", "error_message", "updated_at"])
-                _update_export_progress(export)
+                item.save(update_fields=["status", "error_code", "error_message"])
+                _record_item_progress(export, item.status)
                 continue
             destination = agents_root / item.folder_name
             try:
-                result = PortableAgentArchiveBuilder(agent, item, destination).build()
-            except (
-                AttributeError,
-                BotoCoreError,
-                ClientError,
-                KeyError,
-                OSError,
-                RuntimeError,
-                TypeError,
-                ValueError,
-                sqlite3.Error,
-                DatabaseError,
-                SQLiteStateError,
-                AgentSQLiteBusy,
-            ) as exc:
-                logger.exception("Portable export item failed: export=%s agent=%s", export.id, item.source_agent_id)
+                result = PortableAgentArchiveBuilder(
+                    agent,
+                    item,
+                    destination,
+                    content_registry=content_registry,
+                ).build()
+            except ARCHIVE_BUILD_ERRORS as exc:
+                logger.warning(
+                    "Portable export item failed export=%s agent=%s error=%s",
+                    export.id,
+                    item.source_agent_id,
+                    type(exc).__name__,
+                )
                 shutil.rmtree(destination, ignore_errors=True)
+                failed_prefix = f"agents/{item.folder_name}/"
+                for digest, path in tuple(content_registry.items()):
+                    if path.startswith(failed_prefix):
+                        content_registry.pop(digest)
                 item.status = PortableAgentExportItem.Status.FAILED
                 item.error_code = type(exc).__name__.lower()[:64]
                 item.error_message = "This agent could not be exported."
-                item.save(update_fields=["status", "error_code", "error_message", "updated_at"])
-                _update_export_progress(export)
+                item.save(update_fields=["status", "error_code", "error_message"])
+                _record_item_progress(export, item.status)
                 continue
             results[str(item.id)] = result
             item.status = PortableAgentExportItem.Status.READY
@@ -371,17 +381,15 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
             item.file_count = result.file_count
             item.warning_count = len(result.warnings)
             item.redaction_count = int(result.redaction_report.get("total", 0))
-            item.warnings = [{"code": "content_omitted", "count": len(result.warnings)}] if result.warnings else []
             item.save(update_fields=[
                 "status", "message_count", "step_count", "file_count", "warning_count", "redaction_count",
-                "warnings", "updated_at",
             ])
-            _update_export_progress(export)
+            _record_item_progress(export, item.status)
 
         items = list(export.items.order_by("source_agent_name", "source_agent_id"))
         successful = [item for item in items if item.status == PortableAgentExportItem.Status.READY]
         if not successful:
-            _mark_export_failed(export, code="no_agents_exported")
+            mark_portable_agent_export_failed(export, code="no_agents_exported")
             return
         export.phase = "packaging"
         export.save(update_fields=["phase", "updated_at"])
@@ -390,25 +398,25 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
         _zip_staging_directory(staging, archive_path)
         archive_size = archive_path.stat().st_size
         if archive_size > settings.PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES:
-            _mark_export_failed(export, code="archive_too_large", message="The export is too large to package safely.")
+            mark_portable_agent_export_failed(export, code="archive_too_large", message="The export is too large to package safely.")
             return
         archive_sha256 = _sha256_file(archive_path)
 
         export.refresh_from_db()
         if not user_can_access_export(export.requester, export):
-            _mark_export_failed(export, code="access_revoked", message="Access to the requested agents is no longer available.")
+            mark_portable_agent_export_failed(export, code="access_revoked", message="Access to the requested agents is no longer available.")
             return
         export.phase = "uploading"
         export.save(update_fields=["phase", "updated_at"])
         storage_key = f"portable_agent_exports/{timezone.now():%Y/%m}/{export.id}.zip"
+        storage = portable_agent_export_storage()
         with archive_path.open("rb") as archive:
-            saved_key = default_storage.save(storage_key, File(archive))
+            saved_key = storage.save(storage_key, File(archive))
 
         export.refresh_from_db()
         if not user_can_access_export(export.requester, export):
-            if default_storage.exists(saved_key):
-                default_storage.delete(saved_key)
-            _mark_export_failed(export, code="access_revoked", message="Access to the requested agents is no longer available.")
+            export.storage_key = saved_key
+            revoke_export_artifact(export)
             return
         warning_count = sum(item.warning_count for item in items) + len(items) - len(successful)
         now = timezone.now()
@@ -436,11 +444,8 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
                 "error_code", "error_message", "updated_at",
             ])
         except DatabaseError:
-            try:
-                if default_storage.exists(saved_key):
-                    default_storage.delete(saved_key)
-            except (BotoCoreError, ClientError, OSError, ValueError):
-                logger.warning("Could not remove an untracked portable export artifact %s", saved_key, exc_info=True)
+            if not delete_portable_agent_export_artifact(saved_key, export_id=export.id):
+                PortableAgentExport.objects.filter(pk=export.pk).update(storage_key=saved_key)
             raise
 
     export.refresh_from_db()
@@ -478,21 +483,10 @@ def process_portable_agent_export(export_id: str) -> None:
         return
     try:
         _process_portable_agent_export(export)
-    except (
-        AttributeError,
-        BotoCoreError,
-        ClientError,
-        KeyError,
-        OSError,
-        RuntimeError,
-        TypeError,
-        ValueError,
-        zipfile.BadZipFile,
-        DatabaseError,
-    ) as exc:
-        logger.exception("Portable export job failed: export=%s", export_id)
+    except ARCHIVE_BUILD_ERRORS + (zipfile.BadZipFile,) as exc:
+        logger.warning("Portable export job failed export=%s error=%s", export_id, type(exc).__name__)
         export.refresh_from_db()
-        _mark_export_failed(export, code=type(exc).__name__.lower())
+        mark_portable_agent_export_failed(export, code=type(exc).__name__.lower())
 
 
 @shared_task(name="api.tasks.portable_agent_exports.prune_portable_agent_exports")
@@ -505,20 +499,8 @@ def prune_portable_agent_exports() -> dict:
         expires_at__lte=now,
     ).iterator(chunk_size=100):
         archive_size_bytes = export.archive_size_bytes
-        try:
-            if export.storage_key and default_storage.exists(export.storage_key):
-                default_storage.delete(export.storage_key)
-        except (BotoCoreError, ClientError, OSError, ValueError):
-            logger.warning("Could not expire portable export %s; cleanup will retry", export.id, exc_info=True)
+        if not expire_export_artifact(export):
             continue
-        export.status = PortableAgentExport.Status.EXPIRED
-        export.phase = "expired"
-        export.storage_key = ""
-        export.archive_size_bytes = None
-        export.archive_sha256 = ""
-        export.save(update_fields=[
-            "status", "phase", "storage_key", "archive_size_bytes", "archive_sha256", "updated_at",
-        ])
         expired_count += 1
         Analytics.track(
             user_id=export.requester_id,
@@ -534,8 +516,20 @@ def prune_portable_agent_exports() -> dict:
             user=export.requester,
         )
 
+    for export in PortableAgentExport.objects.filter(
+        status=PortableAgentExport.Status.FAILED,
+    ).exclude(storage_key="").iterator(chunk_size=100):
+        if delete_portable_agent_export_artifact(export.storage_key, export_id=export.id):
+            export.storage_key = ""
+            export.archive_size_bytes = None
+            export.archive_sha256 = ""
+            export.save(update_fields=["storage_key", "archive_size_bytes", "archive_sha256", "updated_at"])
+
     metadata_cutoff = now - timedelta(days=settings.PORTABLE_AGENT_EXPORT_METADATA_TTL_DAYS)
-    stale = PortableAgentExport.objects.exclude(status__in=PortableAgentExport.ACTIVE_STATUSES).filter(created_at__lt=metadata_cutoff)
+    stale = PortableAgentExport.objects.exclude(status__in=PortableAgentExport.ACTIVE_STATUSES).filter(
+        created_at__lt=metadata_cutoff,
+        storage_key="",
+    )
     deleted_count = stale.count()
     stale.delete()
     logger.info("Portable export cleanup expired=%s deleted_metadata=%s", expired_count, deleted_count)

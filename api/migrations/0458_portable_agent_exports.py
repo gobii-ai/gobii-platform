@@ -3,7 +3,6 @@ import uuid
 import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
-import django.utils.timezone
 
 
 FLAG_NAME = "portable_agent_exports"
@@ -56,7 +55,6 @@ class Migration(migrations.Migration):
                 ("archive_sha256", models.CharField(blank=True, max_length=64)),
                 ("error_code", models.CharField(blank=True, max_length=64)),
                 ("error_message", models.CharField(blank=True, max_length=512)),
-                ("requested_at", models.DateTimeField(default=django.utils.timezone.now)),
                 ("started_at", models.DateTimeField(blank=True, null=True)),
                 ("completed_at", models.DateTimeField(blank=True, null=True)),
                 ("expires_at", models.DateTimeField(blank=True, db_index=True, null=True)),
@@ -83,11 +81,8 @@ class Migration(migrations.Migration):
                 ("file_count", models.PositiveIntegerField(default=0)),
                 ("warning_count", models.PositiveIntegerField(default=0)),
                 ("redaction_count", models.PositiveIntegerField(default=0)),
-                ("warnings", models.JSONField(blank=True, default=list)),
                 ("error_code", models.CharField(blank=True, max_length=64)),
                 ("error_message", models.CharField(blank=True, max_length=512)),
-                ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("updated_at", models.DateTimeField(auto_now=True)),
                 ("agent", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name="portable_export_items", to="api.persistentagent")),
                 ("export", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="items", to="api.portableagentexport")),
             ],

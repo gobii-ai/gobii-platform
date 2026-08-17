@@ -7,7 +7,8 @@ import zipfile
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
@@ -33,16 +34,22 @@ from api.models import (
     PersistentAgentPromptArchive,
     PersistentAgentStep,
     PersistentAgentSystemStep,
+    PersistentAgentSystemSkillState,
     PersistentAgentToolCall,
     PortableAgentExport,
     PortableAgentExportItem,
 )
 from api.services.portable_agent_export_archive import (
     AgentArchiveResult,
+    ExportFileCollector,
     PortableAgentArchiveBuilder,
     _safe_relative_path,
 )
-from api.services.portable_agent_exports import build_download_token, user_can_access_export
+from api.services.portable_agent_exports import (
+    build_download_token,
+    portable_agent_export_storage,
+    user_can_access_export,
+)
 from api.tasks.portable_agent_exports import (
     _process_portable_agent_export,
     _send_completion_email,
@@ -66,6 +73,13 @@ class TemporaryStorageMixin:
             "public_template_social_images": {
                 "BACKEND": "django.core.files.storage.FileSystemStorage",
                 "OPTIONS": {"location": self.storage_directory.name, "base_url": "/media/"},
+            },
+            "portable_agent_exports": {
+                "BACKEND": "django.core.files.storage.FileSystemStorage",
+                "OPTIONS": {
+                    "location": str(Path(self.storage_directory.name) / "exports"),
+                    "base_url": "/private-agent-exports/",
+                },
             },
             "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
         }
@@ -225,7 +239,8 @@ class PortableAgentExportApiTests(TemporaryStorageMixin, TestCase):
         self.assertEqual(export.items.get().source_agent_id, org_agent.id)
 
     def test_download_requires_sign_in_requester_token_and_current_access(self):
-        storage_key = default_storage.save("portable-tests/export.zip", ContentFile(b"zip-data"))
+        export_storage = portable_agent_export_storage()
+        storage_key = export_storage.save("portable-tests/export.zip", ContentFile(b"zip-data"))
         export = PortableAgentExport.objects.create(
             requester=self.owner,
             scope=PortableAgentExport.Scope.AGENT,
@@ -276,7 +291,7 @@ class PortableAgentExportApiTests(TemporaryStorageMixin, TestCase):
         self.assertEqual(response.status_code, 403)
         export.refresh_from_db()
         self.assertEqual(export.status, PortableAgentExport.Status.FAILED)
-        self.assertFalse(default_storage.exists(storage_key))
+        self.assertFalse(export_storage.exists(storage_key))
 
 
 @tag("agent_portable_export_batch")
@@ -425,6 +440,9 @@ class PortableAgentArchiveTests(TemporaryStorageMixin, TestCase):
             }
             actual_paths = {path.relative_to(agent_dir).as_posix() for path in agent_dir.rglob("*") if path.is_file()}
             self.assertTrue(expected_paths.issubset(actual_paths))
+            self.assertNotIn("work/external-tasks.json", actual_paths)
+            self.assertFalse((agent_dir / "adapters/hermes/skills").exists())
+            self.assertFalse((agent_dir / "adapters/chatgpt/knowledge").exists())
             self.assertEqual(result.message_count, 1)
             self.assertEqual(result.step_count, 1)
 
@@ -475,6 +493,121 @@ class PortableAgentArchiveTests(TemporaryStorageMixin, TestCase):
 
         self.assertNotEqual(_agent_folder_name(self.agent), _agent_folder_name(other))
         self.assertNotIn("..", _agent_folder_name(self.agent))
+
+    def test_file_deduplication_is_shared_across_agents(self):
+        storage_name = default_storage.save("portable-tests/shared.txt", ContentFile(b"same content"))
+        registry = {}
+        with tempfile.TemporaryDirectory() as destination:
+            root = Path(destination)
+            first_result = AgentArchiveResult()
+            first = ExportFileCollector(
+                self.agent,
+                root / "agents/first",
+                first_result,
+                registry,
+                "agents/first",
+            )
+            first_entry = first.add_storage_file(
+                storage_name=storage_name,
+                logical_path="shared.txt",
+                category="workspace",
+                identifier="first",
+            )
+            second_result = AgentArchiveResult()
+            second = ExportFileCollector(
+                self.agent,
+                root / "agents/second",
+                second_result,
+                registry,
+                "agents/second",
+            )
+            second_entry = second.add_storage_file(
+                storage_name=storage_name,
+                logical_path="duplicate.txt",
+                category="workspace",
+                identifier="second",
+            )
+
+            self.assertFalse(second_entry["archivePath"].startswith("files/"))
+            self.assertEqual(second_entry["archivePathScope"], "bundle")
+            self.assertEqual(second_entry["archivePath"], f"agents/first/{first_entry['archivePath']}")
+            self.assertEqual(first_result.file_count, 1)
+            self.assertEqual(second_result.file_count, 0)
+
+    def test_system_skills_export_setup_metadata_without_rendering_prompts(self):
+        PersistentAgentSystemSkillState.objects.create(agent=self.agent, skill_key="private-system-skill")
+        render_prompt = Mock(return_value="rendered-system-prompt-marker")
+        definition = SimpleNamespace(
+            skill_key="private-system-skill",
+            name="Private system skill",
+            tool_names=("system_tool",),
+            setup_instructions="Reconnect the service.",
+            setup_steps=("Sign in again.",),
+            render_prompt_instructions=render_prompt,
+        )
+        server = SimpleNamespace(
+            id="server-id",
+            name="portable-server",
+            display_name="Portable server",
+            description="Reconnect me",
+            scope="user",
+            transport="streamable_http",
+            command="",
+            command_args=[],
+            url="https://example.com/mcp?signature=private",
+            auth_method="oauth2",
+            managed_integration_key="portable",
+            metadata={"scopes": ["records.read"], "internalSecret": "mcp-metadata-secret-marker"},
+        )
+        with tempfile.TemporaryDirectory() as destination:
+            agent_dir = Path(destination) / self.item.folder_name
+            builder = PortableAgentArchiveBuilder(self.agent, self.item, agent_dir)
+            with (
+                patch("api.services.portable_agent_export_archive.get_latest_skill_versions", return_value=[]),
+                patch("api.services.portable_agent_export_archive.get_system_skill_definition", return_value=definition),
+                patch("api.services.portable_agent_export_archive.agent_accessible_server_configs", return_value=[server]),
+            ):
+                builder._write_skills_tools_and_connections()
+
+            render_prompt.assert_not_called()
+            capabilities = json.loads((agent_dir / "tools/capabilities.json").read_text())
+            self.assertEqual(capabilities["systemSkills"][0]["setupInstructions"], "Reconnect the service.")
+            servers = json.loads((agent_dir / "tools/mcp-servers.json").read_text())["servers"]
+            self.assertEqual(servers[0]["requiredScopes"], ["records.read"])
+            self.assertNotIn("metadata", servers[0])
+            self.assertFalse(any((agent_dir / "skills").glob("system-*")))
+            exported_text = "\n".join(
+                path.read_text(errors="ignore") for path in agent_dir.rglob("*") if path.is_file()
+            )
+            self.assertNotIn("rendered-system-prompt-marker", exported_text)
+            self.assertNotIn("mcp-metadata-secret-marker", exported_text)
+
+    def test_file_warning_does_not_export_storage_exception_details(self):
+        with tempfile.TemporaryDirectory() as destination:
+            result = AgentArchiveResult()
+            collector = ExportFileCollector(
+                self.agent,
+                Path(destination),
+                result,
+                {},
+                "agents/safe-warning",
+            )
+            with self.assertLogs("api.services.portable_agent_export_archive", level="WARNING") as logs:
+                with patch(
+                    "api.services.portable_agent_export_archive.default_storage.open",
+                    side_effect=OSError("signed-url-and-credential-marker"),
+                ):
+                    entry = collector.add_storage_file(
+                        storage_name="missing.txt",
+                        logical_path="missing.txt",
+                        category="workspace",
+                        identifier="missing",
+                    )
+
+        self.assertTrue(entry["missing"])
+        self.assertNotIn("signed-url-and-credential-marker", json.dumps(entry))
+        self.assertNotIn("signed-url-and-credential-marker", json.dumps(result.warnings))
+        self.assertNotIn("signed-url-and-credential-marker", "\n".join(logs.output))
 
 
 @tag("agent_portable_export_batch")
@@ -561,7 +694,11 @@ class PortableAgentExportTaskTests(TemporaryStorageMixin, TestCase):
 
         def build(builder):
             if builder.agent.id == bad_agent.id:
+                builder.content_registry["failed-digest"] = (
+                    f"agents/{builder.item.folder_name}/files/workspace/source.txt"
+                )
                 raise OSError("missing source")
+            self.assertNotIn("failed-digest", builder.content_registry)
             builder.destination.mkdir(parents=True, exist_ok=True)
             (builder.destination / "manifest.json").write_text('{"formatVersion":"gobii.agent-portable-export/v1"}\n')
             (builder.destination / "README.md").write_text("# Ready\n")
@@ -579,9 +716,10 @@ class PortableAgentExportTaskTests(TemporaryStorageMixin, TestCase):
         self.assertEqual(export.completed_agents, 1)
         self.assertEqual(export.failed_agents, 1)
         self.assertEqual(export.warning_count, 1)
-        self.assertTrue(default_storage.exists(export.storage_key))
+        export_storage = portable_agent_export_storage()
+        self.assertTrue(export_storage.exists(export.storage_key))
 
-        with default_storage.open(export.storage_key, "rb") as archive_file, zipfile.ZipFile(archive_file) as archive:
+        with export_storage.open(export.storage_key, "rb") as archive_file, zipfile.ZipFile(archive_file) as archive:
             names = set(archive.namelist())
             self.assertIn("manifest.json", names)
             self.assertIn("README.md", names)
@@ -635,7 +773,7 @@ class PortableAgentExportTaskTests(TemporaryStorageMixin, TestCase):
         item = export.items.get()
         item.status = PortableAgentExportItem.Status.READY
         item.save(update_fields=["status"])
-        storage_key = default_storage.save("portable-tests/revoked.zip", ContentFile(b"data"))
+        storage_key = portable_agent_export_storage().save("portable-tests/revoked.zip", ContentFile(b"data"))
         export.status = PortableAgentExport.Status.READY
         export.storage_key = storage_key
         export.expires_at = timezone.now() + timedelta(days=7)
@@ -649,7 +787,8 @@ class PortableAgentExportTaskTests(TemporaryStorageMixin, TestCase):
 
     def test_cleanup_expires_artifacts_and_removes_old_metadata(self):
         agent = self._create_agent("Cleanup Agent")
-        storage_key = default_storage.save("portable-tests/expired.zip", ContentFile(b"data"))
+        export_storage = portable_agent_export_storage()
+        storage_key = export_storage.save("portable-tests/expired.zip", ContentFile(b"data"))
         expired = PortableAgentExport.objects.create(
             requester=self.user,
             scope=PortableAgentExport.Scope.AGENT,
@@ -674,6 +813,6 @@ class PortableAgentExportTaskTests(TemporaryStorageMixin, TestCase):
 
         expired.refresh_from_db()
         self.assertEqual(expired.status, PortableAgentExport.Status.EXPIRED)
-        self.assertFalse(default_storage.exists(storage_key))
+        self.assertFalse(export_storage.exists(storage_key))
         self.assertFalse(PortableAgentExport.objects.filter(pk=stale.pk).exists())
         self.assertEqual(result, {"expired": 1, "deletedMetadata": 1})

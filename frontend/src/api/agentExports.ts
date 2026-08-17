@@ -12,9 +12,6 @@ export type PortableAgentExportStatus =
 export type PortableAgentExportJob = {
   id: string
   scope: PortableAgentExportScope
-  agentId: string | null
-  organizationId: string | null
-  formatVersion: string
   status: PortableAgentExportStatus
   phase: string
   agentsTotal: number
@@ -22,12 +19,9 @@ export type PortableAgentExportJob = {
   agentsFailed: number
   warningCount: number
   redactionCount: number
-  archiveFilename: string | null
   archiveSizeBytes: number | null
-  archiveSha256: string | null
   error: string | null
   createdAt: string
-  completedAt: string | null
   expiresAt: string | null
   downloadUrl: string | null
 }

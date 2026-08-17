@@ -209,9 +209,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     : 'Open agent settings'
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false)
   const [exportDialogAgentId, setExportDialogAgentId] = useState<string | null>(null)
-  const [exportQueuedAgentId, setExportQueuedAgentId] = useState<string | null>(null)
   const exportDialogOpen = Boolean(agentId && exportDialogAgentId === agentId)
-  const exportQueued = Boolean(agentId && exportQueuedAgentId === agentId)
   const showMobileOverflow = showShareButton || showPublicShareButton || showExportButton || showSettingsButton || showDeveloperMode
   const shareLabel = shareDisabledReason || 'Invite collaborators'
   const publicShareLabel = publicShareDisabledReason || 'Share this agent'
@@ -333,7 +331,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               {!agentIsActive ? (
                 <AgentChatStatusBadge tone="warning">Paused</AgentChatStatusBadge>
               ) : null}
-              {exportQueued ? <AgentChatStatusBadge tone="success">Export queued</AgentChatStatusBadge> : null}
               {agentIsActive && (agentEmail || agentSms) ? (
                 <span className="banner-contact-links">
                   {agentEmail ? (
@@ -661,7 +658,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
           scope="agent"
           agentId={agentId}
           onClose={() => setExportDialogAgentId(null)}
-          onStarted={() => setExportQueuedAgentId(agentId)}
         />
       ) : null}
     </div>

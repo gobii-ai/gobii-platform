@@ -2,9 +2,10 @@ import logging
 from urllib.parse import urlencode
 
 from botocore.exceptions import BotoCoreError, ClientError
+from google.cloud.exceptions import GoogleCloudError
 from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.files.storage import default_storage
+from django.core.files.storage import storages
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.urls import reverse
@@ -19,6 +20,28 @@ from console.context_helpers import build_console_context
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_TOKEN_SALT = "portable-agent-export-download-v1"
+STORAGE_ERRORS = (BotoCoreError, ClientError, GoogleCloudError, OSError, ValueError)
+
+
+def portable_agent_export_storage():
+    return storages["portable_agent_exports"]
+
+
+def delete_portable_agent_export_artifact(storage_key: str, *, export_id=None) -> bool:
+    if not storage_key:
+        return True
+    storage = portable_agent_export_storage()
+    try:
+        if storage.exists(storage_key):
+            storage.delete(storage_key)
+    except STORAGE_ERRORS as exc:
+        logger.warning(
+            "Could not delete portable export artifact %s error=%s",
+            export_id or storage_key,
+            type(exc).__name__,
+        )
+        return False
+    return True
 
 
 def user_can_export_agent(user, agent: PersistentAgent) -> bool:
@@ -75,7 +98,7 @@ def _agent_folder_name(agent: PersistentAgent) -> str:
     return f"{name}--{str(agent.id).replace('-', '')[:8]}"
 
 
-def _resolve_export_scope(request, scope: str, agent_id=None):
+def resolve_portable_export_scope(request, scope: str, agent_id=None, *, include_agents: bool = True):
     user = request.user
     if scope == PortableAgentExport.Scope.AGENT:
         if not agent_id:
@@ -85,7 +108,7 @@ def _resolve_export_scope(request, scope: str, agent_id=None):
             raise ValidationError({"agentId": "Agent not found."})
         if not user_can_export_agent(user, agent):
             raise PermissionDenied("You do not have permission to export this agent.")
-        return f"agent:{agent.id}", agent, agent.organization, [agent]
+        return f"agent:{agent.id}", agent, agent.organization, [agent] if include_agents else []
 
     if scope == PortableAgentExport.Scope.PERSONAL:
         agents = list(
@@ -93,7 +116,7 @@ def _resolve_export_scope(request, scope: str, agent_id=None):
             .filter(user=user, organization__isnull=True)
             .select_related("organization", "user")
             .order_by("name", "id")
-        )
+        ) if include_agents else []
         return f"personal:{user.id}", None, None, agents
 
     if scope == PortableAgentExport.Scope.ORGANIZATION:
@@ -109,14 +132,14 @@ def _resolve_export_scope(request, scope: str, agent_id=None):
             .filter(organization=organization)
             .select_related("organization", "user")
             .order_by("name", "id")
-        )
+        ) if include_agents else []
         return f"organization:{organization.id}", None, organization, agents
 
     raise ValidationError({"scope": "scope must be agent, personal, or organization."})
 
 
 def create_portable_agent_export(request, *, scope: str, agent_id=None) -> tuple[PortableAgentExport, bool]:
-    scope_key, agent, organization, agents = _resolve_export_scope(request, scope, agent_id)
+    scope_key, agent, organization, agents = resolve_portable_export_scope(request, scope, agent_id)
     if not agents:
         raise ValidationError({"scope": "There are no agents to export in this workspace."})
 
@@ -189,9 +212,6 @@ def serialize_portable_agent_export(export: PortableAgentExport) -> dict:
     return {
         "id": str(export.id),
         "scope": export.scope,
-        "agentId": str(export.agent_id) if export.agent_id else None,
-        "organizationId": str(export.organization_id) if export.organization_id else None,
-        "formatVersion": export.format_version,
         "status": export.status,
         "phase": export.phase,
         "agentsTotal": export.total_agents,
@@ -199,12 +219,9 @@ def serialize_portable_agent_export(export: PortableAgentExport) -> dict:
         "agentsFailed": export.failed_agents,
         "warningCount": export.warning_count,
         "redactionCount": export.redaction_count,
-        "archiveFilename": export.archive_filename or None,
         "archiveSizeBytes": export.archive_size_bytes,
-        "archiveSha256": export.archive_sha256 or None,
         "error": export.error_message or None,
         "createdAt": export.created_at.isoformat(),
-        "completedAt": export.completed_at.isoformat() if export.completed_at else None,
         "expiresAt": export.expires_at.isoformat() if export.expires_at else None,
         "downloadUrl": download_url,
     }
@@ -212,23 +229,32 @@ def serialize_portable_agent_export(export: PortableAgentExport) -> dict:
 
 def revoke_export_artifact(export: PortableAgentExport, *, code: str = "access_revoked") -> None:
     storage_key = export.storage_key
-    artifact_deleted = not storage_key
-    if storage_key:
-        try:
-            if default_storage.exists(storage_key):
-                default_storage.delete(storage_key)
-            artifact_deleted = True
-        except (BotoCoreError, ClientError, OSError, ValueError):
-            logger.warning("Could not delete revoked portable export %s", export.id, exc_info=True)
+    artifact_deleted = delete_portable_agent_export_artifact(storage_key, export_id=export.id)
     export.status = PortableAgentExport.Status.FAILED
     export.phase = "revoked"
     export.expires_at = None
     export.error_code = code
     export.error_message = "Access to this export is no longer available."
-    update_fields = ["status", "phase", "expires_at", "error_code", "error_message", "updated_at"]
+    update_fields = [
+        "status", "phase", "storage_key", "expires_at", "error_code", "error_message", "updated_at",
+    ]
     if artifact_deleted:
         export.storage_key = ""
         export.archive_size_bytes = None
         export.archive_sha256 = ""
-        update_fields.extend(["storage_key", "archive_size_bytes", "archive_sha256"])
+        update_fields.extend(["archive_size_bytes", "archive_sha256"])
     export.save(update_fields=update_fields)
+
+
+def expire_export_artifact(export: PortableAgentExport) -> bool:
+    if not delete_portable_agent_export_artifact(export.storage_key, export_id=export.id):
+        return False
+    export.status = PortableAgentExport.Status.EXPIRED
+    export.phase = "expired"
+    export.storage_key = ""
+    export.archive_size_bytes = None
+    export.archive_sha256 = ""
+    export.save(update_fields=[
+        "status", "phase", "storage_key", "archive_size_bytes", "archive_sha256", "updated_at",
+    ])
+    return True

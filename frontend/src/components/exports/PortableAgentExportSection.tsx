@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Archive, CheckCircle2, Download, Loader2 } from 'lucide-react'
 
 import {
@@ -9,6 +9,8 @@ import {
   type PortableAgentExportScope,
 } from '../../api/agentExports'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
+import { formatBytes } from '../../util/formatBytes'
+import { formatAbsoluteTimestamp } from '../../util/time'
 import { SettingsActionButton, SettingsStatusBadge } from '../agentSettings/SettingsControls'
 import { AsyncActionConfirmDialog } from '../common/ActionConfirmDialog'
 
@@ -68,32 +70,6 @@ type PortableAgentExportSectionProps = {
   buttonLabel?: string
 }
 
-function formatDate(value: string | null): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
-}
-
-function formatBytes(value: number | null): string | null {
-  if (value === null || !Number.isFinite(value)) return null
-  if (value < 1024) return `${value} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let size = value / 1024
-  let unit = units[0]
-  for (let index = 1; index < units.length && size >= 1024; index += 1) {
-    size /= 1024
-    unit = units[index]
-  }
-  return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${unit}`
-}
-
 function jobStatus(job: PortableAgentExportJob): {
   label: string
   tone: 'neutral' | 'success' | 'warning' | 'danger'
@@ -111,9 +87,9 @@ function ExportJobStatus({ job, surface }: { job: PortableAgentExportJob; surfac
   const active = ACTIVE_STATUSES.has(job.status)
   const finishedAgents = job.agentsCompleted + job.agentsFailed
   const progress = job.agentsTotal > 0 ? Math.min(100, Math.round((finishedAgents / job.agentsTotal) * 100)) : 0
-  const expiresAt = formatDate(job.expiresAt)
-  const createdAt = formatDate(job.createdAt)
-  const archiveSize = formatBytes(job.archiveSizeBytes)
+  const expiresAt = formatAbsoluteTimestamp(job.expiresAt)
+  const createdAt = formatAbsoluteTimestamp(job.createdAt)
+  const archiveSize = job.archiveSizeBytes === null ? null : formatBytes(job.archiveSizeBytes)
 
   return (
     <div className="space-y-3 rounded-lg border border-slate-200/70 bg-transparent p-4">
@@ -212,28 +188,36 @@ export function PortableAgentExportSection({
     return () => controller.abort()
   }, [loadLatest])
 
+  const active = Boolean(job && ACTIVE_STATUSES.has(job.status))
+  const activeJobId = active ? job?.id ?? null : null
+
   useEffect(() => {
-    if (!job || !ACTIVE_STATUSES.has(job.status)) return
+    if (!activeJobId) return
     const controller = new AbortController()
-    const timer = window.setTimeout(async () => {
+    let refreshing = false
+    const refresh = async () => {
+      if (refreshing) return
+      refreshing = true
       try {
-        const nextJob = await fetchPortableAgentExport(job.id, controller.signal)
+        const nextJob = await fetchPortableAgentExport(activeJobId, controller.signal)
         setJob(nextJob)
         setLoadError(null)
       } catch (error) {
         if (!controller.signal.aborted) {
           setLoadError(safeErrorMessage(error, 'Unable to refresh export progress.'))
         }
+      } finally {
+        refreshing = false
       }
-    }, 3000)
+    }
+    const timer = window.setInterval(() => void refresh(), 3000)
     return () => {
       controller.abort()
-      window.clearTimeout(timer)
+      window.clearInterval(timer)
     }
-  }, [job])
+  }, [activeJobId])
 
-  const active = Boolean(job && ACTIVE_STATUSES.has(job.status))
-  const content = useMemo(() => (
+  const content = (
     <>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         {surface === 'settings' ? (
@@ -268,7 +252,7 @@ export function PortableAgentExportSection({
         }}
       />
     </>
-  ), [active, agentId, buttonLabel, confirmOpen, description, job, loadError, loading, scope, surface, title])
+  )
 
   if (surface === 'profile') {
     return (

@@ -218,7 +218,6 @@ export type AgentSettingsUrls = {
   manageFiles: string
   contactRequests: string
   delete: string
-  agentExports: string
 }
 
 export type AgentSettingsData = {

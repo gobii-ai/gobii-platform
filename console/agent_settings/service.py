@@ -1137,7 +1137,6 @@ class _AgentSettingsService(AgentOwnerContextOverrideMixin, ConsoleViewMixin, De
                     organization_id=str(agent.organization_id) if agent.organization_id else None,
                 ),
                 'delete': reverse('agent_delete', args=[agent.id]),
-                'agentExports': reverse('console_portable_agent_exports'),
             },
             'agent': {
                 'id': str(agent.id),
