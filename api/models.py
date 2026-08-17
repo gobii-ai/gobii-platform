@@ -13978,14 +13978,29 @@ class PortableAgentExportItem(models.Model):
         return f"PortableAgentExportItem<{self.source_agent_name}:{self.status}>"
 
 
+class PortableAgentExportArtifactCleanup(models.Model):
+    storage_key = models.CharField(max_length=512, unique=True)
+    source_export_id = models.UUIDField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+
 @receiver(post_delete, sender=PortableAgentExport)
 def delete_portable_agent_export_file(sender, instance: PortableAgentExport, **kwargs):
     if not instance.storage_key:
         return
-    from api.services.portable_agent_exports import delete_portable_agent_export_artifact
+    from api.services.portable_agent_exports import try_portable_agent_export_artifact_cleanup
 
-    storage_key = instance.storage_key
-    transaction.on_commit(lambda: delete_portable_agent_export_artifact(storage_key, export_id=instance.id))
+    cleanup, _created = PortableAgentExportArtifactCleanup.objects.get_or_create(
+        storage_key=instance.storage_key,
+        defaults={"source_export_id": instance.id},
+    )
+    transaction.on_commit(
+        lambda: try_portable_agent_export_artifact_cleanup(cleanup.id),
+        robust=True,
+    )
 
 
 class AgentOwnerCategoryProfile(models.Model):

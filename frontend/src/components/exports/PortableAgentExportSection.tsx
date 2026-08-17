@@ -90,6 +90,12 @@ function ExportJobStatus({ job, surface }: { job: PortableAgentExportJob; surfac
   const expiresAt = formatAbsoluteTimestamp(job.expiresAt)
   const createdAt = formatAbsoluteTimestamp(job.createdAt)
   const archiveSize = job.archiveSizeBytes === null ? null : formatBytes(job.archiveSizeBytes)
+  const issueSummary = [
+    job.warningCount > 0 ? `${job.warningCount} warning${job.warningCount === 1 ? '' : 's'}` : null,
+    job.agentsFailed > 0
+      ? `${job.agentsFailed} agent${job.agentsFailed === 1 ? '' : 's'} could not be exported`
+      : null,
+  ].filter(Boolean).join(' · ')
 
   return (
     <div className="space-y-3 rounded-lg border border-slate-200/70 bg-transparent p-4">
@@ -121,12 +127,7 @@ function ExportJobStatus({ job, surface }: { job: PortableAgentExportJob; surfac
         </div>
       ) : null}
 
-      {job.warningCount > 0 || job.agentsFailed > 0 ? (
-        <p className="text-sm text-amber-800">
-          {job.warningCount} warning{job.warningCount === 1 ? '' : 's'}
-          {job.agentsFailed > 0 ? ` · ${job.agentsFailed} agent${job.agentsFailed === 1 ? '' : 's'} could not be exported` : ''}
-        </p>
-      ) : null}
+      {issueSummary ? <p className="text-sm text-amber-800">{issueSummary}</p> : null}
       {job.redactionCount > 0 ? (
         <p className="text-sm text-slate-600">
           {job.redactionCount} sensitive value{job.redactionCount === 1 ? '' : 's'} removed from portable text and tool data.

@@ -5,6 +5,7 @@ import threading
 
 from pottery import Redlock
 from pottery.exceptions import PotteryError, ReleaseUnlockedLock
+from redis.exceptions import RedisError
 
 from config.redis_client import get_redis_client
 
@@ -18,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 class AgentSQLiteBusy(RuntimeError):
     pass
+
+
+AGENT_SQLITE_COORDINATION_ERRORS = (AgentSQLiteBusy, PotteryError, RedisError)
 
 
 def agent_sqlite_busy_result(exc: AgentSQLiteBusy) -> dict:

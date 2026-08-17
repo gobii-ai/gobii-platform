@@ -12,7 +12,13 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
 
-from api.models import OrganizationMembership, PersistentAgent, PortableAgentExport, PortableAgentExportItem
+from api.models import (
+    OrganizationMembership,
+    PersistentAgent,
+    PortableAgentExport,
+    PortableAgentExportArtifactCleanup,
+    PortableAgentExportItem,
+)
 from api.services.organization_permissions import ORG_AGENT_CONFIG_AUTHORITY_ROLES
 from console.context_helpers import build_console_context
 
@@ -42,6 +48,31 @@ def delete_portable_agent_export_artifact(storage_key: str, *, export_id=None) -
         )
         return False
     return True
+
+
+def try_portable_agent_export_artifact_cleanup(cleanup_id) -> bool:
+    cleanup = PortableAgentExportArtifactCleanup.objects.filter(pk=cleanup_id).first()
+    if cleanup is None:
+        return True
+    if not delete_portable_agent_export_artifact(
+        cleanup.storage_key,
+        export_id=cleanup.source_export_id,
+    ):
+        return False
+    cleanup.delete()
+    return True
+
+
+def retry_portable_agent_export_artifact_cleanups() -> int:
+    deleted = 0
+    cleanup_ids = PortableAgentExportArtifactCleanup.objects.values_list(
+        "id",
+        flat=True,
+    ).iterator(chunk_size=100)
+    for cleanup_id in cleanup_ids:
+        if try_portable_agent_export_artifact_cleanup(cleanup_id):
+            deleted += 1
+    return deleted
 
 
 def user_can_export_agent(user, agent: PersistentAgent) -> bool:

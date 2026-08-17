@@ -12,6 +12,7 @@ from typing import Mapping
 from urllib.parse import urlsplit, urlunsplit
 
 from cryptography.exceptions import InvalidTag
+from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db.models import Q
 from django.utils.text import get_valid_filename, slugify
@@ -35,7 +36,7 @@ from api.services.agent_owner_custom_instructions import (
     get_custom_instructions_for_organization_id,
     get_custom_instructions_for_user_id,
 )
-from api.services.agent_sqlite_coordination import AgentSQLiteBusy
+from api.services.agent_sqlite_coordination import AGENT_SQLITE_COORDINATION_ERRORS
 from api.services.mcp_servers import agent_accessible_server_configs
 from api.services.portable_agent_exports import STORAGE_ERRORS
 from console.agent_chat.timeline import visible_agent_message_queryset, visible_tool_steps_queryset
@@ -59,6 +60,30 @@ BEARER_RE = re.compile(r"\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{12,}", re.IGNOR
 JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
 TOKEN_RE = re.compile(r"\b(?:sk|pk|rk|xox[baprs]|gh[pousr])[-_][A-Za-z0-9_-]{12,}\b", re.IGNORECASE)
 URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+SQLITE_EXPORT_ERRORS = (OSError, sqlite3.Error, SQLiteStateError, *AGENT_SQLITE_COORDINATION_ERRORS)
+
+
+class PortableExportSizeLimitExceeded(RuntimeError):
+    pass
+
+
+@dataclass
+class ExportArchiveBudget:
+    max_bytes: int
+    used_bytes: int = 0
+
+    def reserve(self, size: int) -> None:
+        if self.used_bytes + size > self.max_bytes:
+            raise PortableExportSizeLimitExceeded("Portable export staging limit exceeded.")
+        self.used_bytes += size
+
+    def release(self, size: int) -> None:
+        self.used_bytes = max(0, self.used_bytes - size)
+
+    def sync(self, directory: Path) -> None:
+        self.used_bytes = sum(path.stat().st_size for path in directory.rglob("*") if path.is_file())
+        if self.used_bytes > self.max_bytes:
+            raise PortableExportSizeLimitExceeded("Portable export staging limit exceeded.")
 
 
 def _json_default(value):
@@ -87,6 +112,10 @@ def _safe_relative_path(value: str, fallback: str = "item") -> str:
             continue
         parts.append(_safe_segment(part, fallback))
     return str(PurePosixPath(*parts)) if parts else fallback
+
+
+def _quote_sqlite_identifier(value: str) -> str:
+    return f'"{value.replace(chr(34), chr(34) * 2)}"'
 
 
 def _safe_url_without_credentials(value: str) -> str:
@@ -201,12 +230,14 @@ class ExportFileCollector:
     def __init__(
         self, agent: PersistentAgent, agent_dir: Path, result: AgentArchiveResult,
         content_registry: dict[str, str], archive_prefix: str,
+        archive_budget: ExportArchiveBudget | None = None,
     ):
         self.agent = agent
         self.agent_dir = agent_dir
         self.result = result
         self.content_registry = content_registry
         self.archive_prefix = archive_prefix.strip("/")
+        self.archive_budget = archive_budget or ExportArchiveBudget(settings.PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES)
         self.entries: list[dict] = []
         self.used_paths: set[str] = set()
 
@@ -252,9 +283,14 @@ class ExportFileCollector:
         try:
             with default_storage.open(storage_name, "rb") as source, target.open("wb") as destination:
                 while chunk := source.read(1024 * 1024):
+                    self.archive_budget.reserve(len(chunk))
+                    copied += len(chunk)
                     destination.write(chunk)
                     digest.update(chunk)
-                    copied += len(chunk)
+        except PortableExportSizeLimitExceeded:
+            target.unlink(missing_ok=True)
+            self.archive_budget.release(copied)
+            raise
         except STORAGE_ERRORS as exc:
             logger.warning(
                 "Could not include portable export file agent=%s error=%s",
@@ -262,6 +298,7 @@ class ExportFileCollector:
                 type(exc).__name__,
             )
             target.unlink(missing_ok=True)
+            self.archive_budget.release(copied)
             warning = "A referenced file could not be included."
             self.result.warnings.append(warning)
             entry.update({"archivePath": None, "missing": True, "warning": warning})
@@ -272,6 +309,7 @@ class ExportFileCollector:
         canonical_path = self.content_registry.get(actual_digest)
         if canonical_path:
             target.unlink(missing_ok=True)
+            self.archive_budget.release(copied)
             own_prefix = f"{self.archive_prefix}/" if self.archive_prefix else ""
             if own_prefix and canonical_path.startswith(own_prefix):
                 entry["archivePath"] = canonical_path.removeprefix(own_prefix)
@@ -394,6 +432,7 @@ class PortableAgentArchiveBuilder:
         destination: Path,
         *,
         content_registry: dict[str, str] | None = None,
+        archive_budget: ExportArchiveBudget | None = None,
     ):
         self.agent = agent
         self.item = item
@@ -402,12 +441,13 @@ class PortableAgentArchiveBuilder:
         self.redactor = ExportRedactor(_load_known_secret_values(agent))
         self.content_registry = content_registry if content_registry is not None else {}
         self.archive_prefix = f"agents/{item.folder_name}" if content_registry is not None else ""
+        self.archive_budget = archive_budget or ExportArchiveBudget(settings.PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES)
 
     def build(self) -> AgentArchiveResult:
         self.result.display_name = self.redactor.redact_text(self.agent.name) or "Agent"
         self.destination.mkdir(parents=True, exist_ok=True)
         collector = ExportFileCollector(
-            self.agent, self.destination, self.result, self.content_registry, self.archive_prefix,
+            self.agent, self.destination, self.result, self.content_registry, self.archive_prefix, self.archive_budget,
         )
         collector.collect_workspace()
         self._write_identity()
@@ -751,16 +791,18 @@ class PortableAgentArchiveBuilder:
                 ).fetchall():
                     columns = [
                         {"name": row[1], "type": row[2], "notNull": bool(row[3]), "default": row[4], "primaryKey": bool(row[5])}
-                        for row in connection.execute(f"PRAGMA table_info({json.dumps(table_name)})").fetchall()
+                        for row in connection.execute(f"PRAGMA table_info({_quote_sqlite_identifier(table_name)})").fetchall()
                     ]
-                    row_count = connection.execute(f'SELECT COUNT(*) FROM "{table_name.replace(chr(34), chr(34) * 2)}"').fetchone()[0]
+                    row_count = connection.execute(
+                        f"SELECT COUNT(*) FROM {_quote_sqlite_identifier(table_name)}"
+                    ).fetchone()[0]
                     tables.append({"name": table_name, "columns": columns, "rowCount": row_count})
             finally:
                 connection.close()
             schema_sql = "\n\n".join(row[3].rstrip(";") + ";" for row in schema_rows) + "\n"
             (state_dir / "schema.sql").write_text(schema_sql, encoding="utf-8")
             write_json_file(state_dir / "tables.json", {"tables": tables})
-        except (OSError, sqlite3.Error, SQLiteStateError, AgentSQLiteBusy) as exc:
+        except SQLITE_EXPORT_ERRORS as exc:
             logger.warning(
                 "Could not include portable SQLite state agent=%s error=%s",
                 self.agent.id,
@@ -776,17 +818,19 @@ class PortableAgentArchiveBuilder:
         skills_dir.mkdir(parents=True, exist_ok=True)
         latest_skills = get_latest_skill_versions(self.agent)
         for skill in latest_skills:
-            folder = skills_dir / (_safe_segment(slugify(skill.name), "skill") + f"--v{skill.version}")
+            skill_name = self.redactor.redact_text(skill.name) or "Skill"
+            skill_description = self.redactor.redact_text(skill.description or "")
+            folder = skills_dir / (_safe_segment(slugify(skill_name), "skill") + f"--v{skill.version}")
             folder.mkdir(parents=True, exist_ok=True)
             tools = [str(value) for value in (skill.tools or [])]
             secrets = [str(value) for value in (skill.secrets or [])]
             body = (
                 "---\n"
-                f"name: {json.dumps(skill.name)}\n"
-                f"description: {json.dumps(skill.description or '')}\n"
+                f"name: {json.dumps(skill_name)}\n"
+                f"description: {json.dumps(skill_description)}\n"
                 f"version: {skill.version}\n"
                 "---\n\n"
-                f"# {self.redactor.redact_text(skill.name)}\n\n"
+                f"# {skill_name}\n\n"
                 f"{self.redactor.redact_text(skill.instructions)}\n\n"
                 f"## Required tools\n\n{chr(10).join(f'- `{self.redactor.redact_text(value)}`' for value in tools) or '- None'}\n\n"
                 f"## Required connections\n\n{chr(10).join(f'- `{self.redactor.redact_text(value)}`' for value in secrets) or '- None'}\n"

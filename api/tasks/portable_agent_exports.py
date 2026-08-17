@@ -33,15 +33,21 @@ from api.models import (
     PortableAgentExport,
     PortableAgentExportItem,
 )
-from api.services.agent_sqlite_coordination import AgentSQLiteBusy
+from api.services.agent_sqlite_coordination import AGENT_SQLITE_COORDINATION_ERRORS
 from api.services.email_verification import has_verified_email_address
-from api.services.portable_agent_export_archive import PortableAgentArchiveBuilder, write_json_file
+from api.services.portable_agent_export_archive import (
+    ExportArchiveBudget,
+    PortableAgentArchiveBuilder,
+    PortableExportSizeLimitExceeded,
+    write_json_file,
+)
 from api.services.portable_agent_exports import (
     STORAGE_ERRORS,
     build_download_token,
     delete_portable_agent_export_artifact,
     expire_export_artifact,
     portable_agent_export_storage,
+    retry_portable_agent_export_artifact_cleanups,
     revoke_export_artifact,
     user_can_access_export,
     user_can_export_agent,
@@ -61,7 +67,7 @@ ARCHIVE_BUILD_ERRORS = (
     sqlite3.Error,
     DatabaseError,
     SQLiteStateError,
-    AgentSQLiteBusy,
+    *AGENT_SQLITE_COORDINATION_ERRORS,
 )
 
 
@@ -127,7 +133,7 @@ def _write_root_files(staging: Path, export: PortableAgentExport, items, results
             "requested": len(items),
             "succeeded": len(successful),
             "failed": len(failed),
-            "warnings": sum(item.warning_count for item in items) + len(failed),
+            "warnings": sum(item.warning_count for item in items),
             "redactions": sum(item.redaction_count for item in items),
         },
         "security": {
@@ -191,6 +197,7 @@ def _zip_staging_directory(staging: Path, archive_path: Path) -> None:
         for path in sorted(staging.rglob("*")):
             if path.is_file():
                 archive.write(path, path.relative_to(staging).as_posix())
+                path.unlink()
 
 
 def _sha256_file(path: Path) -> str:
@@ -329,6 +336,7 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
     items = list(export.items.select_related("agent").order_by("source_agent_name", "source_agent_id"))
     results = {}
     content_registry = {}
+    archive_budget = ExportArchiveBudget(settings.PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES)
     with tempfile.TemporaryDirectory(prefix=f"gobii-portable-export-{export.id}-") as temp_dir:
         staging = Path(temp_dir) / "bundle"
         agents_root = staging / "agents"
@@ -355,7 +363,22 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
                     item,
                     destination,
                     content_registry=content_registry,
+                    archive_budget=archive_budget,
                 ).build()
+                archive_budget.sync(staging)
+            except PortableExportSizeLimitExceeded:
+                item.status = PortableAgentExportItem.Status.FAILED
+                item.error_code = "archive_too_large"
+                item.error_message = "This export is too large to package safely."
+                item.save(update_fields=["status", "error_code", "error_message"])
+                _record_item_progress(export, item.status)
+                export.refresh_from_db()
+                mark_portable_agent_export_failed(
+                    export,
+                    code="archive_too_large",
+                    message="The export is too large to package safely.",
+                )
+                return
             except ARCHIVE_BUILD_ERRORS as exc:
                 logger.warning(
                     "Portable export item failed export=%s agent=%s error=%s",
@@ -368,6 +391,7 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
                 for digest, path in tuple(content_registry.items()):
                     if path.startswith(failed_prefix):
                         content_registry.pop(digest)
+                archive_budget.sync(staging)
                 item.status = PortableAgentExportItem.Status.FAILED
                 item.error_code = type(exc).__name__.lower()[:64]
                 item.error_message = "This agent could not be exported."
@@ -393,7 +417,16 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
             return
         export.phase = "packaging"
         export.save(update_fields=["phase", "updated_at"])
-        _write_root_files(staging, export, items, results)
+        try:
+            _write_root_files(staging, export, items, results)
+            archive_budget.sync(staging)
+        except PortableExportSizeLimitExceeded:
+            mark_portable_agent_export_failed(
+                export,
+                code="archive_too_large",
+                message="The export is too large to package safely.",
+            )
+            return
         archive_path = Path(temp_dir) / "portable-agent-export.zip"
         _zip_staging_directory(staging, archive_path)
         archive_size = archive_path.stat().st_size
@@ -418,10 +451,10 @@ def _process_portable_agent_export(export: PortableAgentExport) -> None:
             export.storage_key = saved_key
             revoke_export_artifact(export)
             return
-        warning_count = sum(item.warning_count for item in items) + len(items) - len(successful)
+        warning_count = sum(item.warning_count for item in items)
         now = timezone.now()
         export.status = (
-            PortableAgentExport.Status.READY_WITH_WARNINGS if warning_count
+            PortableAgentExport.Status.READY_WITH_WARNINGS if warning_count or len(successful) != len(items)
             else PortableAgentExport.Status.READY
         )
         export.phase = "ready"
@@ -494,6 +527,7 @@ def prune_portable_agent_exports() -> dict:
     now = timezone.now()
     expired_count = 0
     deleted_count = 0
+    retry_portable_agent_export_artifact_cleanups()
     for export in PortableAgentExport.objects.filter(
         status__in=PortableAgentExport.READY_STATUSES,
         expires_at__lte=now,

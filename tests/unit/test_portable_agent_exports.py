@@ -18,6 +18,7 @@ from django.core.files.storage import default_storage
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
+from redis.exceptions import RedisError
 from waffle.testutils import override_flag
 
 from api.agent.tools.sqlite_state import MESSAGES_TABLE, write_agent_sqlite_export_snapshot
@@ -37,12 +38,16 @@ from api.models import (
     PersistentAgentSystemSkillState,
     PersistentAgentToolCall,
     PortableAgentExport,
+    PortableAgentExportArtifactCleanup,
     PortableAgentExportItem,
 )
 from api.services.portable_agent_export_archive import (
     AgentArchiveResult,
+    ExportArchiveBudget,
+    ExportRedactor,
     ExportFileCollector,
     PortableAgentArchiveBuilder,
+    PortableExportSizeLimitExceeded,
     _safe_relative_path,
 )
 from api.services.portable_agent_exports import (
@@ -53,6 +58,7 @@ from api.services.portable_agent_exports import (
 from api.tasks.portable_agent_exports import (
     _process_portable_agent_export,
     _send_completion_email,
+    _zip_staging_directory,
     prune_portable_agent_exports,
 )
 from constants.feature_flags import PORTABLE_AGENT_EXPORTS
@@ -330,6 +336,8 @@ class PortableAgentArchiveTests(TemporaryStorageMixin, TestCase):
         try:
             connection.execute("CREATE TABLE durable_memory (value TEXT NOT NULL)")
             connection.execute("INSERT INTO durable_memory (value) VALUES ('remember this')")
+            connection.execute('CREATE TABLE "quoted""table" (value TEXT NOT NULL)')
+            connection.execute('INSERT INTO "quoted""table" (value) VALUES (\'quoted name\')')
             connection.commit()
         finally:
             connection.close()
@@ -458,6 +466,9 @@ class PortableAgentArchiveTests(TemporaryStorageMixin, TestCase):
             redaction_report = json.loads((agent_dir / "redaction-report.json").read_text())
             self.assertGreater(redaction_report["total"], 0)
             self.assertEqual(set(redaction_report), {"total", "counts"})
+            sqlite_tables = json.loads((agent_dir / "state/sqlite/tables.json").read_text())["tables"]
+            quoted_table = next(table for table in sqlite_tables if table["name"] == 'quoted"table')
+            self.assertEqual(quoted_table["rowCount"], 1)
 
             text_bundle = "\n".join(
                 path.read_text(encoding="utf-8", errors="ignore")
@@ -582,6 +593,73 @@ class PortableAgentArchiveTests(TemporaryStorageMixin, TestCase):
             self.assertNotIn("rendered-system-prompt-marker", exported_text)
             self.assertNotIn("mcp-metadata-secret-marker", exported_text)
 
+    def test_user_skill_frontmatter_and_folder_name_are_redacted(self):
+        secret_marker = "managed-secret-value"
+        skill = SimpleNamespace(
+            name=f"Research {secret_marker}",
+            description=f"Uses {secret_marker}",
+            version=1,
+            instructions=f"Never expose {secret_marker}",
+            tools=[],
+            secrets=[],
+        )
+        with tempfile.TemporaryDirectory() as destination:
+            agent_dir = Path(destination) / self.item.folder_name
+            builder = PortableAgentArchiveBuilder(self.agent, self.item, agent_dir)
+            builder.redactor = ExportRedactor([secret_marker])
+            with (
+                patch("api.services.portable_agent_export_archive.get_latest_skill_versions", return_value=[skill]),
+                patch("api.services.portable_agent_export_archive.agent_accessible_server_configs", return_value=[]),
+            ):
+                builder._write_skills_tools_and_connections()
+
+            exported_paths = [path.relative_to(agent_dir).as_posix() for path in agent_dir.rglob("*")]
+            exported_text = "\n".join(
+                path.read_text(errors="ignore") for path in agent_dir.rglob("*") if path.is_file()
+            )
+            self.assertNotIn(secret_marker, "\n".join(exported_paths))
+            self.assertNotIn(secret_marker, exported_text)
+
+    def test_file_collection_enforces_uncompressed_staging_limit(self):
+        storage_name = default_storage.save("portable-tests/oversized.txt", ContentFile(b"compressible"))
+        budget = ExportArchiveBudget(max_bytes=4)
+        with tempfile.TemporaryDirectory() as destination:
+            collector = ExportFileCollector(
+                self.agent,
+                Path(destination),
+                AgentArchiveResult(),
+                {},
+                "agents/limited",
+                budget,
+            )
+            with self.assertRaises(PortableExportSizeLimitExceeded):
+                collector.add_storage_file(
+                    storage_name=storage_name,
+                    logical_path="oversized.txt",
+                    category="workspace",
+                    identifier="oversized",
+                )
+
+            self.assertEqual(budget.used_bytes, 0)
+            self.assertFalse(any(Path(destination).rglob("oversized.txt")))
+
+    def test_sqlite_lock_backend_failure_becomes_a_safe_warning(self):
+        with tempfile.TemporaryDirectory() as destination:
+            agent_dir = Path(destination) / self.item.folder_name
+            builder = PortableAgentArchiveBuilder(self.agent, self.item, agent_dir)
+            with (
+                patch(
+                    "api.services.portable_agent_export_archive.write_agent_sqlite_export_snapshot",
+                    side_effect=RedisError("redis-credential-marker"),
+                ),
+                self.assertLogs("api.services.portable_agent_export_archive", level="WARNING") as logs,
+            ):
+                builder._write_sqlite()
+
+            tables = json.loads((agent_dir / "state/sqlite/tables.json").read_text())
+            self.assertTrue(tables["unavailable"])
+            self.assertNotIn("redis-credential-marker", "\n".join(logs.output))
+
     def test_file_warning_does_not_export_storage_exception_details(self):
         with tempfile.TemporaryDirectory() as destination:
             result = AgentArchiveResult()
@@ -612,7 +690,7 @@ class PortableAgentArchiveTests(TemporaryStorageMixin, TestCase):
 
 @tag("agent_portable_export_batch")
 class PortableAgentSQLiteSnapshotTests(TestCase):
-    def test_snapshot_uses_coordinated_database_and_removes_ephemeral_tables(self):
+    def test_snapshot_coordinates_read_only_restore_and_removes_ephemeral_tables(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.sqlite3"
             destination = Path(directory) / "export.sqlite3"
@@ -628,15 +706,24 @@ class PortableAgentSQLiteSnapshotTests(TestCase):
 
             @contextmanager
             def coordinated_database():
-                yield str(source)
+                yield
 
-            with patch(
-                "api.agent.tools.sqlite_state.agent_sqlite_db",
-                return_value=coordinated_database(),
-            ) as coordinated:
+            with (
+                patch(
+                    "api.services.agent_sqlite_coordination.agent_sqlite_execution",
+                    return_value=coordinated_database(),
+                ) as coordinated,
+                patch(
+                    "api.agent.tools.sqlite_state._restore_agent_sqlite_db",
+                    return_value=(str(source), Mock()),
+                ) as restore,
+                patch("api.agent.tools.sqlite_state._persist_validated_sqlite_state") as persist,
+            ):
                 write_agent_sqlite_export_snapshot("agent-id", str(destination))
 
             coordinated.assert_called_once_with("agent-id")
+            self.assertEqual(restore.call_args.args[0], "agent-id")
+            persist.assert_not_called()
             connection = sqlite3.connect(destination)
             try:
                 self.assertEqual(connection.execute("PRAGMA quick_check").fetchone()[0], "ok")
@@ -645,6 +732,14 @@ class PortableAgentSQLiteSnapshotTests(TestCase):
             finally:
                 connection.close()
             self.assertNotIn(MESSAGES_TABLE, tables)
+            source_connection = sqlite3.connect(source)
+            try:
+                source_tables = {
+                    row[0] for row in source_connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                }
+            finally:
+                source_connection.close()
+            self.assertIn(MESSAGES_TABLE, source_tables)
 
 
 @tag("agent_portable_export_batch")
@@ -715,7 +810,7 @@ class PortableAgentExportTaskTests(TemporaryStorageMixin, TestCase):
         self.assertEqual(export.status, PortableAgentExport.Status.READY_WITH_WARNINGS)
         self.assertEqual(export.completed_agents, 1)
         self.assertEqual(export.failed_agents, 1)
-        self.assertEqual(export.warning_count, 1)
+        self.assertEqual(export.warning_count, 0)
         export_storage = portable_agent_export_storage()
         self.assertTrue(export_storage.exists(export.storage_key))
 
@@ -725,6 +820,7 @@ class PortableAgentExportTaskTests(TemporaryStorageMixin, TestCase):
             self.assertIn("README.md", names)
             self.assertIn("checksums.sha256", names)
             self.assertIn("shared-files/index.json", names)
+            self.assertEqual(json.loads(archive.read("manifest.json"))["summary"]["warnings"], 0)
             good_item = export.items.get(source_agent_id=good_agent.id)
             self.assertIn(f"agents/{good_item.folder_name}/manifest.json", names)
             bad_item = export.items.get(source_agent_id=bad_agent.id)
@@ -732,6 +828,43 @@ class PortableAgentExportTaskTests(TemporaryStorageMixin, TestCase):
             for line in archive.read("checksums.sha256").decode().splitlines():
                 expected_digest, path = line.split("  ", 1)
                 self.assertEqual(hashlib.sha256(archive.read(path)).hexdigest(), expected_digest)
+
+    @override_settings(PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES=128)
+    def test_generated_content_over_staging_limit_fails_before_packaging(self):
+        agent = self._create_agent("Oversized Agent")
+        export = self._create_bulk_export([agent])
+
+        def build(builder):
+            builder.destination.mkdir(parents=True, exist_ok=True)
+            (builder.destination / "large.txt").write_bytes(b"x" * 129)
+            return AgentArchiveResult()
+
+        with (
+            patch.object(PortableAgentArchiveBuilder, "build", autospec=True, side_effect=build),
+            patch("api.tasks.portable_agent_exports._zip_staging_directory") as package,
+            patch("api.tasks.portable_agent_exports.Analytics.track"),
+        ):
+            _process_portable_agent_export(export)
+
+        export.refresh_from_db()
+        self.assertEqual(export.status, PortableAgentExport.Status.FAILED)
+        self.assertEqual(export.error_code, "archive_too_large")
+        package.assert_not_called()
+
+    def test_packaging_releases_staged_files_as_they_are_archived(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staging = root / "staging"
+            staging.mkdir()
+            (staging / "first.txt").write_text("first")
+            (staging / "second.txt").write_text("second")
+            archive_path = root / "export.zip"
+
+            _zip_staging_directory(staging, archive_path)
+
+            self.assertFalse(any(path.is_file() for path in staging.rglob("*")))
+            with zipfile.ZipFile(archive_path) as archive:
+                self.assertEqual(set(archive.namelist()), {"first.txt", "second.txt"})
 
     def test_single_agent_email_prefers_agent_sender_then_falls_back(self):
         agent = self._create_agent("Email Agent")
@@ -816,3 +949,30 @@ class PortableAgentExportTaskTests(TemporaryStorageMixin, TestCase):
         self.assertFalse(export_storage.exists(storage_key))
         self.assertFalse(PortableAgentExport.objects.filter(pk=stale.pk).exists())
         self.assertEqual(result, {"expired": 1, "deletedMetadata": 1})
+
+    def test_deleted_export_artifact_cleanup_retries_after_storage_failure(self):
+        agent = self._create_agent("Deleted Export Agent")
+        export_storage = portable_agent_export_storage()
+        storage_key = export_storage.save("portable-tests/deleted.zip", ContentFile(b"data"))
+        export = PortableAgentExport.objects.create(
+            requester=self.user,
+            scope=PortableAgentExport.Scope.AGENT,
+            scope_key=f"agent:{agent.id}",
+            agent=agent,
+            status=PortableAgentExport.Status.READY,
+            storage_key=storage_key,
+        )
+
+        with patch.object(export_storage, "delete", side_effect=OSError("temporary storage failure")):
+            with self.captureOnCommitCallbacks(execute=True):
+                export.delete()
+
+        cleanup = PortableAgentExportArtifactCleanup.objects.get(storage_key=storage_key)
+        self.assertTrue(export_storage.exists(storage_key))
+        self.assertIsNotNone(cleanup)
+
+        with patch("api.tasks.portable_agent_exports.Analytics.track"):
+            prune_portable_agent_exports()
+
+        self.assertFalse(export_storage.exists(storage_key))
+        self.assertFalse(PortableAgentExportArtifactCleanup.objects.filter(pk=cleanup.pk).exists())

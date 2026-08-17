@@ -1286,11 +1286,37 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
 
 
 def write_agent_sqlite_export_snapshot(agent_uuid: str, destination_path: str) -> None:
-    """Write a validated, persistence-equivalent SQLite snapshot for a portable export."""
-    with agent_sqlite_db(agent_uuid) as db_path:
+    """Write a coordinated snapshot without re-persisting unchanged source state."""
+    from api.services.agent_sqlite_coordination import agent_sqlite_execution
+
+    with agent_sqlite_execution(agent_uuid), tempfile.TemporaryDirectory() as tmp_dir:
+        db_path, _session = _restore_agent_sqlite_db(agent_uuid, tmp_dir)
         create_validated_sqlite_snapshot(db_path, destination_path)
         _maintain_sqlite_persistence_candidate(destination_path)
         validate_sqlite_file(destination_path)
+
+
+def _restore_agent_sqlite_db(agent_uuid: str, tmp_dir: str) -> tuple[str, SQLiteStateSession]:
+    storage_key = sqlite_storage_key(agent_uuid)
+    db_path = os.path.join(tmp_dir, "state.db")
+    checkpoint_path = os.path.join(tmp_dir, "state.checkpoint.db")
+
+    with tracer.start_as_current_span("Restore Agent SQLite State") as restore_span:
+        restored = False
+        if default_storage.exists(storage_key):
+            restored = _restore_sqlite_db_from_storage(storage_key, db_path, agent_uuid)
+        session = SQLiteStateSession(
+            agent_uuid=agent_uuid,
+            db_path=db_path,
+            checkpoint_path=checkpoint_path,
+        )
+        if not restored:
+            session.initialize()
+        session.checkpoint(phase="initial_restore")
+        restore_span.set_attribute("sqlite.restored", restored)
+        if os.path.exists(db_path):
+            restore_span.set_attribute("sqlite.restored_bytes", os.path.getsize(db_path))
+    return db_path, session
 
 
 @contextlib.contextmanager
@@ -1302,28 +1328,9 @@ def _agent_sqlite_db_uncoordinated(agent_uuid: str):
     3. On exit, snapshots the DB, performs maintenance on that copy, validates
        it, and uploads without a delete window unless the existing 100MB wipe applies.
     """
-    storage_key = sqlite_storage_key(agent_uuid)
-
     with tempfile.TemporaryDirectory() as tmp_dir:
-        db_path = os.path.join(tmp_dir, "state.db")
-        checkpoint_path = os.path.join(tmp_dir, "state.checkpoint.db")
-
-        # ---------------- Restore phase ---------------- #
-        with tracer.start_as_current_span("Restore Agent SQLite State") as restore_span:
-            restored = False
-            if default_storage.exists(storage_key):
-                restored = _restore_sqlite_db_from_storage(storage_key, db_path, agent_uuid)
-            session = SQLiteStateSession(
-                agent_uuid=agent_uuid,
-                db_path=db_path,
-                checkpoint_path=checkpoint_path,
-            )
-            if not restored:
-                session.initialize()
-            session.checkpoint(phase="initial_restore")
-            restore_span.set_attribute("sqlite.restored", restored)
-            if os.path.exists(db_path):
-                restore_span.set_attribute("sqlite.restored_bytes", os.path.getsize(db_path))
+        storage_key = sqlite_storage_key(agent_uuid)
+        db_path, session = _restore_agent_sqlite_db(agent_uuid, tmp_dir)
 
         db_path_token = set_sqlite_db_path(db_path)
         session_token = set_sqlite_state_session(session)
