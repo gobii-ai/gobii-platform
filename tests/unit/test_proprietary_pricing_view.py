@@ -107,7 +107,7 @@ class PricingPageCtaCopyTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
-    def test_pricing_page_renders_signup_modal_config_when_flag_enabled_for_anonymous_users(
+    def test_pricing_page_does_not_render_plan_action_controls(
         self,
         mock_get_stripe_settings,
     ):
@@ -122,11 +122,14 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "gobii-cta-signup-modal-config")
         self.assertContains(response, 'id="cta-signup-modal"')
-        self.assertContains(response, 'data-cta-signup-modal="pricing-plan"')
+        self.assertNotContains(response, 'data-cta-signup-modal="pricing-plan"')
+        self.assertNotContains(response, 'data-plan-code=')
+        self.assertNotContains(response, 'class="plan-cta')
+        self.assertNotContains(response, 'id="plan-change-modal"')
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
-    def test_pricing_page_enables_cta_tracking_and_plan_analytics_attributes(
+    def test_pricing_page_keeps_global_cta_tracking_without_plan_analytics_attributes(
         self,
         mock_get_stripe_settings,
     ):
@@ -139,9 +142,9 @@ class PricingPageCtaCopyTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-analytics-cta-tracking-enabled="true"')
-        self.assertContains(response, 'data-analytics-cta-id="pricing_startup_plan"')
-        self.assertContains(response, 'data-analytics-placement="pricing_grid"')
-        self.assertContains(response, 'data-analytics-intent="select_plan"')
+        self.assertNotContains(response, 'data-analytics-cta-id="pricing_startup_plan"')
+        self.assertNotContains(response, 'data-analytics-placement="pricing_grid"')
+        self.assertNotContains(response, 'data-analytics-intent="select_plan"')
         self.assertContains(response, "Simple Pricing")
         self.assertContains(response, "Choose the plan that fits your team.")
 
