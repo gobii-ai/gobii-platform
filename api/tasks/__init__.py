@@ -53,6 +53,11 @@ from .mcp_catalogs import refresh_mcp_catalog  # noqa: F401
 from .mcp_tasks import poll_mcp_task, reconcile_mcp_tasks  # noqa: F401
 from .computer_relay import cleanup_computer_relay_records  # noqa: F401
 from .portable_agent_exports import process_portable_agent_export, prune_portable_agent_exports  # noqa: F401
+from .portable_agent_imports import (  # noqa: F401
+    process_portable_agent_import,
+    prune_portable_agent_imports,
+    validate_portable_agent_import,
+)
 
 # Ensure persistent-agent task modules (IMAP polling, event processing) are imported
 # so Celery autodiscovery picks them up when it imports api.tasks.

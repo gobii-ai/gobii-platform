@@ -112,6 +112,11 @@ from console.agent_exports_api import (
     PortableAgentExportDownloadAPIView,
     PortableAgentExportListCreateAPIView,
 )
+from console.agent_imports_api import (
+    PortableAgentImportDetailAPIView,
+    PortableAgentImportListCreateAPIView,
+    PortableAgentImportStartAPIView,
+)
 from console.evals.api_views import (
     EvalRunCompareAPIView,
     EvalRunDetailAPIView,
@@ -454,6 +459,9 @@ urlpatterns = [
     path("console/api/agent-exports/", PortableAgentExportListCreateAPIView.as_view(), name="console_portable_agent_exports"),
     path("console/api/agent-exports/<uuid:export_id>/", PortableAgentExportDetailAPIView.as_view(), name="console_portable_agent_export_detail"),
     path("console/api/agent-exports/<uuid:export_id>/download/", PortableAgentExportDownloadAPIView.as_view(), name="console_portable_agent_export_download"),
+    path("console/api/agent-imports/", PortableAgentImportListCreateAPIView.as_view(), name="console_portable_agent_imports"),
+    path("console/api/agent-imports/<uuid:import_id>/", PortableAgentImportDetailAPIView.as_view(), name="console_portable_agent_import_detail"),
+    path("console/api/agent-imports/<uuid:import_id>/start/", PortableAgentImportStartAPIView.as_view(), name="console_portable_agent_import_start"),
     path("console/api/user/phone/", UserPhoneAPIView.as_view(), name="console_user_phone"),
     path("console/api/user/phone/cancel/", UserPhoneCancelAPIView.as_view(), name="console_user_phone_cancel"),
     path("console/api/user/phone/verify/", UserPhoneVerifyAPIView.as_view(), name="console_user_phone_verify"),

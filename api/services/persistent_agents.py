@@ -83,6 +83,9 @@ class PersistentAgentProvisioningService:
         preferred_llm_tier: IntelligenceTier | None = None,
         signup_preview_state: str | None = None,
         planning_state: str | None = None,
+        generate_charter_artifacts: bool = True,
+        create_onboarding_schedule: bool = True,
+        browser_agent_name: str | None = None,
     ) -> ProvisioningResult:
         """Create a new persistent agent and its backing browser agent."""
         agent_name = name or cls.generate_unique_name(user)
@@ -98,7 +101,7 @@ class PersistentAgentProvisioningService:
         applied_schedule: Optional[str] = None
 
         with transaction.atomic():
-            browser_agent = BrowserUseAgent(user=user, name=agent_name)
+            browser_agent = BrowserUseAgent(user=user, name=browser_agent_name or agent_name)
             if organization is not None:
                 browser_agent._agent_creation_organization = organization
             try:
@@ -169,7 +172,8 @@ class PersistentAgentProvisioningService:
                 ) from exc
 
             persistent_agent.save()
-            create_default_onboarding_schedule(persistent_agent)
+            if create_onboarding_schedule:
+                create_default_onboarding_schedule(persistent_agent)
 
             # Apply plan-specific default daily credit limits
             if settings.GOBII_PROPRIETARY_MODE:
@@ -253,7 +257,8 @@ class PersistentAgentProvisioningService:
                         persistent_agent.id,
                     )
 
-            transaction.on_commit(_schedule_charter_artifacts)
+            if generate_charter_artifacts:
+                transaction.on_commit(_schedule_charter_artifacts)
 
             return ProvisioningResult(
                 agent=persistent_agent,

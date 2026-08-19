@@ -337,6 +337,31 @@ class ExportFileCollector:
             .select_related("filespace")
             .order_by("filespace__name")
         )
+        access_agents_by_space: dict[str, list[dict]] = {}
+        all_accesses = AgentFileSpaceAccess.objects.filter(
+            filespace_id__in=[access.filespace_id for access in accesses],
+        ).order_by("filespace_id", "agent_id")
+        for related_access in all_accesses:
+            access_agents_by_space.setdefault(str(related_access.filespace_id), []).append({
+                "agentId": str(related_access.agent_id),
+                "role": related_access.role,
+                "isDefault": related_access.is_default,
+            })
+        write_json_file(self.agent_dir / "files/filespaces.json", {
+            "filespaces": [
+                {
+                    "sourceFilespaceId": str(access.filespace_id),
+                    "name": access.filespace.name,
+                    "description": access.filespace.description,
+                    "role": access.role,
+                    "isDefault": access.is_default,
+                    "ownedByExportedAgent": access.role == AgentFileSpaceAccess.Role.OWNER,
+                    "agentAccess": access_agents_by_space.get(str(access.filespace_id), []),
+                }
+                for access in accesses
+            ],
+            "sharingPolicy": "recreate-when-all-owners-selected-otherwise-private-copy",
+        })
         owned_ids = {
             access.filespace_id
             for access in accesses
@@ -404,6 +429,35 @@ class ExportFileCollector:
                 "ownerAgents": owners_by_space.get(str(node.filespace_id), []),
             }
             self.result.shared_file_references.append(reference)
+            if node.node_type == AgentFsNode.NodeType.DIR:
+                self.entries.append({
+                    "id": str(node.id),
+                    "category": "shared",
+                    "logicalPath": node.path or node.name,
+                    "archivePath": None,
+                    "directory": True,
+                    "filespaceId": str(node.filespace_id),
+                    "filespaceName": node.filespace.name,
+                    "ownerAgents": owners_by_space.get(str(node.filespace_id), []),
+                })
+                continue
+            if not node.content or not node.content.name:
+                continue
+            entry = self.add_storage_file(
+                storage_name=node.content.name,
+                logical_path=node.path or node.name,
+                category="shared",
+                identifier=node.id,
+                expected_sha256=node.checksum_sha256 or "",
+                content_type=node.mime_type,
+                size_bytes=node.size_bytes,
+            )
+            entry.update({
+                "filespaceId": str(node.filespace_id),
+                "filespaceName": node.filespace.name,
+                "ownerAgents": owners_by_space.get(str(node.filespace_id), []),
+                "fallbackPolicy": "private-copy-when-owner-not-imported",
+            })
 
     def add_attachment(self, attachment) -> dict:
         if not attachment.file or not attachment.file.name:
@@ -471,6 +525,7 @@ class PortableAgentArchiveBuilder:
             else get_custom_instructions_for_user_id(self.agent.user_id)
         )
         tier = getattr(self.agent.preferred_llm_tier, "key", None)
+        avatar_metadata = None
         profile = {
             "id": str(self.agent.id),
             "name": self.redactor.redact_text(self.agent.name),
@@ -488,15 +543,9 @@ class PortableAgentArchiveBuilder:
             "updatedAt": self.agent.updated_at,
             "ownerInstructionsSource": "organization" if self.agent.organization_id else "personal",
             "ownerInstructions": self.redactor.redact_text(owner_instructions),
+            "avatar": avatar_metadata,
         }
-        write_json_file(self.destination / "identity/profile.json", profile)
-        instructions = (
-            f"# {profile['name']}\n\n"
-            f"## Charter\n\n{profile['charter'] or 'No charter was configured.'}\n\n"
-            f"## Owner instructions\n\n{profile['ownerInstructions'] or 'No additional owner instructions were configured.'}\n"
-        )
         (self.destination / "identity").mkdir(parents=True, exist_ok=True)
-        (self.destination / "identity/instructions.md").write_text(instructions, encoding="utf-8")
         if self.agent.avatar and self.agent.avatar.name:
             suffix = os.path.splitext(self.agent.avatar.name)[1].lower()[:12] or ".bin"
             target = self.destination / f"identity/avatar{suffix}"
@@ -511,6 +560,21 @@ class PortableAgentArchiveBuilder:
                 )
                 self.result.warnings.append("The agent avatar could not be included.")
                 target.unlink(missing_ok=True)
+            else:
+                avatar_metadata = {
+                    "archivePath": target.relative_to(self.destination).as_posix(),
+                    "sourceFilename": os.path.basename(self.agent.avatar.name),
+                    "sizeBytes": target.stat().st_size,
+                    "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                }
+                profile["avatar"] = avatar_metadata
+        write_json_file(self.destination / "identity/profile.json", profile)
+        instructions = (
+            f"# {profile['name']}\n\n"
+            f"## Charter\n\n{profile['charter'] or 'No charter was configured.'}\n\n"
+            f"## Owner instructions\n\n{profile['ownerInstructions'] or 'No additional owner instructions were configured.'}\n"
+        )
+        (self.destination / "identity/instructions.md").write_text(instructions, encoding="utf-8")
 
     def _write_memory(self) -> None:
         comms = list(self.agent.comms_snapshots.filter(snapshot_until__lte=self.item.snapshot_at).order_by("snapshot_until", "id"))
@@ -709,7 +773,11 @@ class PortableAgentArchiveBuilder:
                     "status": tool.status, "parameters": self.redactor.redact(tool.tool_params),
                     "result": result_value,
                     "displayMetadata": self.redactor.redact(tool.display_metadata),
-                    "parentStepId": str(tool.parent_tool_call_id) if tool.parent_tool_call_id else None,
+                    "parentStepId": (
+                        str(tool.parent_tool_call.step_id)
+                        if tool.parent_tool_call_id and tool.parent_tool_call
+                        else None
+                    ),
                 }
                 step_output.write(json.dumps(step_payload, ensure_ascii=False, default=_json_default) + "\n")
                 tool_output.write(json.dumps(tool_payload, ensure_ascii=False, default=_json_default) + "\n")
@@ -817,6 +885,7 @@ class PortableAgentArchiveBuilder:
         skills_dir = self.destination / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
         latest_skills = get_latest_skill_versions(self.agent)
+        skill_index = []
         for skill in latest_skills:
             skill_name = self.redactor.redact_text(skill.name) or "Skill"
             skill_description = self.redactor.redact_text(skill.description or "")
@@ -836,6 +905,16 @@ class PortableAgentArchiveBuilder:
                 f"## Required connections\n\n{chr(10).join(f'- `{self.redactor.redact_text(value)}`' for value in secrets) or '- None'}\n"
             )
             (folder / "SKILL.md").write_text(body, encoding="utf-8")
+            skill_index.append({
+                "name": skill_name,
+                "description": skill_description,
+                "version": skill.version,
+                "tools": tools,
+                "secrets": secrets,
+                "instructions": self.redactor.redact_text(skill.instructions),
+                "archivePath": (folder / "SKILL.md").relative_to(self.destination).as_posix(),
+            })
+        write_json_file(skills_dir / "index.json", {"skills": skill_index})
 
         system_skills = []
         for state in self.agent.system_skill_states.filter(is_enabled=True).order_by("skill_key"):
@@ -853,13 +932,16 @@ class PortableAgentArchiveBuilder:
 
         custom_tools = []
         for tool in self.agent.custom_tools.order_by("tool_name", "id"):
-            custom_tools.append({
+            custom_tool = {
                 "id": str(tool.id), "name": tool.name, "toolName": tool.tool_name,
                 "description": self.redactor.redact_text(tool.description),
                 "parametersSchema": self.redactor.redact(tool.parameters_schema),
                 "entrypoint": tool.entrypoint, "timeoutSeconds": tool.timeout_seconds,
-                "sourcePath": tool.source_path, "portability": "portable",
-            })
+                "sourcePath": tool.source_path, "sourceArchivePath": None,
+                "enabledAtExport": self.agent.enabled_tools.filter(tool_full_name=tool.tool_name).exists(),
+                "enabledOnImport": False, "portability": "portable-disabled",
+            }
+            custom_tools.append(custom_tool)
             node = AgentFsNode.objects.alive().files().filter(
                 filespace__access__agent=self.agent,
                 path=tool.source_path,
@@ -871,6 +953,7 @@ class PortableAgentArchiveBuilder:
                     target = self.destination / "tools/custom" / f"{_safe_segment(tool.tool_name, 'tool')}.py"
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(self.redactor.redact_text(text), encoding="utf-8")
+                    custom_tool["sourceArchivePath"] = target.relative_to(self.destination).as_posix()
                 except STORAGE_ERRORS + (UnicodeDecodeError,) as exc:
                     logger.warning(
                         "Could not include custom tool source agent=%s tool=%s error=%s",
@@ -910,6 +993,12 @@ class PortableAgentArchiveBuilder:
         ]
         write_json_file(self.destination / "tools/capabilities.json", {
             "enabledTools": enabled_tools, "customTools": custom_tools, "systemSkills": system_skills,
+            "importPolicy": {
+                "builtInTools": "restore-when-supported",
+                "systemSkills": "restore-when-supported",
+                "customTools": "restore-source-disabled",
+                "mcpTools": "record-reconnection-required",
+            },
         })
 
         secret_requirements = []
@@ -965,6 +1054,11 @@ class PortableAgentArchiveBuilder:
                 "Use `../../identity/instructions.md` and `../../memory/current-state.md` as initial instructions and memory. Add the transcript and "
                 "selected workspace files as context. Reconnect tools manually; this is not a one-click Gemini import."
             ),
+            "gobii": (
+                "Use New agent → Import agent and upload the complete ZIP. Gobii validates every checksum, lets you "
+                "select and rename agents, and restores compatible state. Schedules, proactive work, external channels, "
+                "MCP connections, webhooks, and custom tools stay disabled until reviewed."
+            ),
         }
         for name, body in adapters.items():
             folder = self.destination / "adapters" / name
@@ -973,7 +1067,7 @@ class PortableAgentArchiveBuilder:
 
     def _write_manifest(self) -> None:
         write_json_file(self.destination / "manifest.json", {
-            "formatVersion": "gobii.agent-portable-export/v1",
+            "formatVersion": self.item.export.format_version,
             "agentId": str(self.agent.id), "agentName": self.redactor.redact_text(self.agent.name),
             "snapshotAt": self.item.snapshot_at, "folderName": self.item.folder_name,
             "counts": {

@@ -395,14 +395,14 @@ export const ChatSidebar = memo(function ChatSidebar({
       rows.push({
         key: 'create-agent',
         content: (
-          !collapsedView && teamTemplateMenu ? (
+          !collapsedView ? (
             <AgentCreateSplitButton
               variant={variant}
               onCreateAgent={handleCreateAgent}
               createAgentDisabled={createAgentDisabled}
               createAgentButtonDisabled={createAgentButtonDisabled}
               createAgentDisabledReason={createAgentDisabledReason}
-              menu={teamTemplateMenu}
+              menu={teamTemplateMenu ?? null}
             />
           ) : (
             <button

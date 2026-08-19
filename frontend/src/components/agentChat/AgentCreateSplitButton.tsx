@@ -1,8 +1,10 @@
-import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Bot, Building2, ChevronDown, Loader2, Plus, Sparkles } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { ArchiveRestore, Bot, Building2, ChevronDown, Loader2, Plus, Sparkles } from 'lucide-react'
 import { Button, Dialog, Popover } from 'react-aria-components'
 
 import type { OrganizationTemplate } from '../../api/organization'
+import { fetchPortableAgentImports } from '../../api/agentImports'
+import { PortableAgentImportDialog } from '../imports/PortableAgentImportDialog'
 import { joinClassNames } from './uiPrimitives'
 
 export type TeamTemplateCreateMenu = {
@@ -22,7 +24,7 @@ type AgentCreateSplitButtonProps = {
   createAgentDisabled: boolean
   createAgentButtonDisabled: boolean
   createAgentDisabledReason?: string | null
-  menu: TeamTemplateCreateMenu
+  menu: TeamTemplateCreateMenu | null
   className?: string
 }
 
@@ -46,14 +48,26 @@ export function AgentCreateSplitButton({
 }: AgentCreateSplitButtonProps) {
   const triggerRef = useRef<HTMLDivElement | null>(null)
   const [open, setOpen] = useState(false)
-  const launchBusy = Boolean(menu.launchBusyTemplateId)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importAvailable, setImportAvailable] = useState(false)
+  const launchBusy = Boolean(menu?.launchBusyTemplateId)
   const menuCreateDisabled = Boolean(createAgentButtonDisabled || launchBusy)
-  const footerLabel = menu.canManageTemplates ? 'Manage team templates' : 'View organization'
+  const footerLabel = menu?.canManageTemplates ? 'Manage team templates' : 'View organization'
   const buttonClassName = variant === 'gallery'
     ? 'agent-gallery-create'
     : joinClassNames('chat-sidebar-create-btn', variant === 'drawer' && 'chat-sidebar-create-btn--drawer')
 
   const closeMenu = useCallback(() => setOpen(false), [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetchPortableAgentImports(controller.signal)
+      .then(() => {
+        setImportAvailable(true)
+      })
+      .catch(() => setImportAvailable(false))
+    return () => controller.abort()
+  }, [])
 
   const handleBlankAgent = useCallback(() => {
     if (menuCreateDisabled) {
@@ -64,11 +78,13 @@ export function AgentCreateSplitButton({
   }, [closeMenu, menuCreateDisabled, onCreateAgent])
 
   const handleOpenTemplates = useCallback(() => {
+    if (!menu) return
     closeMenu()
     menu.onOpenTemplates()
   }, [closeMenu, menu])
 
   const handleTemplateLaunch = useCallback((template: OrganizationTemplate) => {
+    if (!menu) return
     if (menuCreateDisabled) {
       return
     }
@@ -80,6 +96,11 @@ export function AgentCreateSplitButton({
     closeMenu()
     menu.onLaunchTemplate(template)
   }, [closeMenu, createAgentDisabled, menu, menuCreateDisabled, onCreateAgent])
+
+  const handleImportAgent = useCallback(() => {
+    closeMenu()
+    setImportDialogOpen(true)
+  }, [closeMenu])
 
   const handleChevronPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (!open) {
@@ -116,7 +137,7 @@ export function AgentCreateSplitButton({
       </button>
       <Button
         className="agent-create-split__chevron"
-        aria-label="Choose a team template"
+        aria-label="Choose how to create an agent"
         aria-expanded={open}
         onPointerDownCapture={handleChevronPointerDownCapture}
         onPress={() => setOpen((current) => !current)}
@@ -150,31 +171,45 @@ export function AgentCreateSplitButton({
               <span className="agent-chat-menu-item__description agent-create-menu__item-description">Start from a fresh charter.</span>
             </span>
           </button>
-          <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
-
-          <div className="agent-create-menu__section-label">
-            <Sparkles className="agent-create-menu__section-icon" aria-hidden="true" />
-            <span>Team templates</span>
-          </div>
-
-          {menu.launchErrorMessage ? (
-            <div className="agent-create-menu__state agent-create-menu__state--error">
-              {menu.launchErrorMessage}
-            </div>
+          {importAvailable ? (
+            <button
+              type="button"
+              className="agent-create-menu__item sidebar-settings__link"
+              onClick={handleImportAgent}
+            >
+              <ArchiveRestore className="agent-create-menu__item-icon sidebar-settings__link-icon" aria-hidden="true" />
+              <span className="agent-chat-menu-item__copy">
+                <span className="agent-chat-menu-item__title agent-create-menu__item-title">Import agent</span>
+                <span className="agent-chat-menu-item__description agent-create-menu__item-description">Restore a Gobii portable export.</span>
+              </span>
+            </button>
           ) : null}
 
-          {menu.isLoading ? (
-            <div className="agent-create-menu__state">
-              <Loader2 className="agent-create-menu__state-icon animate-spin" aria-hidden="true" />
-              <span>Loading templates...</span>
-            </div>
-          ) : menu.errorMessage ? (
-            <div className="agent-create-menu__state agent-create-menu__state--error">
-              {menu.errorMessage}
-            </div>
-          ) : menu.templates.length > 0 ? (
-            <div className="agent-create-menu__templates">
-              {menu.templates.map((template) => {
+          {menu ? (
+            <>
+              <div className="agent-create-menu__section-label">
+                <Sparkles className="agent-create-menu__section-icon" aria-hidden="true" />
+                <span>Team templates</span>
+              </div>
+
+              {menu.launchErrorMessage ? (
+                <div className="agent-create-menu__state agent-create-menu__state--error">
+                  {menu.launchErrorMessage}
+                </div>
+              ) : null}
+
+              {menu.isLoading ? (
+                <div className="agent-create-menu__state">
+                  <Loader2 className="agent-create-menu__state-icon animate-spin" aria-hidden="true" />
+                  <span>Loading templates...</span>
+                </div>
+              ) : menu.errorMessage ? (
+                <div className="agent-create-menu__state agent-create-menu__state--error">
+                  {menu.errorMessage}
+                </div>
+              ) : menu.templates.length > 0 ? (
+                <div className="agent-create-menu__templates">
+                  {menu.templates.map((template) => {
                 const launching = menu.launchBusyTemplateId === template.id
                 const disabled = menuCreateDisabled || launchBusy
                 return (
@@ -198,25 +233,32 @@ export function AgentCreateSplitButton({
                     </span>
                   </button>
                 )
-              })}
-            </div>
-          ) : (
-            <div className="agent-create-menu__empty">
-              <span className="agent-create-menu__empty-title">No team templates yet</span>
-              <span className="agent-create-menu__empty-copy">Create reusable starting points for this organization.</span>
-            </div>
-          )}
+                  })}
+                </div>
+              ) : (
+                <div className="agent-create-menu__empty">
+                  <span className="agent-create-menu__empty-title">No team templates yet</span>
+                  <span className="agent-create-menu__empty-copy">Create reusable starting points for this organization.</span>
+                </div>
+              )}
 
-          <button
-            type="button"
-            className="agent-create-menu__footer sidebar-settings__link"
-            onClick={handleOpenTemplates}
-          >
-            <Building2 className="agent-create-menu__footer-icon sidebar-settings__link-icon" aria-hidden="true" />
-            <span>{footerLabel}</span>
-          </button>
+              <button
+                type="button"
+                className="agent-create-menu__footer sidebar-settings__link"
+                onClick={handleOpenTemplates}
+              >
+                <Building2 className="agent-create-menu__footer-icon sidebar-settings__link-icon" aria-hidden="true" />
+                <span>{footerLabel}</span>
+              </button>
+            </>
+          ) : null}
         </Dialog>
       </Popover>
+      {importDialogOpen ? (
+        <PortableAgentImportDialog
+          onClose={() => setImportDialogOpen(false)}
+        />
+      ) : null}
     </div>
   )
 }

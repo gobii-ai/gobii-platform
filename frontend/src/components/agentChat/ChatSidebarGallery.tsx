@@ -1,4 +1,4 @@
-import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
+import { Mail, MessageSquare, Settings, Star } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
@@ -223,28 +223,15 @@ export function ChatSidebarGallery({
     if (onCreateAgent) {
       nextRows.push({
         key: 'gallery:create',
-        content: teamTemplateMenu ? (
+        content: (
           <AgentCreateSplitButton
             variant="gallery"
             onCreateAgent={onCreateAgent}
             createAgentDisabled={createAgentDisabled}
             createAgentButtonDisabled={createAgentButtonDisabled}
             createAgentDisabledReason={createAgentDisabledReason}
-            menu={teamTemplateMenu}
+            menu={teamTemplateMenu ?? null}
           />
-        ) : (
-          <button
-            type="button"
-            className="agent-gallery-create"
-            data-variant={variant}
-            onClick={onCreateAgent}
-            disabled={createAgentButtonDisabled}
-            aria-disabled={createAgentDisabled ? 'true' : undefined}
-            title={createAgentDisabledReason ?? undefined}
-          >
-            <Plus className="h-4 w-4" />
-            <span>New Agent</span>
-          </button>
         ),
       })
     }

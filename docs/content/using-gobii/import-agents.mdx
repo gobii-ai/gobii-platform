@@ -1,0 +1,82 @@
+---
+title: "Import Gobii Agents"
+description: "Import a Gobii portable-export ZIP into a personal, organization, or self-hosted workspace."
+sidebar_label: "Import Agents"
+---
+
+Gobii can restore agents from Gobii portable-export ZIPs. This is useful when moving from a hosted production workspace into the open-source Gobii build, or when making a safe copy in another workspace.
+
+Imports always create new agents with new IDs. They do not update or replace an existing agent.
+
+## Before you import
+
+- Keep the complete ZIP. Do not unzip, edit, or recompress it.
+- Treat it as sensitive: it may contain messages, attachments, workspace files, contacts, and durable SQLite data.
+- Make sure the destination workspace has one available agent slot for each agent you select.
+- Sign in as someone who can normally create agents in the destination workspace.
+
+The open-source build enables portable imports by default. Hosted or proprietary deployments may roll the feature out separately.
+
+## Import into the current workspace
+
+1. Switch to the personal or organization workspace that should own the imported agents.
+2. Open the arrow beside **New Agent** and choose **Import agent**.
+3. Upload the original Gobii portable-export ZIP.
+4. Wait while Gobii validates the archive's format, paths, size limits, and checksums.
+5. Select the agents to restore and edit their destination names if needed.
+6. Confirm that the selection fits the displayed workspace capacity, then choose **Import**.
+7. Keep the dialog open or return to **Import agent** later to see progress and results.
+
+Bulk imports are independent per agent. If one agent fails, successfully restored agents remain available and the result explains what needs attention.
+
+## What Gobii restores
+
+When present and compatible, Gobii restores:
+
+- Name, charter, descriptions, tags, avatar, and the nearest supported intelligence tier.
+- Memory snapshots, completed planning information, tasks, and deliverables.
+- Visible conversation history, attachments, and non-billable historical tool steps.
+- Owned filespaces, files, checksums, and compatible sharing between agents imported together.
+- Saved skills, supported built-in capabilities, custom-tool definitions and source, and durable SQLite tables.
+- Peer relationships when both agents were selected.
+
+Older `gobii.agent-portable-export/v1` archives remain supported. Because v1 did not record every filespace and skill detail, Gobii uses safe best-effort fallbacks and shows those choices as warnings. New v2 exports include machine-readable restoration metadata.
+
+## What stays off
+
+An imported agent becomes active for web chat only after its restoration succeeds. Gobii does not start imported work or replay imported messages.
+
+These remain disabled until you review them:
+
+- Schedules and proactive work.
+- Email, SMS, Discord, Slack, and other external channels.
+- Inbound and outbound webhooks.
+- MCP servers, OAuth connections, and managed integrations.
+- Custom Python tools.
+- Peer links recreated from the archive.
+
+Credential values are never included in a portable export. Reconnect required services in the destination and review their scopes before enabling writes.
+
+Owner-level instructions and communication policies from the source are preserved in the migration report for reference. They do not change the destination workspace and are not appended to the agent charter. Imported contacts are disabled reference entries.
+
+## Review an imported agent
+
+Open each result link and check:
+
+- The charter, memory, current plan, and important tasks.
+- Files and any private-copy warnings for shared files.
+- The migration report's skipped data, disabled schedules and tools, source owner instructions, and reconnection requirements.
+- Saved custom tools before enabling them.
+- Contacts, recipients, permissions, and connection scopes.
+
+Test the agent in web chat before enabling any automation or external delivery.
+
+## Troubleshooting
+
+**The ZIP is rejected:** Upload the original Gobii portable export. Files added, removed, renamed, or edited after export will fail checksum validation. Archives from an unsupported newer format require upgrading the destination Gobii installation.
+
+**An agent cannot be selected:** The source export may have failed for that agent, or required v2 restoration metadata may be missing.
+
+**The import cannot start:** Workspace access, account state, agent capacity, and destination name conflicts are checked again at start time so another concurrent creation cannot overfill the workspace.
+
+**A v1 import has warnings:** This is expected when the older archive lacks exact filespace access or skill-index metadata. Review the reported fallback before relying on those files or skills.
