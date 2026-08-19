@@ -34,8 +34,12 @@ export function PortableAgentImportDialog({ initialJobId, onClose }: PortableAge
     const controller = new AbortController()
     void fetchPortableAgentImport(initialJobId, controller.signal)
       .then(setJob)
-      .catch((reason: unknown) => setError(safeErrorMessage(reason)))
-      .finally(() => setLoading(false))
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) setError(safeErrorMessage(reason))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
     return () => controller.abort()
   }, [initialJobId])
 

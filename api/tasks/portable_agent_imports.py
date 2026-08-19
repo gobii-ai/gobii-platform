@@ -357,7 +357,7 @@ def _begin_or_resume_import(job: PortableAgentImport, task_id: str) -> bool:
 def _claim_next_item(job: PortableAgentImport) -> PortableAgentImportItem | None:
     with transaction.atomic():
         item = (
-            PortableAgentImportItem.objects.select_for_update()
+            PortableAgentImportItem.objects.select_for_update(of=("self",))
             .select_related("imported_agent")
             .filter(import_job=job, status=PortableAgentImportItem.Status.SELECTED)
             .first()
