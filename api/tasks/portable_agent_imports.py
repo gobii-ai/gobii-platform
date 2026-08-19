@@ -7,7 +7,6 @@ from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
-from django.core.files.storage import default_storage
 from django.db import DatabaseError, transaction
 from django.db.models import F, Q
 from django.utils import timezone
@@ -25,7 +24,11 @@ from api.services.portable_agent_import_archive import (
     PortableAgentImportArchiveError,
     validate_portable_agent_archive,
 )
-from api.services.portable_agent_import_restore import PortableAgentRestorer, RESTORE_ERRORS
+from api.services.portable_agent_import_restore import (
+    PortableAgentRestorer,
+    PortableAgentRestoreError,
+    RESTORE_ERRORS,
+)
 from api.services.portable_agent_imports import (
     STORAGE_ERRORS,
     delete_failed_import_shells,
@@ -85,7 +88,7 @@ def mark_portable_agent_import_failed(
             error_message=(message or SAFE_FAILURE_MESSAGE)[:512],
         )
     job.status = PortableAgentImport.Status.FAILED
-    job.phase = "failed"
+    job.processing_task_id = ""
     job.error_code = code[:64]
     job.error_message = (message or SAFE_FAILURE_MESSAGE)[:512]
     job.failed_agents = job.items.filter(status=PortableAgentImportItem.Status.FAILED).count()
@@ -95,8 +98,8 @@ def mark_portable_agent_import_failed(
     if storage_key and delete_portable_agent_import_artifact(storage_key, import_id=job.id):
         job.storage_key = ""
     job.save(update_fields=[
-        "status", "phase", "error_code", "error_message", "failed_agents", "completed_at",
-        "expires_at", "storage_key", "updated_at",
+        "status", "processing_task_id", "error_code", "error_message", "failed_agents",
+        "completed_at", "expires_at", "storage_key", "updated_at",
     ])
     if fail_selected_items:
         delete_failed_import_shells(job)
@@ -125,7 +128,6 @@ def _validate_import(job: PortableAgentImport) -> None:
                 message_count=candidate.message_count,
                 step_count=candidate.step_count,
                 file_count=candidate.file_count,
-                warning_count=len(candidate.warnings),
                 warnings=candidate.warnings,
                 compatibility=candidate.compatibility,
                 error_code="" if candidate.selectable else "unavailable",
@@ -135,11 +137,10 @@ def _validate_import(job: PortableAgentImport) -> None:
         ])
         locked.format_version = validation.format_version
         locked.status = PortableAgentImport.Status.AWAITING_SELECTION
-        locked.phase = "awaiting_selection"
         locked.total_agents = len(validation.candidates)
         locked.warning_count = sum(len(candidate.warnings) for candidate in validation.candidates)
         locked.save(update_fields=[
-            "format_version", "status", "phase", "total_agents", "warning_count", "updated_at",
+            "format_version", "status", "total_agents", "warning_count", "updated_at",
         ])
 
 
@@ -171,7 +172,6 @@ def _mark_item_failed(item: PortableAgentImportItem, exc) -> None:
     item.save(update_fields=["status", "error_code", "error_message", "updated_at"])
     PortableAgentImport.objects.filter(pk=item.import_job_id).update(
         failed_agents=F("failed_agents") + 1,
-        phase="restoring",
     )
 
 
@@ -185,6 +185,13 @@ def _sync_migration_report_warnings(item: PortableAgentImportItem) -> None:
     report["warnings"] = list(item.warnings) if isinstance(item.warnings, list) else []
     migration_report.report = report
     migration_report.save(update_fields=["report"])
+
+
+def _item_warning_count(job: PortableAgentImport) -> int:
+    return sum(
+        len(value) if isinstance(value, list) else 0
+        for value in job.items.values_list("warnings", flat=True)
+    )
 
 
 def _restore_relationships(archive, job: PortableAgentImport, successful_items: list[PortableAgentImportItem]) -> int:
@@ -272,8 +279,7 @@ def _restore_filespace_sharing(successful_items: list[PortableAgentImportItem]) 
                 if warning not in warnings:
                     warnings.append(warning)
                     item.warnings = warnings
-                    item.warning_count = len(warnings)
-                    item.save(update_fields=["warnings", "warning_count", "updated_at"])
+                    item.save(update_fields=["warnings", "updated_at"])
                     _sync_migration_report_warnings(item)
                     fallbacks += 1
             continue
@@ -290,10 +296,11 @@ def _restore_filespace_sharing(successful_items: list[PortableAgentImportItem]) 
                     storage_names = list(private_space.nodes.exclude(content="").values_list("content", flat=True))
                     private_space.delete()
                     for storage_name in {name for name in storage_names if name}:
-                        try:
-                            default_storage.delete(storage_name)
-                        except STORAGE_ERRORS:
-                            continue
+                        delete_portable_agent_import_artifact(
+                            storage_name,
+                            import_id=item.import_job_id,
+                            storage_alias="default",
+                        )
             role = str(access.get("role") or AgentFileSpaceAccess.Role.READER)
             if role not in {choice for choice, _label in AgentFileSpaceAccess.Role.choices}:
                 role = AgentFileSpaceAccess.Role.READER
@@ -316,7 +323,53 @@ def _restore_filespace_sharing(successful_items: list[PortableAgentImportItem]) 
     return fallbacks
 
 
-def _process_import(job: PortableAgentImport) -> None:
+def _begin_or_resume_import(job: PortableAgentImport, task_id: str) -> bool:
+    interrupted = False
+    with transaction.atomic():
+        locked = PortableAgentImport.objects.select_for_update().get(pk=job.pk)
+        if locked.status == PortableAgentImport.Status.QUEUED:
+            locked.status = PortableAgentImport.Status.RUNNING
+            locked.processing_task_id = task_id
+        elif locked.status == PortableAgentImport.Status.RUNNING:
+            if locked.processing_task_id and locked.processing_task_id != task_id:
+                return False
+            locked.processing_task_id = task_id
+            interrupted_items = locked.items.select_for_update().filter(
+                status=PortableAgentImportItem.Status.PROVISIONING,
+            )
+            interrupted = interrupted_items.update(
+                status=PortableAgentImportItem.Status.FAILED,
+                error_code="interrupted",
+                error_message="This agent restore was interrupted and its reserved shell was removed.",
+            ) > 0
+            if interrupted:
+                locked.failed_agents = locked.items.filter(
+                    status=PortableAgentImportItem.Status.FAILED,
+                ).count()
+        else:
+            return False
+        locked.save(update_fields=["status", "processing_task_id", "failed_agents", "updated_at"])
+    if interrupted:
+        delete_failed_import_shells(job)
+    return True
+
+
+def _claim_next_item(job: PortableAgentImport) -> PortableAgentImportItem | None:
+    with transaction.atomic():
+        item = (
+            PortableAgentImportItem.objects.select_for_update()
+            .select_related("imported_agent")
+            .filter(import_job=job, status=PortableAgentImportItem.Status.SELECTED)
+            .first()
+        )
+        if item is None:
+            return None
+        item.status = PortableAgentImportItem.Status.PROVISIONING
+        item.save(update_fields=["status", "updated_at"])
+        return item
+
+
+def _process_import(job: PortableAgentImport, task_id: str) -> None:
     if not user_can_import_to_target(job.requester, job):
         mark_portable_agent_import_failed(
             job,
@@ -325,20 +378,14 @@ def _process_import(job: PortableAgentImport) -> None:
             fail_selected_items=True,
         )
         return
-    with transaction.atomic():
-        locked = PortableAgentImport.objects.select_for_update().get(pk=job.pk)
-        if locked.status != PortableAgentImport.Status.QUEUED:
-            return
-        locked.status = PortableAgentImport.Status.RUNNING
-        locked.phase = "restoring"
-        locked.save(update_fields=["status", "phase", "updated_at"])
+    if not _begin_or_resume_import(job, task_id):
+        return
 
     with tempfile.TemporaryDirectory(prefix=f"gobii-portable-import-{job.id}-") as temp_dir:
         archive_path = _copy_archive_to_temp(job, temp_dir)
         validate_portable_agent_archive(archive_path)
         with PortableAgentImportArchive(archive_path) as archive:
-            items = list(job.items.filter(status=PortableAgentImportItem.Status.SELECTED).select_related("imported_agent"))
-            for item in items:
+            while item := _claim_next_item(job):
                 if not user_can_import_to_target(job.requester, job):
                     mark_portable_agent_import_failed(
                         job,
@@ -347,10 +394,23 @@ def _process_import(job: PortableAgentImport) -> None:
                         fail_selected_items=True,
                     )
                     return
-                item.status = PortableAgentImportItem.Status.PROVISIONING
-                item.save(update_fields=["status", "updated_at"])
                 try:
-                    warnings = PortableAgentRestorer(archive, job, item).restore()
+                    restorer = PortableAgentRestorer(archive, job, item)
+                    warnings = restorer.restore()
+                    with transaction.atomic():
+                        restorer.activate_for_web_chat()
+                        completed = PortableAgentImportItem.objects.filter(
+                            pk=item.pk,
+                            status=PortableAgentImportItem.Status.PROVISIONING,
+                        ).update(
+                            status=PortableAgentImportItem.Status.READY,
+                            warnings=warnings,
+                            error_code="",
+                            error_message="",
+                            updated_at=timezone.now(),
+                        )
+                        if completed != 1:
+                            raise PortableAgentRestoreError("The import item changed while it was being restored.")
                 except RESTORE_ERRORS as exc:
                     logger.warning(
                         "Portable agent restore failed import=%s item=%s error=%s",
@@ -361,17 +421,8 @@ def _process_import(job: PortableAgentImport) -> None:
                     _mark_item_failed(item, exc)
                     delete_failed_import_shells(job)
                     continue
-                item.status = PortableAgentImportItem.Status.READY
-                item.warnings = warnings
-                item.warning_count = len(warnings)
-                item.error_code = ""
-                item.error_message = ""
-                item.save(update_fields=[
-                    "status", "warnings", "warning_count", "error_code", "error_message", "updated_at",
-                ])
                 PortableAgentImport.objects.filter(pk=job.pk).update(
                     completed_agents=F("completed_agents") + 1,
-                    phase="restoring",
                 )
             successful = list(
                 job.items.filter(status=PortableAgentImportItem.Status.READY).select_related("imported_agent")
@@ -380,17 +431,16 @@ def _process_import(job: PortableAgentImport) -> None:
             relationship_warnings = _restore_relationships(archive, job, successful)
 
     job.refresh_from_db()
-    warning_count = sum(job.items.values_list("warning_count", flat=True)) + relationship_warnings
+    warning_count = _item_warning_count(job) + relationship_warnings
     if relationship_warnings:
         ready_item = job.items.filter(status=PortableAgentImportItem.Status.READY).first()
         if ready_item:
             ready_item.warnings = list(ready_item.warnings) + [
                 f"{relationship_warnings} peer relationship(s) were not recreated because the counterpart was not imported."
             ]
-            ready_item.warning_count = len(ready_item.warnings)
-            ready_item.save(update_fields=["warnings", "warning_count", "updated_at"])
+            ready_item.save(update_fields=["warnings", "updated_at"])
             _sync_migration_report_warnings(ready_item)
-            warning_count = sum(job.items.values_list("warning_count", flat=True))
+            warning_count = _item_warning_count(job)
     now = timezone.now()
     if job.completed_agents == 0:
         final_status = PortableAgentImport.Status.FAILED
@@ -408,25 +458,26 @@ def _process_import(job: PortableAgentImport) -> None:
     if storage_key and delete_portable_agent_import_artifact(storage_key, import_id=job.id):
         storage_key = ""
     job.status = final_status
-    job.phase = "completed" if final_status != PortableAgentImport.Status.FAILED else "failed"
+    job.processing_task_id = ""
     job.warning_count = warning_count
     job.error_code = error_code
     job.error_message = error_message
     job.completed_at = now
     job.storage_key = storage_key
     job.save(update_fields=[
-        "status", "phase", "warning_count", "error_code", "error_message", "completed_at",
-        "storage_key", "updated_at",
+        "status", "processing_task_id", "warning_count", "error_code", "error_message",
+        "completed_at", "storage_key", "updated_at",
     ])
 
 
-@shared_task(name="api.tasks.portable_agent_imports.process_portable_agent_import")
-def process_portable_agent_import(import_id: str) -> None:
+@shared_task(bind=True, name="api.tasks.portable_agent_imports.process_portable_agent_import")
+def process_portable_agent_import(self, import_id: str) -> None:
     job = PortableAgentImport.objects.select_related("requester", "organization").filter(pk=import_id).first()
     if job is None or job.status not in {PortableAgentImport.Status.QUEUED, PortableAgentImport.Status.RUNNING}:
         return
+    task_id = str(self.request.id or f"local:{import_id}")
     try:
-        _process_import(job)
+        _process_import(job, task_id)
     except PortableAgentImportArchiveError as exc:
         logger.warning("Portable import archive changed import=%s code=%s", import_id, exc.code)
         job.refresh_from_db()

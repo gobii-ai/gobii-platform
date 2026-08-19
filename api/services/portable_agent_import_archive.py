@@ -265,6 +265,8 @@ def validate_portable_agent_archive(path: str | Path) -> PortableAgentImportVali
         raw_agents = manifest.get("agents")
         if not isinstance(raw_agents, list) or not raw_agents:
             raise PortableAgentImportArchiveError("The export manifest contains no agents.", code="invalid_manifest")
+        if len(raw_agents) > settings.PORTABLE_AGENT_IMPORT_MAX_AGENTS:
+            raise PortableAgentImportArchiveError("The export contains too many agents.", code="too_many_agents")
 
         candidates: list[PortableAgentImportCandidate] = []
         seen_ids: set[uuid.UUID] = set()
@@ -356,6 +358,7 @@ class PortableAgentImportArchive:
     def __init__(self, path: str | Path):
         self.path = str(path)
         self.archive = zipfile.ZipFile(self.path, "r", allowZip64=True)
+        self.names = frozenset(self.archive.namelist())
 
     def close(self) -> None:
         self.archive.close()
@@ -367,7 +370,7 @@ class PortableAgentImportArchive:
         self.close()
 
     def has(self, name: str) -> bool:
-        return _safe_archive_path(name) in self.archive.namelist()
+        return _safe_archive_path(name) in self.names
 
     def json(self, name: str) -> dict:
         return _read_json(self.archive, _safe_archive_path(name))
@@ -419,4 +422,4 @@ class PortableAgentImportArchive:
 
     def names_under(self, prefix: str) -> list[str]:
         safe_prefix = _safe_archive_path(prefix).rstrip("/") + "/"
-        return sorted(name for name in self.archive.namelist() if name.startswith(safe_prefix) and not name.endswith("/"))
+        return sorted(name for name in self.names if name.startswith(safe_prefix) and not name.endswith("/"))

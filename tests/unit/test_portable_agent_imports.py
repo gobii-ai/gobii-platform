@@ -12,7 +12,9 @@ from unittest.mock import patch
 from PIL import Image
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.core.files.storage import storages
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import DatabaseError
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -47,6 +49,7 @@ from api.models import (
     PortableAgentExport,
     PortableAgentExportItem,
     PortableAgentImport,
+    PortableAgentImportArtifactCleanup,
     PortableAgentImportItem,
     PortableAgentMigrationReport,
 )
@@ -57,7 +60,13 @@ from api.services.portable_agent_import_archive import (
     PortableAgentImportArchiveError,
     validate_portable_agent_archive,
 )
-from api.services.portable_agent_imports import portable_agent_import_storage, reserve_portable_agent_shells
+from api.services.portable_agent_import_restore import PortableAgentRestorer
+from api.services.portable_agent_imports import (
+    portable_agent_import_storage,
+    reserve_portable_agent_shells,
+    retry_portable_agent_import_artifact_cleanups,
+    try_portable_agent_import_artifact_cleanup,
+)
 from api.tasks.portable_agent_exports import _write_root_files, _zip_staging_directory
 from api.tasks.portable_agent_imports import (
     process_portable_agent_import,
@@ -284,6 +293,8 @@ class PortableAgentImportApiTests(ImportStorageMixin, TestCase):
         item = job.items.get()
         self.assertEqual(item.status, PortableAgentImportItem.Status.AVAILABLE)
         self.assertTrue(any("v1 export" in warning for warning in item.warnings))
+        recent = self.client.get(self.list_url).json()["imports"][0]
+        self.assertNotIn("agents", recent)
 
         start_url = reverse("console_portable_agent_import_start", args=[job.id])
         payload = {"agents": [{"itemId": str(item.id), "name": "Restored Helper"}]}
@@ -413,6 +424,18 @@ class PortableAgentImportApiTests(ImportStorageMixin, TestCase):
         self.assertEqual(job.status, PortableAgentImport.Status.EXPIRED)
         self.assertEqual(job.storage_key, "")
 
+        default_key = storages["default"].save("tests/orphaned-import-file.txt", ContentFile(b"orphaned"))
+        cleanup = PortableAgentImportArtifactCleanup.objects.create(
+            storage_alias="default",
+            storage_key=default_key,
+            source_import_id=job.id,
+        )
+        with patch.object(storages["default"], "delete", side_effect=OSError("storage offline")):
+            self.assertFalse(try_portable_agent_import_artifact_cleanup(cleanup.id))
+        self.assertEqual(retry_portable_agent_import_artifact_cleanups(), 1)
+        self.assertFalse(PortableAgentImportArtifactCleanup.objects.filter(pk=cleanup.id).exists())
+        self.assertFalse(storages["default"].exists(default_key))
+
 
 @tag("agent_portable_import_batch")
 @override_settings(PORTABLE_AGENT_IMPORT_MAX_ARCHIVE_BYTES=2 * 1024 * 1024, PORTABLE_AGENT_IMPORT_MAX_ENTRIES=200)
@@ -480,6 +503,12 @@ class PortableAgentImportArchiveSecurityTests(TestCase):
             file_overrides={f"agents/{folder}/skills/index.json": None},
         )
         self.assert_archive_error(missing, "invalid_manifest")
+
+        with override_settings(PORTABLE_AGENT_IMPORT_MAX_AGENTS=1):
+            self.assert_archive_error(
+                combine_portable_zips(build_portable_zip(), build_portable_zip()),
+                "too_many_agents",
+            )
 
 
 @tag("agent_portable_import_batch")
@@ -558,6 +587,66 @@ class PortableAgentBulkImportTests(ImportStorageMixin, TestCase):
         self.assertEqual(PersistentAgent.objects.filter(user=user).count(), 1)
         self.assertEqual(BrowserUseAgent.objects.filter(user=user).count(), 1)
         self.assertEqual(AgentFileSpace.objects.filter(owner_user=user).count(), 1)
+
+    def test_redelivery_recovers_interrupted_item_and_finishes_remaining_agents(self):
+        user = User.objects.create_user(username="resume-import", email="resume@example.com")
+        archive_bytes = combine_portable_zips(build_portable_zip(), build_portable_zip())
+        job = self.create_import_job(user, archive_bytes)
+        validate_portable_agent_import(str(job.id))
+        selections = [
+            {"itemId": str(item.id), "name": f"Resume {index}"}
+            for index, item in enumerate(job.items.order_by("source_agent_name"), start=1)
+        ]
+        with (
+            patch("api.services.portable_agent_imports.AgentService.get_agents_available", return_value=10),
+            patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True),
+        ):
+            reserve_portable_agent_shells(job, selections)
+        interrupted = job.items.order_by("source_agent_name").first()
+        interrupted.status = PortableAgentImportItem.Status.PROVISIONING
+        interrupted.save(update_fields=["status", "updated_at"])
+        job.status = PortableAgentImport.Status.RUNNING
+        job.processing_task_id = f"local:{job.id}"
+        job.save(update_fields=["status", "processing_task_id", "updated_at"])
+
+        process_portable_agent_import(str(job.id))
+
+        job.refresh_from_db()
+        interrupted.refresh_from_db()
+        self.assertEqual(job.status, PortableAgentImport.Status.COMPLETED_WITH_WARNINGS)
+        self.assertEqual(interrupted.status, PortableAgentImportItem.Status.FAILED)
+        self.assertIsNone(interrupted.imported_agent)
+        self.assertEqual(job.items.filter(status=PortableAgentImportItem.Status.READY).count(), 1)
+
+    def test_activation_and_ready_transition_roll_back_together(self):
+        user = User.objects.create_user(username="atomic-import", email="atomic@example.com")
+        job = self.create_import_job(user, build_portable_zip())
+        validate_portable_agent_import(str(job.id))
+        item = job.items.get()
+        with (
+            patch("api.services.portable_agent_imports.AgentService.get_agents_available", return_value=10),
+            patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True),
+        ):
+            reserve_portable_agent_shells(
+                job,
+                [{"itemId": str(item.id), "name": "Atomic copy"}],
+            )
+
+        activate = PortableAgentRestorer.activate_for_web_chat
+
+        def activate_then_fail(restorer):
+            activate(restorer)
+            raise DatabaseError("completion write failed")
+
+        with patch.object(PortableAgentRestorer, "activate_for_web_chat", new=activate_then_fail):
+            process_portable_agent_import(str(job.id))
+
+        job.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(job.status, PortableAgentImport.Status.FAILED)
+        self.assertEqual(item.status, PortableAgentImportItem.Status.FAILED)
+        self.assertIsNone(item.imported_agent)
+        self.assertFalse(PersistentAgent.objects.filter(user=user).exists())
 
     def test_bulk_import_recreates_complete_sharing_and_subset_uses_private_fallback(self):
         user = User.objects.create_user(username="shared-import", email="shared@example.com")

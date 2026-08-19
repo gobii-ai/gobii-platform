@@ -48,7 +48,7 @@ class Migration(migrations.Migration):
                 ("target_key", models.CharField(max_length=128)),
                 ("format_version", models.CharField(blank=True, max_length=64)),
                 ("status", models.CharField(choices=[("validating", "Validating"), ("awaiting_selection", "Awaiting selection"), ("queued", "Queued"), ("running", "Running"), ("completed", "Completed"), ("completed_with_warnings", "Completed with warnings"), ("failed", "Failed"), ("expired", "Expired")], db_index=True, default="validating", max_length=32)),
-                ("phase", models.CharField(default="validating", max_length=32)),
+                ("processing_task_id", models.CharField(blank=True, max_length=64)),
                 ("storage_key", models.CharField(blank=True, max_length=512)),
                 ("archive_filename", models.CharField(blank=True, max_length=255)),
                 ("archive_size_bytes", models.PositiveBigIntegerField(blank=True, null=True)),
@@ -83,7 +83,6 @@ class Migration(migrations.Migration):
                 ("message_count", models.PositiveIntegerField(default=0)),
                 ("step_count", models.PositiveIntegerField(default=0)),
                 ("file_count", models.PositiveIntegerField(default=0)),
-                ("warning_count", models.PositiveIntegerField(default=0)),
                 ("warnings", models.JSONField(blank=True, default=list)),
                 ("compatibility", models.JSONField(blank=True, default=dict)),
                 ("error_code", models.CharField(blank=True, max_length=64)),
@@ -99,7 +98,8 @@ class Migration(migrations.Migration):
             name="PortableAgentImportArtifactCleanup",
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
-                ("storage_key", models.CharField(max_length=512, unique=True)),
+                ("storage_alias", models.CharField(default="portable_agent_imports", max_length=64)),
+                ("storage_key", models.CharField(max_length=512)),
                 ("source_import_id", models.UUIDField()),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
             ],
@@ -148,6 +148,13 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="portableagentimportitem",
             index=models.Index(fields=["import_job", "status"], name="pa_import_item_status_idx"),
+        ),
+        migrations.AddConstraint(
+            model_name="portableagentimportartifactcleanup",
+            constraint=models.UniqueConstraint(
+                fields=("storage_alias", "storage_key"),
+                name="uniq_import_cleanup_storage_key",
+            ),
         ),
         migrations.RunPython(add_portable_import_flag, remove_portable_import_flag),
     ]

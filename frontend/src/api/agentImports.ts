@@ -24,7 +24,6 @@ export type PortableAgentImportItem = {
   fileCount: number
   warningCount: number
   warnings: string[]
-  compatibility: Record<string, unknown>
   error: string | null
   importedAgent: { id: string; name: string; url: string } | null
 }
@@ -32,7 +31,6 @@ export type PortableAgentImportItem = {
 export type PortableAgentImportJob = {
   id: string
   status: PortableAgentImportStatus
-  phase: string
   target: { type: 'personal' | 'organization'; id: string; name: string }
   formatVersion: string | null
   archiveName: string
@@ -49,13 +47,12 @@ export type PortableAgentImportJob = {
   agents: PortableAgentImportItem[]
 }
 
-type ImportListResponse = { imports: PortableAgentImportJob[]; enabled: boolean }
 type ImportResponse = { import: PortableAgentImportJob; created?: boolean }
 
 const IMPORTS_URL = '/console/api/agent-imports/'
 
-export async function fetchPortableAgentImports(signal?: AbortSignal): Promise<PortableAgentImportJob[]> {
-  const payload = await jsonFetch<ImportListResponse>(IMPORTS_URL, { signal })
+export async function fetchPortableAgentImports(signal?: AbortSignal) {
+  const payload = await jsonFetch<{ imports: Array<Omit<PortableAgentImportJob, 'agents'>> }>(IMPORTS_URL, { signal })
   return payload.imports
 }
 

@@ -50,6 +50,7 @@ export function AgentCreateSplitButton({
   const [open, setOpen] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [importAvailable, setImportAvailable] = useState(false)
+  const [recentImportId, setRecentImportId] = useState<string | null>(null)
   const launchBusy = Boolean(menu?.launchBusyTemplateId)
   const menuCreateDisabled = Boolean(createAgentButtonDisabled || launchBusy)
   const footerLabel = menu?.canManageTemplates ? 'Manage team templates' : 'View organization'
@@ -62,10 +63,14 @@ export function AgentCreateSplitButton({
   useEffect(() => {
     const controller = new AbortController()
     void fetchPortableAgentImports(controller.signal)
-      .then(() => {
+      .then((imports) => {
+        setRecentImportId(imports[0]?.id ?? null)
         setImportAvailable(true)
       })
-      .catch(() => setImportAvailable(false))
+      .catch(() => {
+        setRecentImportId(null)
+        setImportAvailable(false)
+      })
     return () => controller.abort()
   }, [])
 
@@ -256,6 +261,7 @@ export function AgentCreateSplitButton({
       </Popover>
       {importDialogOpen ? (
         <PortableAgentImportDialog
+          initialJobId={recentImportId}
           onClose={() => setImportDialogOpen(false)}
         />
       ) : null}

@@ -14043,7 +14043,7 @@ class PortableAgentImport(models.Model):
     )
     format_version = models.CharField(max_length=64, blank=True)
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.VALIDATING, db_index=True)
-    phase = models.CharField(max_length=32, default="validating")
+    processing_task_id = models.CharField(max_length=64, blank=True)
     storage_key = models.CharField(max_length=512, blank=True)
     archive_filename = models.CharField(max_length=255, blank=True)
     archive_size_bytes = models.PositiveBigIntegerField(null=True, blank=True)
@@ -14113,7 +14113,6 @@ class PortableAgentImportItem(models.Model):
     message_count = models.PositiveIntegerField(default=0)
     step_count = models.PositiveIntegerField(default=0)
     file_count = models.PositiveIntegerField(default=0)
-    warning_count = models.PositiveIntegerField(default=0)
     warnings = models.JSONField(default=list, blank=True)
     compatibility = models.JSONField(default=dict, blank=True)
     error_code = models.CharField(max_length=64, blank=True)
@@ -14136,12 +14135,19 @@ class PortableAgentImportItem(models.Model):
 
 
 class PortableAgentImportArtifactCleanup(models.Model):
-    storage_key = models.CharField(max_length=512, unique=True)
+    storage_alias = models.CharField(max_length=64, default="portable_agent_imports")
+    storage_key = models.CharField(max_length=512)
     source_import_id = models.UUIDField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["storage_alias", "storage_key"],
+                name="uniq_import_cleanup_storage_key",
+            ),
+        ]
 
 
 class PortableAgentMigrationReport(models.Model):
@@ -14172,6 +14178,7 @@ def delete_portable_agent_import_file(sender, instance: PortableAgentImport, **k
     from api.services.portable_agent_imports import try_portable_agent_import_artifact_cleanup
 
     cleanup, _created = PortableAgentImportArtifactCleanup.objects.get_or_create(
+        storage_alias="portable_agent_imports",
         storage_key=instance.storage_key,
         defaults={"source_import_id": instance.id},
     )

@@ -5,7 +5,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.files.storage import default_storage, storages
+from django.core.files.storage import storages
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import get_valid_filename
@@ -51,21 +51,30 @@ def portable_agent_imports_enabled(request=None) -> bool:
     return is_waffle_flag_active(PORTABLE_AGENT_IMPORTS, request, default=False)
 
 
-def delete_portable_agent_import_artifact(storage_key: str, *, import_id=None) -> bool:
+def delete_portable_agent_import_artifact(
+    storage_key: str,
+    *,
+    import_id=None,
+    storage_alias: str = "portable_agent_imports",
+) -> bool:
     if not storage_key:
         return True
-    storage = portable_agent_import_storage()
+    storage = storages[storage_alias]
     try:
         if storage.exists(storage_key):
             storage.delete(storage_key)
     except STORAGE_ERRORS:
         if import_id is not None:
             PortableAgentImportArtifactCleanup.objects.get_or_create(
+                storage_alias=storage_alias,
                 storage_key=storage_key,
                 defaults={"source_import_id": import_id},
             )
         return False
-    PortableAgentImportArtifactCleanup.objects.filter(storage_key=storage_key).delete()
+    PortableAgentImportArtifactCleanup.objects.filter(
+        storage_alias=storage_alias,
+        storage_key=storage_key,
+    ).delete()
     return True
 
 
@@ -76,6 +85,7 @@ def try_portable_agent_import_artifact_cleanup(cleanup_id) -> bool:
     return delete_portable_agent_import_artifact(
         cleanup.storage_key,
         import_id=cleanup.source_import_id,
+        storage_alias=cleanup.storage_alias,
     )
 
 
@@ -211,12 +221,10 @@ def _target_payload(job: PortableAgentImport) -> dict:
     }
 
 
-def serialize_portable_agent_import(job: PortableAgentImport) -> dict:
-    items = list(job.items.select_related("imported_agent").order_by("source_agent_name", "source_agent_id"))
-    return {
+def serialize_portable_agent_import(job: PortableAgentImport, *, include_agents: bool = True) -> dict:
+    payload = {
         "id": str(job.id),
         "status": job.status,
-        "phase": job.phase,
         "target": _target_payload(job),
         "formatVersion": job.format_version or None,
         "archiveName": job.archive_filename,
@@ -230,7 +238,11 @@ def serialize_portable_agent_import(job: PortableAgentImport) -> dict:
         "error": job.error_message or None,
         "createdAt": job.created_at.isoformat(),
         "expiresAt": job.expires_at.isoformat() if job.expires_at else None,
-        "agents": [
+    }
+    if not include_agents:
+        return payload
+    items = job.items.select_related("imported_agent").order_by("source_agent_name", "source_agent_id")
+    payload["agents"] = [
             {
                 "id": str(item.id),
                 "sourceAgentId": str(item.source_agent_id),
@@ -245,9 +257,8 @@ def serialize_portable_agent_import(job: PortableAgentImport) -> dict:
                 "messageCount": item.message_count,
                 "stepCount": item.step_count,
                 "fileCount": item.file_count,
-                "warningCount": item.warning_count,
+                "warningCount": len(item.warnings) if isinstance(item.warnings, list) else 0,
                 "warnings": item.warnings if isinstance(item.warnings, list) else [],
-                "compatibility": item.compatibility if isinstance(item.compatibility, dict) else {},
                 "error": item.error_message or None,
                 "importedAgent": (
                     {
@@ -260,21 +271,20 @@ def serialize_portable_agent_import(job: PortableAgentImport) -> dict:
                 ),
             }
             for item in items
-        ],
-    }
+        ]
+    return payload
 
 
 def expire_portable_agent_import(job: PortableAgentImport) -> None:
     storage_key = job.storage_key
     deleted = delete_portable_agent_import_artifact(storage_key, import_id=job.id)
     job.status = PortableAgentImport.Status.EXPIRED
-    job.phase = "expired"
     job.expires_at = None
     job.completed_at = timezone.now()
     if deleted:
         job.storage_key = ""
     job.save(update_fields=[
-        "status", "phase", "expires_at", "completed_at", "storage_key", "updated_at",
+        "status", "expires_at", "completed_at", "storage_key", "updated_at",
     ])
 
 
@@ -330,7 +340,8 @@ def reserve_portable_agent_shells(job: PortableAgentImport, selections: list[dic
         selection_by_id[item_id] = name
 
     with transaction.atomic():
-        locked_job = PortableAgentImport.objects.select_for_update().select_related(
+        # PostgreSQL cannot lock the nullable organization side of this outer join.
+        locked_job = PortableAgentImport.objects.select_for_update(of=("self",)).select_related(
             "requester", "organization",
         ).get(pk=job.pk)
         if locked_job.status != PortableAgentImport.Status.AWAITING_SELECTION:
@@ -396,14 +407,13 @@ def reserve_portable_agent_shells(job: PortableAgentImport, selections: list[dic
             status=PortableAgentImportItem.Status.SKIPPED,
         )
         locked_job.status = PortableAgentImport.Status.QUEUED
-        locked_job.phase = "queued"
         locked_job.selected_agents = len(selection_by_id)
         locked_job.started_at = timezone.now()
         locked_job.expires_at = None
         locked_job.error_code = ""
         locked_job.error_message = ""
         locked_job.save(update_fields=[
-            "status", "phase", "selected_agents", "started_at", "expires_at",
+            "status", "selected_agents", "started_at", "expires_at",
             "error_code", "error_message", "updated_at",
         ])
     return True
@@ -440,7 +450,8 @@ def delete_failed_import_shells(job: PortableAgentImport) -> None:
             address__startswith=f"portable-import://{agent.id}/",
         ).delete()
         for storage_name in {name for name in storage_names if name}:
-            try:
-                default_storage.delete(storage_name)
-            except STORAGE_ERRORS:
-                continue
+            delete_portable_agent_import_artifact(
+                storage_name,
+                import_id=job.id,
+                storage_alias="default",
+            )

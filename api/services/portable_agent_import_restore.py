@@ -185,8 +185,52 @@ class PortableAgentRestorer:
         self._restore_contacts()
         self._restore_sqlite()
         self._create_report(profile)
-        self._activate_for_web_chat()
         return self.warnings
+
+    def _optional_json(self, relative_path: str) -> dict:
+        name = f"{self.prefix}/{relative_path}"
+        return self.archive.json(name) if self.archive.has(name) else {}
+
+    def _optional_list(self, relative_path: str, key: str) -> list:
+        value = self._optional_json(relative_path).get(key)
+        return value if isinstance(value, list) else []
+
+    def _read_file_payload(self, entry: dict, label: str) -> tuple[bytes, str] | None:
+        content_path = _archive_content_path(self.prefix, entry)
+        if not content_path or not self.archive.has(content_path):
+            self.warnings.append(f"{label} was unavailable.")
+            return None
+        if isinstance(entry.get("sizeBytes"), int) and entry["sizeBytes"] > settings.MAX_FILE_SIZE:
+            self.warnings.append(f"{label} exceeded the destination file limit and was skipped.")
+            return None
+        payload = self.archive.bytes(content_path, limit=settings.MAX_FILE_SIZE)
+        digest = hashlib.sha256(payload).hexdigest()
+        if entry.get("sha256") and entry["sha256"] != digest:
+            raise PortableAgentRestoreError(f"{label} failed checksum verification during restoration.")
+        return payload, digest
+
+    def _create_filespace(self, name: str, *, is_default: bool) -> AgentFileSpace:
+        filespace = AgentFileSpace.objects.create(
+            name=_unique_filespace_name(self.agent.user, name),
+            owner_user=self.agent.user,
+            description=f"Imported from Gobii agent {self.item.source_agent_name}.",
+        )
+        AgentFileSpaceAccess.objects.create(
+            filespace=filespace,
+            agent=self.agent,
+            role=AgentFileSpaceAccess.Role.OWNER,
+            is_default=is_default,
+        )
+        return filespace
+
+    def _save_validated(self, value, warning: str) -> bool:
+        try:
+            value.full_clean()
+            value.save()
+        except (ValidationError, DatabaseError):
+            self.warnings.append(warning)
+            return False
+        return True
 
     def _restore_identity(self, profile: dict) -> None:
         owner = self.agent.organization or self.agent.user
@@ -244,23 +288,19 @@ class PortableAgentRestorer:
         self.agent.avatar.save(f"imported-avatar{suffix}", ContentFile(payload), save=True)
 
     def _restore_files(self) -> None:
-        index_name = f"{self.prefix}/files/index.json"
-        if not self.archive.has(index_name):
+        index = self._optional_json("files/index.json")
+        if not index:
             self.warnings.append("No workspace file index was present in the export.")
             return
-        index = self.archive.json(index_name)
         entries = index.get("files") if isinstance(index.get("files"), list) else []
         for entry in entries:
             if isinstance(entry, dict) and entry.get("id"):
                 self.file_entries[str(entry["id"])] = entry
 
         metadata_by_id = {}
-        metadata_name = f"{self.prefix}/files/filespaces.json"
-        if self.archive.has(metadata_name):
-            raw_metadata = self.archive.json(metadata_name).get("filespaces")
-            for row in raw_metadata if isinstance(raw_metadata, list) else []:
-                if isinstance(row, dict) and row.get("sourceFilespaceId"):
-                    metadata_by_id[str(row["sourceFilespaceId"])] = row
+        for row in self._optional_list("files/filespaces.json", "filespaces"):
+            if isinstance(row, dict) and row.get("sourceFilespaceId"):
+                metadata_by_id[str(row["sourceFilespaceId"])] = row
 
         workspace_entries = [entry for entry in entries if isinstance(entry, dict) and entry.get("category") == "workspace"]
         grouped: dict[str, list[dict]] = {}
@@ -323,17 +363,7 @@ class PortableAgentRestorer:
                 filespace.description = f"Imported from Gobii agent {self.item.source_agent_name}."
                 filespace.save(update_fields=["name", "description", "updated_at"])
             else:
-                filespace = AgentFileSpace.objects.create(
-                    name=_unique_filespace_name(self.agent.user, proposed),
-                    owner_user=self.agent.user,
-                    description=f"Imported from Gobii agent {self.item.source_agent_name}.",
-                )
-                AgentFileSpaceAccess.objects.create(
-                    filespace=filespace,
-                    agent=self.agent,
-                    role=AgentFileSpaceAccess.Role.OWNER,
-                    is_default=False,
-                )
+                filespace = self._create_filespace(proposed, is_default=False)
             self.filespaces[source_id] = filespace
             restored_mapping[source_id] = str(filespace.id)
             cache: dict[str, AgentFsNode] = {}
@@ -343,19 +373,13 @@ class PortableAgentRestorer:
                 if entry.get("directory"):
                     _ensure_directory(filespace, cache, parts)
                     continue
-                content_path = _archive_content_path(self.prefix, entry)
-                if not content_path or not self.archive.has(content_path):
-                    self.warnings.append(f"Workspace file `{entry.get('logicalPath') or 'unknown'}` was unavailable.")
+                restored = self._read_file_payload(
+                    entry,
+                    f"Workspace file `{entry.get('logicalPath') or 'unknown'}`",
+                )
+                if restored is None:
                     continue
-                if isinstance(entry.get("sizeBytes"), int) and entry["sizeBytes"] > settings.MAX_FILE_SIZE:
-                    self.warnings.append(
-                        f"Workspace file `{entry.get('logicalPath') or 'unknown'}` exceeded the destination file limit and was skipped."
-                    )
-                    continue
-                payload = self.archive.bytes(content_path, limit=settings.MAX_FILE_SIZE)
-                digest = hashlib.sha256(payload).hexdigest()
-                if entry.get("sha256") and entry["sha256"] != digest:
-                    raise PortableAgentRestoreError("A workspace file failed checksum verification during restoration.")
+                payload, digest = restored
                 _write_file_node(
                     filespace=filespace,
                     cache=cache,
@@ -402,9 +426,8 @@ class PortableAgentRestorer:
 
     def _restore_work(self) -> list[dict]:
         deliverables = []
-        plan_name = f"{self.prefix}/work/plan.json"
-        if self.archive.has(plan_name):
-            plan = self.archive.json(plan_name)
+        plan = self._optional_json("work/plan.json")
+        if plan:
             state = str(plan.get("state") or "")
             if state == PersistentAgent.PlanningState.COMPLETED:
                 self.agent.planning_state = PersistentAgent.PlanningState.COMPLETED
@@ -420,33 +443,30 @@ class PortableAgentRestorer:
             if isinstance(plan.get("deliverables"), list):
                 deliverables = [row for row in plan["deliverables"] if isinstance(row, dict)]
 
-        tasks_name = f"{self.prefix}/work/tasks.json"
-        if self.archive.has(tasks_name):
-            tasks = self.archive.json(tasks_name).get("tasks")
-            for row in tasks if isinstance(tasks, list) else []:
-                if not isinstance(row, dict):
-                    continue
-                status = str(row.get("status") or "")
-                valid_statuses = {choice for choice, _label in PersistentAgentKanbanCard.Status.choices}
-                card = PersistentAgentKanbanCard.objects.create(
-                    assigned_agent=self.agent,
-                    title=_safe_text(row.get("title") or "Imported task", limit=255),
-                    description=_safe_text(row.get("description")),
-                    status=status if status in valid_statuses else PersistentAgentKanbanCard.Status.TODO,
-                    priority=_bounded_int(
-                        row.get("priority"),
-                        minimum=-(2 ** 31),
-                        maximum=(2 ** 31) - 1,
-                    ),
-                    completed_at=_parse_time(row.get("completedAt")),
-                )
-                updates = {}
-                if _parse_time(row.get("createdAt")):
-                    updates["created_at"] = _parse_time(row.get("createdAt"))
-                if _parse_time(row.get("updatedAt")):
-                    updates["updated_at"] = _parse_time(row.get("updatedAt"))
-                if updates:
-                    PersistentAgentKanbanCard.objects.filter(pk=card.pk).update(**updates)
+        for row in self._optional_list("work/tasks.json", "tasks"):
+            if not isinstance(row, dict):
+                continue
+            status = str(row.get("status") or "")
+            valid_statuses = {choice for choice, _label in PersistentAgentKanbanCard.Status.choices}
+            card = PersistentAgentKanbanCard.objects.create(
+                assigned_agent=self.agent,
+                title=_safe_text(row.get("title") or "Imported task", limit=255),
+                description=_safe_text(row.get("description")),
+                status=status if status in valid_statuses else PersistentAgentKanbanCard.Status.TODO,
+                priority=_bounded_int(
+                    row.get("priority"),
+                    minimum=-(2 ** 31),
+                    maximum=(2 ** 31) - 1,
+                ),
+                completed_at=_parse_time(row.get("completedAt")),
+            )
+            updates = {}
+            if _parse_time(row.get("createdAt")):
+                updates["created_at"] = _parse_time(row.get("createdAt"))
+            if _parse_time(row.get("updatedAt")):
+                updates["updated_at"] = _parse_time(row.get("updatedAt"))
+            if updates:
+                PersistentAgentKanbanCard.objects.filter(pk=card.pk).update(**updates)
         return deliverables
 
     def _historical_endpoint(self, kind: str, source: dict | None = None) -> PersistentAgentCommsEndpoint:
@@ -570,19 +590,13 @@ class PortableAgentRestorer:
             if not isinstance(row, dict):
                 continue
             entry = self.file_entries.get(str(row.get("id") or ""), row)
-            content_path = _archive_content_path(self.prefix, entry)
-            if not content_path or not self.archive.has(content_path):
-                self.warnings.append(f"Attachment `{row.get('filename') or 'unknown'}` was unavailable.")
+            restored = self._read_file_payload(
+                entry,
+                f"Attachment `{row.get('filename') or 'unknown'}`",
+            )
+            if restored is None:
                 continue
-            if isinstance(entry.get("sizeBytes"), int) and entry["sizeBytes"] > settings.MAX_FILE_SIZE:
-                self.warnings.append(
-                    f"Attachment `{row.get('filename') or 'unknown'}` exceeded the destination file limit and was skipped."
-                )
-                continue
-            payload = self.archive.bytes(content_path, limit=settings.MAX_FILE_SIZE)
-            digest = hashlib.sha256(payload).hexdigest()
-            if entry.get("sha256") and entry["sha256"] != digest:
-                raise PortableAgentRestoreError("An attachment failed checksum verification during restoration.")
+            payload, digest = restored
             filename = (get_valid_filename(os.path.basename(str(entry.get("logicalPath") or row.get("filename") or "attachment"))) or "attachment")[:512]
             PersistentAgentMessageAttachment.objects.create(
                 message=message,
@@ -635,8 +649,7 @@ class PortableAgentRestorer:
     def _restore_skills_and_tools(self) -> None:
         skill_index_name = f"{self.prefix}/skills/index.json"
         if self.archive.has(skill_index_name):
-            raw_skills = self.archive.json(skill_index_name).get("skills")
-            skills = raw_skills if isinstance(raw_skills, list) else []
+            skills = self._optional_list("skills/index.json", "skills")
         else:
             skills = [
                 parsed
@@ -657,16 +670,11 @@ class PortableAgentRestorer:
                 secrets=row.get("secrets") if isinstance(row.get("secrets"), list) else [],
                 instructions=_safe_text(row.get("instructions")),
             )
-            try:
-                skill.full_clean()
-                skill.save()
-            except (ValidationError, DatabaseError):
-                self.warnings.append(f"Saved skill `{skill.name}` was incompatible and was skipped.")
+            self._save_validated(skill, f"Saved skill `{skill.name}` was incompatible and was skipped.")
 
-        capabilities_name = f"{self.prefix}/tools/capabilities.json"
-        if not self.archive.has(capabilities_name):
+        capabilities = self._optional_json("tools/capabilities.json")
+        if not capabilities:
             return
-        capabilities = self.archive.json(capabilities_name)
         for row in capabilities.get("systemSkills") if isinstance(capabilities.get("systemSkills"), list) else []:
             if not isinstance(row, dict) or not row.get("key"):
                 continue
@@ -701,11 +709,9 @@ class PortableAgentRestorer:
 
         for row in capabilities.get("customTools") if isinstance(capabilities.get("customTools"), list) else []:
             self._restore_custom_tool(row)
-        mcp_name = f"{self.prefix}/tools/mcp-servers.json"
-        if self.archive.has(mcp_name):
-            servers = self.archive.json(mcp_name).get("servers")
-            if isinstance(servers, list) and servers:
-                self.warnings.append(f"{len(servers)} MCP server connection(s) require review and reconnection.")
+        servers = self._optional_list("tools/mcp-servers.json", "servers")
+        if servers:
+            self.warnings.append(f"{len(servers)} MCP server connection(s) require review and reconnection.")
 
     def _restore_custom_tool(self, row) -> None:
         if not isinstance(row, dict):
@@ -739,14 +745,7 @@ class PortableAgentRestorer:
             if default_access is not None:
                 filespace = default_access.filespace
             else:
-                filespace = AgentFileSpace.objects.create(
-                    name=_unique_filespace_name(self.agent.user, f"{self.agent.name} imported files"),
-                    owner_user=self.agent.user,
-                    description=f"Imported from Gobii agent {self.item.source_agent_name}.",
-                )
-                AgentFileSpaceAccess.objects.create(
-                    filespace=filespace, agent=self.agent, role=AgentFileSpaceAccess.Role.OWNER, is_default=True,
-                )
+                filespace = self._create_filespace(f"{self.agent.name} imported files", is_default=True)
             self.filespaces[source_id] = filespace
             self.directory_caches[source_id] = {}
         source_id, filespace = next(iter(self.filespaces.items()))
@@ -769,41 +768,32 @@ class PortableAgentRestorer:
             entrypoint=_safe_text(row.get("entrypoint") or "run", limit=64),
             timeout_seconds=row.get("timeoutSeconds") if isinstance(row.get("timeoutSeconds"), int) else 300,
         )
-        try:
-            tool.full_clean()
-            tool.save()
-        except (ValidationError, DatabaseError):
-            self.warnings.append(f"Custom tool `{tool_name or 'unknown'}` definition was incompatible and was skipped.")
+        if not self._save_validated(
+            tool,
+            f"Custom tool `{tool_name or 'unknown'}` definition was incompatible and was skipped.",
+        ):
             return
         self.warnings.append(f"Custom tool `{tool.tool_name}` was restored disabled and requires review.")
 
     def _restore_contacts(self) -> None:
-        contacts_name = f"{self.prefix}/communications/contacts.json"
-        if not self.archive.has(contacts_name):
-            return
-        contacts = self.archive.json(contacts_name).get("contacts")
-        for row in contacts if isinstance(contacts, list) else []:
+        for row in self._optional_list("communications/contacts.json", "contacts"):
             if not isinstance(row, dict):
                 continue
             channel = str(row.get("channel") or "")
             address = _safe_text(row.get("address"), limit=512).strip()
             if channel not in {choice for choice, _label in CommsChannel.choices} or not address:
                 continue
-            try:
-                contact = CommsAllowlistEntry(
-                    agent=self.agent,
-                    channel=channel,
-                    address=address,
-                    verified=False,
-                    is_active=False,
-                    allow_inbound=False,
-                    allow_outbound=False,
-                    can_configure=False,
-                )
-                contact.full_clean()
-                contact.save()
-            except (ValidationError, DatabaseError):
-                self.warnings.append(f"Reference contact `{address}` could not be restored.")
+            contact = CommsAllowlistEntry(
+                agent=self.agent,
+                channel=channel,
+                address=address,
+                verified=False,
+                is_active=False,
+                allow_inbound=False,
+                allow_outbound=False,
+                can_configure=False,
+            )
+            self._save_validated(contact, f"Reference contact `{address}` could not be restored.")
 
     def _restore_sqlite(self) -> None:
         source_name = f"{self.prefix}/state/sqlite/state.sqlite3"
@@ -816,18 +806,12 @@ class PortableAgentRestorer:
             try:
                 validate_sqlite_file(source_path)
                 with sqlite3.connect(source_path) as connection:
-                    table_names = {
-                        row[0]
-                        for row in connection.execute(
-                            "SELECT name FROM sqlite_master WHERE type = 'table'"
-                        ).fetchall()
-                    }
-                    ephemeral_tables = {
-                        table_name
-                        for table_name in table_names
-                        if table_name.startswith("__") or table_name in EPHEMERAL_TABLES
-                    }
-                    for table_name in ephemeral_tables:
+                    table_names = connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    ).fetchall()
+                    for table_name, in table_names:
+                        if not table_name.startswith("__") and table_name not in EPHEMERAL_TABLES:
+                            continue
                         escaped = table_name.replace('"', '""')
                         connection.execute(f'DROP TABLE IF EXISTS "{escaped}"')
                     connection.commit()
@@ -838,43 +822,9 @@ class PortableAgentRestorer:
                 raise PortableAgentRestoreError("The exported durable SQLite state could not be restored.") from exc
 
     def _create_report(self, profile: dict) -> None:
-        schedules = []
-        schedules_name = f"{self.prefix}/work/schedules.json"
-        if self.archive.has(schedules_name):
-            raw_schedules = self.archive.json(schedules_name).get("schedules")
-            schedules = raw_schedules if isinstance(raw_schedules, list) else []
-            if schedules:
-                self.warnings.append(f"{len(schedules)} schedule(s) were preserved for review but remain disabled.")
-        connections = {}
-        connections_name = f"{self.prefix}/connections/requirements.json"
-        if self.archive.has(connections_name):
-            connections = self.archive.json(connections_name)
-        communication_policy = {}
-        policy_name = f"{self.prefix}/communications/allowlist.json"
-        if self.archive.has(policy_name):
-            communication_policy = self.archive.json(policy_name)
-        source_endpoints = []
-        endpoints_name = f"{self.prefix}/communications/endpoints.json"
-        if self.archive.has(endpoints_name):
-            raw_endpoints = self.archive.json(endpoints_name).get("endpoints")
-            source_endpoints = raw_endpoints if isinstance(raw_endpoints, list) else []
-        mcp_servers = []
-        mcp_name = f"{self.prefix}/tools/mcp-servers.json"
-        if self.archive.has(mcp_name):
-            raw_servers = self.archive.json(mcp_name).get("servers")
-            mcp_servers = raw_servers if isinstance(raw_servers, list) else []
-        source_capabilities = {}
-        capabilities_name = f"{self.prefix}/tools/capabilities.json"
-        if self.archive.has(capabilities_name):
-            source_capabilities = self.archive.json(capabilities_name)
-        source_webhooks = {}
-        webhooks_name = f"{self.prefix}/communications/webhooks.json"
-        if self.archive.has(webhooks_name):
-            source_webhooks = self.archive.json(webhooks_name)
-        source_planning = {}
-        planning_name = f"{self.prefix}/work/plan.json"
-        if self.archive.has(planning_name):
-            source_planning = self.archive.json(planning_name)
+        schedules = self._optional_list("work/schedules.json", "schedules")
+        if schedules:
+            self.warnings.append(f"{len(schedules)} schedule(s) were preserved for review but remain disabled.")
         report = {
             "source": {
                 "formatVersion": self.job.format_version,
@@ -889,17 +839,17 @@ class PortableAgentRestorer:
                 "text": profile.get("ownerInstructions") or "",
                 "appliedToDestination": False,
             },
-            "sourcePlanning": source_planning,
+            "sourcePlanning": self._optional_json("work/plan.json"),
             "schedules": schedules,
             "sourceCommunicationPolicy": {
-                "policy": communication_policy,
-                "endpoints": source_endpoints,
+                "policy": self._optional_json("communications/allowlist.json"),
+                "endpoints": self._optional_list("communications/endpoints.json", "endpoints"),
                 "appliedToDestination": False,
             },
-            "connectionRequirements": connections,
-            "mcpServers": mcp_servers,
-            "sourceCapabilities": source_capabilities,
-            "sourceWebhooks": source_webhooks,
+            "connectionRequirements": self._optional_json("connections/requirements.json"),
+            "mcpServers": self._optional_list("tools/mcp-servers.json", "servers"),
+            "sourceCapabilities": self._optional_json("tools/capabilities.json"),
+            "sourceWebhooks": self._optional_json("communications/webhooks.json"),
             "disabledByPolicy": [
                 "schedules", "proactive work", "webhooks", "external channels", "MCP connections",
                 "custom tools", "pending input requests",
@@ -917,7 +867,7 @@ class PortableAgentRestorer:
             },
         )
 
-    def _activate_for_web_chat(self) -> None:
+    def activate_for_web_chat(self) -> None:
         user_address = build_web_user_address(self.job.requester_id, self.agent.id)
         agent_address = build_web_agent_address(self.agent.id)
         user_endpoint, _created = PersistentAgentCommsEndpoint.objects.get_or_create(

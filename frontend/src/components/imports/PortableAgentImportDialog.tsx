@@ -4,38 +4,25 @@ import { AlertTriangle, ArchiveRestore, CheckCircle2, FileArchive, Loader2, Uplo
 import {
   discardPortableAgentImport,
   fetchPortableAgentImport,
-  fetchPortableAgentImports,
   startPortableAgentImport,
   uploadPortableAgentImport,
   type PortableAgentImportJob,
 } from '../../api/agentImports'
-import { HttpError } from '../../api/http'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
+import { formatBytes } from '../../util/formatBytes'
 import { Modal } from '../common/Modal'
 
 type PortableAgentImportDialogProps = {
-  initialJobs?: PortableAgentImportJob[]
+  initialJobId: string | null
   onClose: () => void
 }
 
 const POLLED_STATUSES = new Set<PortableAgentImportJob['status']>(['validating', 'queued', 'running'])
 
-function errorMessage(error: unknown): string {
-  if (error instanceof HttpError && error.body && typeof error.body === 'object' && 'error' in error.body) {
-    return String((error.body as { error?: unknown }).error || 'The request could not be completed.')
-  }
-  return error instanceof Error ? error.message : 'The request could not be completed.'
-}
-
-function formatBytes(value: number | null): string {
-  if (!value) return 'Unknown size'
-  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`
-}
-
-export function PortableAgentImportDialog({ initialJobs = [], onClose }: PortableAgentImportDialogProps) {
+export function PortableAgentImportDialog({ initialJobId, onClose }: PortableAgentImportDialogProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [job, setJob] = useState<PortableAgentImportJob | null>(initialJobs[0] ?? null)
-  const [loading, setLoading] = useState(initialJobs.length === 0)
+  const [job, setJob] = useState<PortableAgentImportJob | null>(null)
+  const [loading, setLoading] = useState(Boolean(initialJobId))
   const [busy, setBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -43,14 +30,14 @@ export function PortableAgentImportDialog({ initialJobs = [], onClose }: Portabl
   const [names, setNames] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    if (initialJobs.length > 0) return
+    if (!initialJobId) return
     const controller = new AbortController()
-    void fetchPortableAgentImports(controller.signal)
-      .then((jobs) => setJob(jobs[0] ?? null))
-      .catch((reason: unknown) => setError(errorMessage(reason)))
+    void fetchPortableAgentImport(initialJobId, controller.signal)
+      .then(setJob)
+      .catch((reason: unknown) => setError(safeErrorMessage(reason)))
       .finally(() => setLoading(false))
     return () => controller.abort()
-  }, [initialJobs.length])
+  }, [initialJobId])
 
   useEffect(() => {
     if (!job || !POLLED_STATUSES.has(job.status)) return
@@ -59,7 +46,7 @@ export function PortableAgentImportDialog({ initialJobs = [], onClose }: Portabl
       void fetchPortableAgentImport(job.id, controller.signal)
         .then(setJob)
         .catch((reason: unknown) => {
-          if (!controller.signal.aborted) setError(errorMessage(reason))
+          if (!controller.signal.aborted) setError(safeErrorMessage(reason))
         })
     }, 1500)
     return () => {
@@ -101,7 +88,7 @@ export function PortableAgentImportDialog({ initialJobs = [], onClose }: Portabl
     try {
       setJob(await uploadPortableAgentImport(file, setUploadProgress))
     } catch (reason) {
-      setError(errorMessage(reason))
+      setError(safeErrorMessage(reason))
       setUploadProgress(0)
     } finally {
       setBusy(false)
@@ -121,7 +108,7 @@ export function PortableAgentImportDialog({ initialJobs = [], onClose }: Portabl
       const response = await startPortableAgentImport(job.id, agents)
       setJob(response.import)
     } catch (reason) {
-      setError(errorMessage(reason))
+      setError(safeErrorMessage(reason))
     } finally {
       setBusy(false)
     }
@@ -135,7 +122,7 @@ export function PortableAgentImportDialog({ initialJobs = [], onClose }: Portabl
       await discardPortableAgentImport(job.id)
       resetForUpload()
     } catch (reason) {
-      setError(errorMessage(reason))
+      setError(safeErrorMessage(reason))
     } finally {
       setBusy(false)
     }
@@ -206,7 +193,7 @@ export function PortableAgentImportDialog({ initialJobs = [], onClose }: Portabl
             </div>
             <div className="flex items-center gap-3 text-sm text-slate-600">
               <FileArchive className="h-5 w-5 text-slate-700" aria-hidden="true" />
-              <span>{job.archiveName} · {formatBytes(job.archiveSizeBytes)} · {job.formatVersion}</span>
+              <span>{job.archiveName} · {job.archiveSizeBytes === null ? 'Unknown size' : formatBytes(job.archiveSizeBytes)} · {job.formatVersion}</span>
             </div>
             <div className="space-y-3">
               {job.agents.map((agent) => (

@@ -85,8 +85,10 @@ class PortableAgentImportListCreateAPIView(ApiLoginRequiredMixin, View):
         for job in jobs:
             _expire_if_needed(job)
         return JsonResponse({
-            "imports": [serialize_portable_agent_import(job) for job in jobs],
-            "enabled": True,
+            "imports": [
+                serialize_portable_agent_import(job, include_agents=False)
+                for job in jobs
+            ],
         })
 
     def post(self, request, *args, **kwargs):
