@@ -13868,7 +13868,7 @@ class PortableAgentExport(models.Model):
 
     ACTIVE_STATUSES = (Status.QUEUED, Status.RUNNING)
     READY_STATUSES = (Status.READY, Status.READY_WITH_WARNINGS)
-    FORMAT_VERSION = "gobii.agent-portable-export/v1"
+    FORMAT_VERSION = "gobii.agent-portable-export/v2"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     requester = models.ForeignKey(
@@ -13999,6 +13999,191 @@ def delete_portable_agent_export_file(sender, instance: PortableAgentExport, **k
     )
     transaction.on_commit(
         lambda: try_portable_agent_export_artifact_cleanup(cleanup.id),
+        robust=True,
+    )
+
+
+class PortableAgentImport(models.Model):
+    class TargetType(models.TextChoices):
+        PERSONAL = "personal", "Personal workspace"
+        ORGANIZATION = "organization", "Organization"
+
+    class Status(models.TextChoices):
+        VALIDATING = "validating", "Validating"
+        AWAITING_SELECTION = "awaiting_selection", "Awaiting selection"
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        COMPLETED_WITH_WARNINGS = "completed_with_warnings", "Completed with warnings"
+        FAILED = "failed", "Failed"
+        EXPIRED = "expired", "Expired"
+
+    ACTIVE_STATUSES = (Status.VALIDATING, Status.QUEUED, Status.RUNNING)
+    TERMINAL_STATUSES = (
+        Status.COMPLETED,
+        Status.COMPLETED_WITH_WARNINGS,
+        Status.FAILED,
+        Status.EXPIRED,
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="portable_agent_imports",
+    )
+    target_type = models.CharField(max_length=24, choices=TargetType.choices)
+    target_key = models.CharField(max_length=128)
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="portable_agent_imports",
+    )
+    format_version = models.CharField(max_length=64, blank=True)
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.VALIDATING, db_index=True)
+    processing_task_id = models.CharField(max_length=64, blank=True)
+    storage_key = models.CharField(max_length=512, blank=True)
+    archive_filename = models.CharField(max_length=255, blank=True)
+    archive_size_bytes = models.PositiveBigIntegerField(null=True, blank=True)
+    archive_sha256 = models.CharField(max_length=64, blank=True)
+    total_agents = models.PositiveIntegerField(default=0)
+    selected_agents = models.PositiveIntegerField(default=0)
+    completed_agents = models.PositiveIntegerField(default=0)
+    failed_agents = models.PositiveIntegerField(default=0)
+    warning_count = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=64, blank=True)
+    error_message = models.CharField(max_length=512, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(target_type="personal", organization__isnull=True)
+                    | models.Q(target_type="organization", organization__isnull=False)
+                ),
+                name="pa_import_target_matches_org",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["requester", "target_key", "-created_at"], name="pa_import_req_target_idx"),
+            models.Index(fields=["status", "expires_at"], name="pa_import_status_exp_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"PortableAgentImport<{self.target_type}:{self.status}:{self.id}>"
+
+
+class PortableAgentImportItem(models.Model):
+    class Status(models.TextChoices):
+        AVAILABLE = "available", "Available"
+        UNAVAILABLE = "unavailable", "Unavailable"
+        SELECTED = "selected", "Selected"
+        PROVISIONING = "provisioning", "Provisioning"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    import_job = models.ForeignKey(
+        PortableAgentImport,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    source_agent_id = models.UUIDField()
+    source_agent_name = models.CharField(max_length=255)
+    folder_name = models.CharField(max_length=320)
+    snapshot_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.AVAILABLE)
+    requested_name = models.CharField(max_length=255, blank=True)
+    imported_agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="portable_import_items",
+    )
+    message_count = models.PositiveIntegerField(default=0)
+    step_count = models.PositiveIntegerField(default=0)
+    file_count = models.PositiveIntegerField(default=0)
+    warnings = models.JSONField(default=list, blank=True)
+    compatibility = models.JSONField(default=dict, blank=True)
+    error_code = models.CharField(max_length=64, blank=True)
+    error_message = models.CharField(max_length=512, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["source_agent_name", "source_agent_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["import_job", "source_agent_id"], name="uniq_import_source_agent"),
+            models.UniqueConstraint(fields=["import_job", "folder_name"], name="uniq_import_agent_folder"),
+        ]
+        indexes = [
+            models.Index(fields=["import_job", "status"], name="pa_import_item_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"PortableAgentImportItem<{self.source_agent_name}:{self.status}>"
+
+
+class PortableAgentImportArtifactCleanup(models.Model):
+    storage_alias = models.CharField(max_length=64, default="portable_agent_imports")
+    storage_key = models.CharField(max_length=512)
+    source_import_id = models.UUIDField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["storage_alias", "storage_key"],
+                name="uniq_import_cleanup_storage_key",
+            ),
+        ]
+
+
+class PortableAgentMigrationReport(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.OneToOneField(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="portable_migration_report",
+    )
+    source_format_version = models.CharField(max_length=64)
+    source_agent_id = models.UUIDField()
+    source_snapshot_at = models.DateTimeField(null=True, blank=True)
+    source_was_active = models.BooleanField(default=False)
+    report = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"PortableAgentMigrationReport<{self.agent_id}>"
+
+
+@receiver(post_delete, sender=PortableAgentImport)
+def delete_portable_agent_import_file(sender, instance: PortableAgentImport, **kwargs):
+    if not instance.storage_key:
+        return
+    from api.services.portable_agent_imports import try_portable_agent_import_artifact_cleanup
+
+    cleanup, _created = PortableAgentImportArtifactCleanup.objects.get_or_create(
+        storage_alias="portable_agent_imports",
+        storage_key=instance.storage_key,
+        defaults={"source_import_id": instance.id},
+    )
+    transaction.on_commit(
+        lambda: try_portable_agent_import_artifact_cleanup(cleanup.id),
         robust=True,
     )
 

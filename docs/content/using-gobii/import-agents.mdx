@@ -1,0 +1,55 @@
+---
+title: "Import Gobii Agents"
+description: "Import a Gobii portable-export ZIP into a personal, organization, or self-hosted workspace."
+sidebar_label: "Import Agents"
+---
+
+Gobii can restore portable-export ZIPs into another workspace, including from hosted production into the open-source build. Imports always create new agents with new IDs; they never update or replace existing agents.
+
+## Before you import
+
+- Keep the original ZIP intact and treat it as sensitive; it may contain messages, files, contacts, and durable SQLite data.
+- Make sure the current workspace has enough agent slots and that you can normally create agents there.
+
+The open-source build enables portable imports by default. Hosted or proprietary deployments may roll the feature out separately.
+
+## Import into the current workspace
+
+1. Switch to the destination personal or organization workspace.
+2. Open the arrow beside **New Agent**, choose **Import agent**, and upload the original ZIP.
+3. Wait for format, path, size, and checksum validation.
+4. Select agents, edit their destination names, confirm capacity, and choose **Import**.
+5. Keep the dialog open or return to **Import agent** later for progress and results.
+
+Bulk imports are independent per agent. If one agent fails, successfully restored agents remain available and the result explains what needs attention.
+
+## What Gobii restores
+
+- Name, charter, descriptions, tags, avatar, and the nearest supported intelligence tier.
+- Memory snapshots, completed planning information, tasks, and deliverables.
+- Visible conversation history, attachments, and non-billable historical tool steps.
+- Files and compatible sharing, saved skills and capabilities, disabled custom-tool source, durable SQLite tables, and peer relationships between agents imported together.
+
+Older `gobii.agent-portable-export/v1` archives remain supported. Because v1 did not record every filespace and skill detail, Gobii uses safe best-effort fallbacks and shows those choices as warnings. New v2 exports include machine-readable restoration metadata.
+
+## What stays off
+
+An imported agent becomes active for web chat only after restoration succeeds. Imported work and messages are not replayed. Schedules, proactive work, external channels, webhooks, MCP and OAuth connections, managed integrations, custom Python tools, and recreated peer links remain disabled.
+
+Credential values are never included in a portable export. Reconnect required services in the destination and review their scopes before enabling writes.
+
+Owner-level instructions and communication policies from the source are preserved in the migration report for reference. They do not change the destination workspace and are not appended to the agent charter. Imported contacts are disabled reference entries.
+
+## Review an imported agent
+
+Open each result link and review its charter, memory, plan, tasks, files, private-copy warnings, disabled tools and schedules, contacts, permissions, and reconnection requirements. Test web chat before enabling automation or external delivery.
+
+## Troubleshooting
+
+**The ZIP is rejected:** Upload the unmodified original. Changed files fail checksum validation; newer formats require upgrading the destination.
+
+**An agent cannot be selected:** The source export may have failed for that agent, or required v2 restoration metadata may be missing.
+
+**The import cannot start:** Workspace access, account state, capacity, and names are rechecked at start time.
+
+**A v1 import has warnings:** Older archives may lack exact filespace or skill metadata; review the reported fallback.

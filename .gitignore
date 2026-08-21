@@ -35,6 +35,7 @@ pip-wheel-metadata/
 # Django collectstatic outputs (if generated locally)
 staticfiles/
 mediafiles/
+privatefiles/
 
 
 # AI

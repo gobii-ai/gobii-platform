@@ -608,6 +608,10 @@ PORTABLE_AGENT_EXPORT_ROOT = env(
     "PORTABLE_AGENT_EXPORT_ROOT",
     default=BASE_DIR / "privatefiles" / "portable-agent-exports",
 )
+PORTABLE_AGENT_IMPORT_ROOT = env(
+    "PORTABLE_AGENT_IMPORT_ROOT",
+    default=BASE_DIR / "privatefiles" / "portable-agent-imports",
+)
 USER_PET_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 USER_PET_MAX_CUSTOM_PETS = 10
 
@@ -625,6 +629,13 @@ STORAGES = {
         "OPTIONS": {
             "location": PORTABLE_AGENT_EXPORT_ROOT,
             "base_url": "/private-agent-exports/",
+        },
+    },
+    "portable_agent_imports": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {
+            "location": PORTABLE_AGENT_IMPORT_ROOT,
+            "base_url": "/private-agent-imports/",
         },
     },
     "staticfiles": {
@@ -687,6 +698,12 @@ if STORAGE_BACKEND_TYPE == "GCS":
         "default_acl": "projectPrivate",
         "querystring_auth": True,
     })
+    STORAGES["portable_agent_imports"] = deepcopy(STORAGES["default"])
+    STORAGES["portable_agent_imports"]["OPTIONS"].update({
+        "location": "portable-agent-imports",
+        "default_acl": "projectPrivate",
+        "querystring_auth": True,
+    })
     # Static files continue to be served by WhiteNoise as configured above
 
 elif STORAGE_BACKEND_TYPE == "S3":
@@ -714,6 +731,13 @@ elif STORAGE_BACKEND_TYPE == "S3":
     STORAGES["portable_agent_exports"] = deepcopy(STORAGES["default"])
     STORAGES["portable_agent_exports"]["OPTIONS"].update({
         "location": "portable-agent-exports",
+        "default_acl": "private",
+        "querystring_auth": True,
+        "object_parameters": {"CacheControl": "private, no-store"},
+    })
+    STORAGES["portable_agent_imports"] = deepcopy(STORAGES["default"])
+    STORAGES["portable_agent_imports"]["OPTIONS"].update({
+        "location": "portable-agent-imports",
         "default_acl": "private",
         "querystring_auth": True,
         "object_parameters": {"CacheControl": "private, no-store"},
@@ -951,6 +975,13 @@ CELERY_BEAT_SCHEDULE = {
             "routing_key": "celery.single_instance",
         },
     },
+    "prune-portable-agent-imports": {
+        "task": "api.tasks.portable_agent_imports.prune_portable_agent_imports",
+        "schedule": crontab(minute=45, hour=3),
+        "options": {
+            "routing_key": "celery.single_instance",
+        },
+    },
     "sandbox-compute-idle-sweep": {
         "task": "api.tasks.sandbox_compute.sweep_idle_sessions",
         "schedule": timedelta(seconds=env.int("SANDBOX_COMPUTE_IDLE_SWEEP_INTERVAL_SECONDS", default=300)),
@@ -1139,6 +1170,30 @@ PORTABLE_AGENT_EXPORT_METADATA_TTL_DAYS = env.int(
 PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES = env.int(
     "PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES",
     default=5 * 1024 * 1024 * 1024,
+)
+PORTABLE_AGENT_IMPORTS_ENABLED = env.bool(
+    "PORTABLE_AGENT_IMPORTS_ENABLED",
+    default=True,
+)
+PORTABLE_AGENT_IMPORT_MAX_ARCHIVE_BYTES = env.int(
+    "PORTABLE_AGENT_IMPORT_MAX_ARCHIVE_BYTES",
+    default=PORTABLE_AGENT_EXPORT_MAX_ARCHIVE_BYTES,
+)
+PORTABLE_AGENT_IMPORT_MAX_ENTRIES = env.int(
+    "PORTABLE_AGENT_IMPORT_MAX_ENTRIES",
+    default=100_000,
+)
+PORTABLE_AGENT_IMPORT_MAX_AGENTS = env.int(
+    "PORTABLE_AGENT_IMPORT_MAX_AGENTS",
+    default=1_000,
+)
+PORTABLE_AGENT_IMPORT_SELECTION_TTL_HOURS = env.int(
+    "PORTABLE_AGENT_IMPORT_SELECTION_TTL_HOURS",
+    default=24,
+)
+PORTABLE_AGENT_IMPORT_METADATA_TTL_DAYS = env.int(
+    "PORTABLE_AGENT_IMPORT_METADATA_TTL_DAYS",
+    default=30,
 )
 
 # computer.cpp desktop relay

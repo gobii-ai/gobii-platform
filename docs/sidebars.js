@@ -67,6 +67,7 @@ const sidebars = {
         'using-gobii/email-and-sms',
         'using-gobii/files-and-workspaces',
         'using-gobii/export-agents',
+        'using-gobii/import-agents',
         'using-gobii/secrets-and-credentials',
         'using-gobii/usage-credits-and-limits',
         'using-gobii/optimizing-credit-usage',
