@@ -43,6 +43,7 @@ from .chat_email_display_cache import merge_chat_body_html_cache
 from .email_content import convert_body_to_html_and_plaintext
 from .email_footer_service import append_footer_if_needed
 from .email_threading import build_reply_headers, get_message_raw_payload, get_message_rfc_message_id
+from .gmail_api import GmailApiTransport, uses_gmail_api
 from .smtp_transport import EmailAttachmentPayload, SmtpTransport
 
 
@@ -936,14 +937,18 @@ def deliver_agent_email(message: PersistentAgentMessage):
         acct = None
 
     if acct is not None:
+        gmail_api_enabled = uses_gmail_api(acct)
+        transport_name = "gmail_api" if gmail_api_enabled else "smtp"
+        transport = GmailApiTransport if gmail_api_enabled else SmtpTransport
         logger.info(
-            "Using per-endpoint SMTP for message %s from %s",
+            "Using per-endpoint %s transport for message %s from %s",
+            transport_name,
             message.id,
             message.from_endpoint.address,
         )
         attempt = OutboundMessageAttempt.objects.create(
             message=message,
-            provider="smtp",
+            provider=transport_name,
             status=DeliveryStatus.SENDING,
         )
 
@@ -975,16 +980,16 @@ def deliver_agent_email(message: PersistentAgentMessage):
             cc_addresses = list(message.cc_endpoints.values_list("address", flat=True))
             bcc_addresses = list(message.bcc_endpoints.values_list("address", flat=True))
 
-            with tracer.start_as_current_span("SMTP Transport Send") as smtp_span:
-                smtp_span.set_attribute("from", from_address)
-                smtp_span.set_attribute("to_count", 1)
-                smtp_span.set_attribute("cc_count", len(cc_addresses))
-                smtp_span.set_attribute("bcc_count", len(bcc_addresses))
-                smtp_span.set_attribute(
+            with tracer.start_as_current_span(f"{transport_name} Transport Send") as transport_span:
+                transport_span.set_attribute("from", from_address)
+                transport_span.set_attribute("to_count", 1)
+                transport_span.set_attribute("cc_count", len(cc_addresses))
+                transport_span.set_attribute("bcc_count", len(bcc_addresses))
+                transport_span.set_attribute(
                     "recipient_total",
                     len(recipient_list) + len(cc_addresses) + len(bcc_addresses),
                 )
-                provider_id = SmtpTransport.send(
+                provider_id = transport.send(
                     account=acct,
                     from_addr=from_header,
                     envelope_from_addr=from_address,
@@ -1011,10 +1016,13 @@ def deliver_agent_email(message: PersistentAgentMessage):
             message.latest_sent_at = now
             message.latest_error_message = ""
             message.save(update_fields=["raw_payload", "latest_status", "latest_sent_at", "latest_error_message"])
+            acct.smtp_last_ok_at = now
+            acct.smtp_error = ""
+            acct.save(update_fields=["smtp_last_ok_at", "smtp_error", "updated_at"])
 
             if span is not None and getattr(span, "is_recording", lambda: False)():
                 span.add_event(
-                    'Email - SMTP Delivery',
+                    f'Email - {transport_name} Delivery',
                     {
                         'message_id': str(message.id),
                         'from_address': from_address,
@@ -1029,7 +1037,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
                     'from_address': from_address,
                     'to_address': to_address,
                     'subject': subject,
-                    'provider': 'smtp',
+                    'provider': transport_name,
                 },
                 organization=getattr(message.owner_agent, "organization", None),
             )
@@ -1045,12 +1053,15 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         except Exception as e:
             logger.exception(
-                "SMTP error sending message %s from %r to %r",
+                "%s error sending message %s from %r to %r",
+                transport_name,
                 message.id,
                 getattr(message.from_endpoint, 'address', None),
                 to_address,
             )
             error_str = str(e)
+            acct.smtp_error = error_str
+            acct.save(update_fields=["smtp_error", "updated_at"])
             attempt.status = DeliveryStatus.FAILED
             attempt.error_message = error_str
             attempt.save(update_fields=["status", "error_message"])

@@ -7,21 +7,21 @@
       "first_run": {
         "fitted_tokens": 9761,
         "system_bytes": 34000,
-        "tools_bytes": 24611,
+        "tools_bytes": 24668,
         "total_bytes": 70942,
         "user_bytes": 12331
       },
       "normal_explicit_send": {
         "fitted_tokens": 9214,
         "system_bytes": 31203,
-        "tools_bytes": 24611,
+        "tools_bytes": 24668,
         "total_bytes": 68178,
         "user_bytes": 12364
       },
       "web_chat_implied_send": {
         "fitted_tokens": 9362,
         "system_bytes": 31753,
-        "tools_bytes": 24611,
+        "tools_bytes": 24668,
         "total_bytes": 68731,
         "user_bytes": 12367
       }

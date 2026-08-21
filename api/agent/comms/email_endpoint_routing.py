@@ -2,10 +2,25 @@ import logging
 from typing import Iterable, Optional
 
 from api.models import CommsChannel, PersistentAgentCommsEndpoint
+from api.services.agent_email_integrations import active_external_email_account
 from api.services.agent_email_aliases import get_default_agent_email_endpoint
 
 
 logger = logging.getLogger(__name__)
+
+
+class EmailSenderSelectionError(ValueError):
+    pass
+
+
+def available_agent_email_senders(agent) -> dict[str, object]:
+    default_endpoint = get_default_agent_email_endpoint(agent)
+    configured_account = active_external_email_account(agent)
+    return {
+        "gobii_endpoint": default_endpoint,
+        "configured_account": configured_account,
+        "configured_endpoint": configured_account.endpoint if configured_account else None,
+    }
 
 
 def get_agent_primary_endpoint(
@@ -31,6 +46,7 @@ def resolve_agent_email_sender_endpoint(
     to_address: str = "",
     has_cc_or_bcc: bool = False,
     log_context: str = "",
+    requested_from: str = "",
 ) -> Optional[PersistentAgentCommsEndpoint]:
     """
     Return the preferred agent email endpoint for outbound delivery.
@@ -42,19 +58,51 @@ def resolve_agent_email_sender_endpoint(
       the selected sender address, switch sender to the agent's default-domain
       email endpoint (e.g. @my.gobii.ai) when available.
     """
-    primary_endpoint = get_agent_primary_endpoint(agent, CommsChannel.EMAIL)
-    if primary_endpoint is None:
+    senders = available_agent_email_senders(agent)
+    default_endpoint = senders["gobii_endpoint"]
+    configured_account = senders["configured_account"]
+    configured_endpoint = senders["configured_endpoint"]
+    requested = (requested_from or "").strip().lower()
+
+    allowed_addresses = [
+        endpoint.address
+        for endpoint in (configured_endpoint, default_endpoint)
+        if endpoint is not None
+    ]
+    if requested:
+        if configured_endpoint and requested == configured_endpoint.address.lower():
+            if not configured_account.is_outbound_enabled:
+                allowed = ", ".join(allowed_addresses) or "none"
+                raise EmailSenderSelectionError(
+                    f"Sending from {configured_endpoint.address} is disabled. Available sender addresses: {allowed}."
+                )
+            return configured_endpoint
+        if default_endpoint and requested == default_endpoint.address.lower():
+            return default_endpoint
+        allowed = ", ".join(allowed_addresses) or "none"
+        raise EmailSenderSelectionError(
+            f"Unknown from address '{requested_from}'. Available sender addresses: {allowed}."
+        )
+
+    selected_endpoint = None
+    if configured_account and configured_account.is_outbound_enabled:
+        selected_endpoint = configured_endpoint
+    elif default_endpoint is not None:
+        selected_endpoint = default_endpoint
+    else:
+        selected_endpoint = get_agent_primary_endpoint(agent, CommsChannel.EMAIL)
+
+    if selected_endpoint is None:
         return None
 
     if has_cc_or_bcc:
-        return primary_endpoint
+        return selected_endpoint
 
     normalized_to = (to_address or "").strip().lower()
-    normalized_from = (primary_endpoint.address or "").strip().lower()
+    normalized_from = (selected_endpoint.address or "").strip().lower()
     if not normalized_to or normalized_to != normalized_from:
-        return primary_endpoint
+        return selected_endpoint
 
-    default_endpoint = get_default_agent_email_endpoint(agent)
     if default_endpoint and (default_endpoint.address or "").strip().lower() != normalized_from:
         return default_endpoint
 
@@ -63,7 +111,7 @@ def resolve_agent_email_sender_endpoint(
         getattr(agent, "id", None),
         log_context or "unspecified",
     )
-    return primary_endpoint
+    return selected_endpoint
 
 
 def resolve_agent_email_sender_endpoint_for_message(
@@ -73,6 +121,7 @@ def resolve_agent_email_sender_endpoint_for_message(
     cc_endpoints: Iterable[PersistentAgentCommsEndpoint] | None = None,
     has_bcc: bool = False,
     log_context: str = "",
+    requested_from: str = "",
 ) -> Optional[PersistentAgentCommsEndpoint]:
     cc_present = False
     if cc_endpoints is not None:
@@ -86,4 +135,5 @@ def resolve_agent_email_sender_endpoint_for_message(
         to_address=to_address,
         has_cc_or_bcc=cc_present or has_bcc,
         log_context=log_context,
+        requested_from=requested_from,
     )

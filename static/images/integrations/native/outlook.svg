@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Outlook">
+  <path fill="#0A64C9" d="M18 7h25v34H18z"/>
+  <path fill="#1473E6" d="M18 10h22v15H18z"/>
+  <path fill="#fff" d="M20 14l9 7 9-7v2l-9 7-9-7z" opacity=".95"/>
+  <path fill="#0757A8" d="M5 12l22-4v32L5 36z"/>
+  <path fill="#fff" d="M11 19c1.2-2.2 3.2-3.4 5.8-3.4 4.2 0 6.8 3.1 6.8 8.2 0 5.3-2.7 8.5-7 8.5-4.2 0-6.7-3.1-6.7-8.2 0-2 .4-3.7 1.1-5.1zm5.7.5c-1.8 0-2.8 1.6-2.8 4.5 0 2.9 1 4.4 2.9 4.4s2.9-1.6 2.9-4.5c0-2.9-1-4.4-3-4.4z"/>
+</svg>
