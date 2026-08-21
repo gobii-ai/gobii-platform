@@ -109,7 +109,11 @@ def build_email_message(
 ) -> EmailMessage:
     """Build the RFC 2822 message shared by SMTP and provider API transports."""
     recipient_list = list(to_addrs or [])
-    visible_cc_recipients = list(cc_addrs or [])
+    if cc_addrs is None:
+        visible_cc_recipients = recipient_list[1:]
+        recipient_list = recipient_list[:1]
+    else:
+        visible_cc_recipients = list(cc_addrs)
     hidden_recipients = list(bcc_addrs or [])
     msg = EmailMessage()
     msg["Subject"] = subject or ""

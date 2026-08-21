@@ -62,7 +62,7 @@ def backfill_email_integrations(apps, schema_editor):
 
 
 def remove_unrepresentable_oauth_sessions(apps, schema_editor):
-    """Remove sessions that cannot be represented by the pre-0422 schema.
+    """Remove sessions that cannot be represented by the pre-0460 schema.
 
     Native email OAuth starts before an AgentEmailAccount exists, so these
     short-lived authorization sessions intentionally have no account.  The old
@@ -80,10 +80,9 @@ def remove_unrepresentable_oauth_sessions(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0422_update_pretrained_employee_descriptions"),
+        ("api", "0459_portable_export_artifact_cleanup"),
         ("contenttypes", "0002_remove_content_type_name"),
     ]
-
     operations = [
         migrations.RenameModel(
             old_name="AgentEmailOAuthSession",

@@ -153,7 +153,7 @@ class NativeAgentEmailIntegrationTests(TestCase):
             expires_at=expires_at,
         )
         migration = importlib.import_module(
-            "api.migrations.0423_native_email_integrations"
+            "api.migrations.0460_native_email_integrations"
         )
 
         migration.remove_unrepresentable_oauth_sessions(
