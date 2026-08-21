@@ -419,7 +419,7 @@ def _process_import(job: PortableAgentImport, task_id: str) -> None:
                         type(exc).__name__,
                     )
                     _mark_item_failed(item, exc)
-                    delete_failed_import_shells(job)
+                    delete_failed_import_shells(job, failed_item=item)
                     continue
                 PortableAgentImport.objects.filter(pk=job.pk).update(
                     completed_agents=F("completed_agents") + 1,

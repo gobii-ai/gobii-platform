@@ -33,6 +33,11 @@ class PersistentAgentProvisioningError(Exception):
     """Raised when a persistent agent cannot be provisioned."""
 
 
+def lock_agent_creation_owner(owner) -> None:
+    """Serialize capacity checks and agent creation for one workspace owner."""
+    owner._meta.model._default_manager.select_for_update().only("pk").get(pk=owner.pk)
+
+
 @dataclass(slots=True)
 class ProvisioningResult:
     agent: PersistentAgent
@@ -86,21 +91,21 @@ class PersistentAgentProvisioningService:
         generate_charter_artifacts: bool = True,
         create_onboarding_schedule: bool = True,
         browser_agent_name: str | None = None,
+        _owner_lock_held: bool = False,
     ) -> ProvisioningResult:
         """Create a new persistent agent and its backing browser agent."""
         agent_name = name or cls.generate_unique_name(user)
-
-        # Ensure the owner has capacity before we hit database constraints — the
-        # BrowserUseAgent clean() method enforces this but we prefer an early,
-        # explicit error for API consumers.
         owner = organization or user
-        if not AgentService.has_agents_available(owner):
-            raise PersistentAgentProvisioningError("Agent limit reached for this user.")
 
         applied_template_code: Optional[str] = None
         applied_schedule: Optional[str] = None
 
         with transaction.atomic():
+            if not _owner_lock_held:
+                lock_agent_creation_owner(owner)
+            if not AgentService.has_agents_available(owner):
+                raise PersistentAgentProvisioningError("Agent limit reached for this user.")
+
             browser_agent = BrowserUseAgent(user=user, name=browser_agent_name or agent_name)
             if organization is not None:
                 browser_agent._agent_creation_organization = organization

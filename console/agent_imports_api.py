@@ -121,7 +121,7 @@ class PortableAgentImportDetailAPIView(ApiLoginRequiredMixin, View):
     def get(self, request, import_id, *args, **kwargs):
         _require_feature(request)
         job = _get_requester_job(request, import_id)
-        if not user_can_import_to_target(request.user, job) and job.status not in PortableAgentImport.TERMINAL_STATUSES:
+        if not user_can_import_to_target(request.user, job):
             return _error("You no longer have permission to access this import.", status=403)
         return JsonResponse({"import": serialize_portable_agent_import(job)})
 

@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MessageEventCard } from './MessageEventCard'
 import type { AgentMessage } from './types'
@@ -75,6 +75,15 @@ describe('MessageEventCard email recipient', () => {
 })
 
 describe('MessageEventCard Debug Mode timestamp', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-21T19:11:09Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('shows an exact viewer-timezone timestamp while retaining the raw datetime', () => {
     render(
       <MessageEventCard

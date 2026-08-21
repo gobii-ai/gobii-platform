@@ -3,7 +3,6 @@ import os
 from datetime import timedelta
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import storages
 from django.db import transaction
@@ -14,7 +13,6 @@ from agents.services import AgentService
 from api.agent.tools.sqlite_state import sqlite_storage_key
 from api.models import (
     AgentFileSpace,
-    Organization,
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -28,6 +26,7 @@ from api.services.organization_permissions import user_role_can_create_org_agent
 from api.services.persistent_agents import (
     PersistentAgentProvisioningError,
     PersistentAgentProvisioningService,
+    lock_agent_creation_owner,
 )
 from api.services.portable_agent_exports import STORAGE_ERRORS
 from console.context_helpers import build_console_context
@@ -312,13 +311,6 @@ def _validate_requested_name(raw_name) -> str:
     return name
 
 
-def _lock_import_owner(job: PortableAgentImport) -> None:
-    if job.organization_id:
-        Organization.objects.select_for_update().get(pk=job.organization_id)
-    else:
-        get_user_model().objects.select_for_update().get(pk=job.requester_id)
-
-
 def reserve_portable_agent_shells(job: PortableAgentImport, selections: list[dict]) -> bool:
     """Reserve inactive shells atomically; return False for an already-started job."""
     if not isinstance(selections, list) or not selections:
@@ -349,7 +341,7 @@ def reserve_portable_agent_shells(job: PortableAgentImport, selections: list[dic
         if locked_job.expires_at and locked_job.expires_at <= timezone.now():
             raise ValidationError("This upload expired. Upload the export again.")
         validate_import_creation_eligibility(locked_job)
-        _lock_import_owner(locked_job)
+        lock_agent_creation_owner(target_owner(locked_job))
 
         items = {
             str(item.id): item
@@ -395,6 +387,7 @@ def reserve_portable_agent_shells(job: PortableAgentImport, selections: list[dic
                     generate_charter_artifacts=False,
                     create_onboarding_schedule=False,
                     browser_agent_name=browser_agent_name,
+                    _owner_lock_held=True,
                 )
             except PersistentAgentProvisioningError as exc:
                 raise ValidationError(str(exc)) from exc
@@ -419,11 +412,24 @@ def reserve_portable_agent_shells(job: PortableAgentImport, selections: list[dic
     return True
 
 
-def delete_failed_import_shells(job: PortableAgentImport) -> None:
-    for item in job.items.filter(status=PortableAgentImportItem.Status.FAILED).select_related("imported_agent"):
+def delete_failed_import_shells(
+    job: PortableAgentImport,
+    *,
+    failed_item: PortableAgentImportItem | None = None,
+) -> None:
+    failed_items = (
+        PortableAgentImportItem.objects.filter(
+            pk=failed_item.pk,
+            status=PortableAgentImportItem.Status.FAILED,
+        ).select_related("imported_agent")
+        if failed_item is not None
+        else job.items.filter(status=PortableAgentImportItem.Status.FAILED).select_related("imported_agent")
+    )
+    for item in failed_items:
         agent = item.imported_agent
         if agent is None or agent.is_active:
             continue
+        agent_id = agent.id
         browser_agent = agent.browser_use_agent
         filespaces = list(agent.filespaces.all())
         storage_names = list(
@@ -440,14 +446,14 @@ def delete_failed_import_shells(job: PortableAgentImport) -> None:
         )
         if agent.avatar and agent.avatar.name:
             storage_names.append(agent.avatar.name)
-        storage_names.append(sqlite_storage_key(str(agent.id)))
+        storage_names.append(sqlite_storage_key(str(agent_id)))
         item.imported_agent = None
         item.save(update_fields=["imported_agent", "updated_at"])
         AgentFileSpace.objects.filter(pk__in=[filespace.pk for filespace in filespaces]).delete()
         agent.delete()
         browser_agent.delete()
         PersistentAgentCommsEndpoint.objects.filter(
-            address__startswith=f"portable-import://{agent.id}/",
+            address__startswith=f"portable-import://{agent_id}/",
         ).delete()
         for storage_name in {name for name in storage_names if name}:
             delete_portable_agent_import_artifact(

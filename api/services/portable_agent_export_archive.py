@@ -930,6 +930,9 @@ class PortableAgentArchiveBuilder:
                 "definitionAvailable": True, "portability": "reconnect-required",
             })
 
+        enabled_tool_names = set(
+            self.agent.enabled_tools.values_list("tool_full_name", flat=True)
+        )
         custom_tools = []
         for tool in self.agent.custom_tools.order_by("tool_name", "id"):
             custom_tool = {
@@ -938,7 +941,7 @@ class PortableAgentArchiveBuilder:
                 "parametersSchema": self.redactor.redact(tool.parameters_schema),
                 "entrypoint": tool.entrypoint, "timeoutSeconds": tool.timeout_seconds,
                 "sourcePath": tool.source_path, "sourceArchivePath": None,
-                "enabledAtExport": self.agent.enabled_tools.filter(tool_full_name=tool.tool_name).exists(),
+                "enabledAtExport": tool.tool_name in enabled_tool_names,
                 "enabledOnImport": False, "portability": "portable-disabled",
             }
             custom_tools.append(custom_tool)

@@ -62,6 +62,7 @@ from api.services.portable_agent_import_archive import (
 )
 from api.services.portable_agent_import_restore import PortableAgentRestorer
 from api.services.portable_agent_imports import (
+    delete_failed_import_shells,
     portable_agent_import_storage,
     reserve_portable_agent_shells,
     retry_portable_agent_import_artifact_cleanups,
@@ -385,6 +386,14 @@ class PortableAgentImportApiTests(ImportStorageMixin, TestCase):
             )
         self.assertEqual(response.status_code, 409)
 
+        PortableAgentImport.objects.filter(pk=job.id).update(
+            status=PortableAgentImport.Status.COMPLETED,
+        )
+        membership.status = OrganizationMembership.OrgStatus.REMOVED
+        membership.save(update_fields=["status"])
+        detail_url = reverse("console_portable_agent_import_detail", args=[job.id])
+        self.assertEqual(self.client.get(detail_url).status_code, 403)
+
     def test_destination_name_conflict_is_rejected_before_shell_creation(self):
         response = self.upload()
         job = PortableAgentImport.objects.get(pk=response.json()["import"]["id"])
@@ -587,6 +596,33 @@ class PortableAgentBulkImportTests(ImportStorageMixin, TestCase):
         self.assertEqual(PersistentAgent.objects.filter(user=user).count(), 1)
         self.assertEqual(BrowserUseAgent.objects.filter(user=user).count(), 1)
         self.assertEqual(AgentFileSpace.objects.filter(owner_user=user).count(), 1)
+
+    def test_failed_shell_cleanup_removes_unowned_historical_endpoints(self):
+        user = User.objects.create_user(username="cleanup-import", email="cleanup@example.com")
+        job = self.create_import_job(user, build_portable_zip())
+        validate_portable_agent_import(str(job.id))
+        item = job.items.get()
+        with (
+            patch("api.services.portable_agent_imports.AgentService.get_agents_available", return_value=10),
+            patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True),
+        ):
+            reserve_portable_agent_shells(
+                job,
+                [{"itemId": str(item.id), "name": "Cleanup copy"}],
+            )
+        item.refresh_from_db()
+        agent_id = item.imported_agent_id
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.OTHER,
+            address=f"portable-import://{agent_id}/external/source",
+        )
+        item.status = PortableAgentImportItem.Status.FAILED
+        item.save(update_fields=["status", "updated_at"])
+
+        delete_failed_import_shells(job, failed_item=item)
+
+        self.assertFalse(PersistentAgentCommsEndpoint.objects.filter(pk=endpoint.pk).exists())
 
     def test_redelivery_recovers_interrupted_item_and_finishes_remaining_agents(self):
         user = User.objects.create_user(username="resume-import", email="resume@example.com")
