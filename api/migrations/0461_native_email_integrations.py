@@ -80,7 +80,7 @@ def remove_unrepresentable_oauth_sessions(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0459_portable_export_artifact_cleanup"),
+        ("api", "0460_portable_agent_imports"),
         ("contenttypes", "0002_remove_content_type_name"),
     ]
     operations = [
