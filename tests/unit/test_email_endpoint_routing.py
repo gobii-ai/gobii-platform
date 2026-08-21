@@ -68,6 +68,13 @@ class EmailEndpointRoutingTests(TestCase):
         sender = resolve_agent_email_sender_endpoint(self.agent, to_address="someone@example.com")
         self.assertEqual(sender, self.configured_endpoint)
 
+    def test_omitted_sender_avoids_configured_mailbox_self_send(self):
+        sender = resolve_agent_email_sender_endpoint(
+            self.agent,
+            to_address=self.configured_endpoint.address,
+        )
+        self.assertEqual(sender, self.gobii_endpoint)
+
     def test_omitted_sender_falls_back_to_gobii_when_configured_sending_disabled(self):
         self.account.is_outbound_enabled = False
         self.account.save(update_fields=["is_outbound_enabled"])

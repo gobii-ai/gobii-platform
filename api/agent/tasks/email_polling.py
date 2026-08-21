@@ -433,10 +433,10 @@ def _update_gmail_poll_success(acct: AgentEmailAccount, now) -> None:
 
 
 def _ingest_gmail_message(acct: AgentEmailAccount, message_id: str) -> bool:
+    endpoint = acct.endpoint
+    agent = getattr(endpoint, "owner_agent", None)
+    raw = get_gmail_raw_message(acct, message_id)
     try:
-        endpoint = acct.endpoint
-        agent = getattr(endpoint, "owner_agent", None)
-        raw = get_gmail_raw_message(acct, message_id)
         parsed = ImapEmailAdapter.parse_bytes(
             raw,
             recipient_address=endpoint.address,
@@ -451,7 +451,9 @@ def _ingest_gmail_message(acct: AgentEmailAccount, message_id: str) -> bool:
             return True
         ingest_inbound_message(CommsChannel.EMAIL, parsed)
         return True
-    except (GmailApiError, ValueError, RuntimeError) as exc:
+    except Exception as exc:
+        # Treat malformed individual messages as poison messages so one bad
+        # payload cannot permanently block all newer mailbox history.
         logger.error(
             "Error ingesting Gmail message %s for %s: %s",
             message_id,
@@ -515,10 +517,9 @@ def _poll_gmail_api_account(acct: AgentEmailAccount) -> None:
                 if message_id not in seen_message_ids
             ]
             for message_id in history_message_ids:
-                if not _ingest_gmail_message(acct, message_id):
-                    raise GmailApiError(f"Gmail message {message_id} could not be ingested.")
+                if _ingest_gmail_message(acct, message_id):
+                    processed += 1
                 seen_message_ids.add(message_id)
-                processed += 1
 
             history_id = str(history.get("id") or "").strip() if isinstance(history, dict) else ""
             if history_id:
@@ -541,7 +542,9 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
         try:
             with tracer.start_as_current_span("email.gmail_api.poll"):
                 _poll_gmail_api_account(acct)
-        except (GmailApiError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
+            # This task boundary must record backoff for unexpected provider,
+            # parsing, or persistence failures instead of hot-looping retries.
             logger.error(
                 "Gmail API poll error for %s: %s",
                 getattr(acct.endpoint, "address", None),

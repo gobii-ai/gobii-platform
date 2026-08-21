@@ -195,6 +195,70 @@ class GmailApiEmailTests(TestCase):
         self.assertEqual(mock_history.call_args_list[1].kwargs["start_history_id"], "100")
         self.assertEqual(mock_history.call_args_list[1].kwargs["page_token"], "next-page")
 
+    @patch("api.agent.tasks.email_polling.ingest_inbound_message")
+    @patch("api.agent.tasks.email_polling.get_gmail_raw_message")
+    @patch("api.agent.tasks.email_polling.list_gmail_history")
+    @patch("api.agent.comms.gmail_api.get_gmail_profile")
+    def test_polling_skips_poison_message_and_advances_history(
+        self,
+        mock_profile,
+        mock_history,
+        mock_raw_message,
+        mock_ingest,
+    ):
+        account, credential = self._create_account(scope=f"{GMAIL_SEND_SCOPE} {GMAIL_READONLY_SCOPE}")
+        credential.metadata = {**credential.metadata, "gmail_history_id": "100"}
+        credential.save(update_fields=["metadata"])
+        mock_profile.return_value = {"emailAddress": account.endpoint.address, "historyId": "100"}
+        mock_history.return_value = {
+            "history": [
+                {
+                    "id": "101",
+                    "messagesAdded": [
+                        {"message": {"id": "poison-message"}},
+                        {"message": {"id": "valid-message"}},
+                    ],
+                }
+            ],
+            "historyId": "101",
+        }
+        inbound = EmailMessage()
+        inbound["From"] = "allowed@example.com"
+        inbound["To"] = account.endpoint.address
+        inbound["Subject"] = "Inbound Gmail"
+        inbound.set_content("Hello")
+        mock_raw_message.return_value = inbound.as_bytes()
+        mock_ingest.side_effect = [AttributeError("malformed message"), None]
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="allowed@example.com",
+            allow_inbound=True,
+            allow_outbound=True,
+        )
+
+        _poll_account_locked(account)
+
+        account.refresh_from_db()
+        credential.refresh_from_db()
+        self.assertEqual(credential.metadata["gmail_history_id"], "101")
+        self.assertEqual(account.imap_error, "")
+        self.assertEqual(mock_ingest.call_count, 2)
+
+    @patch("api.agent.tasks.email_polling.list_gmail_history", side_effect=KeyError("unexpected payload"))
+    @patch("api.agent.comms.gmail_api.get_gmail_profile")
+    def test_unexpected_polling_error_records_backoff(self, mock_profile, _mock_history):
+        account, credential = self._create_account(scope=f"{GMAIL_SEND_SCOPE} {GMAIL_READONLY_SCOPE}")
+        credential.metadata = {**credential.metadata, "gmail_history_id": "100"}
+        credential.save(update_fields=["metadata"])
+        mock_profile.return_value = {"emailAddress": account.endpoint.address, "historyId": "100"}
+
+        _poll_account_locked(account)
+
+        account.refresh_from_db()
+        self.assertIn("unexpected payload", account.imap_error)
+        self.assertIsNotNone(account.backoff_until)
+
     def test_legacy_full_mail_scope_stays_on_smtp_imap(self):
         account, _credential = self._create_account(scope="openid email https://mail.google.com/")
         self.assertFalse(uses_gmail_api(account))

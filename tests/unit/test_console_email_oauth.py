@@ -13,6 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from api.agent.comms.email_oauth import _maybe_refresh_email_oauth_credential
+from api.agent.comms.gmail_api import GMAIL_READONLY_SCOPE, GMAIL_SEND_SCOPE
 from api.models import (
     AgentEmailAccount,
     AgentEmailIntegration,
@@ -23,6 +24,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
+    PersistentAgentStep,
 )
 from api.services.agent_email_integrations import connect_agent_email_oauth, resolve_email_oauth_identity
 from api.services.persistent_agents import ensure_default_agent_email_endpoint
@@ -227,11 +229,15 @@ class NativeAgentEmailIntegrationTests(TestCase):
             "refresh_token": "refresh-one",
             "expires_in": 3600,
         }
-        callback = self.client.post(
-            reverse("console-native-integration-callback", args=["gmail"]),
-            data=json.dumps({"authorization_code": "code", "state": payload["state"]}),
-            content_type="application/json",
-        )
+        with (
+            patch("api.services.native_integration_events.process_agent_events_task.delay") as mock_delay,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            callback = self.client.post(
+                reverse("console-native-integration-callback", args=["gmail"]),
+                data=json.dumps({"authorization_code": "code", "state": payload["state"]}),
+                content_type="application/json",
+            )
         self.assertEqual(callback.status_code, 200, callback.content)
         integration = AgentEmailIntegration.objects.get(agent=self.agent)
         credential = integration.oauth_account.oauth_credential
@@ -245,6 +251,9 @@ class NativeAgentEmailIntegrationTests(TestCase):
             PersistentAgentEmailEndpoint.objects.get(endpoint=integration.oauth_account.endpoint).display_name,
             "Mailbox Name",
         )
+        connected_step = PersistentAgentStep.objects.get(agent=self.agent)
+        self.assertIn("Gmail was connected", connected_step.description)
+        mock_delay.assert_called_once_with(str(self.agent.id))
 
         second = self._start()
         mock_token.return_value = {"access_token": "access-two", "expires_in": 3600}
@@ -256,6 +265,37 @@ class NativeAgentEmailIntegrationTests(TestCase):
         self.assertEqual(callback.status_code, 200, callback.content)
         credential.refresh_from_db()
         self.assertEqual(credential.refresh_token, "refresh-one")
+
+    def test_gmail_connection_enables_only_granted_directions(self):
+        account = connect_agent_email_oauth(
+            agent=self.agent,
+            provider_key="gmail",
+            identity={"address": "scoped@gmail.com", "display_name": "Scoped", "account_type": "gmail"},
+            token_payload={"access_token": "access", "refresh_token": "refresh", "scope": GMAIL_SEND_SCOPE},
+            client_id="gmail-client",
+            client_secret="gmail-secret",
+            user=self.user,
+            organization=None,
+            token_endpoint="https://oauth2.googleapis.com/token",
+            requested_scope=f"{GMAIL_SEND_SCOPE} {GMAIL_READONLY_SCOPE}",
+        )
+        self.assertTrue(account.is_outbound_enabled)
+        self.assertFalse(account.is_inbound_enabled)
+
+        account = connect_agent_email_oauth(
+            agent=self.agent,
+            provider_key="gmail",
+            identity={"address": "scoped@gmail.com", "display_name": "Scoped", "account_type": "gmail"},
+            token_payload={"access_token": "access-two", "scope": GMAIL_READONLY_SCOPE},
+            client_id="gmail-client",
+            client_secret="gmail-secret",
+            user=self.user,
+            organization=None,
+            token_endpoint="https://oauth2.googleapis.com/token",
+            requested_scope=f"{GMAIL_SEND_SCOPE} {GMAIL_READONLY_SCOPE}",
+        )
+        self.assertFalse(account.is_outbound_enabled)
+        self.assertTrue(account.is_inbound_enabled)
 
     @patch("api.services.agent_email_integrations.httpx.get")
     def test_gmail_identity_uses_google_profile_name(self, mock_get):

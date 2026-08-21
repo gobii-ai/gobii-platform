@@ -587,8 +587,16 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
                 )
                 from console.email_settings.views import _validate_agent_imap_connection, _validate_agent_smtp_connection
 
-                smtp_ok, smtp_error = _validate_agent_smtp_connection(account)
-                imap_ok, imap_error = _validate_agent_imap_connection(account)
+                smtp_ok, smtp_error = (
+                    _validate_agent_smtp_connection(account)
+                    if account.is_outbound_enabled
+                    else (False, "")
+                )
+                imap_ok, imap_error = (
+                    _validate_agent_imap_connection(account)
+                    if account.is_inbound_enabled
+                    else (False, "")
+                )
                 now = timezone.now()
                 account.smtp_last_ok_at = now if smtp_ok else None
                 account.smtp_error = smtp_error
@@ -602,6 +610,12 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
                     "smtp_last_ok_at", "smtp_error", "imap_last_ok_at", "imap_error",
                     "connection_last_ok_at", "connection_error", "updated_at",
                 ])
+                record_native_integration_agent_event(
+                    agent=session.agent,
+                    provider=provider,
+                    event_type="connected",
+                    source="console.native_integrations_api.NativeIntegrationOAuthCallbackAPIView",
+                )
             except ValidationError as exc:
                 session.delete()
                 return _validation_error_response(exc, status=502)

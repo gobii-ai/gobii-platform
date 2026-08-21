@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 EMAIL_NATIVE_PROVIDER_KEYS = ("gmail", "outlook")
 OUTLOOK_CONSUMER_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad"
 OUTLOOK_JWKS_URL = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
+OUTLOOK_IMAP_SCOPE = "https://outlook.office.com/IMAP.AccessAsUser.All"
+OUTLOOK_SMTP_SCOPE = "https://outlook.office.com/SMTP.Send"
 
 
 def canonical_email_provider(provider: str) -> str:
@@ -168,6 +170,22 @@ def _provider_transport(provider_key: str, account_type: str) -> dict[str, Any]:
     }
 
 
+def _granted_email_directions(provider: str, scope: str) -> tuple[bool, bool]:
+    scopes = {item for item in str(scope or "").replace(",", " ").split() if item}
+    if provider == "gmail":
+        from api.agent.comms.gmail_api import (
+            GMAIL_LEGACY_MAIL_SCOPE,
+            GMAIL_READONLY_SCOPE,
+            GMAIL_SEND_SCOPE,
+        )
+
+        has_legacy_scope = GMAIL_LEGACY_MAIL_SCOPE in scopes
+        return has_legacy_scope or GMAIL_SEND_SCOPE in scopes, has_legacy_scope or GMAIL_READONLY_SCOPE in scopes
+
+    normalized_scopes = {item.casefold() for item in scopes}
+    return OUTLOOK_SMTP_SCOPE.casefold() in normalized_scopes, OUTLOOK_IMAP_SCOPE.casefold() in normalized_scopes
+
+
 def _retained_custom_transport(account: AgentEmailAccount) -> dict[str, Any]:
     return {
         "smtp_host": account.smtp_host,
@@ -264,6 +282,8 @@ def connect_agent_email_oauth(
     existing_metadata = dict(credential.metadata) if credential and isinstance(credential.metadata, dict) else {}
     if existing_account and integration.custom_account_id == existing_account.pk:
         existing_metadata.setdefault("retained_custom_transport", _retained_custom_transport(existing_account))
+    granted_scope = str(token_payload.get("scope") or requested_scope).strip()
+    outbound_enabled, inbound_enabled = _granted_email_directions(provider, granted_scope)
 
     for field, value in _provider_transport(provider, identity.get("account_type", "")).items():
         setattr(account, field, value)
@@ -272,8 +292,8 @@ def connect_agent_email_oauth(
     account.smtp_username = mailbox
     account.imap_username = mailbox
     account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
-    account.is_outbound_enabled = True
-    account.is_inbound_enabled = True
+    account.is_outbound_enabled = outbound_enabled
+    account.is_inbound_enabled = inbound_enabled
     account.smtp_error = ""
     account.imap_error = ""
     account.save()
@@ -295,7 +315,7 @@ def connect_agent_email_oauth(
     if id_token:
         credential.id_token = id_token
     credential.token_type = str(token_payload.get("token_type") or "Bearer").strip()
-    credential.scope = str(token_payload.get("scope") or requested_scope).strip()
+    credential.scope = granted_scope
     try:
         expires_in = int(token_payload.get("expires_in") or 0)
     except (TypeError, ValueError):

@@ -84,24 +84,25 @@ def resolve_agent_email_sender_endpoint(
             f"Unknown from address '{requested_from}'. Available sender addresses: {allowed}."
         )
 
+    selected_endpoint = None
     if configured_account and configured_account.is_outbound_enabled:
-        return configured_endpoint
-    if default_endpoint is not None:
-        return default_endpoint
+        selected_endpoint = configured_endpoint
+    elif default_endpoint is not None:
+        selected_endpoint = default_endpoint
+    else:
+        selected_endpoint = get_agent_primary_endpoint(agent, CommsChannel.EMAIL)
 
-    primary_endpoint = get_agent_primary_endpoint(agent, CommsChannel.EMAIL)
-    if primary_endpoint is None:
+    if selected_endpoint is None:
         return None
 
     if has_cc_or_bcc:
-        return primary_endpoint
+        return selected_endpoint
 
     normalized_to = (to_address or "").strip().lower()
-    normalized_from = (primary_endpoint.address or "").strip().lower()
+    normalized_from = (selected_endpoint.address or "").strip().lower()
     if not normalized_to or normalized_to != normalized_from:
-        return primary_endpoint
+        return selected_endpoint
 
-    default_endpoint = get_default_agent_email_endpoint(agent)
     if default_endpoint and (default_endpoint.address or "").strip().lower() != normalized_from:
         return default_endpoint
 
@@ -110,7 +111,7 @@ def resolve_agent_email_sender_endpoint(
         getattr(agent, "id", None),
         log_context or "unspecified",
     )
-    return primary_endpoint
+    return selected_endpoint
 
 
 def resolve_agent_email_sender_endpoint_for_message(
