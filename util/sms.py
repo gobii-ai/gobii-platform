@@ -16,6 +16,12 @@ except ImportError:  # pragma: no cover - dependency optional in tests
 
 logger = logging.getLogger(__name__)
 
+
+def _mask_phone(number) -> str:
+    """Last four digits only: enough to tell recipients apart in logs without identifying them."""
+    digits = "".join(ch for ch in str(number or "") if ch.isdigit())
+    return f"***{digits[-4:]}" if len(digits) > 4 else "***"
+
 tracer = trace.get_tracer("gobii.utils")
 
 TWILIO_RISK_CHECK_DISABLE = "disable"
@@ -205,7 +211,7 @@ def send_sms(to_number: str, from_number: str, body: str, *, owner_user=None) ->
 
     try:
         with traced("SMS send_sms - Twilio"):
-            logger.info(f"Sending SMS to {to_number} from {from_number}: {body}")
+            logger.info("Sending SMS to %s from %s (%d chars)", _mask_phone(to_number), _mask_phone(from_number), len(body))
             message_kwargs = {
                 "body": body,
                 "from_": from_number,
@@ -216,11 +222,13 @@ def send_sms(to_number: str, from_number: str, body: str, *, owner_user=None) ->
                 message_kwargs["risk_check"] = TWILIO_RISK_CHECK_DISABLE
             message = client.messages.create(**message_kwargs)
 
-        logger.info(f"SMS sent successfully to {to_number}: {message.sid}")
+        logger.info("SMS sent successfully to %s: %s", _mask_phone(to_number), message.sid)
         return message.sid
 
     except Exception as e:
-        logger.error(f"Failed to send SMS to {to_number}: {e}")
+        # Twilio errors can quote the number back ("The 'To' number +1555... is not valid").
+        error = str(e).replace(str(to_number), _mask_phone(to_number)) if to_number else str(e)
+        logger.error("Failed to send SMS to %s: %s", _mask_phone(to_number), error)
         span.record_exception(e)
         span.add_event("SMS send failed", {"error": str(e)})
         return False

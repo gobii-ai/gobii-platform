@@ -63,7 +63,9 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
     2. Else if Markdown syntax is detected, render to plaintext via *pypandoc*.
     3. Otherwise, treat as generic plaintext.
 
-    All stages emit detailed INFO-level logs for observability.
+    Stages log their decisions at INFO. The message text itself (input, output
+    and match context) is logged only at DEBUG: it is what the agent wrote to a
+    person and often holds details they shared, so it must stay out of default logs.
     """
     import re
     import logging
@@ -80,11 +82,8 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
 
     body_length = len(body)
     body_preview = body[:200] + "..." if len(body) > 200 else body
-    logger.info(
-        "SMS content conversion starting. Input body length: %d characters. Preview: %r",
-        body_length,
-        body_preview,
-    )
+    logger.info("SMS content conversion starting. Input body length: %d characters.", body_length)
+    logger.debug("SMS body preview: %r", body_preview)
 
     # ------------------------------------------------------------------ Detect HTML
     logger.info("=== SMS HTML DETECTION START ===")
@@ -93,7 +92,7 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
     
     if html_match:
         logger.info("=== HTML DETECTED ===")
-        logger.info(
+        logger.debug(
             "Content type: HTML. Found tag %r at position %d",
             html_match.group(0),
             html_match.start(),
@@ -103,10 +102,10 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
         match_start = max(0, html_match.start() - 20)
         match_end = min(len(body), html_match.end() + 20)
         context = body[match_start:match_end]
-        logger.info("HTML tag context: %r", context)
+        logger.debug("HTML tag context: %r", context)
         
         logger.info("=== INSCRIPTIS CONVERSION START ===")
-        logger.info("Input to inscriptis (length=%d):\n%s", len(body), body)
+        logger.debug("Input to inscriptis (length=%d):\n%s", len(body), body)
         
         strict_css = CSS_PROFILES['strict'].copy()
         config = ParserConfig(css=strict_css, display_links=True, display_anchors=True)
@@ -114,11 +113,11 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
         
         raw_output = get_text(body, config)
         logger.info("=== INSCRIPTIS RAW OUTPUT ===")
-        logger.info("Raw inscriptis output (before .strip()):\n%r", raw_output)
+        logger.debug("Raw inscriptis output (before .strip()):\n%r", raw_output)
         
         plaintext = raw_output.strip()
         logger.info("=== INSCRIPTIS FINAL OUTPUT ===")
-        logger.info("Final output after .strip() (length=%d):\n%r", len(plaintext), plaintext)
+        logger.debug("Final output after .strip() (length=%d):\n%r", len(plaintext), plaintext)
         
         logger.info(
             "✓ HTML → plaintext conversion SUCCESSFUL. Input length: %d → Output length: %d",
@@ -145,7 +144,7 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
     detected_patterns = []
     logger.info("=== SMS MARKDOWN PATTERN DETECTION START ===")
     logger.info("Analyzing input body for markdown patterns...")
-    logger.info("Input body (full):\n%r", body)
+    logger.debug("Input body (full):\n%r", body)
     
     for pattern, pattern_name in markdown_patterns:
         matches = list(re.finditer(pattern, body, flags=re.MULTILINE))
@@ -158,7 +157,7 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
                 len(matches)
             )
             for i, match in enumerate(matches):
-                logger.info(
+                logger.debug(
                     "  Match %d: %r at position %d-%d (line context: %r)",
                     i + 1,
                     match.group(0),
@@ -178,7 +177,7 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
         
         logger.info("=== PYPANDOC CONVERSION START ===")
         logger.info("Input to pypandoc (length=%d):", len(body))
-        logger.info("Input content:\n%s", body)
+        logger.debug("Input content:\n%s", body)
         
         logger.info("Pypandoc args: to='plain', format='gfm', extra_args=['--wrap=preserve', '--reference-links']")
         
@@ -193,29 +192,29 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
                 extra_args=["--wrap=preserve", "--reference-links"]
             )
             logger.info("=== PYPANDOC RAW OUTPUT ===")
-            logger.info("Raw pypandoc output (before .strip()):\n%r", raw_output)
-            logger.info("Raw pypandoc output formatted:\n%s", raw_output)
+            logger.debug("Raw pypandoc output (before .strip()):\n%r", raw_output)
+            logger.debug("Raw pypandoc output formatted:\n%s", raw_output)
             
             plaintext = raw_output.strip()
             logger.info("=== PYPANDOC FINAL OUTPUT ===")
-            logger.info("Final output after .strip() (length=%d):\n%r", len(plaintext), plaintext)
-            logger.info("Final output formatted:\n%s", plaintext)
+            logger.debug("Final output after .strip() (length=%d):\n%r", len(plaintext), plaintext)
+            logger.debug("Final output formatted:\n%s", plaintext)
             
             # Character-by-character comparison for debugging
             if body != plaintext:
                 logger.info("=== INPUT vs OUTPUT COMPARISON ===")
-                logger.info("Input chars: %r", [c for c in body])
-                logger.info("Output chars: %r", [c for c in plaintext])
+                logger.debug("Input chars: %r", [c for c in body])
+                logger.debug("Output chars: %r", [c for c in plaintext])
                 
                 # Line-by-line comparison
                 input_lines = body.split('\n')
                 output_lines = plaintext.split('\n')
-                logger.info("Input lines (%d): %r", len(input_lines), input_lines)
-                logger.info("Output lines (%d): %r", len(output_lines), output_lines)
+                logger.debug("Input lines (%d): %r", len(input_lines), input_lines)
+                logger.debug("Output lines (%d): %r", len(output_lines), output_lines)
                 
                 for i, (input_line, output_line) in enumerate(zip(input_lines, output_lines)):
                     if input_line != output_line:
-                        logger.info("Line %d changed: %r → %r", i, input_line, output_line)
+                        logger.debug("Line %d changed: %r → %r", i, input_line, output_line)
             
             logger.info(
                 "✓ Markdown → plaintext conversion SUCCESSFUL. Input length: %d → Output length: %d",
@@ -231,7 +230,7 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
             logger.error("Exception message: %s", str(e))
             logger.error("Falling back to original markdown text (stripped)")
             fallback = body.strip()
-            logger.info("Fallback output: %r", fallback)
+            logger.debug("Fallback output: %r", fallback)
             return fallback
 
     # ------------------------------------------------------------------ Plaintext fallback
@@ -239,7 +238,7 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
     logger.info("No markdown patterns detected. Treating as plaintext.")
     logger.info("Content type detected for SMS: Plaintext. No HTML or Markdown patterns found.")
     fallback = body.strip()
-    logger.info("Plaintext output (after .strip(), length=%d): %r", len(fallback), fallback)
+    logger.debug("Plaintext output (after .strip(), length=%d): %r", len(fallback), fallback)
     logger.info("=== SMS PLAINTEXT CONVERSION COMPLETE ===")
     return fallback
 
