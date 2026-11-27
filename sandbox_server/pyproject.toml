@@ -15,6 +15,8 @@ dependencies = [
     "gunicorn==23.0.0",
     "fastmcp==2.11.3",
     "mcp==1.13.1",
+    # mcp 1.13.1 imports pydantic's private eval_type_backport, missing in pydantic 2.14 (same version as the root uv.lock)
+    "pydantic==2.12.5",
     "asgiref==3.9.1",
     "uvicorn[standard]>=0.35.0",
 ]
