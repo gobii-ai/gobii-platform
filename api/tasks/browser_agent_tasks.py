@@ -396,9 +396,15 @@ def _build_extraction_payload(te: Any) -> dict[str, Any] | None:
         'base_url': extraction_base_url,
         'backend': extraction_provider.browser_backend,
         'supports_vision': bool(getattr(extraction_endpoint, 'supports_vision', False)),
+        'supports_temperature': bool(getattr(extraction_endpoint, 'supports_temperature', True)),
         'max_output_tokens': extraction_endpoint.max_output_tokens,
         'api_key': extraction_api_key,
     }
+
+
+def _browser_llm_temperature(supports_temperature: bool) -> float | None:
+    """Return the browser LLM temperature; None must be explicit because browser-use's ChatOpenAI otherwise defaults to 0.2."""
+    return 0 if supports_temperature else None
 
 
 def _init_chat_llm(
@@ -409,11 +415,16 @@ def _init_chat_llm(
     model_name: str | None,
     base_url: str | None,
     max_output_tokens: int | None = None,
+    supports_temperature: bool = True,
 ) -> Any:
     """Instantiate Chat* client based on backend/provider."""
     if not api_key or not model_name:
         return None
-    params: dict[str, Any] = {"api_key": api_key, "temperature": 0, "model": model_name}
+    params: dict[str, Any] = {
+        "api_key": api_key,
+        "temperature": _browser_llm_temperature(supports_temperature),
+        "model": model_name,
+    }
     if max_output_tokens is not None:
         params["max_output_tokens"] = int(max_output_tokens)
 
@@ -447,6 +458,7 @@ def _resolve_browser_provider_priority_from_db(
         'base_url': str | '',
         'backend': str (OPENAI|ANTHROPIC|GOOGLE|OPENAI_COMPAT),
         'max_output_tokens': int | None,
+        'supports_temperature': bool,
         'has_key': bool,
     }
 
@@ -541,6 +553,7 @@ def _resolve_browser_from_profile(
                         'max_output_tokens': endpoint.max_output_tokens,
                         'backend': provider.browser_backend,
                         'supports_vision': bool(getattr(endpoint, 'supports_vision', False)),
+                        'supports_temperature': bool(getattr(endpoint, 'supports_temperature', True)),
                         'api_key': api_key,
                         'has_key': True,
                         'intelligence_tier': getattr(tier.intelligence_tier, "key", "standard"),
@@ -621,6 +634,7 @@ def _resolve_browser_from_legacy_policy(*, max_tier: AgentLLMTier) -> list[list[
                         'max_output_tokens': endpoint.max_output_tokens,
                         'backend': provider.browser_backend,
                         'supports_vision': bool(getattr(endpoint, 'supports_vision', False)),
+                        'supports_temperature': bool(getattr(endpoint, 'supports_temperature', True)),
                         'api_key': api_key,
                         'has_key': True,
                         'intelligence_tier': getattr(tier.intelligence_tier, "key", "standard"),
@@ -886,6 +900,7 @@ async def _run_agent(
     provider_backend_override: Optional[str] = None,
     override_max_output_tokens: Optional[int] = None,
     supports_vision: bool = True,
+    supports_temperature: bool = True,
     vision_detail_level: Optional[str] = None,
     is_eval: bool = False,
     max_steps_override: Optional[int] = None,
@@ -895,6 +910,7 @@ async def _run_agent(
     extraction_backend: Optional[str] = None,
     extraction_supports_vision: Optional[bool] = None,
     extraction_max_output_tokens: Optional[int] = None,
+    extraction_supports_temperature: bool = True,
     extraction_provider_key: Optional[str] = None,
     captcha_enabled: bool = False,
     gobii_ui_browser_task_id: Optional[str] = None,
@@ -1092,7 +1108,7 @@ async def _run_agent(
                     gobii_ui_browser_task_id,
                 )
 
-            llm_params = {"api_key": llm_api_key, "temperature": 0}
+            llm_params = {"api_key": llm_api_key, "temperature": _browser_llm_temperature(supports_temperature)}
 
             backend = provider_backend_override
             if backend is None:
@@ -1156,6 +1172,7 @@ async def _run_agent(
                     model_name=extraction_model_name,
                     base_url=extraction_base,
                     max_output_tokens=extraction_max_output_tokens,
+                    supports_temperature=extraction_supports_temperature,
                 )
                 if extraction_llm:
                     agent_span.set_attribute("llm.extraction.model", extraction_model_name)
@@ -1625,9 +1642,11 @@ def _execute_agent_with_failover(
                 base_url = attempt.get("base_url")
                 backend = attempt.get("backend")
                 supports_vision = attempt.get("supports_vision")
+                supports_temperature = attempt.get("supports_temperature", True)
                 max_output_tokens = attempt.get("max_output_tokens")
                 extraction_cfg = attempt.get("extraction") or None
             else:
+                supports_temperature = True
                 (
                     endpoint_key,
                     provider_key,
@@ -1671,6 +1690,7 @@ def _execute_agent_with_failover(
             extraction_backend = None
             extraction_supports_vision = None
             extraction_max_output_tokens = None
+            extraction_supports_temperature = True
             extraction_provider = None
             if isinstance(extraction_cfg, dict):
                 extraction_api_key = extraction_cfg.get("api_key")
@@ -1679,6 +1699,7 @@ def _execute_agent_with_failover(
                 extraction_backend = extraction_cfg.get("backend")
                 extraction_supports_vision = extraction_cfg.get("supports_vision")
                 extraction_max_output_tokens = extraction_cfg.get("max_output_tokens")
+                extraction_supports_temperature = extraction_cfg.get("supports_temperature", True)
                 extraction_provider = extraction_cfg.get("provider_key")
 
             try:
@@ -1698,6 +1719,7 @@ def _execute_agent_with_failover(
                         override_base_url=base_url,
                         provider_backend_override=backend,
                         supports_vision=vision_enabled,
+                        supports_temperature=supports_temperature,
                         override_max_output_tokens=max_output_tokens,
                         is_eval=is_eval,
                         max_steps_override=max_steps,
@@ -1707,6 +1729,7 @@ def _execute_agent_with_failover(
                         extraction_backend=extraction_backend,
                         extraction_supports_vision=extraction_supports_vision,
                         extraction_max_output_tokens=extraction_max_output_tokens,
+                        extraction_supports_temperature=extraction_supports_temperature,
                         extraction_provider_key=extraction_provider,
                         vision_detail_level=vision_detail_level,
                         captcha_enabled=captcha_enabled,
